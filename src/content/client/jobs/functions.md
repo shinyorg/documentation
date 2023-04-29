@@ -1,4 +1,6 @@
-# Querying, Cancelling, and Adhoc
+---
+title: Additional Functions
+---
 
 
 ## Cancelling Jobs

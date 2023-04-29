@@ -156,6 +156,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
+"ble/background.md": {
+  id: "ble/background.md",
+  slug: "ble/background",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".md"] },
 "ble/best-practices.md": {
   id: "ble/best-practices.md",
   slug: "ble/best-practices",
@@ -173,13 +180,6 @@ declare module 'astro:content' {
 "ble/index.md": {
   id: "ble/index.md",
   slug: "ble",
-  body: string,
-  collection: "client",
-  data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
-"ble/managed-scan.md": {
-  id: "ble/managed-scan.md",
-  slug: "ble/managed-scan",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
@@ -303,6 +303,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
+"other/androidforeground.mdx": {
+  id: "other/androidforeground.mdx",
+  slug: "other/androidforeground",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
 "other/configuration.mdx": {
   id: "other/configuration.mdx",
   slug: "other/configuration",

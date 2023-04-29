@@ -42,10 +42,10 @@ export const SIDEBAR: Sidebar = {
         ],
         'BluetoothLE':[
             { text: 'Getting Started', link: 'client/ble/index' },
+            { text: 'Background Operations', link: 'client/ble/background' },
             { text: 'Scanning', link: 'client/ble/scanning' },
             { text: 'Peripheral', link: 'client/ble/peripheral' },
             { text: 'GATT', link: 'client/ble/gatt' },
-            { text: 'Managed Scanning', link: 'client/ble/managed-scan' },
             { text: 'Best Practices', link: 'client/ble/best-practices' }
         ],
         'BluetoothLE Hosting':[
@@ -58,6 +58,8 @@ export const SIDEBAR: Sidebar = {
         ], 
         'Jobs':[
             { text: 'Getting Started', link: 'client/jobs/index' },
+            { text: 'Create a Job', link: 'client/jobs/create' },
+            { text: 'Additional Functions', link: 'client/jobs/functions' },
             { text: 'FAQ', link: 'client/jobs/faq' }
         ], 
         'Locations':[
