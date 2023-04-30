@@ -51,7 +51,7 @@ const AndroidManifest = (props: Props) => {
     src += addP( 'BLUETOOTH_ADVERTISE');
   }
   
-  if (has('gps') || has('geofences')) {
+  if (has('gps') || has('geofencing')) {
     src += addP('ACCESS_BACKGROUND_LOCATION');
     src += addF("location.gps");
     src += addF("location.network");
