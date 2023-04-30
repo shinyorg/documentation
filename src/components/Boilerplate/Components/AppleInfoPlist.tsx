@@ -1,5 +1,5 @@
 import { Data, ShinyComponent } from '../../../consts';
-import CopyToClipboardButton from './CopyToClipboardButton';
+import Syntax from '../../Syntax';
 
 export interface Props {
   components: ShinyComponent[]
@@ -108,15 +108,10 @@ const AppleInfoPlist = (props: Props) => {
         `;
   }
   src += `  
-      </dict>
-    </plist>
-    `;
-  return (
-    <>
-      <div>{src}</div>
-      <CopyToClipboardButton text={src} />
-    </>
-  );
+</dict>
+</plist>
+`;
+  return (<Syntax source={src} language="xml" />);
 };
 
 export default AppleInfoPlist;

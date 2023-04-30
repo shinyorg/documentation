@@ -1,5 +1,6 @@
 import { DEFAULT_VERSION, ShinyComponent } from '../../../consts';
-import CopyToClipboardButton from './CopyToClipboardButton';
+import CopyToClipboardButton from '../../CopyToClipboardButton';
+import Syntax from '../../Syntax';
 
 export interface Props {
   components: ShinyComponent[]
@@ -22,8 +23,8 @@ const ProjectFile = (props: Props) => {
     pr += "</ItemGroup>";
 
     if (nugets.find(x => x.nuget === "Shiny.Extensions.Configuration") !== undefined) {
-        pr += "<ItemGroup>\r\n";
-        pr += "<!-- Add these to your project file if you are using Shiny.Extensions.Configuration, mix & match your requirements based on platform specific configs -->\r\n";
+        pr += "\r\n<ItemGroup>\r\n";
+        pr += "\t<!-- Add these to your project file if you are using Shiny.Extensions.Configuration, mix & match your requirements based on platform specific configs -->\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.json\" LogicalName=\"appsettings.json\" />\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.apple.json\" LogicalName=\"appsettings.apple.json\" />\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.ios.json\" LogicalName=\"appsettings.ios.json\" />\r\n";
@@ -32,12 +33,7 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>";
     }
 
-    return (
-        <div>
-            <div>{pr}</div>
-            <CopyToClipboardButton text={pr} />            
-        </div>
-    )
+    return (<Syntax source={pr} language="xml" />);
 }
 
 export default ProjectFile;

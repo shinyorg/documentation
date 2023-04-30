@@ -1,4 +1,4 @@
-import CopyToClipboardButton from './CopyToClipboardButton';
+import Syntax from "../../Syntax";
 
 const AppleEntitlements = () => {
   let src = `
@@ -11,11 +11,6 @@ const AppleEntitlements = () => {
   </dict>
   </plist>  
   `;
-  return (
-    <>
-      <div>{src}</div>
-      <CopyToClipboardButton text={src} />
-    </>
-  );
+  return (<Syntax source={src} language="xml" />);
 };
 export default AppleEntitlements;

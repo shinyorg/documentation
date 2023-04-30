@@ -1,5 +1,5 @@
 import { ShinyComponent, Data } from '../../../consts';
-import CopyToClipboardButton from './CopyToClipboardButton';
+import Syntax from '../../Syntax';
 
 export interface Props {
   components: ShinyComponent[]
@@ -74,10 +74,6 @@ const AndroidManifest = (props: Props) => {
 
   src += `
   </manifest>`;
-  return (
-    <>
-      <div>{src}</div>
-      <CopyToClipboardButton text={src} />
-    </>);
+  return (<Syntax source={src} language="xml" />);
 };
 export default AndroidManifest;

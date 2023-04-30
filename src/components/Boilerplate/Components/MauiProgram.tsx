@@ -1,5 +1,5 @@
 import { Data, ShinyComponent } from '../../../consts';
-import CopyToClipboardButton from './CopyToClipboardButton';
+import Syntax from '../../Syntax';
 
 export interface Props {
   components: ShinyComponent[]
@@ -85,12 +85,7 @@ const MauiProgram = (props: Props) => {
       return builder.Build();
     }
   }`;
-  return (
-    <>
-      <div>{src}</div>
-      <CopyToClipboardButton text={src} />
-    </>
-  );
+  return (<Syntax source={src} language="csharp" />);
 };
 
 export default MauiProgram;

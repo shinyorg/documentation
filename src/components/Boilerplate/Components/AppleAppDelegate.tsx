@@ -1,4 +1,4 @@
-import CopyToClipboardButton from './CopyToClipboardButton';
+import Syntax from '../../Syntax';
 
 const AppleAppDelegate = () => {
   let src = `
@@ -25,16 +25,7 @@ const AppleAppDelegate = () => {
           => global::Shiny.Hosting.Host.Current.Lifecycle().OnDidReceiveRemoveNotification(userInfo, completionHandler);	
   
   }`;
-  
-  return (
-    <div>
-        <figure className="code-snippet has-title lang-cs">
-          <figcaption className="header">AppDelegate.cs</figcaption>
-          <pre className="astro-code">{src}</pre>
-        </figure>
-        <CopyToClipboardButton text={src} />
-    </div>
-  );
+  return (<Syntax source={src} />);
 };
 
 export default AppleAppDelegate;
