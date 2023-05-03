@@ -46,7 +46,8 @@ export const SIDEBAR: Sidebar = {
             { text: 'Scanning', link: 'client/ble/scanning' },
             { text: 'Peripheral', link: 'client/ble/peripheral' },
             { text: 'GATT', link: 'client/ble/gatt' },
-            { text: 'Best Practices', link: 'client/ble/best-practices' }
+            { text: 'Best Practices', link: 'client/ble/best-practices' },
+            { text: 'FAQ', link: 'client/ble/faq' }
         ],
         'BluetoothLE Hosting':[
             { text: 'Getting Started', link: 'client/blehosting/index' },
