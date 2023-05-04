@@ -170,6 +170,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
+"ble/faq.mdx": {
+  id: "ble/faq.mdx",
+  slug: "ble/faq",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
 "ble/gatt.md": {
   id: "ble/gatt.md",
   slug: "ble/gatt",

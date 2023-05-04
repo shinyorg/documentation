@@ -109,6 +109,7 @@ export type ShinyComponent = {
     nuget: string;
     description: string;
     version: string;
+    foregroundService?: boolean;
 }
 
 
@@ -119,6 +120,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "beacons",
         "nuget": "Shiny.Beacons",
         "description": "Beacons",
+        "foregroundService": true,
         "version": DEFAULT_VERSION
     },
     {
@@ -141,8 +143,9 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "gps",
-        "nuget": "Shiny.Locations",
+        "nuget": "Shiny.Locations",        
         "description": "GPS",
+        "foregroundService": true,
         "version": DEFAULT_VERSION
     },
     {
@@ -155,6 +158,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "httptransfers",
         "nuget": "Shiny.Net.Http",
         "description": "HTTP file uploads and downloads",
+        "foregroundService": true,
         "version": DEFAULT_VERSION
     },
     {
@@ -202,5 +206,9 @@ export const Data = {
 
     usesPush(compos: ShinyComponent[]): boolean {
         return compos.filter(x => x.id.indexOf('push') > -1).length > 0;
+    },
+
+    usingForeground(compos: ShinyComponent[]): boolean {
+        return compos.filter(x => x.foregroundService === true).length > 0;
     }
 };

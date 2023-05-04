@@ -9,9 +9,10 @@ import AppleAppDelegate from './Components/AppleAppDelegate';
 import ProjectFile from './Components/ProjectFile';
 import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
 import 'react-tabs/style/react-tabs.css';
+import Aside from '../Aside';
 
 const App = () => {
-  const { usesPush } = Data;
+  const { usesPush, usingForeground } = Data;
   const [components, setComponents] = useState<ShinyComponent[]>([]);
 
   const handleChange = (e: ShinyComponent) => {
@@ -41,6 +42,18 @@ const App = () => {
           <button onClick={selectAll}>Select All</button>
           <button onClick={unselectAll}>Unselect All</button>
         </div>
+        {usesPush(components) && (
+            <Aside type="caution">
+                Using push on iOS/MacCatalyst requires you have an entitlements.plist as well as a provisioning profile that supports push.  If your app is not set to a provisioning profile with push enabled, 
+                you will experience build/deployment errors on iOS and startup crashes on MAC Catalyst.
+            </Aside>
+        )}
+        {usingForeground(components) && (
+            <Aside type="caution">
+                You are using a component that uses an Android foreground service!  You must have an application icon set or a drawable resource called notification in order for this background operation to work
+                For additional information, please read <a href="/client/other/androidforeground">Android Foreground Services</a>
+            </Aside>
+        )}
         <div>
           <Tabs>
             <TabList>
