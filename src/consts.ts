@@ -18,9 +18,9 @@ export const SECTIONS = {
     Releases: 'releases'
 } as const;
 
-export const GITHUB_EDIT_URL = `https://github.com/shinyorg/docs/tree/main/`;
+export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/main/`;
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
-export const SPONSOR_URL = 'https://github.com/sponsors/aritchie';
+export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
 
 export type Sidebar = Record<
