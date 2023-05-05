@@ -115,6 +115,7 @@ export type ShinyComponent = {
 
 export const DEFAULT_VERSION: string = "3.0.0-beta-0026";
 
+// TODO: ranging/monitoring on beacons
 export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "beacons",
