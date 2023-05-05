@@ -78,8 +78,9 @@ export const SIDEBAR: Sidebar = {
         ],
         'Other': [
             { text: 'Configuration Extensions', link: 'client/other/configuration' },
+            { text: 'AppCenter Logging', link: 'client/other/appcenter' },
             { text: 'Speech Recognition', link: 'client/other/speechrecognition' },
-            { text: 'Persistent Storage', link: 'client/other/persistentstorage' },
+            { text: 'Stateful Services', link: 'client/other/statefulservices' },
             { text: 'Startup Services', link: 'client/other/startupservices' },
             { text: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
         ]

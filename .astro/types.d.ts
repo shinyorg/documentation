@@ -317,6 +317,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
+"other/appcenter.mdx": {
+  id: "other/appcenter.mdx",
+  slug: "other/appcenter",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
 "other/configuration.mdx": {
   id: "other/configuration.mdx",
   slug: "other/configuration",
