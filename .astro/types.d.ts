@@ -184,13 +184,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
-"ble/index.md": {
-  id: "ble/index.md",
+"ble/index.mdx": {
+  id: "ble/index.mdx",
   slug: "ble",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
+} & { render(): Render[".mdx"] },
 "ble/peripheral.md": {
   id: "ble/peripheral.md",
   slug: "ble/peripheral",
@@ -219,20 +219,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
-"blehosting/index.md": {
-  id: "blehosting/index.md",
+"blehosting/index.mdx": {
+  id: "blehosting/index.mdx",
   slug: "blehosting",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
-"httptransfers/advanced.md": {
-  id: "httptransfers/advanced.md",
-  slug: "httptransfers/advanced",
-  body: string,
-  collection: "client",
-  data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
+} & { render(): Render[".mdx"] },
 "httptransfers/index.mdx": {
   id: "httptransfers/index.mdx",
   slug: "httptransfers",
@@ -268,20 +261,20 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
-"jobs/index.md": {
-  id: "jobs/index.md",
+"jobs/index.mdx": {
+  id: "jobs/index.mdx",
   slug: "jobs",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
-"locations/geofencing.md": {
-  id: "locations/geofencing.md",
+} & { render(): Render[".mdx"] },
+"locations/geofencing.mdx": {
+  id: "locations/geofencing.mdx",
   slug: "locations/geofencing",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
+} & { render(): Render[".mdx"] },
 "locations/gps.mdx": {
   id: "locations/gps.mdx",
   slug: "locations/gps",
@@ -352,13 +345,6 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"push/azure.md": {
-  id: "push/azure.md",
-  slug: "push/azure",
-  body: string,
-  collection: "client",
-  data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
 "push/faq.mdx": {
   id: "push/faq.mdx",
   slug: "push/faq",
@@ -366,13 +352,6 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"push/firebase.md": {
-  id: "push/firebase.md",
-  slug: "push/firebase",
-  body: string,
-  collection: "client",
-  data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
 "push/index.mdx": {
   id: "push/index.mdx",
   slug: "push",
@@ -380,13 +359,6 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"push/native.md": {
-  id: "push/native.md",
-  slug: "push/native",
-  body: string,
-  collection: "client",
-  data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
 },
 "releases": {
 "client/30.mdx": {

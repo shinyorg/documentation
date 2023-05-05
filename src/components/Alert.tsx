@@ -4,7 +4,7 @@ interface Props {
 	children: React.ReactNode;
 }
 
-const Aside = (props: Props) => {
+const Alert = (props: Props) => {
 	const { type = 'note', title = type } = props;
 
 	// SVG icon paths based on GitHub Octicons
@@ -45,4 +45,4 @@ const Aside = (props: Props) => {
 	);
 }
 
-export default Aside;
+export default Alert;

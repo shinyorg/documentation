@@ -41,7 +41,7 @@ export const SIDEBAR: Sidebar = {
             { text: 'Monitoring', link: 'client/beacons/monitoring' },
         ],
         'BluetoothLE':[
-            { text: 'Getting Started', link: 'client/ble/index' },
+            { text: 'Getting Started', link: 'client/ble/' },
             { text: 'Background Operations', link: 'client/ble/background' },
             { text: 'Scanning', link: 'client/ble/scanning' },
             { text: 'Peripheral', link: 'client/ble/peripheral' },
@@ -50,15 +50,15 @@ export const SIDEBAR: Sidebar = {
             { text: 'FAQ', link: 'client/ble/faq' }
         ],
         'BluetoothLE Hosting':[
-            { text: 'Getting Started', link: 'client/blehosting/index' },
+            { text: 'Getting Started', link: 'client/blehosting/' },
             { text: 'Advertising', link: 'client/blehosting/advertising' },
             { text: 'GATT Service', link: 'client/blehosting/gatt' }
         ],
         'HTTP Transfers':[
-            { text: 'Getting Started', link: 'client/httptransfers/index' },
+            { text: 'How To', link: 'client/httptransfers/' },
         ], 
         'Jobs':[
-            { text: 'Getting Started', link: 'client/jobs/index' },
+            { text: 'Getting Started', link: 'client/jobs/' },
             { text: 'Create a Job', link: 'client/jobs/create' },
             { text: 'Additional Functions', link: 'client/jobs/functions' },
             { text: 'FAQ', link: 'client/jobs/faq' }
@@ -68,12 +68,12 @@ export const SIDEBAR: Sidebar = {
             { text: 'Geofencing', link: 'client/locations/geofencing' }
         ],
         'Local Notifications':[
-            { text: 'Getting Started', link: 'client/notifications/index' },
+            { text: 'Getting Started', link: 'client/notifications/' },
             { text: 'Channels', link: 'client/notifications/channels' },
             { text: 'Platform Specifics', link: 'client/notifications/platformspecifics' }
         ],
         'Push Notifications':[
-            { text: 'Getting Started', link: 'client/push/index' },
+            { text: 'Getting Started', link: 'client/push/' },
             { text: 'FAQ', link: 'client/push/faq' }
         ],
         'Other': [
