@@ -149,13 +149,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"beacons/ranging.md": {
-  id: "beacons/ranging.md",
+"beacons/ranging.mdx": {
+  id: "beacons/ranging.mdx",
   slug: "beacons/ranging",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
-} & { render(): Render[".md"] },
+} & { render(): Render[".mdx"] },
 "ble/background.md": {
   id: "ble/background.md",
   slug: "ble/background",
@@ -222,6 +222,13 @@ declare module 'astro:content' {
 "blehosting/index.mdx": {
   id: "blehosting/index.mdx",
   slug: "blehosting",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"hosting/classicxam.mdx": {
+  id: "hosting/classicxam.mdx",
+  slug: "hosting/classicxam",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
@@ -324,13 +331,6 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"other/persistentstorage.mdx": {
-  id: "other/persistentstorage.mdx",
-  slug: "other/persistentstorage",
-  body: string,
-  collection: "client",
-  data: InferEntrySchema<"client">
-} & { render(): Render[".mdx"] },
 "other/speechrecognition.mdx": {
   id: "other/speechrecognition.mdx",
   slug: "other/speechrecognition",
@@ -341,6 +341,13 @@ declare module 'astro:content' {
 "other/startupservices.mdx": {
   id: "other/startupservices.mdx",
   slug: "other/startupservices",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"other/statefulservices.mdx": {
+  id: "other/statefulservices.mdx",
+  slug: "other/statefulservices",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
@@ -368,13 +375,13 @@ declare module 'astro:content' {
   collection: "releases",
   data: InferEntrySchema<"releases">
 } & { render(): Render[".mdx"] },
-"index.md": {
-  id: "index.md",
+"index.mdx": {
+  id: "index.mdx",
   slug: "index",
   body: string,
   collection: "releases",
   data: InferEntrySchema<"releases">
-} & { render(): Render[".md"] },
+} & { render(): Render[".mdx"] },
 "server/20.mdx": {
   id: "server/20.mdx",
   slug: "server/20",
