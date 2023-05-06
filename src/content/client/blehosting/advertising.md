@@ -15,11 +15,12 @@ For now, I have chosen to support only the same feature band as iOS
 
 ```csharp
 
-CrossBleAdapter.Current.Advertiser.Start(new AdvertisementData
+IBleHostingManager manager;
+await manager.StartAdvertising(new AdvertisementData
 {
     LocalName = "TestServer",
     ServiceUUIDs = new Guid[] { /* your custom UUIDs here */ }
 });
 
-CrossBleAdapter.Current.Advertiser.Stop();
+manager.StopAdvertising();
 ```

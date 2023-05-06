@@ -43,16 +43,17 @@ export const SIDEBAR: Sidebar = {
         'BluetoothLE':[
             { text: 'Getting Started', link: 'client/ble/' },
             { text: 'Background Operations', link: 'client/ble/background' },
-            { text: 'Scanning', link: 'client/ble/scanning' },
+            { text: 'BLE Manager', link: 'client/ble/manager' },
             { text: 'Peripheral', link: 'client/ble/peripheral' },
-            { text: 'GATT', link: 'client/ble/gatt' },
+            { text: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
             { text: 'Best Practices', link: 'client/ble/best-practices' },
             { text: 'FAQ', link: 'client/ble/faq' }
         ],
         'BluetoothLE Hosting':[
             { text: 'Getting Started', link: 'client/blehosting/' },
             { text: 'Advertising', link: 'client/blehosting/advertising' },
-            { text: 'GATT Service', link: 'client/blehosting/gatt' }
+            { text: 'GATT Service', link: 'client/blehosting/gatt' },
+            { text: 'Managed Characteristic', link: 'client/blehosting/managed' }
         ],
         'HTTP Transfers':[
             { text: 'How To', link: 'client/httptransfers/' },

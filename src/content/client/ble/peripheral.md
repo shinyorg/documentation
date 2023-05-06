@@ -65,7 +65,6 @@ device.CancelConnection();
 
 **Reliable Write Transactions**
 
-_Android and UWP only_
 
 ```csharp
 using (var trans = device.BeginReliableWriteTransaction()) 
@@ -77,7 +76,8 @@ using (var trans = device.BeginReliableWriteTransaction())
 ```
 
 
-**Pairing with a device**
+## Pairing
+
 ```csharp
 if (device.IsPairingRequestSupported && device.PairingStatus != PairingStatus.Paired) 
 {
@@ -89,32 +89,30 @@ if (device.IsPairingRequestSupported && device.PairingStatus != PairingStatus.Pa
 **Request MTU size increase**
 
 
-**MTU (Max Transmission Unit)**
+## Request MTU (Max Transmission Unit)
 If MTU requests are available (Android Only - API 21+)
 
 This is specific to Android only where this negotiation is not automatic.
 The size can be up to 512, but you should be careful with anything above 255 in practice
 ```csharp
-// Request a greater MTU size (Androd API 21+ only), but return the final negotiated value
-var newMtuValue = await device.RequestMtu(255);
-
 // iOS will return current, Android will return 20 unless changes are observed
-device.GetCurrentMtu();
+await device.TryRequestMtuAsync(255);
 
 // iOS will return current value and return, Android will continue to monitor changes
-device.WhenMtuChanged().Subscribe(...)
+device.TryRequestMtu(255).Subscribe(x => {});
 ```
 
-**Monitor device states**
+## Monitor Status Changes
 
 ```csharp
-// This will tell you if the device name changes during a connection
-device.WhenNameChanged().Subscribe(string => {});
-
 // this will watch the connection states to the device
 device.WhenStatusChanged().Subscribe(connectionState => {});
 
-// monitor MTU size changes (droid only)
-device.WhenMtuChanged().Subscribe(size => {});
-
 ```
+
+
+## PHY
+TODO
+
+## L2Cap
+TODO

@@ -1,8 +1,6 @@
 ---
-title: Scanning
+title: BLE Manager
 ---
-# BleManager
-
 The adapter is where everything begins and ends.  Unlike the platform implementations of the adapter scan, the BLE plugin Scan()
 method will scan continuously (or restart the scan when the cycle completes) until you dispose of the Scan() token.
 
@@ -18,10 +16,17 @@ BleManager.Status
 BleManager.WhenStatusChanged().Subscribe(status => {});
 ```
 
+## Get Connected Devices
+TODO
+
+## Get Known Peripheral
+TODO
+
 ## Scan for Devices
 
 ```csharp
-var scanner = CrossBleAdapter.Current.Scan().Subscribe(scanResult => 
+IBleManager bleManager; // injected/resolved
+var scanner = bleManager.Scan().Subscribe(scanResult => 
 {
     // do something with it
     // the scanresult contains the device, RSSI, and advertisement packet
@@ -34,7 +39,8 @@ scanner.Dispose(); // to stop scanning
 
 ## Scan for Devices 
 ```csharp
-CrossBleAdapter.Current.Scan(
+IBleManager bleManager; // injected/resolved
+bleManager.Scan(
     new ScanConfig 
     {
         ServiceUuids = { new Guid("<your guid here>") }
@@ -45,15 +51,6 @@ CrossBleAdapter.Current.Scan(
 })
 ```
 
-## General Scan
-
-```csharp
-var scan = CentralManager.Scan().Subscribe(scanResult => {});
-
-// to stop scan 
-scan.Dispose();
-
-```
 
 ## Specific Scans
 
@@ -80,8 +77,7 @@ Managed scans is probably one of the most helpful things in BLE if you are runni
 ## Creating a Managed scanner
 
 ```csharp
-var bleManager = ShinyHost.Resolve<IBleManager>();
-
+IBleManager bleManager; // injected/resolved
 var scanner = bleManager.CreateManagedScanner(
     RxApp.MainThreadScheduler, // this is from ReactiveUI which is ideal for this scenario as this will put changes on the main thread for your UI to render
     TimeSpan.FromSeconds(3),   // (optional) how long a peripheral can go "underheard" before being removed from the list.  Defaults to 3 seconds
@@ -91,7 +87,7 @@ var scanner = bleManager.CreateManagedScanner(
 // now start the scanner, this will do everything like ensuring the proper permissions
 await scanner.Start();
 
-scanner.Peripherals <= this is an observable collection, you can bind it directly to a XF page and watch it update live
+scanner.Peripherals <= this is an observable collection, you can bind it directly to a page and watch it update live
 
 // to stop the scan
 scanner.Stop();

@@ -14,6 +14,8 @@ You likely will encounter issues if you don't follow the below:
 2. Don't overwhelm the radio. The library now has an internal queue to force operations to finish.
 3. GATT 133 will happen on Connect on occasion.  Catch exceptions in the observable subscriptions.
 4. Bluetooth LE IS NOT GOOD for large payloads or things like JSON - keep it small and simple
+5. Scan for devices YOU work with.  In most apps, you will almost always be scanning with a Service UUID
+6. Do NOT discover all services & characteristics.  There is a performance cost with doing this.  You are always best to work with the service/characteristics known to you
 
 ## Connection Options
 
