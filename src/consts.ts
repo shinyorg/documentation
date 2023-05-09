@@ -35,6 +35,7 @@ export const SIDEBAR: Sidebar = {
 			{ text: 'Introduction', link: 'client/index' },
             { text: 'App Builder', link: 'client/appbuilder' },
 			{ text: 'Architecture', link: 'client/architecture' },
+            { text: 'Logging', link: 'client/logging' }
 		],
         'Hosting Models':[
             { text: 'MAUI', link: 'client/hosting/maui' },
@@ -68,6 +69,7 @@ export const SIDEBAR: Sidebar = {
             { text: 'Getting Started', link: 'client/jobs/' },
             { text: 'Create a Job', link: 'client/jobs/create' },
             { text: 'Additional Functions', link: 'client/jobs/functions' },
+            { text: 'Testing', link: 'client/jobs/testing' },
             { text: 'FAQ', link: 'client/jobs/faq' }
         ], 
         'Locations':[
@@ -122,6 +124,45 @@ export type ShinyComponent = {
 
 
 export const DEFAULT_VERSION: string = "3.0.0-beta-0026";
+
+export type AndroidConfig = {
+    usesJobs?: boolean;
+    usesLocation?: boolean;
+    foregroundService?: boolean;
+    permissions?: string[];
+};
+
+export type AppleConfig = {
+    usesJobs?: boolean;
+    backgroundModes?: string[];
+    permissions?: string[];
+};
+
+export type ShinyModule = {
+    id: string;
+    nuget: string;
+    description: string;
+    version: string;
+    android?: AndroidConfig;
+    apple?: AppleConfig;
+};
+
+export const ShinyModules: ShinyModule[] = [
+    {
+        id: "beaconranging",
+        nuget: "Shiny.Beacons.",
+        description: "Beacon Ranging (Foreground)",
+        version: DEFAULT_VERSION,
+        android: {
+            permissions: [
+                "android.permission.ACCESS_FINE_LOCATION"
+            ]
+        },
+        apple: {
+
+        }
+    }
+];
 
 // TODO: ranging/monitoring on beacons
 export const ShinyComponents: ShinyComponent[] = [

@@ -303,6 +303,13 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
+"jobs/testing.mdx": {
+  id: "jobs/testing.mdx",
+  slug: "jobs/testing",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
 "locations/geofencing.mdx": {
   id: "locations/geofencing.mdx",
   slug: "locations/geofencing",
@@ -313,6 +320,13 @@ declare module 'astro:content' {
 "locations/gps.mdx": {
   id: "locations/gps.mdx",
   slug: "locations/gps",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"logging.mdx": {
+  id: "logging.mdx",
+  slug: "logging",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
