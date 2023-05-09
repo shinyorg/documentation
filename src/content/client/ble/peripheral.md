@@ -111,7 +111,7 @@ device.WhenStatusChanged().Subscribe(connectionState => {});
 ```
 
 
-## PHY
+## PHY (Physical Layer)
 TODO
 
 ## L2Cap

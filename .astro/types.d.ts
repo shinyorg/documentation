@@ -191,16 +191,16 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"ble/peripheral.md": {
-  id: "ble/peripheral.md",
-  slug: "ble/peripheral",
+"ble/manager.md": {
+  id: "ble/manager.md",
+  slug: "ble/manager",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".md"] },
-"ble/scanning.md": {
-  id: "ble/scanning.md",
-  slug: "ble/scanning",
+"ble/peripheral.md": {
+  id: "ble/peripheral.md",
+  slug: "ble/peripheral",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">
@@ -226,9 +226,37 @@ declare module 'astro:content' {
   collection: "client",
   data: InferEntrySchema<"client">
 } & { render(): Render[".mdx"] },
-"hosting/classicxam.mdx": {
-  id: "hosting/classicxam.mdx",
-  slug: "hosting/classicxam",
+"blehosting/managed.mdx": {
+  id: "blehosting/managed.mdx",
+  slug: "blehosting/managed",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"hosting/manual.mdx": {
+  id: "hosting/manual.mdx",
+  slug: "hosting/manual",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"hosting/maui.mdx": {
+  id: "hosting/maui.mdx",
+  slug: "hosting/maui",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"hosting/native.mdx": {
+  id: "hosting/native.mdx",
+  slug: "hosting/native",
+  body: string,
+  collection: "client",
+  data: InferEntrySchema<"client">
+} & { render(): Render[".mdx"] },
+"hosting/uno.mdx": {
+  id: "hosting/uno.mdx",
+  slug: "hosting/uno",
   body: string,
   collection: "client",
   data: InferEntrySchema<"client">

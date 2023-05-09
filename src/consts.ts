@@ -36,6 +36,12 @@ export const SIDEBAR: Sidebar = {
             { text: 'App Builder', link: 'client/appbuilder' },
 			{ text: 'Architecture', link: 'client/architecture' },
 		],
+        'Hosting Models':[
+            { text: 'MAUI', link: 'client/hosting/maui' },
+            { text: 'Native', link: 'client/hosting/native' },
+            { text: 'Uno Platform', link: 'client/hosting/uno' },
+            { text: 'Manual', link: 'client/hosting/manual' }
+        ],
         'Beacons':[
             { text: 'Ranging', link: 'client/beacons/ranging' },
             { text: 'Monitoring', link: 'client/beacons/monitoring' },
