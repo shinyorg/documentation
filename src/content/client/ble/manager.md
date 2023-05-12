@@ -66,7 +66,7 @@ var peripheral = CentralManager.ScanForPeripheral(YourDevice);
 
 ## Managed Scans
 
-Managed scans is probably one of the most helpful things in BLE if you are running any sort of peripheral scan.  It deals with things like:
+Managed scans is probably one of the most helpful things in BLE in your User Interface if you are running any sort of peripheral scan.  It deals with things like:
 
 * Maintains an observable collection that it makes thread safe and throttled changes to. Most users new to BLE won't do these things out of the box, so let us manage it for you.
 * Marshalls changes to the collection to the main thread (or another RX scheduler if necessary) allowing UI's like Xamarin Forms a chance to rerender the contents

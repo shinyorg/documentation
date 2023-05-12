@@ -123,17 +123,20 @@ export type ShinyComponent = {
 }
 
 
-export const DEFAULT_VERSION: string = "3.0.0-beta-0026";
+export const DEFAULT_VERSION: string = "3.0.0-beta-0074";
+
+
 
 export type AndroidConfig = {
     usesJobs?: boolean;
-    usesLocation?: boolean;
+    locations?: "bg" | "fg" | "both";
     foregroundService?: boolean;
     permissions?: string[];
 };
 
 export type AppleConfig = {
     usesJobs?: boolean;
+    locations?: "bg" | "fg" | "both";
     backgroundModes?: string[];
     permissions?: string[];
 };
@@ -143,6 +146,9 @@ export type ShinyModule = {
     nuget: string;
     description: string;
     version: string;
+    service: string;
+    builderCommand?: string;
+    builderCommandBg?: string;
     android?: AndroidConfig;
     apple?: AppleConfig;
 };
@@ -150,8 +156,10 @@ export type ShinyModule = {
 export const ShinyModules: ShinyModule[] = [
     {
         id: "beaconranging",
-        nuget: "Shiny.Beacons.",
+        nuget: "Shiny.Beacons",
         description: "Beacon Ranging (Foreground)",
+        service: "Shiny.Beacons.IBeaconRangingManager",
+        builderCommand: "builder.Services.AddBeaconRanging();",
         version: DEFAULT_VERSION,
         android: {
             permissions: [
