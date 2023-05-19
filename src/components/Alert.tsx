@@ -1,3 +1,5 @@
+import './Alert.css';
+
 interface Props {
 	type?: 'note' | 'tip' | 'caution' | 'danger';
 	title?: string;

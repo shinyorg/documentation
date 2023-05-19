@@ -136,6 +136,7 @@ export type AndroidConfig = {
 
 export type AppleConfig = {
     usesJobs?: boolean;
+    usesPush?: boolean;
     locations?: "bg" | "fg" | "both";
     backgroundModes?: string[];
     permissions?: string[];
