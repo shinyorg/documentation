@@ -21,4 +21,17 @@ and it will simply replay what has been discovered since the connection occurred
 * BLOB writes TODO - Used for sending larger arrays or streams of data without working with the MTU byte gap
 
 ## Descriptors
-* Read/Write
+
+Descriptors generally aren't used by Bluetooth LE applications.  They are a child collection off each characterisitcs and have read/write operations
+just like characteristics.
+
+#### Read Descriptor
+```csharp
+//TODO
+```
+
+
+#### Write Descriptor
+```csharp
+//TODO
+```
