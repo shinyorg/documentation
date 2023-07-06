@@ -9,7 +9,7 @@ export default defineConfig({
     starlight({
       title: 'Shiny.NET',
       editLink: {
-        baseUrl: 'https://github.com/withastro/starlight/edit/main/'
+        baseUrl: 'https://github.com/shinyorg/documentation/edit/main/'
       },
       logo: {
         src: '/src/assets/logo.svg',
