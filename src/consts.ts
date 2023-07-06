@@ -1,118 +1,9 @@
-export const SITE = {
-	title: 'Shiny .NET',
-	description: 'Making all of your .NET Mobile Apps Shiny'
-	// defaultLanguage: 'en-us',
-} as const;
-
-export const OPEN_GRAPH = {
-	image: {
-		src: 'https://github.com/shinyorg/shiny/blob/master/art/logo.svg',
-		alt: 'Shiny Logo'
-	},
-	twitter: 'shinydotnet',
-};
-
-export const SECTIONS = {
-    Client: 'client',
-    Server: 'server',
-    Releases: 'releases'
-} as const;
 
 export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/main/`;
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-
-export type Sidebar = Record<
-	// (typeof SECTIONS)[number],
-    string,
-	Record<string, { text: string; link: string }[]>
->;
-
-export const SIDEBAR: Sidebar = {
-	client: {
-		'Getting Started': [
-			{ text: 'Introduction', link: 'client/index' },
-            { text: 'App Builder', link: 'client/appbuilder' },
-			{ text: 'Architecture', link: 'client/architecture' },
-            { text: 'Logging', link: 'client/logging' }
-		],
-        'Hosting Models':[
-            { text: 'MAUI', link: 'client/hosting/maui' },
-            { text: 'Native', link: 'client/hosting/native' },
-            { text: 'Uno Platform', link: 'client/hosting/uno' },
-            { text: 'Manual', link: 'client/hosting/manual' }
-        ],
-        'Beacons':[
-            { text: 'Ranging', link: 'client/beacons/ranging' },
-            { text: 'Monitoring', link: 'client/beacons/monitoring' },
-        ],
-        'BluetoothLE':[
-            { text: 'Getting Started', link: 'client/ble/' },
-            { text: 'Background Operations', link: 'client/ble/background' },
-            { text: 'BLE Manager', link: 'client/ble/manager' },
-            { text: 'Peripheral', link: 'client/ble/peripheral' },
-            { text: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
-            { text: 'Best Practices', link: 'client/ble/best-practices' },
-            { text: 'FAQ', link: 'client/ble/faq' }
-        ],
-        'BluetoothLE Hosting':[
-            { text: 'Getting Started', link: 'client/blehosting/' },
-            { text: 'Advertising', link: 'client/blehosting/advertising' },
-            { text: 'GATT Service', link: 'client/blehosting/gatt' },
-            { text: 'Managed Characteristic', link: 'client/blehosting/managed' }
-        ],
-        'HTTP Transfers':[
-            { text: 'How To', link: 'client/httptransfers/' },
-        ], 
-        'Jobs':[
-            { text: 'Getting Started', link: 'client/jobs/' },
-            { text: 'Create a Job', link: 'client/jobs/create' },
-            { text: 'Additional Functions', link: 'client/jobs/functions' },
-            { text: 'Testing', link: 'client/jobs/testing' },
-            { text: 'FAQ', link: 'client/jobs/faq' }
-        ], 
-        'Locations':[
-            { text: 'GPS', link: 'client/locations/gps' },
-            { text: 'Geofencing', link: 'client/locations/geofencing' }
-        ],
-        'Local Notifications':[
-            { text: 'Getting Started', link: 'client/notifications/' },
-            { text: 'Channels', link: 'client/notifications/channels' },
-            { text: 'Platform Specifics', link: 'client/notifications/platformspecifics' }
-        ],
-        'Push Notifications':[
-            { text: 'Getting Started', link: 'client/push/' },
-            { text: 'FAQ', link: 'client/push/faq' }
-        ],
-        'Other': [
-            { text: 'Configuration Extensions', link: 'client/other/configuration' },
-            { text: 'AppCenter Logging', link: 'client/other/appcenter' },
-            { text: 'Speech Recognition', link: 'client/other/speechrecognition' },
-            { text: 'Stateful Services', link: 'client/other/statefulservices' },
-            { text: 'Startup Services', link: 'client/other/startupservices' },
-            { text: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
-        ]
-	},
-
-	server: {
-		'Server Side': [
-			{ text: 'Introduction', link: 'server/index' },
-			{ text: 'Email', link: 'server/email' },
-			{ text: 'Localization', link: 'server/localization' },
-            { text: 'Push Management', link: 'server/push' },
-		]
-	},
-
-	releases: { 
-		'Client': [
-			{ text: '3.0.0', link: 'releases/client/30' }
-        ],
-        'Server':[
-            { text: '2.0.0', link: 'releases/server/20' }
-        ]
-	},
-};
+// description: 'Making all of your .NET Mobile Apps Shiny'
 
 export type ShinyComponent = {
     id: string;
@@ -249,7 +140,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Logging.AppCenter",
         "description": "AppCenter Logging",
         "version": DEFAULT_VERSION
-    }
+    },
+    {
+        "id": "sqlite",
+        "nuget": "Shiny.Logging.SQLite",
+        "description": "SQLite Logging",
+        "version": DEFAULT_VERSION
+    }    
     // {
     //     "id": "framework",
     //     "nuget": "Shiny.Framework",

@@ -1,0 +1,240 @@
+---
+title: Push Notification Management
+nuget: Shiny.Extensions.Push
+---
+import NugetBadge from '../../../components/NugetBadge';
+
+<NugetBadge name="Shiny.Extensions.Push" />
+
+There are tons of push management systems out there - Azure Notification Hubs, Amazon SQS, OneSignal, Firebase, etc, but what if you want to run this stuff local?  That also exists - PushSharp and others exist in the .NET ecosystem.
+
+Currently, this library supports Apple Notifications and Google Firebase Messaging.  It is important you understand the native API's before using this library
+    * [Firebase Cloud Messaging Documentation](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages)
+    * [Apple Notification Documentation](https://developer.apple.com/documentation/usernotifications/setting_up_a_remote_notification_server/generating_a_remote_notification)
+
+However, there is a bunch of things that they don't offer
+1. General purpose push notification abilities
+2. Management of the registration base (tokens, which user owns the token, etc)
+3. From the sender base, they lack a lot of deep customization
+4. What if I just want to hit the base OS providers without the middle man?  
+
+Shiny.Extensions.Push looks to solve all of these issues.  
+
+```csharp
+services.AddPushManagement(x => x
+    .AddApplePush(new AppleConfiguration {
+        IsProduction = true, // prod or sandbox
+        TeamId = "Your Team ID",
+        AppBundleIdentifier = "com.yourcompany.yourapp",
+        Key = "Your Key With NO new lines from Apple Dev Portal",
+        KeyId = "The KeyID for your cert"
+    })
+    .AddGooglePush(new GoogleConfiguration {
+        SenderId = "Your Firebase Sender ID",
+        ServerKey = "Your Firebase Server Key",
+        DefaultChannelId = "The Default Channel to use on Android",
+        UseShinyAndroidPushIntent = true // this is for Shiny.Push.X v2.5+ if you use it on Xamarin Mobile apps
+    })
+);
+```
+
+## Register a Device/User
+
+Now that we've registered our push management components, we can assume they we will be injecting Shiny.Extensions.Push.IPushManager wherever we need it.
+
+```csharp
+using Shiny.Extensions.Push;
+
+
+public class ExampleController : ControllerBase {
+    readonly IPushManager pushManager;
+
+    
+    public ExampleController(IPushManager pushManager) {
+        this.pushManager = pushManager;
+    }
+
+
+    public async Task Register(bool isApple, string token) {
+        var userId = this.User.GetUserId(); // you can tag the device registration with the user id
+        await this.pushManager.Send(new PushRegistration {
+            Platform = PushPlatform.Apple,
+            DeviceToken = token,
+            UserId = userId.ToString(),
+            Tags = new [] { "tag1", "tag2" }
+        });
+    }
+}
+```
+
+## Sending a Push
+
+Sending a push cross platform, couldn't be easier (or more powerful)
+
+```csharp
+await this.pushManager.Send(
+    new Shiny.Extensions.Push.Notification
+    {
+        Title = "Hello",
+        Message = "This is not spam really!",
+        Data = new Dictionary<string, string> {
+            { "custom", "data" }
+        }
+    },
+    // what group of users you want to target
+    new PushFilter
+    {
+        //DeviceToken = reg.DeviceToken,
+        //UserId = reg.UserId,
+        //Tags = reg.Tags,
+        Platform = PushPlatforms.All
+    }    
+);
+```
+
+# Managing Users
+
+The push notification abstractions at their core are a minor part of this library.  The main "features" are the ones that manage not only the push tokens, but also the user tagging and general tags that don't come out of the box for all push providers like Apple.
+
+## Register Users
+
+```csharp
+IPushManager pushManager; // inject this
+await this.pushManager.Send(new PushRegistration {
+    Platform = PushPlatform.Apple, // or Google
+    DeviceToken = token, // the device token from the push provider on the mobile side
+    UserId = "Your User's ID (optional)",
+    Tags = new [] { "tag1", "tag2" } // tags (optional)
+});
+
+```
+
+## Unregister All Users
+
+```csharp
+IPushManager pushManager; // inject this
+
+await this.pushManager.UnRegister(PushPlatform.Apple, "DeviceToken");
+
+// OR
+
+await this.pushManager.UnRegisterByUser("UserId"); // unregistered a userId from all platforms & devices
+```
+
+## Sending a Push
+
+Sending allows you to not only provide a fully set notification, but also provide a rich set of criteria for who to send to
+
+```csharp
+IPushManager pushManager; // inject this
+
+await this.pushManager.Send(
+    new Shiny.Extensions.Push.Notification
+    {
+        Title = "Your Notification Title",
+        Message = "Your Message",
+        Data = new Dictionary<string, string> {
+            { "custom", "data" }
+        }
+    },
+
+    // all arguments are optional here
+    new PushFilter
+    {
+        DeviceToken = "DeviceToken", // if set, will only send to a specific device
+        UserId = "Your UserId", // if set, will only send to a specific user
+        Tags = new [] { "tag1" }, // if set, will only send to users with these tags
+        Platform = PushPlatforms.Apple // if set, will only send to users on this platform
+    }
+);
+```
+
+
+## Querying
+This is the exact same criteria as used by send, but obviously, without the sending :)
+
+```csharp
+IPushManager pushManager; // inject this
+
+var registrations = await this.pushManager.GetRegistrations(    new PushFilter
+{
+    DeviceToken = "DeviceToken", // if set, will only retrieve to a specific device
+    UserId = "Your UserId", // if set, will only retrieve to a specific user
+    Tags = new [] { "tag1" }, // if set, will only retrieve to users with these tags
+    Platform = PushPlatforms.Apple // if set, will only retrieve users on this platform
+});
+```
+
+
+# Notification Reporters
+
+Notifications are often sent in "batches" depending on how wide your notification search parameters are.  
+
+Reporters offer you a way of:
+* Tracking Errors on a specific notification to a device
+* Tracking when the batch begins and how many devices are going to be sent for processing
+
+## Creating a Reporter
+
+First thing to do, is implement the Shiny Notification Reporter interface like so:
+
+```csharp
+public class MyCustomReporter : Shiny.Extensions.Push.INotificationReporter
+{
+    public Task OnBatchCompleted(Guid batchId, IReadOnlyCollection<PushRegistration> success, IReadOnlyCollection<(PushRegistration Registration, Exception Exception)> failures, Notification notification, CancellationToken cancelToken)
+    {
+        ...
+    }
+
+    public Task OnBatchStart(Guid batchId, IReadOnlyCollection<PushRegistration> registrations, Notification notification, CancellationToken cancelToken)
+    {
+        ...
+    }
+
+    public Task OnNotificationError(Guid batchId, PushRegistration registration, Notification notification, Exception exception, CancellationToken cancelToken)
+    {
+        ...
+    }
+
+    public Task OnNotificationSuccess(Guid batchId, PushRegistration registration, Notification notification, CancellationToken cancelToken)
+    {
+        ...
+    }
+}
+```
+
+> [!NOTE]
+> You can also use the `Shiny.Extensions.Push.NotificationReporter` class and use override instead of implementing the entire interface.
+
+> [!NOTE]
+> You can have multiple reporters
+
+Next thing to do is register this with the extension during startup
+
+```csharp
+builder.Services.AddPushManagement(x => x
+    .AddApplePush(...)
+    .AddGooglePush(...)
+    .AddReporter<MyCustomReporter>()
+);
+```
+
+> [!WARNING]
+> The reporter is registered as a singleton
+
+> [!WARNING]
+> It isn't good to do a lot of logic inside notification error or notification success as they run per notifcation in a batch.  It is better to use OnBatchStart and OnBatchCompleted to process.  This will allow your notification batches to finish quicker.
+
+## Out of the Box Reporters
+* **BatchTimeNotificationReporter** - this will log how long a batch takes to process.  You can use this to tune your queries or even determine that you may need to move your push functions to a more resilient platform like Azure Functions instead of directly in your Web API.
+
+* **AutoCleanupNotificationReporter** - This reporter will remove any notification errors that occur because no notification was sent.  This usually means the user uninstalled your app (therefore never unregistered using your app) or has unregistered from notifications but it never hit your server.  It happens.  This will catch the exceptions and unregister the device for you.  To Setup, use the following during the extension registration
+
+```csharp
+builder.Services.AddPushManagement(x => x
+    .AddApplePush(...)
+    .AddGooglePush(...)
+    .AddPerformanceLogger()
+    .AddAutoRemoveNoReceive()
+);
+```
