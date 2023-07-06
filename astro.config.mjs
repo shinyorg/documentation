@@ -126,13 +126,13 @@ export default defineConfig({
             {
               label: 'Client',
               items:[
-                { label: 'v3.0', link: 'releases/client/v30' },
+                { label: 'v3.0', link: 'release-notes/client/v30' },
               ]
             },
             {
               label: 'Server',
               items:[
-                { label: 'v2.0', link: 'releases/client/v20' },
+                { label: 'v2.0', link: 'release-notes/client/v20' },
               ]
             }
           ]
