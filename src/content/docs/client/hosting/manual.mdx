@@ -3,14 +3,75 @@ title: Manual
 ---
 import NugetBadge from '../../../../components/NugetBadge';
 
-You can use this when you want to manually wire in Shiny due to application complexities
+You can use this when you want to manually wire in Shiny due to application complexities. 
 
-First, install <NugetBadge name="Shiny.Core" />
+First, install <NugetBadge name="Shiny.Core" /> - this contains all of the internal services needed by Shiny modules
+as well as all the lifecycle hooks in order for Shiny to successfully register against the native platform
 
 
 ## iOS/Mac Catalyst AppDelegate
 
-TODO
+```csharp
+using System;
+using Foundation;
+using Shiny.Hosting;
+using UIKit;
+
+namespace Shiny;
+
+
+public abstract class ShinyAppDelegate : UIApplicationDelegate
+{
+    public override bool FinishedLaunching(UIApplication application, NSDictionary launchOptions)
+    {
+        var host = HostBuilder.Create();
+
+        // add shiny services & your own services here
+        host.Build().Run();
+
+        Host.Lifecycle.FinishedLaunching(launchOptions);
+        return base.FinishedLaunching(application, launchOptions);
+    }
+
+    public override void WillEnterForeground(UIApplication application)
+    {
+        Host.Lifecycle.OnAppForegrounding();
+    }
+
+    public override void DidEnterBackground(UIApplication application)
+    {
+        Host.Lifecycle.OnAppBackgrounding();
+    }
+
+    public override bool ContinueUserActivity(UIApplication application, NSUserActivity userActivity, UIApplicationRestorationHandler completionHandler)
+    {
+        Host.Lifecycle.OnContinueUserActivity(userActivity,  completionHandler);
+    }
+
+    // only used by Shiny.Net.Http
+    public override void HandleEventsForBackgroundUrl(UIApplication application, string sessionIdentifier, Action completionHandler)
+    {
+        Host.Lifecycle.OnHandleEventsForBackgroundUrl(sessionIdentifier, completionHandler);
+    }
+
+    // if using any of the Shiny.Push packages
+    public override void RegisteredForRemoteNotifications(UIApplication application, NSData deviceToken)
+    {
+        Host.Lifecycle.OnRegisteredForRemoteNotifications(deviceToken);
+    }
+
+    public override void FailedToRegisterForRemoteNotifications(UIApplication application, NSError error)
+    {
+        Host.Lifecycle.OnFailedToRegisterForRemoteNotifications(error);
+    }
+
+    public override void DidReceiveRemoteNotification(UIApplication application, NSDictionary userInfo, Action<UIBackgroundFetchResult> completionHandler)
+    {
+        Host.Lifecycle.OnDidReceiveRemoteNotification(userInfo, completionHandler);
+    }
+}
+
+```
 
 ## Android
 
@@ -26,8 +87,78 @@ For Classic Xamarin, you will need to add framework reference to `Mono.Android.E
 
 ### Application
 
-TODO
+The application is required for Shiny on Android.  The application will spin up allowing shiny to register all of its delegates and your services when the app is launching.  When Android launches in the background, it won't run your main activity.
+
+```csharp
+using System;
+using Android.App;
+using Android.Runtime;
+using Shiny.Hosting;
+
+namespace Shiny;
+
+
+[Application]
+public class YourShinyAndroidApplication : Application
+{
+    // you need this constructor for .NET Android
+    public YourShinyAndroidApplication(IntPtr javaReference, JniHandleOwnership transfer) : base(javaReference, transfer) {}
+    
+    
+    public override void OnCreate()
+    {
+        base.OnCreate();
+        var host = HostBuilder.Create();
+
+        // add your shiny & custom services here
+
+        host.Build().Run();
+    }
+}
+```
 
 ### Activity
 
-TODO
+This is all of the required Shiny stuff in your activity.  The main requirement here is OnRequestPermissionsResult since it is used
+by every single module within Shiny.
+
+```csharp
+using Android.App;
+using Android.Content;
+using Android.Content.PM;
+using Android.Runtime;
+using AndroidX.AppCompat.App;
+using Shiny.Hosting;
+
+namespace Shiny;
+
+[IntentFilter(new[] {
+    // if using local notifications
+    Shiny.ShinyNotificationIntents.NotificationClickAction, 
+
+    // if using push notifications
+    Shiny.ShinyPushIntents.NotificationClickAction
+})]
+public class ShinyAndroidActivity : AppCompatActivity
+{
+    protected override void OnActivityResult(int requestCode, [GeneratedEnum] Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        Host.Lifecycle.OnActivityResult(this, requestCode, resultCode, data);
+    }
+
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        Host.Lifecycle.OnNewIntent(this, intent);
+    }
+
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, [GeneratedEnum] Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        Host.Lifecycle.OnRequestPermissionsResult(this, requestCode, permissions, grantResults);
+    }
+}
+```

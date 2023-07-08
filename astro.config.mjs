@@ -8,6 +8,7 @@ export default defineConfig({
     react(),
     starlight({
       title: 'Shiny.NET',
+      // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
       editLink: {
         baseUrl: 'https://github.com/shinyorg/documentation/edit/main/'
       },
