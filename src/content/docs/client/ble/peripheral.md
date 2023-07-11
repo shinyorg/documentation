@@ -1,7 +1,6 @@
 ---
 title: Peripheral
 ---
-# Device
 
 This section deals with gatt connections and state monitoring for a device.
 You should maintain a reference to a device if you intend to connect to it.
@@ -24,18 +23,18 @@ peripheral.Connect();
 If you need to wait for a connection and you know your device is nearby, you can use 
 
 ```csharp
-await peripheral.ConnectAwait();
+await peripheral.ConnectAsync();
 ```
 
 It is important to put your own timeout on these things using RX Timeout or supplying a cancellation token as shown below
 
 ```csharp
 // this will throw an exception if it times out
-await peripheral.Timeout(TimeSpan.FromSeconds(10)).ConnectAwait();
+await peripheral.Timeout(TimeSpan.FromSeconds(10)).WithConnectIf();
 
 // or supply your own cancellation token
 var cancelSource = new CancellationTokenSource();
-await peripheral.ConnectAwait(cancelSource.Token);
+await peripheral.ConnectAsync(cancelSource.Token);
 
 cancelSource.Cancel();
 ```
@@ -106,13 +105,15 @@ device.TryRequestMtu(255).Subscribe(x => {});
 
 ```csharp
 // this will watch the connection states to the device
-device.WhenStatusChanged().Subscribe(connectionState => {});
+peripheral.WhenConnected().Subscribe(x => {});
+peripheral.WhenDisconnected().Subscribe(x => {});
+peripheral.WhenStatusChanged().Subscribe(connectionState => {});
 
 ```
 
 
 ## PHY (Physical Layer)
-TODO
+COMING SOON
 
 ## L2Cap
-TODO
+COMING SOON

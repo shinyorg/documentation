@@ -1,17 +1,36 @@
 ---
-title: BLE Manager
+title: BluetoothLE (BLE) Manager
 ---
-The adapter is where everything begins and ends.  Unlike the platform implementations of the adapter scan, the BLE plugin Scan()
-method will scan continuously (or restart the scan when the cycle completes) until you dispose of the Scan() token.
+The BluetoothLE (BLE) manager is where everything begins with .  This is responsible for all of the scanning of peripherals around you.  
 
 
 ## General
 
+Start by resolving, injecting, etc your Shiny.BluetoothLE.IBleManager and as with most modules within Shiny, call RequestAccess to ensure that 
+you your platform supports the operation, your user has given you consent to perform the operation, and that all of the necessary hardware is turned on
+
+```csharp
+IBleManager bleManager;
+
+var access = await bleManage.RequestAccess();
+if (access != AccessState.Available)
+{
+    // handle accordingly
+}
+```
+
 ## Get Connected Devices
-TODO
+Returns all devices currently connected to your APP, not the device itself.
+
+```csharp
+bleManager.GetConnectPeripherals();
+```
 
 ## Get Known Peripheral
-TODO
+Gets a peripheral by a UUID.  This is only available after a scan operation assuming the peripheral was "seen"
+
+```csharp
+```
 
 ## Scan for Devices
 
@@ -28,30 +47,22 @@ scanner.Dispose(); // to stop scanning
 ```
 
 
-## Scan for Devices 
+## Scan for "My" Peripherals 
+
+It generally isn't recommended you use an "open" ended scan.  You also don't want to rely on something like a device name or even "manufacturer" data
+to find peripherals your app was meant to work with.  It is recommended you ALWAYS use a serviceUiid to scan by
+
 ```csharp
 IBleManager bleManager; // injected/resolved
 bleManager.Scan(
     new ScanConfig 
     {
-        ServiceUuids = { new Guid("<your guid here>") }
+        ServiceUuids = { " your uuid here" }
     }
 )
 .Subscribe(scanResult => 
 {
 })
-```
-
-
-## Specific Scans
-
-_Find a named peripheral_
-
-```csharp
-// this will return a single result and complete - you can await it if you want
-var peripheral = CentralManager.ScanForPeripheral("YourDevice");
-
-var peripheral = CentralManager.ScanForPeripheral(YourDevice);
 ```
 
 
