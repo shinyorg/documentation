@@ -16,8 +16,43 @@ Once connected to a device, you can initiate service discovery (it is pretty muc
 
 This is the main operation points within BLE GATT
 
-* Read/Write/Notify TODO
-* BLOB writes TODO - Used for sending larger arrays or streams of data without working with the MTU byte gap
+
+### Read Characteristic
+```csharp
+//TODO
+```
+
+### Write Characteristic
+```csharp
+//TODO
+```
+
+### Binary Large Objects (BLOBS) Writes
+
+Generally, writing anything large over BLE is not recommended due to the maximum transmission unit (MTU)
+
+```csharp
+//TODO
+```
+
+### Notifications
+
+```csharp
+// TODO
+```
+
+Waiting or checking if a notification is hooked
+```csharp
+// TODO
+```
+
+:::warning
+Notifications will stay hooked as long as you hold a subscription to it.  Make sure you dispose of it when you are done
+:::
+
+:::note
+Unlike previous versions of shiny, we now deal with "rehooking" your subscriptions across connections.  As long as you hold a subscription to a notification characteristic, we'll deal with the junk of restoring it properly.
+:::
 
 ## Descriptors
 
