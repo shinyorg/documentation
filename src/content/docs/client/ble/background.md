@@ -2,4 +2,11 @@
 title: Background
 ---
 
-# TODO
+IBleDelegate
+
+* Monitor the status of the BLE radio
+* Monitor connections to peripherals in the background
+
+```csharp
+// TODO
+```

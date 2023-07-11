@@ -227,6 +227,13 @@ declare module 'astro:content' {
   collection: "docs";
   data: InferEntrySchema<"docs">
 } & { render(): Render[".mdx"] };
+"client/ble/async.md": {
+	id: "client/ble/async.md";
+  slug: "client/ble/async";
+  body: string;
+  collection: "docs";
+  data: InferEntrySchema<"docs">
+} & { render(): Render[".md"] };
 "client/ble/background.md": {
 	id: "client/ble/background.md";
   slug: "client/ble/background";

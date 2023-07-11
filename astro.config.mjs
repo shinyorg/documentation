@@ -45,6 +45,7 @@ export default defineConfig({
                 { label: 'Peripheral', link: 'client/ble/peripheral' },
                 { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
                 { label: 'Best Practices', link: 'client/ble/best-practices' },
+                { label: 'Async/Await', link: 'client/ble/async' },
                 { label: 'FAQ', link: 'client/ble/faq' }
               ]
             },
