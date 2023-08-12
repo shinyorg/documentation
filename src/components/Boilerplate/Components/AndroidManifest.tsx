@@ -14,6 +14,7 @@ const AndroidManifest = (props: Props) => {
     <manifest xmlns:android="http://schemas.android.com/apk/res/android">
       <application android:allowBackup="true" android:icon="@mipmap/appicon" android:roundIcon="@mipmap/appicon_round" android:supportsRtl="true">
       </application>
+      <uses-permission android:name="android.permission.BATTERY_STATS" />
       <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
       <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
       <uses-permission android:name="android.permission.INTERNET" />      
