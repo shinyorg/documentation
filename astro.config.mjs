@@ -98,6 +98,7 @@ export default defineConfig({
               label: 'Push Notifications',
               items:[
                   { label: 'Getting Started', link: 'client/push/' },
+                  { label: 'Providers', link: 'client/push/providers/' },
                   { label: 'FAQ', link: 'client/push/faq' }
               ]
             },
