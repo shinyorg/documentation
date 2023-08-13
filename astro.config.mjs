@@ -1,11 +1,20 @@
 import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
+import starlightBlog from 'starlight-blog';
 
-// https://astro.build/config
 export default defineConfig({
   integrations: [
     react(),
+    starlightBlog({
+      authors: {
+        allanritchie: {
+          name: 'Allan Ritchie',
+          picture: 'https://avatars.githubusercontent.com/u/1431555', // Images in the `public` directory are supported.
+          url: 'https://allanritchie.com',
+        }
+      }
+    }),
     starlight({
       title: 'Shiny.NET',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
@@ -17,8 +26,7 @@ export default defineConfig({
       },
       social: {
         github: 'https://github.com/shinyorg',
-        twitter: 'https://twitter.com/shinydotnet',
-        blog: 'https://allanritchie.com'
+        twitter: 'https://twitter.com/shinydotnet'
       },      
       sidebar: [
         {
