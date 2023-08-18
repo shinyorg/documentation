@@ -3,7 +3,12 @@ title: Best Practices
 ---
 # Best Practices
 
-# Android
+:::warning
+When using observables within BluetoothLE, you should always use .Timeout(TimeSpan.FromSeconds(X)) to kill tasks that take too long.  Android
+tends to hang on certain calls if a connection is broken during certain operations.
+:::
+
+## Android
 
 Android Bluetooth is painful and that's being nice.  This library attempts to deal with the necessary thread handling all internally.
 

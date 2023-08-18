@@ -98,8 +98,7 @@ export default defineConfig({
               label: 'Local Notifications',
               items:[
                 { label: 'Getting Started', link: 'client/notifications/' },
-                { label: 'Channels', link: 'client/notifications/channels' },
-                { label: 'Platform Specifics', link: 'client/notifications/platformspecifics' }
+                { label: 'Channels', link: 'client/notifications/channels' }
               ]
             },
             {
