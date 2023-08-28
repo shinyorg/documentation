@@ -126,7 +126,6 @@ export default defineConfig({
           items:[
               { label: 'Introduction', link: 'server' },
               { label: 'Email', link: 'server/email' },
-              { label: 'Localization', link: 'server/localization' },
               { label: 'Push Management', link: 'server/push' }
           ]
         },

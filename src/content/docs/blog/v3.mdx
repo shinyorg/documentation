@@ -1,0 +1,233 @@
+---
+title: Version 3 Release
+date: 2023-08-24
+authors:
+  - allanritchie
+tags:
+  - Release
+---
+
+We took our time, but we feel version 3 touched everything and we did it in our free time, so its a pretty huge release.  
+We wanted to make sure we could support classic Xamarin platforms while also moving to the new "shiny" .NET7.  We've also added 
+Mac Catalyst to our supported platforms along side our usual iOS and Android.  
+
+## Features
+
+### HTTP Transfers
+We have rewritten our HTTP Transfers stack on Android to support modern practices like foreground services, deliver better performance, and provide missing features 
+from the native download manager.  
+
+First create your delegate
+```csharp
+namespace YourNamespace;
+
+public partial class MyHttpTransferDelegate : Shiny.Net.Http.IHttpTransferDelegate
+{
+    public async Task OnCompleted(HttpTransferRequest request)
+    {
+    }
+
+
+    public async Task OnError(HttpTransferRequest request, Exception ex)
+    {
+    }
+}
+
+#if ANDROID
+public partial class MyHttpTransferDelegate : Shiny.IAndroidForegroundServiceDelegate
+{
+    public void ConfigureNotification(AndroidX.Core.App.NotificationCompat.Builder builder)
+    {
+        builder
+            .SetContentTitle("MyApp")
+            .SetContentText("My App is sending images")
+            .SetSmallIcon(Resource.Mipmap.myNotificationIconWhateverThatIs);
+    })
+}
+#endif
+```
+
+:::note
+See that partial and the #IF ANDROID ?.  That's there so you can customize the Android foreground notification (that must exist).
+This same technique is applied to GPS and Beacon delegates
+:::
+
+Next, add it to your MAUI app builder or host builder setup
+```csharp
+builder.Services.AddHttpTransfers<MyHttpTransferDelegate>();
+```
+
+Finally, queue up your transfer(s) for upload or download - let them carry on in the background without a worry
+```csharp
+using Shiny.Net.Transfers;
+
+IHttpManager manager; // resolve it, inject it, etc
+
+await manager.Queue(new (
+    "your identifer - must be unique",
+    "https://myserver.com/api/transfer",
+    false, // true for upload
+    path // local file path of WHAT to upload OR WHERE to download to
+));
+```
+
+There's lot of other cool new stuff like sending multipart content with your transfers.
+
+### GPS & Geofencing
+MAUI/Xamarin Essentials are great.  They hit all of the platforms.  Once you get past the essentials though and get into big enterprise applications,
+you need some stronger issues.  The only provider currently offering full blown background GPS tracking for Android & iOS on .NET.  
+
+Geofencing hasn't changed much from v3 API wise and still continues to be the only known geofence provider for .NET mobile.
+
+### BluetoothLE
+With BLE, we reevaluated the entire API surface for simplicity while shedding some of the fat.
+
+First off, When working with
+BLE, the user will often know the details like the ServiceUUID and Characteristic UUIDs they wish to interact with.  Thus, all methods to interact with 
+these objects are now based off IPeripheral directly
+
+```csharp
+IPeripheral peripheral; // scan it, select it, etc
+
+peripheral.Get
+```
+
+As part of our simplified API, we've also introduced many Task/Async based methods where you don't need the full power of reactive extensions.
+
+```csharp
+Task<AccessState> RequestAccessAsync(this IBleManager manager);
+Task ConnectAsync(this IPeripheral peripheral, ConnectionConfig? config = null, CancellationToken cancelToken = default, TimeSpan? timeout = null);
+Task WaitForCharacteristicSubscriptionAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, CancellationToken cancellationToken = default);
+Task<IReadOnlyList<BleServiceInfo>> GetServicesAsync(this IPeripheral peripheral, CancellationToken cancelToken = default);
+Task<BleServiceInfo> GetServiceAsync(this IPeripheral peripheral, string serviceUuid, CancellationToken cancelToken = default);
+Task<IReadOnlyList<BleCharacteristicInfo>> GetCharacteristicsAsync(this IPeripheral peripheral, string serviceUuid, CancellationToken cancelToken = default, TimeSpan? timeout = null);
+Task<BleCharacteristicInfo> GetCharacteristicAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, CancellationToken cancelToken = default);
+Task<IReadOnlyList<BleCharacteristicInfo>> GetAllCharacteristicsAsync(this IPeripheral peripheral, CancellationToken cancelToken = default, TimeSpan? timeout = null);
+Task<IReadOnlyList<BleDescriptorInfo>> GetDescriptorsAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, CancellationToken cancelToken = default);
+Task<BleCharacteristicResult> WriteCharacteristicAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, byte[] data, bool withResponse = true, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<BleCharacteristicResult> ReadCharacteristicAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<BleDescriptorResult> ReadDescriptorAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, string descriptorUuid, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<BleDescriptorResult> WriteDescriptorAsync(this IPeripheral peripheral, string serviceUuid, string characteristicUuid, string descriptorUuid, byte[] data, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<DeviceInfo> ReadDeviceInformationAsync(this IPeripheral peripheral, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<int> ReadRssiAsync(this IPeripheral peripheral, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<BleCharacteristicResult> ReadCharacteristicAsync(this IPeripheral peripheral, BleCharacteristicInfo info, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<BleCharacteristicResult> WriteCharacteristicAsync(this IPeripheral peripheral, BleCharacteristicInfo info, byte[] data, bool withoutResponse = false, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<IReadOnlyList<BleDescriptorInfo>> GetDescriptorsAsync(this IPeripheral peripheral, BleCharacteristicInfo info, CancellationToken cancelToken = default);
+Task<BleDescriptorResult> WriteDescriptorAsync(this IPeripheral peripheral, BleDescriptorInfo info, byte[] data, CancellationToken cancelToken = default, int timeoutMs = 3000);
+Task<BleDescriptorResult> ReadDescriptorAsync(this IPeripheral peripheral, BleDescriptorInfo info, CancellationToken cancelToken = default, int timeoutMs = 3000);
+```
+
+You'll notice all of the methods above use strings for UUID arguments.  In version 2, we used GUIDs which made it harder for users to work with 16bit UUIDs.
+
+
+And lastly, in version 2, we have the Managed Peripheral that took care of things like reconnecting, rehooking characteristics, and funky stuff that generally makes BLE hard.  This is now
+all built into the regular peripheral.  As long as you hook a characteristic, we'll restore it across connection blips and disconnections.
+
+
+```csharp
+IPeripheral peripheral; // scan it, select it, etc
+
+var sub = peripheral
+    .NotifyCharacteristic("Known Service UUID", "Known Characteristic UUID")
+    .Subscribe(args => 
+    {
+        // do something with args
+        args.Characteristic // characteristic info
+        args.Data // byte array containing the data
+    });
+
+// make sure to keep a reference to the subscription and dispose when you're done
+sub.Dispose();
+```
+
+BEFORE - you would have had to monitor the IPeripheral.WhenConnected(), then get the characteristic, and lastly hook it.  This sucked and it wasn't without its pain.
+
+We've also taken the time to review and remove a lot of junk code that just wasn't needed in our efforts to reduce our footprint.
+
+### BluetoothLE Hosting
+We've made all of our events ASYNC
+
+TODO: Managed model
+
+### Periodic Job
+Periodic Jobs is another model within Shiny 3 that has remained mostly the same.  On iOS, we did remove the old background fetch mechanism in favour of full
+BGTasks
+
+### Push Notifications
+This is one of our "smaller" modules, but we feel - one of the most important.  Push providers come and go, but the underlying push mechanisms remain the same.  As such,
+we've split the provider from the native mechansim and thus allowing you to work with the native mechanism the same way all the time, but plugging in a provider "on top" that Shiny
+will call into.  Take a look at our [Push Provider Documentation](/client/push/providers) for more info.
+
+Out of the box, we obviously support native, but we also support basic features for Azure Notification Hubs and Firebase (Android Native, but also iOS)
+
+### Local Notifications
+We believe we offer the best of breed in local notifications for Xamarin/MAUI ecosystem.  
+- geofence Notifications
+- android 13 permissions
+- native arguments on iOS & Android
+
+### App Background Centric Logging
+TODO: App Center & SQLite Logging
+
+### App Centric Logging
+Shiny.Extensions.Configuration
+
+### Other Features
+We still have our speech-to-text module (Shiny.SpeechRecognition), but now that this exists in the Maui.CommunityToolkit, we will be deprecating this module in the future.
+We also have our iBeacon library.  We've updated it to use Android foreground services when monitoring.  For the most part, Beacons seem to be dying off.  We aren't deprecating 
+beacons at this time since it isn't a ton of work to keep around/
+
+## Architecture
+A nasty comment we hear from the "not so nice" consumer base is how "Shiny tries to do too much".  This actually isn't true.  Our Core in v2 did have a lot of support functionality for our modules, but it was trimmed when 
+it wasn't needed.  We've taken this a step further by separating support modules out to secondary libraries and linking them into modules where they are needed. 
+
+### Hosting Model
+Our Core module now only contains our truly core functionality including hosting.  Some will ask, well why hosting if MAUI already has it?  Well - the .NET application ecosystem is fragmented right now.  Some users are stuck on Xamarin Forms, 
+Xamarin Full Native, some are moving to MAUI, and some are even looking at newer pastures like [Uno Platform](https://platform.uno/).  Our hosting model allows us to plugin into this different ecosystems and gives us 1 plugin base to rule them all.
+
+### Dependency Injection All The Way
+We believe strongly in dependency injection for clean architecture.  Many users have certain logging and configuration needs, along with their own sets of services
+that they make use of in Shiny delegates.  This would be very hard to enable without dependency injection.  It allows for a very pluggable & testable model.  We realize some don't like this, but this is 
+unfortunately a hill we will die on.  For those places where DI can't reach, Shiny has Shiny.Hosting.Host.GetService for you.  
+
+### Reactive Extensions
+Core parts of Shiny are built with Reactive programming especially our BluetoothLE module where things like configurable timeout, method chaining, and event structure matter.
+We understand this can sometimes present new paradigms to users, so we add async equivalent methods where applicable.  Please review our BluetoothLE feature set above.  
+
+Some won't like Reactive programming and that's fine - as with any free open source, you can use other libraries.  We don't like events, they leak memory and lack functionality that is easily 
+available in RX.  Even the C# inventors have said they regret events.
+
+## Documentation
+
+We have new documentation - you're in it already :)  We think its starting to look pretty awesome.  We've built it using the amazing [Astro Build](https://astro.build) for those who are curious.
+
+There will be some gaps at the time of our release, but we continue to improve things.  Feel free to contribute as we can use all the help we can get!
+
+Have an existing app and just need to get a list of what configuration you need to plug Shiny into your app, take a look at our new
+[App Builder](/client/appbuilder) that will give a list of every piece of boilerplate you will need to add.  Simply select the Shiny libraries you want and let it show you the rest.
+
+
+## Templates
+Our templates make starting net new apps a breeze with support for many popular Xamarin/MAUI 3rd party libraries including Shiny.  Our template
+takes care of setting up ALL of the boilerplate plists, manifests, projects, etc and works for Visual Studio for Windows & Mac (2022)
+
+To Install - simply run the following from command line
+> dotnet new install Shiny.Templates
+
+Check out all of the options in this monster
+![Template](../../../assets/template_vs4mac.png)
+
+## Samples
+Our samples do fall under the "kitchen sink" category, but we cover almost everything you can do with the library.  We use Prism & ReactiveUI within our samples, but you don't need them.  It just makes life
+easier for us to build the samples, but you don't need them to use Shiny.  Our samples also include some basic APIs to show you how to use ASP.NET Core to receive and send HTTP transfers.
+
+[Check out our Samples](https://github.com/shinyorg/shiny/tree/master/samples)
+
+
+## The Road Ahead (Roadmap)
+Webassembly
+Some windows
+
+## Be Kind
+Remember, this is all given away for free. Don't like something, offer constructive and POLITE feedback.  Please also understand that feedback doesn't mean we'll change something, but 
+we want to make something MOST people will like.
