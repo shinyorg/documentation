@@ -10,6 +10,7 @@ export default defineConfig({
       authors: {
         allanritchie: {
           name: 'Allan Ritchie',
+          title: 'One of the guys who builds this',
           picture: 'https://avatars.githubusercontent.com/u/1431555', // Images in the `public` directory are supported.
           url: 'https://allanritchie.com',
         }
