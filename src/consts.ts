@@ -14,7 +14,7 @@ export type ShinyComponent = {
 }
 
 
-export const DEFAULT_VERSION: string = "3.0.0-beta-0245";
+export const DEFAULT_VERSION: string = "3.0.0-beta-0305";
 
 
 
