@@ -3,7 +3,9 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-// description: 'Making all of your .NET Mobile Apps Shiny'
+export const DEFAULT_VERSION: string = "3.0.0";
+
+
 
 export type ShinyComponent = {
     id: string;
@@ -12,11 +14,6 @@ export type ShinyComponent = {
     version: string;
     foregroundService?: boolean;
 }
-
-
-export const DEFAULT_VERSION: string = "3.0.0-beta-0305";
-
-
 
 export type AndroidConfig = {
     usesJobs?: boolean;

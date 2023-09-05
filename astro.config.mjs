@@ -41,7 +41,7 @@ export default defineConfig({
               items:[
                 { label: 'MAUI', link: 'client/hosting/maui' },
                 { label: 'Native', link: 'client/hosting/native' },
-                { label: 'Uno Platform', link: 'client/hosting/uno' },
+                // { label: 'Uno Platform', link: 'client/hosting/uno' },
                 { label: 'Manual', link: 'client/hosting/manual' }
               ]
             },
@@ -49,12 +49,12 @@ export default defineConfig({
               label: 'BluetoothLE',
               items:[
                 { label: 'Getting Started', link: 'client/ble' },
-                { label: 'Background Operations', link: 'client/ble/background' },
+                // { label: 'Background Operations', link: 'client/ble/background' },
                 { label: 'BLE Manager', link: 'client/ble/manager' },
                 { label: 'Peripheral', link: 'client/ble/peripheral' },
                 { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
                 { label: 'Best Practices', link: 'client/ble/best-practices' },
-                { label: 'Async/Await', link: 'client/ble/async' },
+                // { label: 'Async/Await', link: 'client/ble/async' },
                 { label: 'FAQ', link: 'client/ble/faq' }
               ]
             },
