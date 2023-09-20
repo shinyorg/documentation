@@ -1,8 +1,7 @@
 ---
 title: BluetoothLE (BLE) Manager
 ---
-The BluetoothLE (BLE) manager is where everything begins with .  This is responsible for all of the scanning of peripherals around you.  
-
+The BluetoothLE (BLE) manager is where everything begins.  From here, you can request the necessary access from your user to use the hardware and scan for BLE peripherals around you
 
 ## General
 
@@ -19,20 +18,8 @@ if (access != AccessState.Available)
 }
 ```
 
-## Get Connected Devices
-Returns all devices currently connected to your APP, not the device itself.
 
-```csharp
-bleManager.GetConnectPeripherals();
-```
-
-## Get Known Peripheral
-Gets a peripheral by a UUID.  This is only available after a scan operation assuming the peripheral was "seen"
-
-```csharp
-```
-
-## Scan for Devices
+## Scan for Peripherals
 
 ```csharp
 IBleManager bleManager; // injected/resolved
@@ -40,12 +27,13 @@ var scanner = bleManager.Scan().Subscribe(scanResult =>
 {
     // do something with it
     // the scanresult contains the device, RSSI, and advertisement packet
-        
+    scanResult.Rssi
+    scanResult.Peripheral
+    scanResult.AdvertisementData
 });
 
 scanner.Dispose(); // to stop scanning
 ```
-
 
 ## Scan for "My" Peripherals 
 
@@ -54,15 +42,30 @@ to find peripherals your app was meant to work with.  It is recommended you ALWA
 
 ```csharp
 IBleManager bleManager; // injected/resolved
-bleManager.Scan(
-    new ScanConfig 
-    {
-        ServiceUuids = { " your uuid here" }
-    }
-)
+bleManager.Scan(new ScanConfig(
+    "your uuid here"
+))
 .Subscribe(scanResult => 
 {
 })
+```
+
+
+## Get Connected Devices
+Returns all devices currently connected to your APP, not the device itself.
+
+Returns a enumerable of peripherals (non async method)
+
+```csharp
+var peripherals = bleManager.GetConnectPeripherals();
+```
+
+## Get Known Peripheral
+Gets a peripheral by a UUID.  This is only available after a scan operation assuming the peripheral was "seen"
+
+Returns null if not found
+```csharp
+var peripheral = bleManager.GetKnownPeripheral("the peripheral uuid");
 ```
 
 

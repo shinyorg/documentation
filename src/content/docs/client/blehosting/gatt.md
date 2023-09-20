@@ -96,7 +96,7 @@ These are the heart and soul of BLE.  This is where data is exchanged between cl
 A managed characteristic as shown below, respresents a single characteristic but multiple operations
 
 ```csharp
-[BleGattCharacteristic("", Constants.ManagedCharacteristicUuid)]
+[BleGattCharacteristic("Your Service UUID", "Your Characteristic UUID")]
 public class MyManagedCharacteristics : BleGattCharacteristic
 {
     readonly SampleSqliteConnection conn;
@@ -104,15 +104,43 @@ public class MyManagedCharacteristics : BleGattCharacteristic
     public MyManagedCharacteristics(SampleSqliteConnection conn)
         => this.conn = conn;
 
+    // setup any initial wiring before the characteristic is started
     public override Task OnStart()
     {
         return Task.Completed;
     }
+
+    // cleanup any resources/timers/etc you may have had running
     public override void OnStop() => base.OnStop();
 
+    // override this to make your characteristic readable
     public override Task<GattResult> OnRead(ReadRequest request) => base.OnRead(request);
+
+    // override this to make your characteristic writeable
     public override Task OnWrite(WriteRequest request) => base.OnWrite(request);
+
+    // override this to make your characteristic notify based
     public override Task OnSubscriptionChanged(IPeripheral peripheral, bool subscribed) => base.OnSubscriptionChanged(peripheral, subscribed);
 }
 
+```
+
+To register your managed characteristic, during your host building operation (ie. MauiProgram.cs), add the following:
+
+```csharp
+builder.Services.AddBleHostedCharacteristic<MyManagedCharacteristics>();
+```
+
+And lastly to start/stop your managed characteristic
+```csharp
+// now inject/resolve the Shiny.BluetoothLE.Hosting.IBleHostingManager and now you can toggle on/off
+Shiny.BluetoothLE.Hosting.IBleHostingManager hostingManager;
+if (hostingManager.IsRegisteredServicesAttached)
+{
+    hostingManager.DetachRegisteredServices();
+}
+else
+{
+    await hostingManager.AttachRegisteredServices();
+}
 ```
