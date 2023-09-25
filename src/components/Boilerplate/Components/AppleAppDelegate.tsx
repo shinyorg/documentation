@@ -1,3 +1,4 @@
+import React from 'react';
 import Syntax from '../../Syntax';
 
 const AppleAppDelegate = () => {

@@ -1,4 +1,5 @@
-import { DEFAULT_VERSION, ShinyComponent } from '../../../consts';
+import React from 'react';
+import { DEFAULT_VERSION, type ShinyComponent } from '../../../consts';
 import NugetBadge, { BadgeType } from '../../NugetBadge';
 
 export interface Props {

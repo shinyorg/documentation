@@ -1,4 +1,4 @@
-import { ShinyComponent, ShinyComponents, Data } from '../../consts';
+import { type ShinyComponent, ShinyComponents, Data } from '../../consts';
 import { useState } from 'react';
 import NugetList from './Components/NugetList';
 import MauiProgram from './Components/MauiProgram';
@@ -10,9 +10,11 @@ import ProjectFile from './Components/ProjectFile';
 import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
 import 'react-tabs/style/react-tabs.css';
 import Alert from '../Alert';
+import React from 'react';
+import AndroidActivity from './Components/AndroidActivity';
 
 const AppBuilder = () => {
-  const { usesPush, usingForeground } = Data;
+  const { usesPush, usingForeground, usesActivity } = Data;
   const [components, setComponents] = useState<ShinyComponent[]>([]);
 
   const handleChange = (e: ShinyComponent) => {
@@ -61,7 +63,8 @@ const AppBuilder = () => {
                 <Tab>Project File (csproj)</Tab>
                 <Tab>MauiProgram.cs</Tab>
                 <Tab>AndroidManifest.xml</Tab>
-                <Tab>Info.plist</Tab>
+                {usesActivity(components) && <Tab>Android Activity</Tab>}
+                <Tab>Apple Info.plist</Tab>
                 {usesPush(components) && <Tab>Apple Entitlements.plist</Tab>}
                 {usesPush(components) && <Tab>Apple App Delegate</Tab>}
             </TabList>
@@ -77,6 +80,9 @@ const AppBuilder = () => {
             <TabPanel>
                 <AndroidManifest components={components} />
             </TabPanel>
+            {usesActivity(components) &&
+                <TabPanel><AndroidActivity components={components} /></TabPanel>
+            }
             <TabPanel>
                 <AppleInfoPlist components={components} />
             </TabPanel>

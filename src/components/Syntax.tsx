@@ -2,6 +2,7 @@ import CopyToClipboardButton from './CopyToClipboardButton';
 import Prism from "prismjs";
 import "prismjs/components/prism-csharp";
 import "prismjs/themes/prism-tomorrow.css";
+import React from 'react';
 import { useEffect } from 'react';
 
 interface Props {
@@ -10,7 +11,6 @@ interface Props {
 }
 
 const Syntax = (props: Props) => {
-
     const lang = props.language || "csharp";
     const cls = `language-${lang}`;
     useEffect(() => Prism.highlightAll());

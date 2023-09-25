@@ -1,3 +1,5 @@
+import React from "react";
+
 interface Props {
 	type?: 'note' | 'tip' | 'caution' | 'danger';
 	title?: string;

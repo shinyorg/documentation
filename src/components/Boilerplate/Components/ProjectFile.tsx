@@ -1,5 +1,5 @@
-import { DEFAULT_VERSION, ShinyComponent } from '../../../consts';
-import CopyToClipboardButton from '../../CopyToClipboardButton';
+import React from 'react';
+import { DEFAULT_VERSION, type ShinyComponent } from '../../../consts';
 import Syntax from '../../Syntax';
 
 export interface Props {

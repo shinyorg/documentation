@@ -1,4 +1,5 @@
-import { Data, ShinyComponent } from '../../../consts';
+import React from 'react';
+import { Data, type ShinyComponent } from '../../../consts';
 import Syntax from '../../Syntax';
 
 export interface Props {

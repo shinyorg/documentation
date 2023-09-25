@@ -12,6 +12,7 @@ export type ShinyComponent = {
     nuget: string;
     description: string;
     version: string;
+    androidIntent?: string;
     foregroundService?: boolean;
 }
 
@@ -112,6 +113,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "notifications",
         "nuget": "Shiny.Notifications",
         "description": "Local Notifications",
+        "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
     {
@@ -124,6 +126,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "push",
         "nuget": "Shiny.Push",
         "description": "Push Notifications (Native)",
+        "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
     {
@@ -163,5 +166,9 @@ export const Data = {
 
     usingForeground(compos: ShinyComponent[]): boolean {
         return compos.filter(x => x.foregroundService === true).length > 0;
+    },
+
+    usesActivity(compos: ShinyComponent[]): boolean {
+        return compos.filter(x => x.androidIntent !== undefined).length > 0;
     }
 };
