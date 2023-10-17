@@ -13,7 +13,7 @@ export enum BadgeType {
 }
   
 const NugetBadge = (props: Props) => {
-  let type = props.badgeType || BadgeType.Preview;
+  let type = props.badgeType || BadgeType.Default;
   let imgUrl: string = `https://img.shields.io/nuget/${type}/${props.name}?style=for-the-badge`;
   if (props.label !== undefined)
     imgUrl += `&label=${props.label}`;
