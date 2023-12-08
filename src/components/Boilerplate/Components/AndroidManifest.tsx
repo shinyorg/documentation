@@ -71,6 +71,9 @@ const AndroidManifest = (props: Props) => {
   if (has('gps') || has('ble') || has('beacons') || has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE');
   }
+  if (has('gps')) {
+    src += addP('FOREGROUND_SERVICE_LOCATION');
+  }
   if (has('speech')) {
     src += addP("MICROPHONE");
   }
