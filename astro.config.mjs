@@ -19,6 +19,11 @@ export default defineConfig({
     starlight({
       title: 'Shiny.NET',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
+      components: {
+        MarkdownContent: 'starlight-blog/overrides/MarkdownContent.astro',
+        Sidebar: 'starlight-blog/overrides/Sidebar.astro',
+        ThemeSelect: 'starlight-blog/overrides/ThemeSelect.astro',
+      },      
       editLink: {
         baseUrl: 'https://github.com/shinyorg/documentation/edit/main/'
       },
