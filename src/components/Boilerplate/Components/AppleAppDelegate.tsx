@@ -23,7 +23,7 @@ const AppleAppDelegate = () => {
   
       [Export("application:didReceiveRemoteNotification:fetchCompletionHandler:")]
       public void DidReceiveRemoteNotification(UIApplication application, NSDictionary userInfo, Action<UIBackgroundFetchResult> completionHandler)
-          => global::Shiny.Hosting.Host.Lifecycle.OnDidReceiveRemoveNotification(userInfo, completionHandler);	
+          => global::Shiny.Hosting.Host.Lifecycle.OnDidReceiveRemoteNotification(userInfo, completionHandler);	
   
   }`;
   return (<Syntax source={src} />);
