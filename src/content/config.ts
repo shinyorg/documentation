@@ -1,5 +1,5 @@
 import { defineCollection } from 'astro:content';
-import { docsSchema, i18nSchema } from '@astrojs/starlight/schema';
+// import { docsSchema, i18nSchema } from '@astrojs/starlight/schema';
 import { docsAndBlogSchema } from 'starlight-blog/schema'
 
 export const collections = {
