@@ -12,6 +12,7 @@ const AppleEntitlements = () => {
   </dict>
   </plist>  
   `;
+  //com.apple.developer.usernotifications.time-sensitive
   return (<Syntax source={src} language="xml" />);
 };
 export default AppleEntitlements;
