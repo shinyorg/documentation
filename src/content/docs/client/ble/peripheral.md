@@ -2,8 +2,8 @@
 title: Peripheral
 ---
 
-This section deals with gatt connections and state monitoring for a device.
-You should maintain a reference to a device if you intend to connect to it.
+This section deals with gatt connections and state monitoring for a peripheral.
+You should maintain a reference to a peripheral if you intend to connect to it.
 
 Once you have scanned and found your peripheral, you can move on to connecting to it.  BLE operates on something called GATT (Generic Attributes).  
 
@@ -12,15 +12,15 @@ GATT is composed of 3 components
 2. Characteristics - this is the MAIN area of things that you will work with.  This is where the reading, writing, & notifications take place
 3. Descriptors - these are less important in terms of use cases, but do support read/write scenarios.  They are grouped under each characteristic
 
-## Peripheral.Connect() - void
+## Connecting
 
-Connect simply issues a request to connect.  It may connect now or days from now when the device is nearby.  You should use IBleCentralDelegate when using this method.  We'll talk more about that later
+Connect simply issues a request to connect.  It may connect now or days from now when the peripheral is nearby.  You should use IBleCentralDelegate when using this method.  We'll talk more about that later
 
 ```csharp
 peripheral.Connect();
 ```
 
-If you need to wait for a connection and you know your device is nearby, you can use 
+If you need to wait for a connection and you know your peripheral is nearby, you can use 
 
 ```csharp
 await peripheral.ConnectAsync();
@@ -39,15 +39,28 @@ await peripheral.ConnectAsync(cancelSource.Token);
 cancelSource.Cancel();
 ```
 
+### Android Connection Control
 
-**Connect/Disconnect to a device**
+Using androidAutoConnect is suggested in scenarios where you don't know if the device is in-range
+This will cause Android to connect when it sees the device.  WARNING: initial connections take much
+longer with this option enabled
+
+```csharp
+
+IPeripheral peripheral = CrossBleAdapter.Current.GetKnownDevice(guid);
+device.Connect(new GattConnectionConfig {
+	AndroidAutoConnect = true
+});
+```
+
+## Disconnecting
 
 ```csharp
 // connect
-device.Connect(new GattConnectionConfig 
+peripheral.Connect(new GattConnectionConfig 
 {
     /// <summary>
-    /// This will cause disconnected devices to try to immediately reconnect.  It will cause WillRestoreState to fire on iOS. Defaults to true
+    /// This will cause disconnected peripherals to try to immediately reconnect.  It will cause WillRestoreState to fire on iOS. Defaults to true
     /// </summary>
     public bool IsPersistent { get;  set; } = true;
 
@@ -59,14 +72,14 @@ device.Connect(new GattConnectionConfig
 
 // this will disconnect a current connection, cancel a connection attempt, and
 // remove persistent connections
-device.CancelConnection();
+peripheral.CancelConnection();
 ```
 
-**Reliable Write Transactions**
+## Reliable Write Transactions (Android Only)
 
 
 ```csharp
-using (var trans = device.BeginReliableWriteTransaction()) 
+using (var trans = peripheral.BeginReliableWriteTransaction()) 
 {
     await trans.Write(theCharacteristicToWriteTo, bytes);
     // you should do multiple writes here as that is the reason for this mechanism
@@ -75,19 +88,15 @@ using (var trans = device.BeginReliableWriteTransaction())
 ```
 
 
-## Pairing
+## Pairing (Android Only)
 
 ```csharp
-if (device.IsPairingRequestSupported && device.PairingStatus != PairingStatus.Paired) 
+if (peripheral.IsPairingRequestSupported && peripheral.PairingStatus != PairingStatus.Paired) 
 {
     // there is an optional argument to pass a PIN in PairRequest as well
-    device.PairRequest().Subscribe(isSuccessful => {});
+    peripheral.PairRequest().Subscribe(isSuccessful => {});
 }
 ```
-
-**Request MTU size increase**
-
-
 ## Request MTU (Max Transmission Unit)
 If MTU requests are available (Android Only - API 21+)
 
@@ -95,25 +104,18 @@ This is specific to Android only where this negotiation is not automatic.
 The size can be up to 512, but you should be careful with anything above 255 in practice
 ```csharp
 // iOS will return current, Android will return 20 unless changes are observed
-await device.TryRequestMtuAsync(255);
+await peripheral.TryRequestMtuAsync(255);
 
 // iOS will return current value and return, Android will continue to monitor changes
-device.TryRequestMtu(255).Subscribe(x => {});
+peripheral.TryRequestMtu(255).Subscribe(x => {});
 ```
 
-## Monitor Status Changes
+## Monitor Connection Status Changes
 
 ```csharp
-// this will watch the connection states to the device
+// this will watch the connection states to the peripheral
 peripheral.WhenConnected().Subscribe(x => {});
 peripheral.WhenDisconnected().Subscribe(x => {});
 peripheral.WhenStatusChanged().Subscribe(connectionState => {});
 
 ```
-
-
-## PHY (Physical Layer)
-COMING SOON
-
-## L2Cap
-COMING SOON

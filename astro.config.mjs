@@ -54,13 +54,11 @@ export default defineConfig({
               label: 'BluetoothLE',
               items:[
                 { label: 'Getting Started', link: 'client/ble' },
-                // { label: 'Background Operations', link: 'client/ble/background' },
                 { label: 'BLE Manager', link: 'client/ble/manager' },
                 { label: 'Peripheral', link: 'client/ble/peripheral' },
                 { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
-                { label: 'Best Practices', link: 'client/ble/best-practices' },
-                // { label: 'Async/Await', link: 'client/ble/async' },
-                { label: 'FAQ', link: 'client/ble/faq' }
+                { label: 'Background Operations', link: 'client/ble/background' },
+                { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' }
               ]
             },
             {
