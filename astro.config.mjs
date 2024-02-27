@@ -6,24 +6,9 @@ import starlightBlog from 'starlight-blog';
 export default defineConfig({
   integrations: [
     react(),
-    starlightBlog({
-      authors: {
-        allanritchie: {
-          name: 'Allan Ritchie',
-          title: 'One of the guys who builds this',
-          picture: 'https://avatars.githubusercontent.com/u/1431555', // Images in the `public` directory are supported.
-          url: 'https://allanritchie.com',
-        }
-      }
-    }),
     starlight({
       title: 'Shiny.NET',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
-      components: {
-        MarkdownContent: 'starlight-blog/overrides/MarkdownContent.astro',
-        Sidebar: 'starlight-blog/overrides/Sidebar.astro',
-        ThemeSelect: 'starlight-blog/overrides/ThemeSelect.astro',
-      },      
       editLink: {
         baseUrl: 'https://github.com/shinyorg/documentation/edit/main/'
       },
@@ -33,7 +18,19 @@ export default defineConfig({
       social: {
         github: 'https://github.com/shinyorg',
         twitter: 'https://twitter.com/shinydotnet'
-      },      
+      },
+      plugins:[
+        starlightBlog({
+          authors: {
+            allanritchie: {
+              name: 'Allan Ritchie',
+              title: 'One of the guys who builds this',
+              picture: 'https://avatars.githubusercontent.com/u/1431555', // Images in the `public` directory are supported.
+              url: 'https://allanritchie.com',
+            }
+          }
+        }),
+      ],
       sidebar: [
         {
           label: 'Client',
