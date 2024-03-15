@@ -77,9 +77,6 @@ const AndroidManifest = (props: Props) => {
   if (has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE_DATA_SYNC');
   }
-  if (has('speech')) {
-    src += addP("MICROPHONE");
-  }
 
   src += `
   </manifest>`;

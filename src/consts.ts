@@ -117,12 +117,6 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
-        "id": "speech",
-        "nuget": "Shiny.SpeechRecognition",
-        "description": "Speech Recognition",
-        "version": DEFAULT_VERSION
-    },
-    {
         "id": "push",
         "nuget": "Shiny.Push",
         "description": "Push Notifications (Native)",
@@ -136,23 +130,11 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
-        "id": "appcenter",
-        "nuget": "Shiny.Logging.AppCenter",
-        "description": "AppCenter Logging",
-        "version": DEFAULT_VERSION
-    },
-    {
         "id": "sqlite",
         "nuget": "Shiny.Logging.SQLite",
         "description": "SQLite Logging",
         "version": DEFAULT_VERSION
-    }    
-    // {
-    //     "id": "framework",
-    //     "nuget": "Shiny.Framework",
-    //     "description": "Shiny Framework (Brings Together Prism, ReactiveUI, & Shiny)",
-    //     "version": "3.0.0-alpha-0065"
-    // }
+    }
 ];
 
 export const Data = {    

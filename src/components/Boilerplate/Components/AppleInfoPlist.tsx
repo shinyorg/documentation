@@ -58,9 +58,6 @@ const AppleInfoPlist = (props: Props) => {
   if (has('blehosting') || has('ble')) {
     addKey('NSBluetoothPeripheralUsageDescription');
   }
-  if (has('speech')) {
-    addKey('NSSpeechRecognitionUsageDescription');
-  }
   if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('beacons') || has('bluetoothle') || has('blehosting')) {
     src += `
         <key>UIBackgroundModes</key>
