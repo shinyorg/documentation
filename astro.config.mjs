@@ -2,10 +2,12 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
+import tailwind from '@astrojs/tailwind';
 
 export default defineConfig({
   integrations: [
     react(),
+    tailwind(),
     starlight({
       title: 'Shiny.NET',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
