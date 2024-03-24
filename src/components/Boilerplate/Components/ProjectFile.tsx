@@ -1,12 +1,15 @@
 import React from 'react';
-import { DEFAULT_VERSION, type ShinyComponent } from '../../../consts';
+import { DEFAULT_VERSION, Data, type ShinyComponent } from '../../../consts';
 import Syntax from '../../Syntax';
 
 export interface Props {
   components: ShinyComponent[]
 }
 
-const ProjectFile = (props: Props) => { 
+// TODO: usepush or local notifications
+const ProjectFile = (props: Props) => {
+    const { usesPush } = Data;
+    
     let nugets = props.components
         .filter(
             (thing, i, arr) => arr.findIndex(t => t.nuget === thing.nuget) === i
@@ -30,6 +33,17 @@ const ProjectFile = (props: Props) => {
         pr += "\t<MauiAsset Include=\"appsettings.ios.json\" LogicalName=\"appsettings.ios.json\" />\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.maccatalyst.json\" LogicalName=\"appsettings.maccatalyst.json\" />\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.android.json\" LogicalName=\"appsettings.android.json\" />\r\n";
+        pr += "</ItemGroup>";
+    }
+
+    // <!--
+    // For scheduled notifications, you need to setup "Time Sensitive Notifications" in the Apple Developer Portal for your app provisioning and uncomment below
+    // <CustomEntitlements Include="com.apple.developer.usernotifications.time-sensitive" Type="Boolean" Value="true" />
+    // -->    
+    if (usesPush(props.components)) {
+        pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"aps-environment\" Type\"string\" Value=\"development\" Condition=\"'$(Configuration)' == 'Debug'\" />\r\n"
+        pr += "\t<CustomEntitlements Include=\"aps-environment\" Type\"string\" Value=\"production\" Condition=\"'$(Configuration)' == 'Release'\" />\r\n"
         pr += "</ItemGroup>";
     }
 

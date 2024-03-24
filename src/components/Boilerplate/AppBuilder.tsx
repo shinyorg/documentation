@@ -4,7 +4,6 @@ import NugetList from './Components/NugetList';
 import MauiProgram from './Components/MauiProgram';
 import AndroidManifest from './Components/AndroidManifest';
 import AppleInfoPlist from './Components/AppleInfoPlist';
-import AppleEntitlements from './Components/AppleEntitlements';
 import AppleAppDelegate from './Components/AppleAppDelegate';
 import ProjectFile from './Components/ProjectFile';
 import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
@@ -65,7 +64,7 @@ const AppBuilder = () => {
                 <Tab>AndroidManifest.xml</Tab>
                 {usesActivity(components) && <Tab>Android Activity</Tab>}
                 <Tab>Apple Info.plist</Tab>
-                {usesPush(components) && <Tab>Apple Entitlements.plist</Tab>}
+                {/* {usesPush(components) && <Tab>Apple Entitlements.plist</Tab>} */}
                 {usesPush(components) && <Tab>Apple App Delegate</Tab>}
             </TabList>
             <TabPanel>
@@ -87,9 +86,9 @@ const AppBuilder = () => {
                 <AppleInfoPlist components={components} />
             </TabPanel>
           
-          {usesPush(components) && 
+          {/* {usesPush(components) && 
               <TabPanel><AppleEntitlements /></TabPanel>
-          }
+          } */}
           {usesPush(components) && 
               <TabPanel><AppleAppDelegate /></TabPanel>
           }
