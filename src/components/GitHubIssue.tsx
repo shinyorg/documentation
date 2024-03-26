@@ -11,8 +11,8 @@ const GitHubIssue = (props: Props) => {
     const baseUri = isPr ? 'https://github.com/shinyorg/shiny/pull/' : 'https://github.com/shinyorg/shiny/issues';
     return (
         <div>
-            <a href={`${baseUri}/${props.number}`}>[{props.number}]</a>
-            {props.contributor && <span> by <a href={`https://github.com/${props.contributor}`}>{props.contributor}</a></span>}
+            <a href={`${baseUri}/${props.number}`} target="_blank">[GitHub #{props.number}]</a>
+            {props.contributor && <span> by <a href={`https://github.com/${props.contributor}`} target="_blank">{props.contributor}</a></span>}
         </div>
     );    
 };
