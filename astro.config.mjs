@@ -116,7 +116,6 @@ export default defineConfig({
               label: 'Other',
               items: [
                 { label: 'Configuration Extensions', link: 'client/other/configuration' },
-                { label: 'Speech Recognition', link: 'client/other/speechrecognition' },
                 { label: 'Stateful Services', link: 'client/other/statefulservices' },
                 { label: 'Startup Services', link: 'client/other/startupservices' },
                 { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
