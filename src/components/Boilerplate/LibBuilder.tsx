@@ -11,6 +11,7 @@ import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
 import 'react-tabs/style/react-tabs.css';
 import Alert from '../Alert';
 import React from 'react';
+import ApplePrivacy from './Components/ApplePrivacy';
 
 interface Props {
     componentName: string;
@@ -43,7 +44,7 @@ const LibBuilder = (props: Props) => {
                     <Tab>AndroidManifest.xml</Tab>
                     {usesActivity(components) && <Tab>Android Activity</Tab>}
                     <Tab>Apple Info.plist</Tab>
-                    {/* {usesPush(components) && <Tab>Apple Entitlements.plist</Tab>} */}
+                    <Tab>Apple PrivacyInfo.xcprivacy</Tab>
                     {usesPush(components) && <Tab>Apple App Delegate</Tab>}
                 </TabList>
                 <TabPanel>
@@ -64,9 +65,9 @@ const LibBuilder = (props: Props) => {
                 <TabPanel>
                     <AppleInfoPlist components={components} />
                 </TabPanel>
-                {/* {usesPush(components) && 
-                    <TabPanel><AppleEntitlements /></TabPanel>
-                } */}
+                <TabPanel>
+                    <ApplePrivacy components={components} />
+                </TabPanel>  
                 {usesPush(components) && 
                     <TabPanel><AppleAppDelegate /></TabPanel>
                 }
