@@ -53,8 +53,6 @@ const ProjectFile = (props: Props) => {
         }
         pr += "</ItemGroup>";
     }
-  
-
 
     return (<Syntax source={pr} language="xml" />);
 }
