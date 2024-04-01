@@ -24,6 +24,7 @@ const AndroidActivity = (props: Props) => {
   
   
   [Activity(
+      LaunchMode = LaunchMode.SingleTop, // TODO: if using local notifications or push
       Theme = "@style/Maui.SplashTheme", 
       MainLauncher = true, 
       ConfigurationChanges = 
