@@ -54,6 +54,11 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>";
     }
 
+    pr += "\r\n<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' OR $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">";
+    pr += "\r\n\t<BundleResource Include=\"Platforms\\iOS\\PrivacyInfo.xcprivacy\" LogicalName=\"PrivacyInfo.xcprivacy\" />";
+    pr += "\r\n</ItemGroup>";
+    
+
     return (<Syntax source={pr} language="xml" />);
 }
 
