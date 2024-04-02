@@ -28,6 +28,7 @@ const ApplePrivacy = (props: Props) => {
 
   let location = '';
   if (has('gps') || has('geofencing') || has('beacons')) {
+      location += "\n<!--location-->\n";
       location += genPrivDataType('NSPrivacyCollectedDataTypeCoarseLocation', true, true);
       location += genPrivDataType('NSPrivacyCollectedDataTypePreciseLocation', true, true);
   }
@@ -101,18 +102,6 @@ const ApplePrivacy = (props: Props) => {
           </dict>
           <dict>
               <key>NSPrivacyCollectedDataTypePhoneNumber</key>
-              <string>NSPrivacyCollectedDataTypeLocation</string>
-              <key>NSPrivacyCollectedDataTypeLinked</key>
-              <true />
-              <key>NSPrivacyCollectedDataTypeTracking</key>
-              <false />
-              <key>NSPrivacyCollectedDataTypePurposes</key>
-              <array>
-                  <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
-              </array>
-          </dict>
-          <dict>
-              <key>NSPrivacyCollectedDataTypeName</key>
               <string>NSPrivacyCollectedDataTypeLocation</string>
               <key>NSPrivacyCollectedDataTypeLinked</key>
               <true />
