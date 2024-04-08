@@ -41,35 +41,24 @@ cancelSource.Cancel();
 
 ### Android Connection Control
 
-Using androidAutoConnect is suggested in scenarios where you don't know if the device is in-range
+Using AutoConnect is suggested in scenarios where you don't know if the device is in-range
 This will cause Android to connect when it sees the device.  WARNING: initial connections take much
 longer with this option enabled
 
 ```csharp
 
-IPeripheral peripheral = CrossBleAdapter.Current.GetKnownDevice(guid);
-device.Connect(new GattConnectionConfig {
-	AndroidAutoConnect = true
+
+IPeripheral peripheral; // scanned peripheral
+device.Connect(new AndroidConnectionConfig {
+	AutoConnect = true,
+    ConnectionPriority = Android.Bluetooth.GattConnectionPriority.Balanced
 });
 ```
 
-## Disconnecting
+## Cancelling Connection
+Even if you are not connected, it is especially important to cancel the connection request or the peripheral will continue to try to connect.
 
 ```csharp
-// connect
-peripheral.Connect(new GattConnectionConfig 
-{
-    /// <summary>
-    /// This will cause disconnected peripherals to try to immediately reconnect.  It will cause WillRestoreState to fire on iOS. Defaults to true
-    /// </summary>
-    public bool IsPersistent { get;  set; } = true;
-
-    /// <summary>
-    /// Android only - If you have characteristics where you need faster replies, you can set this to high
-    /// </summary>
-    public ConnectionPriority Priority { get; set; } = ConnectionPriority.Normal;
-});
-
 // this will disconnect a current connection, cancel a connection attempt, and
 // remove persistent connections
 peripheral.CancelConnection();
