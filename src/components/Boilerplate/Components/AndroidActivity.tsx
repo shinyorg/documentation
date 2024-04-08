@@ -15,7 +15,10 @@ const AndroidActivity = (props: Props) => {
     .filter(x => x.androidIntent !== undefined)
     .map(x => x.androidIntent)
     .join(",\n");
-  
+//     #if (usepush || notifications)
+//     LaunchMode = LaunchMode.SingleTop,
+// #endif  
+
   let src = `
   using Android.App;
   using Android.Content.PM;
