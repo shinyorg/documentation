@@ -121,6 +121,7 @@ const ApplePrivacy = (props: Props) => {
               <false />
               <key>NSPrivacyCollectedDataTypeTracking</key>
               <false />
+              <key>NSPrivacyCollectedDataTypePurposes</key>
               <array>
                   <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
               </array>            
@@ -132,6 +133,7 @@ const ApplePrivacy = (props: Props) => {
               <true />
               <key>NSPrivacyCollectedDataTypeTracking</key>
               <false />
+              <key>NSPrivacyCollectedDataTypePurposes</key>
               <array>
                   <string>NSPrivacyCollectedDataTypePurposeAppFunctionality</string>
               </array>
