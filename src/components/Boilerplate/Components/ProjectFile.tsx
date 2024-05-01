@@ -36,6 +36,8 @@ const ProjectFile = (props: Props) => {
         pr += "\t<MauiAsset Include=\"appsettings.ios.json\" LogicalName=\"appsettings.ios.json\" />\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.maccatalyst.json\" LogicalName=\"appsettings.maccatalyst.json\" />\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.android.json\" LogicalName=\"appsettings.android.json\" />\r\n";
+        pr += "\t<Content Remove=\"**\appsettings.json\" />\r\n";
+        pr += "\t<Content Remove=\"**\appsettings.*.json\" />\r\n";
         pr += "</ItemGroup>\r\n";
     }
 
