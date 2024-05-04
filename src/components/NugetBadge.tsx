@@ -1,23 +1,19 @@
 import React from "react";
 
 export interface Props {
-  name: string;
-  label?: string;
-  badgeType?: BadgeType;
+    name: string;
+    showPreviewVersion?: boolean;
 }
 
-export enum BadgeType {
-  Downloads = "dt",
-  Preview = "vpre",
-  Default = "v"
-}
   
+// https://github.com/dustinmoris/CI-BuildStats?tab=readme-ov-file#nuget-badges
 const NugetBadge = (props: Props) => {
-  let type = props.badgeType || BadgeType.Default;
-  let imgUrl: string = `https://img.shields.io/nuget/${type}/${props.name}?style=for-the-badge`;
-  if (props.label !== undefined)
-    imgUrl += `&label=${props.label}`;
-  const nugetUrl: string = `https://www.nuget.org/packages/${props.name}`;
-  return (<a href={nugetUrl} target="_NEWWINDOW"><img src={imgUrl} /></a>);
+  
+  let imgUrl: string = `https://buildstats.info/nuget/${props.name}`;
+  if (props.showPreviewVersion === true)
+        imgUrl += `?includePreReleases=true`;
+
+    const nugetUrl: string = `https://www.nuget.org/packages/${props.name}`;
+    return (<a href={nugetUrl} target="_NEWWINDOW"><img src={imgUrl} /></a>);
 };
 export default NugetBadge;

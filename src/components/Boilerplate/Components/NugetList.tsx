@@ -1,6 +1,6 @@
 import React from 'react';
 import { DEFAULT_VERSION, type ShinyComponent } from '../../../consts';
-import NugetBadge, { BadgeType } from '../../NugetBadge';
+import NugetBadge from '../../NugetBadge';
 
 export interface Props {
   components: ShinyComponent[]
@@ -23,7 +23,6 @@ const NugetList = (props: Props) => {
         <tr key={c.id}>
           <td>{c.nuget}</td>
           <td><NugetBadge name={c.nuget} /></td>
-          <td><NugetBadge name={c.nuget} badgeType={BadgeType.Downloads} /></td>
         </tr>
       ))}
     </table>
