@@ -63,6 +63,12 @@ export const ShinyModules: ShinyModule[] = [
 // TODO: ranging/monitoring on beacons
 export const ShinyComponents: ShinyComponent[] = [
     {
+        "id": "mediator",
+        "nuget": "Shiny.Mediator.Maui",
+        "description": "A mediation pattern, but for Apps!",
+        "version" : "1.0.0"
+    },
+    {
         "id": "beacons",
         "nuget": "Shiny.Beacons",
         "description": "Beacons",

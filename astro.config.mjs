@@ -120,6 +120,15 @@ export default defineConfig({
                 { label: 'Startup Services', link: 'client/other/startupservices' },
                 { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
               ]
+            },
+            {
+              label: 'Mediator',
+              items:[
+                { label: 'Getting Started', link: 'client/mediator/' },
+                { label: 'Project Structure', link: 'client/mediator/project-structure' },
+                { label: 'Middleware', link: 'client/mediator/middleware' },
+                { label: 'Advanced', link: 'client/mediator/advanced' }
+              ]
             }
           ],
         },

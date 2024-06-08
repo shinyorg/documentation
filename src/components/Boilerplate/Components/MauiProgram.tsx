@@ -82,6 +82,9 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddPush<ShinyApp.Delegates.MyPushDelegate>();`;
   }
+  if (has('mediator')) {
+    src += `builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;    
+  }
   src += `
       return builder.Build();
     }
