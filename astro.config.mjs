@@ -124,8 +124,8 @@ export default defineConfig({
             {
               label: 'Mediator',
               items:[
-                { label: 'Getting Started', link: 'client/mediator/' },
-                { label: 'Project Structure', link: 'client/mediator/project-structure' },
+                { label: 'What Is It', link: 'client/mediator/' },
+                { label: 'Quick Start', link: 'client/mediator/quick-start' },
                 { label: 'Middleware', link: 'client/mediator/middleware' },
                 { label: 'Advanced', link: 'client/mediator/advanced' }
               ]
