@@ -21,6 +21,21 @@ From there, we wrap each call to each event handler in any registered event midd
 
 Lastly, we execute these using Task.WhenAll to ensure all event handlers are executed in parallel. 
 
+
+## What If I can't add an interface, participate in DI... I'm stuck... how do I listen to an event?
+The main `Shiny.Mediator.IMediator` interface does have a standard MessagingCenter subscription method.  It suffers from the same issue as the standard messaging center, you must Dispose of the call when you're done with it.
+
+```csharp
+// we assume you have access to your DI container statically
+var sub = Container.GetService<IMediator>().Subscribe<SomeEvent>(async (@event, ct) => {
+    // do something
+});
+
+// when you're done
+sub.Dispose();
+```
+
+
 ## Event Collectors
 
 ### What are they?
