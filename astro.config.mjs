@@ -146,7 +146,20 @@ export default defineConfig({
             {
               label: 'Client',
               items:[
+                { label: 'v4.0', link: 'release-notes/client/v40' },
                 { label: 'v3.0', link: 'release-notes/client/v30' },
+              ]
+            },
+            {
+              label: 'Mediator',
+              items:[
+                { label: 'v1.0', link: 'release-notes/mediator/v10' }
+              ]
+            },
+            {
+              label: 'Framework',
+              items:[
+                { label: 'v4.0', link: 'release-notes/framework/v40' }
               ]
             },
             {
