@@ -36,16 +36,11 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Configuration.AddJsonPlatformBundle();`;
   }
-  if (has('appcenter')) {
-    src += `
-      #if !MACCATALYST
-      builder.Logging.AddAppCenter("YourAppCenterKey");
-      #endif
-      `;
-  }
   if (has('jobs')) {
     src += `
       builder.Services.AddJob(typeof(ShinyApp.Delegates.YourJob));
+      // OR 
+      builder.Services.AddJobs();
       `;
   }
   if (has('ble')) {
