@@ -65,7 +65,7 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "mediator",
         "nuget": "Shiny.Mediator.Maui",
-        "description": "A mediation pattern, but for Apps!",
+        "description": "Mediator",
         "version" : "1.0.0"
     },
     {

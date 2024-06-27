@@ -1,0 +1,136 @@
+---
+title: Events
+---
+import { Steps } from '@astrojs/starlight/components';
+
+# Events
+
+Event handlers are just like commands, but they are used to notify other parts of the application that something has happened.  
+Events are not meant to return a value, but rather to notify other parts of the application that something has happened.
+
+Shiny Mediator does a couple of other cool things that other Mediator libraries do not.  
+
+* They support middleware, which allows you to intercept and modify events before they are processed.  This is useful for things like logging, error handling, and more.
+* Event collectors allow you to publish events to other temporary sources such as a transient/scoped viewmodel attached to a .NET MAUI page or Blazor component that may not be registered with your dependency container.
+
+
+Publishing events are done through the `IMediator` interface.  You can publish events in a fire-and-forget manner or wait for them to complete.
+
+<Steps>
+
+1. Just like with requests, let's setup our event and event handler
+
+    ```csharp
+    public class TestEvent : IEvent {}
+    public class TestEventHandler : IEventHandler<TestEvent>
+    {
+        public Task Handle(TestEvent @event, CancellationToken ct) => Task.CompletedTask;
+    }
+    ```
+
+2. Now let's publish our event
+
+    ```csharp
+    IMediator mediator; // get from your DI container or inject into your DI aware component
+
+    await mediator.Publish(new TestEvent());
+    ```
+
+3. Don't want to wait around for all your events to finish.  We have an easy fire & forget set of methods.
+
+    ```csharp
+    mediator.Publish(new TestEvent()).RunInBackground(error => {});
+    ```
+
+:::note
+Our current event publisher uses a Task.WhenAll mechanism to publish event meaning that events are invokved in parallel.  Order should not be a concern when publishing events.
+:::
+
+## .NET MAUI
+
+If your page or viewmodel implements the `IEventHandler` interface, it will automatically participate in the event chain.  If the page is popped off the navigation stack, it is no longer part of the event chain.
+
+To add .NET MAUI support:
+
+<Steps>
+
+1. Install the `Shiny.Mediator.Maui` package
+
+    ```shell
+    dotnet add package Shiny.Mediator.Maui
+    ```
+
+2. Now, in your `MauiProgram.cs`, alter the `AddShinyMediator` call
+
+    ```csharp
+    builder.Services.AddShinyMediator(cfg => cfg.UseMaui());
+    ```
+
+    :::note
+    UseMaui installs some standard middleware 
+
+    * User Notification Exception Handling (Request)
+    * Timed Measurement (Request)
+    * Offline Availability (Request)
+    * Replay (Request)
+    * Replay (Stream)
+    * Main Thread (Events)
+    * Event Handling (Events)
+    :::
+
+
+## Blazor (& Blazor MAUI Hyrbid)
+
+Blazor is a bit of a different beast vs .NET MAUI since their isn't a navigation stack, there is really only a single active page.  Any component in Blazor, can implement `IEventHandler` 
+to catch an event.
+
+<Steps>
+
+1. Install the `Shiny.Mediator.Blazor` package
+
+    ```shell
+    dotnet add package Shiny.Mediator.Blazor
+    ```
+
+2. Now, in your `Startup.cs`, alter the `AddShinyMediator` call
+
+    ```csharp
+    services.AddShinyMediator(cfg => cfg.UseBlazor());
+    ``` 
+
+## Middleware
+
+Event middleware is far simpler than request & streaming middleware due to no results being returned by the handler.  Like all other middleware,
+covariance is supported so you can intercept a base event and modify it before it is processed.
+
+
+Below is a super simple example of an exception handler middleware that uses convariance to work against all event types.
+
+```csharp
+public class ExceptionHandlerEventMiddleware<TEvent>(ILogger<TEvent> logger) : IEventMiddleware<TEvent> where TEvent : IEvent
+{
+    public async Task Process(IEvent @event, EventHandlerDelegate next, IEventHandler<TEvent> eventHandler, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await next().ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, $"Error in event {@event.GetType().FullName}");
+        }
+    }
+}
+```
+
+To register an event like this:
+
+```csharp
+ServiceCollection service; // with your host builder or service collection
+
+services.AddShinyMediator(cfg => 
+{
+    // NOTE: the open generic
+    cfg.AddOpenEventMiddleware(typeof(ExceptionHandlerEventMiddleware<>));
+});
+```

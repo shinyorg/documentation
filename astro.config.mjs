@@ -124,9 +124,26 @@ export default defineConfig({
             {
               label: 'Mediator',
               items:[
-                { label: 'What Is It', link: 'client/mediator/' },
+                { label: 'Introduction', link: 'client/mediator/' },
                 { label: 'Quick Start', link: 'client/mediator/quick-start' },
-                { label: 'Middleware', link: 'client/mediator/middleware' },
+                { label: 'Requests', link: 'client/mediator/requests' },
+                { label: 'Streams', link: 'client/mediator/streams' },
+                { label: 'Events', link: 'client/mediator/events' },
+                { 
+                    label: 'Middleware', 
+                    items:[
+                      { label: 'Introduction', link: 'client/mediator/middleware/' },
+                      { label: 'REQUESTS - Caching', link: 'client/mediator/middleware/caching' },
+                      { label: 'REQUESTS - Resiliency', link: 'client/mediator/middleware/resilence' },
+                      { label: 'REQUESTS - Offline', link: 'client/mediator/middleware/offline' },
+                      { label: 'REQUESTS - Timed Logging', link: 'client/mediator/middleware/timedlogging' },
+                      { label: 'REQUESTS - User Notification Exception Handling', link: 'client/mediator/middleware/usernotifications' },
+                      { label: 'STREAMS - Replay', link: 'client/mediator/middleware/replay' },
+                      { label: 'STREAMS - Refresh', link: 'client/mediator/middleware/refresh' },
+                      { label: 'EVENTS - Main Thread', link: 'client/mediator/middleware/mainthread' },
+                      { label: 'EVENTS - Exception Handling', link: 'client/mediator/middleware/eventexceptions' },
+                    ]
+                },
                 { label: 'Advanced', link: 'client/mediator/advanced' }
               ]
             }
