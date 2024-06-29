@@ -3,11 +3,84 @@ title: Requests
 ---
 import { Steps } from '@astrojs/starlight/components';
 
+# Requests
 
-## Calling
+Requests are really the center of all the action in the Mediator.  Request can only be fulfilled/responded to by a single handler.  Requests also have
+the ability to respond with a result as well.
+
+:::warning
+When issuing a request, we start a fresh Service Provider scope.  This means that any dependencies that are registered as `Scoped` will be disposed of after the request is completed.  If you need to maintain a dependency, you should register it as `Singleton`
+:::
+
+## Creating Requests
+
+A request can be a class, record, or struct.  It must implement the `IRequest` interface.  If you want to return a result, then you must implement `IRequest<TResult>`
+
+```csharp
+public record VoidRequest(string AnyArgs, int YouWant) : Shiny.Mediator.IRequest;
+
+public record ResponseRequest : IRequest<Response>;
+public record Response(string Anything);
+```
+
+The request handlers are also very similar
+
+```csharp
+public class VoidRequestHandler : IRequestHandler<VoidRequest>
+{
+    public async Task Handle(VoidRequest request, CancellationToken ct)
+    {
+        // do something async here
+    }
+}
+
+public class ResponseRequestHandler : IRequestHandler<ResponseRequest, Response>
+{
+    public async Task<Response> Handle(ResponseRequest request, CancellationToken ct)
+    {
+        var response = await GetResponseThing(ct);
+        return response;
+    }
+}
+
+```
+Now, let's register these guys through your host builder/DI container.  They can technically work off any lifecycle you choose.
+
+```csharp
+services.AddSingleton<IRequestHandler<VoidRequest>, VoidRequestHandler>();
+services.AddSingleton<IRequestHandler<ResponseRequest, Response>, ResponseRequestHandler>();
+
+// OR USING OUR EASY EXTENSION METHOD
+services.AddSingletonAsImplementedInterfaces<VoidRequestHandler>();
+services.AddSingletonAsImplementedInterfaces<ResponseRequestHandler>();
+```
+
+Finally, let's send a request through the mediator
+
+```csharp
+IMediator mediator; // get from your DI container or inject into your DI aware component
+
+await mediator.Send(new VoidRequest("Hello", 123));
+
+var result = await mediator.Send(new ResponseRequest());
+```
+
+:::note
+IMediator.Send is for `void` requests where no result is provided
+IMediator.Request is for requests that provide a result.  This is to prevent future issues where the contract may change between a void & result which breaks the build intentionally to let consumers know of the change.
+:::
 
 ## Middleware
 
+In our opinion, this is where Shiny Mediator really begins to shine.  Layering overtop of your requests with middleware is beautiful.  We offer some excellent `out of the box` middleware.  Be sure to check out it [here](/client/mediator/middleware/)
+
+Middleware allows you to mutate the requests, response, or even short circuit the request.  It's a great place to do things like logging, error handling, caching, etc.
+
+:::note
+Middleware has a slight difference for void requests where the `TResult` is `void` and requests that return a result of Unit.
+:::
+
+Let's take a look at an sample piece of request middleware
 ```csharp
 public delegate Task<TResult> RequestHandlerDelegate<TResult>();
 public interface IRequestMiddleware<TRequest, TResult> where TRequest : IRequest<TResult>

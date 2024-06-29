@@ -138,10 +138,10 @@ export default defineConfig({
                       { label: 'REQUESTS - Offline', link: 'client/mediator/middleware/offline' },
                       { label: 'REQUESTS - Timed Logging', link: 'client/mediator/middleware/timedlogging' },
                       { label: 'REQUESTS - User Notification Exception Handling', link: 'client/mediator/middleware/usernotifications' },
-                      { label: 'STREAMS - Replay', link: 'client/mediator/middleware/replay' },
-                      { label: 'STREAMS - Refresh', link: 'client/mediator/middleware/refresh' },
-                      { label: 'EVENTS - Main Thread', link: 'client/mediator/middleware/mainthread' },
+                      { label: 'REQUESTS/EVENTS - Main Thread', link: 'client/mediator/middleware/mainthread' },
                       { label: 'EVENTS - Exception Handling', link: 'client/mediator/middleware/eventexceptions' },
+                      { label: 'STREAMS - Replay', link: 'client/mediator/middleware/replay' },
+                      { label: 'STREAMS - Refresh', link: 'client/mediator/middleware/refresh' }
                     ]
                 },
                 { label: 'Advanced', link: 'client/mediator/advanced' }
