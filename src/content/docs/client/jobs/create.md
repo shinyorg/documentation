@@ -71,4 +71,5 @@ Jobs are stateful.  Please take a look at [Stateful Services](../../other/statef
 
 ## Foreground Jobs
 
-Foreground jobs aren't really anything special.  When your app comes to the foreground, we simply start a timer that schedules a job to run every X seconds.  
+Foreground jobs aren't really anything special.  When your app comes to the foreground, we simply start a timer that schedules a job to run every X seconds.  To have your job run on a timer in the foreground:
+
