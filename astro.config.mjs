@@ -134,7 +134,7 @@ export default defineConfig({
                     items:[
                       { label: 'Introduction', link: 'client/mediator/middleware/' },
                       { label: 'REQUESTS - Caching', link: 'client/mediator/middleware/caching' },
-                      { label: 'REQUESTS - Resiliency', link: 'client/mediator/middleware/resilence' },
+                      { label: 'REQUESTS - Resiliency', link: 'client/mediator/middleware/resilience' },
                       { label: 'REQUESTS - Offline', link: 'client/mediator/middleware/offline' },
                       { label: 'REQUESTS - Timed Logging', link: 'client/mediator/middleware/timedlogging' },
                       { label: 'REQUESTS - User Notification Exception Handling', link: 'client/mediator/middleware/usernotifications' },
@@ -142,6 +142,12 @@ export default defineConfig({
                       { label: 'EVENTS - Exception Handling', link: 'client/mediator/middleware/eventexceptions' },
                       { label: 'STREAMS - Replay', link: 'client/mediator/middleware/replay' },
                       { label: 'STREAMS - Refresh', link: 'client/mediator/middleware/refresh' }
+                    ]
+                },
+                {
+                    label: 'Extensions',
+                    items:[
+                      { label: 'Prism', link: 'client/mediator/extensions/prism' }
                     ]
                 },
                 { label: 'Advanced', link: 'client/mediator/advanced' }
