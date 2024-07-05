@@ -147,7 +147,8 @@ export default defineConfig({
                 {
                     label: 'Extensions',
                     items:[
-                      { label: 'Prism', link: 'client/mediator/extensions/prism' }
+                      { label: 'Prism', link: 'client/mediator/extensions/prism' },
+                      { label: 'ASP.NET Core', link: 'client/mediator/extensions/aspnet' }
                     ]
                 },
                 { label: 'Advanced', link: 'client/mediator/advanced' }
