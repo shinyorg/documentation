@@ -133,6 +133,7 @@ export default defineConfig({
                     label: 'Middleware', 
                     items:[
                       { label: 'Introduction', link: 'client/mediator/middleware/' },
+                      { label: 'REQUESTS - Validation', link: 'client/mediator/middleware/validation' },
                       { label: 'REQUESTS - Caching', link: 'client/mediator/middleware/caching' },
                       { label: 'REQUESTS - Resiliency', link: 'client/mediator/middleware/resilience' },
                       { label: 'REQUESTS - Offline', link: 'client/mediator/middleware/offline' },
