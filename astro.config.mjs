@@ -3,12 +3,11 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
 import tailwind from '@astrojs/tailwind';
-import rehypeMermaid from "rehype-mermaid";
 
 export default defineConfig({
-  markdown: {
-    rehypePlugins: [[rehypeMermaid, { strategy: "img-svg", dark: true }]]
-  },
+  // markdown: {
+  //   rehypePlugins: [[rehypeMermaid, { strategy: "img-svg", dark: true }]]
+  // },
   integrations: [
     react(),
     tailwind(),
