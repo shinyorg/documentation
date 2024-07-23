@@ -3,14 +3,19 @@ import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
 import tailwind from '@astrojs/tailwind';
+import mdx from '@astrojs/mdx';
+import expressiveCode from "astro-expressive-code";
+import remarkMermaid from 'remark-mermaidjs'
 
 export default defineConfig({
-  // markdown: {
-  //   rehypePlugins: [[rehypeMermaid, { strategy: "img-svg", dark: true }]]
-  // },
+  markdown: {
+    remarkPlugins: [remarkMermaid],
+  },
   integrations: [
     react(),
     tailwind(),
+    expressiveCode(), 
+    mdx(),
     starlight({
       title: 'Shiny.NET',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
