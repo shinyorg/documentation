@@ -2,7 +2,7 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
-import tailwind from '@astrojs/tailwind';
+// import tailwind from '@astrojs/tailwind';
 import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 // import rehypeMermaid from "rehype-mermaid";
@@ -13,7 +13,7 @@ export default defineConfig({
   // },
   integrations: [
     react(),
-    tailwind(),
+    // tailwind(),
     expressiveCode(), 
     mdx(),
     starlight({
