@@ -5,12 +5,12 @@ import starlightBlog from 'starlight-blog';
 import tailwind from '@astrojs/tailwind';
 import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
-import rehypeMermaid from "rehype-mermaid";
+// import rehypeMermaid from "rehype-mermaid";
 
 export default defineConfig({
-  markdown: {
-    rehypePlugins: [rehypeMermaid],
-  },
+  // markdown: {
+  //   rehypePlugins: [rehypeMermaid],
+  // },
   integrations: [
     react(),
     tailwind(),
