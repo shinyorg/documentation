@@ -156,6 +156,7 @@ export default defineConfig({
                 {
                     label: 'Extensions',
                     items:[
+                      { label: 'HTTP', link: 'client/mediator/extensions/http' },
                       { label: 'Prism', link: 'client/mediator/extensions/prism' },
                       { label: 'ASP.NET Core', link: 'client/mediator/extensions/aspnet' }
                     ]
