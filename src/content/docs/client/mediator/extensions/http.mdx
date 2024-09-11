@@ -3,6 +3,11 @@ title: HTTP
 ---
 import { Steps } from '@astrojs/starlight/components';
 
+:::note
+Unlike middleware, extensions like HTTP don't have a piece of code you really have to register.  There is a covariant request handler registered internally
+with Shiny Mediator listening for Shiny.Mediator.Http.IHttpRequest requests. 
+:::
+
 HTTP requests are basically a must in every app.  We didn't want people to have to generate their API client, contracts, and then have to global
 add the boilerplate mediator contract and subsequent request handler, so... we found some very convenient ways to build this in.
 
@@ -13,18 +18,28 @@ add the boilerplate mediator contract and subsequent request handler, so... we f
    using Shiny.Mediator;
    using Shiny.Mediator.Http;
 
-   [Http("/route/{Parameter}")]
-   public class MyRequest : IHttpRequest<MyResponse>
-   {
-       [HttpParameter]
-       public string Parameter { get; set; }
+    [Http(HttpVerb.Post, "/route/{Parameter}")]
+    public class MyRequest : IHttpRequest<MyResponse>
+    {
+        // name of the route parameter
+        [HttpParameter(HttpParameterType.Path)]
+        public string Parameter { get; set; }
 
-       [HttpBody]
-       public SomeOtherClass Body { get; set; }
-   }
-   ```
+        // query string parameter appended to uri
+        [HttpParameter(HttpParameterType.Query)]
+        public string QueryValue { get; set; }
 
-2. Next, let's create our configuration for the base URI
+        // query string parameter appended to uri
+        [HttpParameter(HttpParameterType.Header)]
+        public string SomeHeaderValue { get; set; }
+
+        // there can only be one body - serialized to json
+        [HttpBody]
+        public SomeOtherClass Body { get; set; }
+    }
+    ```
+
+2. Next, let's create our configuration for the base URI.  This assumes you use Microsoft.Extensions.Configuration JSON, but any other configuration provider with the same structure will work.
 
     ```json
     {
@@ -39,7 +54,54 @@ add the boilerplate mediator contract and subsequent request handler, so... we f
 3. Now - let's make the request with mediator
 </Steps>
 
+## Decorating the HTTP Request
+
+A common scenario is having to refresh an access token, add it to the next HTTP request, and maybe add some additional header while you're there.  Shiny Mediator allows you to register 
+a different type of middleware of `HTTP Requests` called IHttpRequestDecorator.  
+
+Here's an example that already exists in `Shiny.Mediator.Maui` that adds some headers to the request.
+
+```csharp
+public class MauiHttpRequestDecorator<TRequest, TResult>(
+    IConfiguration configuration,
+    IAppInfo appInfo,
+    IDeviceInfo deviceInfo,
+    IGeolocation geolocation
+) : IHttpRequestDecorator<TRequest, TResult> where TRequest : IHttpRequest<TResult>
+{
+    public async Task Decorate(HttpRequestMessage httpMessage, TRequest request)
+    {
+        httpMessage.Headers.Add("AppId", appInfo.PackageName);
+        httpMessage.Headers.Add("AppVersion", appInfo.Version.ToString());
+        httpMessage.Headers.Add("DeviceManufacturer", deviceInfo.Manufacturer);
+        httpMessage.Headers.Add("DeviceModel", deviceInfo.Model);
+        httpMessage.Headers.Add("DevicePlatform", deviceInfo.Platform.ToString());
+        httpMessage.Headers.Add("DeviceVersion", deviceInfo.Version.ToString());
+        httpMessage.Headers.AcceptLanguage.Add(new StringWithQualityHeaderValue(CultureInfo.CurrentCulture.Name));
+
+        if (configuration["Mediator:Http:GpsHeader"] == "true")
+        {
+            var gps = await geolocation.GetLastKnownLocationAsync();
+            if (gps != null)
+                httpMessage.Headers.Add("GpsCoords", $"{gps.Latitude},{gps.Longitude}");
+        }
+
+        // added to show authentication - does not exist in real MauiHttpRequestDecorator
+        if (someAuthService.TokenExpiry > DateTimeOffset.UtcNow)
+            await someAuthService.RefreshToken();
+
+        httpMessage.Headers.Authorization = new AuthenticationHeaderValue("Bearer", someAuthService.AccessToken);
+    }
+}
+```
+
+:::note
+Just like middleware & handlers - HTTP Decorators support covariance as well
+:::
+
 ## Adding Cache/Offline Support
+
+Without a request handler to mark the functionalilty attribute markers with, the question obviously comes up about how to get things like offline, caching, & resilience on both the HTTP request.  Simple... just mark the attribute on the contract itself.
 
 ```csharp
 [OfflineAvailable]
@@ -52,15 +114,37 @@ public partial class MyRequest
 
 ## Generating All The Contracts and Responses
 
+Some WebAPIs can have a large API surface with many routes, parameters, and types.  Generating OpenAPI files is pretty standard these days with things like NSwag, Swashbuckle, & Refitter.  Shiny Mediator can help with this as well.  You can generate all the contracts and responses from an OpenAPI file or URI to an OpenAPI document.
+
+Simply edit your csproj file that has `Shiny.Mediator` installed and add the following to it.
+
 ```xml
 <ItemGroup>
-    <MediatorHttp Include="OpenApiDoc.json" Namespace="My.Namespace" ContractPrefix="optional" ContractPostfix="HttpRequest" />
-    <MediatorHttp Include="OpenApiRemote" Uri="https://someurl.com" Namespace="My.RemoteNamespace" ContractPrefix="optional" ContractPostfix="HttpRequest" />
+    <MediatorHttp Include="OpenApiDoc.json" Namespace="My.Namespace" ContractPrefix="optional" ContractPostfix="HttpRequest" Visible="false" />
+    <MediatorHttp Include="OpenApiRemote" Uri="https://someurl.com" Namespace="My.RemoteNamespace" ContractPrefix="optional" ContractPostfix="HttpRequest" Visible="false" />
 </ItemGroup>
 ```
 
+:::note
+If you're setting the Uri attribute, you must still set the Include value to satisfy the ItemGroup.  Also note, the use of Visible="false".  This removes the registration of the msbuild variable from the IDE solution explorer.
+:::
+
 ## Adding Cache/Offline Support to Generated
 
+As shown above, adding the feature marker attributes will get you a lot of the Shiny Mediator features like caching, offline, and resilience.  
+However, how do you do this with the generated source code?  We mark the generated classes partial, which allows you to implement additional functionality by simply adding another partial class of your own
+to the same namespace.
+
+_Generated_
+```csharp
+namespace SomeGeneratedRequests;
+public partial class MyRequest : IHttpRequest<Response> 
+{
+    ...
+}
+```
+
+_Added by you_
 ```csharp
 [OfflineAvailable]
 [Cache]
