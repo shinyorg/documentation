@@ -179,28 +179,19 @@ export default defineConfig({
           items:[
             {
               label: 'Client',
-              items:[
-                { label: 'v4.0', link: 'release-notes/client/v40' },
-                { label: 'v3.0', link: 'release-notes/client/v30' },
-              ]
+              link: 'release-notes/client'
             },
             {
               label: 'Mediator',
-              items:[
-                { label: 'v1.0', link: 'release-notes/mediator/v10' }
-              ]
+              link: 'release-notes/mediator'
             },
             {
               label: 'Framework',
-              items:[
-                { label: 'v4.0', link: 'release-notes/framework/v40' }
-              ]
+              link: 'release-notes/framework'
             },
             {
               label: 'Server',
-              items:[
-                { label: 'v2.0', link: 'release-notes/client/v20' },
-              ]
+              link: 'release-notes/client'
             }
           ]
         }
