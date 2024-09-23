@@ -146,7 +146,7 @@ export default defineConfig({
                       { label: 'REQUESTS - Resiliency', link: 'client/mediator/middleware/resilience' },
                       { label: 'REQUESTS - Offline', link: 'client/mediator/middleware/offline' },
                       { label: 'REQUESTS - Timed Logging', link: 'client/mediator/middleware/timedlogging' },
-                      { label: 'REQUESTS - User Notification Exception Handling', link: 'client/mediator/middleware/usernotifications' },
+                      { label: 'REQUESTS - User Notification Exception Handling', link: 'client/mediator/middleware/usererrornotifications' },
                       { label: 'REQUESTS/EVENTS - Main Thread', link: 'client/mediator/middleware/mainthread' },
                       { label: 'EVENTS - Exception Handling', link: 'client/mediator/middleware/eventexceptions' },
                       { label: 'STREAMS - Replay', link: 'client/mediator/middleware/replay' },
