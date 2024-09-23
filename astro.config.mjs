@@ -137,6 +137,7 @@ export default defineConfig({
                 { label: 'Requests', link: 'client/mediator/requests' },
                 { label: 'Streams', link: 'client/mediator/streams' },
                 { label: 'Events', link: 'client/mediator/events' },
+                { label: 'Request Keys', link: 'client/mediator/requestkeys' },
                 { 
                     label: 'Middleware', 
                     items:[
