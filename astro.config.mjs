@@ -171,7 +171,9 @@ export default defineConfig({
           items:[
               { label: 'Introduction', link: 'server' },
               { label: 'Email', link: 'server/email' },
-              { label: 'Push Management', link: 'server/push' }
+              { label: 'Push Management', link: 'server/push' },
+              { label: 'Entity Framework', link: 'server/ef' },
+              { label: 'Web Hosting', link: 'server/webhosting' }
           ]
         },
         {
