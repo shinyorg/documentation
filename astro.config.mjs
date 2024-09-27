@@ -162,7 +162,8 @@ export default defineConfig({
                       { label: 'ASP.NET Core', link: 'client/mediator/extensions/aspnet' }
                     ]
                 },
-                { label: 'Advanced', link: 'client/mediator/advanced' }
+                { label: 'Advanced', link: 'client/mediator/advanced' },
+                { label: 'FAQ', link: 'client/mediator/faq' }
               ]
             }
           ],
