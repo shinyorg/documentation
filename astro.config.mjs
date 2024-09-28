@@ -138,6 +138,9 @@ export default defineConfig({
                 { label: 'Streams', link: 'client/mediator/streams' },
                 { label: 'Events', link: 'client/mediator/events' },
                 { label: 'Request Keys', link: 'client/mediator/requestkeys' },
+                { label: 'Request Contexts', link: 'client/mediator/contexts' },
+                { label: 'Advanced', link: 'client/mediator/advanced' },
+                { label: 'FAQ', link: 'client/mediator/faq' },
                 { 
                     label: 'Middleware', 
                     items:[
@@ -162,8 +165,6 @@ export default defineConfig({
                       { label: 'ASP.NET Core', link: 'client/mediator/extensions/aspnet' }
                     ]
                 },
-                { label: 'Advanced', link: 'client/mediator/advanced' },
-                { label: 'FAQ', link: 'client/mediator/faq' }
               ]
             }
           ],
