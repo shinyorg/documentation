@@ -66,7 +66,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "mediator",
         "nuget": "Shiny.Mediator.Maui",
         "description": "Mediator",
-        "version" : "1.7.0"
+        "version" : "2.1.1"
     },
     {
         "id": "beacons",

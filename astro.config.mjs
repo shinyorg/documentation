@@ -128,57 +128,47 @@ export default defineConfig({
                 { label: 'Startup Services', link: 'client/other/startupservices' },
                 { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
               ]
-            },
-            {
-              label: 'Mediator',
-              items:[
-                { label: 'Introduction', link: 'client/mediator/' },
-                { label: 'Quick Start', link: 'client/mediator/quick-start' },
-                { label: 'Requests', link: 'client/mediator/requests' },
-                { label: 'Streams', link: 'client/mediator/streams' },
-                { label: 'Events', link: 'client/mediator/events' },
-                { label: 'Request Keys', link: 'client/mediator/requestkeys' },
-                { label: 'Execution Context', link: 'client/mediator/context' },
-                { label: 'Advanced', link: 'client/mediator/advanced' },
-                { label: 'FAQ', link: 'client/mediator/faq' },
-                { 
-                    label: 'Middleware', 
-                    items:[
-                      { label: 'Introduction', link: 'client/mediator/middleware/' },
-                      { label: 'REQUESTS - Validation', link: 'client/mediator/middleware/validation' },
-                      { label: 'REQUESTS - Caching', link: 'client/mediator/middleware/caching' },
-                      { label: 'REQUESTS - Resiliency', link: 'client/mediator/middleware/resilience' },
-                      { label: 'REQUESTS - Offline', link: 'client/mediator/middleware/offline' },
-                      { label: 'REQUESTS - Performance Logging', link: 'client/mediator/middleware/performancelogging' },
-                      { label: 'REQUESTS - User Notification Exception Handling', link: 'client/mediator/middleware/usererrornotifications' },
-                      { label: 'REQUESTS/EVENTS - Main Thread', link: 'client/mediator/middleware/mainthread' },
-                      { label: 'EVENTS - Exception Handling', link: 'client/mediator/middleware/eventexceptions' },
-                      { label: 'STREAMS - Replay', link: 'client/mediator/middleware/replay' },
-                      { label: 'STREAMS - Refresh', link: 'client/mediator/middleware/refresh' }
-                    ]
-                },
-                {
-                    label: 'Extensions',
-                    items:[
-                      { label: 'HTTP', link: 'client/mediator/extensions/http' },
-                      { label: 'Prism', link: 'client/mediator/extensions/prism' },
-                      { label: 'ASP.NET Core', link: 'client/mediator/extensions/aspnet' }
-                    ]
-                },
-              ]
-            }
+            } 
           ],
         },
         {
-          label: 'Server',
+          label: 'Mediator',
           items:[
-              { label: 'Introduction', link: 'server' },
-              { label: 'Email', link: 'server/email' },
-              { label: 'Push Management', link: 'server/push' },
-              { label: 'Entity Framework', link: 'server/ef' },
-              { label: 'Web Hosting', link: 'server/webhosting' }
+            { label: 'Introduction', link: 'mediator/' },
+            { label: 'Quick Start', link: 'mediator/quick-start' },
+            { label: 'Requests', link: 'mediator/requests' },
+            { label: 'Streams', link: 'mediator/streams' },
+            { label: 'Events', link: 'mediator/events' },
+            { label: 'Request Keys', link: 'mediator/requestkeys' },
+            { label: 'Execution Context', link: 'mediator/context' },
+            { label: 'Advanced', link: 'mediator/advanced' },
+            { label: 'FAQ', link: 'mediator/faq' },
+            { 
+                label: 'Middleware', 
+                items:[
+                  { label: 'Introduction', link: 'mediator/middleware/' },
+                  { label: 'REQUESTS - Validation', link: 'mediator/middleware/validation' },
+                  { label: 'REQUESTS - Caching', link: 'mediator/middleware/caching' },
+                  { label: 'REQUESTS - Resiliency', link: 'mediator/middleware/resilience' },
+                  { label: 'REQUESTS - Offline', link: 'mediator/middleware/offline' },
+                  { label: 'REQUESTS - Performance Logging', link: 'mediator/middleware/performancelogging' },
+                  { label: 'REQUESTS - User Notification Exception Handling', link: 'mediator/middleware/usererrornotifications' },
+                  { label: 'REQUESTS/EVENTS - Main Thread', link: 'mediator/middleware/mainthread' },
+                  { label: 'EVENTS - Exception Handling', link: 'mediator/middleware/eventexceptions' },
+                  { label: 'STREAMS - Replay', link: 'mediator/middleware/replay' },
+                  { label: 'STREAMS - Refresh', link: 'mediator/middleware/refresh' }
+                ]
+            },
+            {
+                label: 'Extensions',
+                items:[
+                  { label: 'HTTP', link: 'mediator/extensions/http' },
+                  { label: 'Prism', link: 'mediator/extensions/prism' },
+                  { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' }
+                ]
+            },
           ]
-        },
+        },        
         {
           label: 'Releases',
           items:[
@@ -189,14 +179,6 @@ export default defineConfig({
             {
               label: 'Mediator',
               link: 'release-notes/mediator'
-            },
-            {
-              label: 'Framework',
-              link: 'release-notes/framework'
-            },
-            {
-              label: 'Server',
-              link: 'release-notes/client'
             }
           ]
         }
