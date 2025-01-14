@@ -7,10 +7,21 @@ import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 // import rehypeMermaid from "rehype-mermaid";
 
+// import { defineMiddleware } from "astro:middleware";
+
+// // `context` and `next` are automatically typed
+// export const onRequest = defineMiddleware((context, next) => {
+
+// });
+
+
 export default defineConfig({
   // markdown: {
   //   rehypePlugins: [rehypeMermaid],
   // },
+  redirects: {
+      '/client/mediator/[...slug]': '/mediator/[...slug]'
+  },
   integrations: [
     react(),
     // tailwind(),
