@@ -19,8 +19,12 @@ export default defineConfig({
   // markdown: {
   //   rehypePlugins: [rehypeMermaid],
   // },
+  output: 'static',
   redirects: {
-      '/client/mediator/[...slug]': '/mediator/[...slug]'
+      '/client/mediator/': '/mediator/',
+      '/client/mediator/middleware/': '/mediator/middleware/',
+      '/client/mediator/extensions/': '/mediator/extensions/',
+      '/release-notes/client/v30/' : '/release-notes/client/'
   },
   integrations: [
     react(),
