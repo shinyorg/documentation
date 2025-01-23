@@ -14,20 +14,18 @@ When issuing a command, we start a fresh Service Provider scope.  This means tha
 A request can be a class, record, or struct.  It must implement the `IRequest` interface.  If you want to return a result, then you must implement `IRequest<TResult>`
 
 ```csharp
-public record ResponseRequest : Shiny.Mediator.IRequest<Response>;
-public record Response(string Anything);
+public record MyCommand(string RandomArg) : Shiny.Mediator.ICommand;
 ```
 
-The request handlers are also very similar
+Now let's create our handler
 
 ```csharp
 
-public class ResponseRequestHandler : IRequestHandler<ResponseRequest, Response>
+public class MyCommandHandler : ICommandHandler<MyCommand>
 {
-    public async Task<Response> Handle(ResponseRequest request, RequestContext<ResponseRequest> context, CancellationToken ct)
+    public async Task Handle(MyCommand command, CommandContext<MyCommand> context, CancellationToken ct)
     {
-        var response = await GetResponseThing(ct);
-        return response;
+        // do something with the command
     }
 }
 
@@ -35,10 +33,11 @@ public class ResponseRequestHandler : IRequestHandler<ResponseRequest, Response>
 Now, let's register these guys through your host builder/DI container.  They can technically work off any lifecycle you choose.
 
 ```csharp
-services.AddSingleton<IRequestHandler<ResponseRequest, Response>, ResponseRequestHandler>();
+services.AddSingleton<ICommandHandler<MyCommand>, MyCommand>();
 
 // OR USING OUR EASY EXTENSION METHOD
 services.AddSingletonAsImplementedInterfaces<ResponseRequestHandler>();
+
 ```
 
 Finally, let's send a request through the mediator
@@ -46,40 +45,31 @@ Finally, let's send a request through the mediator
 ```csharp
 IMediator mediator; // get from your DI container or inject into your DI aware component
 
-var result = await mediator.Request(new ResponseRequest());
+var context = await mediator.Send(new MyCommand());
+// note that you get back a context to receive back any metadata that may have been processed through by middleware or the handler
 ```
-
-:::note
-IMediator.Send is for `void` requests where no result is provided
-IMediator.Request is for requests that provide a result.  This is to prevent future issues where the contract may change between a void & result which breaks the build intentionally to let consumers know of the change.
-:::
-
-:::warning
-If you use IMediator.Request and TResult implements IEvent, mediator will publish that event for you before returning to the request caller
-:::
 
 ## Middleware
 
 In our opinion, this is where Shiny Mediator really begins to shine.  Layering overtop of your requests with middleware is beautiful.  We offer some excellent `out of the box` middleware.  Be sure to check out it [here](/client/mediator/middleware/)
 
-Middleware allows you to mutate the requests, response, or even short circuit the request.  It's a great place to do things like logging, error handling, caching, etc.
+Middleware allows you to mutate the command or even [schedule it](./middleware/scheduling) for later execution.  It's a great place to do things like logging, error handling, caching, etc.
 
 Let's take a look at an sample piece of request middleware that handles a specific use-case
 
 ```csharp
 
-public class MyRequestMiddleware : IRequestMiddleware<ResponseRequest, Response>
+public class MyCommandMiddleware : ICommandMiddleware<MyCommand>
 {
-    public async Task<Response> Process(
-        RequestContext<ResponseRequest> context,
-        RequestHandlerDelegate<Response> next,
+    public async Task Process(
+        CommandContext<MyCommand> context,
+        CommandHandlerDelegate next,
         CancellationToken cancellationToken
     )
     {
         // do something before the request is handled
-        var response = await next();
+        await next();
         // do something after the request is handled
-        return response;
     }
 }
 ```
@@ -87,13 +77,13 @@ public class MyRequestMiddleware : IRequestMiddleware<ResponseRequest, Response>
 Now, let's register this middleware with your host builder
 
 ```csharp
-services.AddSingleton<IRequestMiddleware<ResponseRequest, Response>, MyRequestMiddleware>();
+services.AddSingleton<ICommandMiddleware<MyCommand>, MyCommandMiddleware>();
 ```
 
 Let's take a look a general purpose middleware that handles any command
 
 ```csharp
-public class MyCommandMiddleware<TCommand>: IRequestMiddleware<TCommand> where TCommand : ICommand
+public class MyCommandMiddleware<TCommand>: ICommandMiddleware<TCommand> where TCommand : ICommand
 {
     public async Task Process(
         CommandContext<TCommand> context,
@@ -113,12 +103,12 @@ Make sure to register this middleware with your host builder using an open gener
 ```csharp
 ServiceCollection services;
 
-services.AddSingleton(typeof(IRequestMiddleware<,>), typeof(MyGeneralMiddleware<,>));
+services.AddSingleton(typeof(ICommandMiddleware<>), typeof(MyCommandMiddleware<>));
 
 // OR
 
 services.AddMediator(x => 
 {
-    x.AddOpenRequestMiddleware(typeof(MyGeneralMiddleware<,>));
+    x.AddOpenCommandMiddleware(typeof(MyGeneralMiddleware<>));
 });
 ```

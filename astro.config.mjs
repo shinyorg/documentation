@@ -171,7 +171,8 @@ export default defineConfig({
                   { label: 'Main Thread', link: 'mediator/middleware/mainthread' },
                   { label: 'Event Exception Handling', link: 'mediator/middleware/eventexceptions' },
                   { label: 'Replay', link: 'mediator/middleware/replay' },
-                  { label: 'Refresh Timer', link: 'mediator/middleware/refresh' }
+                  { label: 'Refresh Timer', link: 'mediator/middleware/refresh' },
+                  { label: 'Command Scheduling', link: 'mediator/middleware/scheduling' }
                 ]
             },
             {
