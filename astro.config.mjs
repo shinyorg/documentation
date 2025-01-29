@@ -155,6 +155,7 @@ export default defineConfig({
             { label: 'Commands', link: 'mediator/commands' },
             { label: 'Streams', link: 'mediator/streams' },
             { label: 'Events', link: 'mediator/events' },
+            { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
             { label: 'Request Keys', link: 'mediator/requestkeys' },
             { label: 'Execution Contexts', link: 'mediator/context' },
             { label: 'Advanced', link: 'mediator/advanced' },
@@ -167,9 +168,7 @@ export default defineConfig({
                   { label: 'Resiliency', link: 'mediator/middleware/resilience' },
                   { label: 'Offline', link: 'mediator/middleware/offline' },
                   { label: 'Performance Logging', link: 'mediator/middleware/performancelogging' },
-                  { label: 'User Notification Exception Handling', link: 'mediator/middleware/usererrornotifications' },
                   { label: 'Main Thread', link: 'mediator/middleware/mainthread' },
-                  { label: 'Event Exception Handling', link: 'mediator/middleware/eventexceptions' },
                   { label: 'Replay', link: 'mediator/middleware/replay' },
                   { label: 'Refresh Timer', link: 'mediator/middleware/refresh' },
                   { label: 'Command Scheduling', link: 'mediator/middleware/scheduling' }
