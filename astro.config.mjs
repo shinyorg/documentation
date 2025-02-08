@@ -179,6 +179,7 @@ export default defineConfig({
                 items:[
                   { label: 'MAUI', link: 'mediator/extensions/maui' },
                   { label: 'Blazor', link: 'mediator/extensions/blazor' },
+                  { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },
                   { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' },
                   { label: 'HTTP', link: 'mediator/extensions/http' },
                   { label: 'Prism', link: 'mediator/extensions/prism' },
