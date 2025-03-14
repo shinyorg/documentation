@@ -50,8 +50,8 @@ const ProjectFile = (props: Props) => {
             pr += "\t-->\r\n";
         }
         if (hasPush) {
-            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type\"string\" Value=\"development\" Condition=\"'$(Configuration)' == 'Debug'\" />\r\n"
-            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type\"string\" Value=\"production\" Condition=\"'$(Configuration)' == 'Release'\" />\r\n"
+            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type=\"string\" Value=\"development\" Condition=\"'$(Configuration)' == 'Debug'\" />\r\n"
+            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type=\"string\" Value=\"production\" Condition=\"'$(Configuration)' == 'Release'\" />\r\n"
         }
         pr += "</ItemGroup>";
     }
