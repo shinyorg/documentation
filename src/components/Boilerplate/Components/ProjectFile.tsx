@@ -21,6 +21,7 @@ const ProjectFile = (props: Props) => {
     const hasNotifications = nugets.find(x => x.nuget === "Shiny.Notifications") !== undefined;
     const hasPush = usesPush(props.components);
 
+    // TODO: what if hosting isn't required
     nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
     let pr = "<ItemGroup>\r\n";
     nugets.map(c => {
@@ -46,12 +47,12 @@ const ProjectFile = (props: Props) => {
         if (hasNotifications) {
             pr += "\t<!--\r\n";
             pr += "\t// For scheduled notifications, you need to setup \"Time Sensitive Notifications\" in the Apple Developer Portal for your app provisioning and uncomment below\r\n";
-            pr += "\t// <CustomEntitlements Include=\"com.apple.developer.usernotifications.time-sensitive\" Type=\"Boolean\" Value=\"true\" />\r\n";
+            pr += "\t// <CustomEntitlements Include=\"com.apple.developer.usernotifications.time-sensitive\" Type=\"Boolean\" Value=\"true\" Visible=\"false\" />\r\n";
             pr += "\t-->\r\n";
         }
         if (hasPush) {
-            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type=\"string\" Value=\"development\" Condition=\"'$(Configuration)' == 'Debug'\" />\r\n"
-            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type=\"string\" Value=\"production\" Condition=\"'$(Configuration)' == 'Release'\" />\r\n"
+            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type=\"string\" Value=\"development\" Condition=\"'$(Configuration)' == 'Debug'\" Visible=\"false\" />\r\n"
+            pr += "\t<CustomEntitlements Include=\"aps-environment\" Type=\"string\" Value=\"production\" Condition=\"'$(Configuration)' == 'Release'\" Visible=\"false\" />\r\n"
         }
         pr += "</ItemGroup>";
     }
