@@ -1,3 +1,8 @@
+Mediator is a behavioral design pattern that lets you reduce chaotic dependencies between objects. The pattern restricts direct communications between the objects and forces them to collaborate only via a mediator object.
+
+Shiny Mediator is a mediator pattern implementation, but for built with ALL .NET apps in mind.  We provide a TON of middleware out-of-box to get you up and rolling with
+hardly any effort whatsoever.  Checkout our [Getting Started](/mediator/getting-started) guide to see how easy it is.  Imagine using 1 line of code to add offline, caching, or validation to your code!
+
 ## Features
 - A Mediator for your ALL .NET Apps
 - [Request/Response Handling](/mediator/requests)

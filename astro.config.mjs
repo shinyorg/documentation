@@ -150,7 +150,7 @@ export default defineConfig({
           label: 'Mediator',
           items:[
             { label: 'Introduction', link: 'mediator/' },
-            { label: 'Quick Start', link: 'mediator/quick-start' },
+            { label: 'Getting Started', link: 'mediator/getting-started' },
             { label: 'Requests', link: 'mediator/requests' },
             { label: 'Commands', link: 'mediator/commands' },
             { label: 'Streams', link: 'mediator/streams' },
