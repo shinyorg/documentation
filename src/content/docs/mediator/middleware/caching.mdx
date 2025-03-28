@@ -14,7 +14,7 @@ Our caching provider is built on top of [Microsoft.Extensions.Caching.Memory](ht
 Caching is insanely easy with request handlers in Shiny Mediator.
 
 :::note
-Fine grained control over caching is available with the `CacheAttribute` attribute and [Request Keys](/mediator/requestkeys)
+Caching uses [Request Keys](/mediator/requestkeys) to determine the key of a request cached item 
 :::
 
 <Steps>
@@ -23,7 +23,7 @@ Fine grained control over caching is available with the `CacheAttribute` attribu
 2. Create your request handler - you can mark Cache here with the attribute or you can use [Configuration](./).
 
    ```csharp
-   [Cache]
+   [Cache(AbsoluteExpirationSeconds = 60, SlidingExpirationSeconds = 30)]
    public class MyHandler : IRequestHandler<MyRequest, MyResult>
    {
        public async Task<MyResult> Handle(MyRequest request, RequestContext<MyRequest> context, CancellationToken ct)
@@ -41,34 +41,37 @@ Fine grained control over caching is available with the `CacheAttribute` attribu
         y.ExpirationScanFrequency = TimeSpan.FromSeconds(5);
    }));
    ```
+
+4. That's it!  Your handler will now cache for 60 seconds with a sliding expiration of 30 seconds.
 </Steps>
 
-:::note
-Caching is session/memory based and will be cleared with your app lifecycle. 
-:::
+### Setting Cache Config on the Context
 
-There are many additional properties you can use to interact with the cache setup
+Sometimes, a very specific call from a very specific location may have a need to set the cache config from a call.  You can do
+this through the IMediatorContext headers
 
 ```csharp
-public class CacheAttribute : Attribute
+IMediator mediator; // inject this
+var response = await mediator.Request(new MyRequest(), CancellationToken.None, ctx => ctx.SetCacheConfig(new CacheItemConfig
 {
-    public int AbsoluteExpirationSeconds { get; set; }
-    public int SlidingExpirationSeconds { get; set; }
-}
+    AbsoluteExpiration = TimeSpan.FromSeconds(60),
+    SlidingExpiration = TimeSpan.FromSeconds(30)
+}));
 ```
 
-### Deeper Cache Control
+### Forcing Cache Refresh
 
 You can add the ICacheControl to your contract to control cache directly at the point of call.
 
 ForceRefresh allows an easy way to bypass cache and SetEntry allows you to set cache entry properties.
 
 ```csharp
-public class MyContract : IRequest<SomeResponse>, ICacheControl 
-{
-    public bool ForceRefresh { get; set; }
-    public Action<ICacheEntry>? SetEntry { get; set; } // optional: allows you to set cache entry properties
-}
+IMediator mediator; // inject this
+var response = await mediator.Request(new MyRequest(), CancellationToken.None, ctx => ctx.ForceCacheRefresh());
+response.Result // won't be from cache
+
+var cacheInfo = response.Context.Cache();
+cacheInfo.IsHit // will be false
 ```
 
 ### Configuration
@@ -112,7 +115,7 @@ services.AddShinyMediator(x =>
 
 It works identical to the memory cache, but stores to the filesystem instead.  This is great for combining with things like Shiny Background Jobs to keep your cache fresh.
 
-## Custom Cache providers
+## Custom Cache Providers
 
 Custom caching is now easy to accomplish inside Shiny.Mediator.  Your cache provider can also make use of all the same benefits/configuration as already shown.
 
@@ -135,7 +138,7 @@ Custom caching is now easy to accomplish inside Shiny.Mediator.  Your cache prov
         /// <param name="key"></param>
         /// <param name="value"></param>
         /// <param name="config"></param>
-        Task Set<T>(
+        Task<CacaheEntry<T>> Set<T>(
             string key, 
             T value, 
             CacheItemConfig? config = null
@@ -196,7 +199,7 @@ var response = mediator.Request(new MyRequest());
 response.Result // the actual data
 var cache = response.Context.Cache();
 
-if (cache == null) 
+if (!cache.IsHit) 
 {
     // ... data is direct from source
 }
