@@ -40,10 +40,11 @@ export default defineConfig({
       logo: {
         src: '/src/assets/logo.svg',
       },
-      social: {
-        github: 'https://github.com/shinyorg',
-        twitter: 'https://twitter.com/shinydotnet'
-      },
+      social: [
+        { icon: 'github', label: 'GitHub', href: 'https://github.com/shinyorg' },
+        { icon: 'blueSky', label: 'BlueSky', href: 'https://bsky.app/profile/shinydotnet.bsky.social' },
+        { icon: 'x.com', label: 'X', href: 'https://x.com/shinydotnet' }
+      ],
       plugins:[
         starlightBlog({
           authors: {
