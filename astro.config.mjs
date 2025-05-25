@@ -29,7 +29,15 @@ export default defineConfig({
   integrations: [
     react(),
     // tailwind(),
-    expressiveCode(), 
+    expressiveCode({
+      themes: ['github-dark', 'github-light'],
+      styleOverrides: {
+        borderRadius: '0.5rem',
+        frames: {
+          frameBoxShadowCssValue: '0 0 0 1px #9A81EA20, 0 5px 17px rgba(0, 0, 0, 0.15)',
+        }
+      }
+    }), 
     mdx(),
     starlight({
       title: 'Shiny.NET',
@@ -40,6 +48,7 @@ export default defineConfig({
       logo: {
         src: '/src/assets/logo.svg',
       },
+      customCss: ['/src/styles/custom.css'],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/shinyorg' },
         { icon: 'blueSky', label: 'BlueSky', href: 'https://bsky.app/profile/shinydotnet.bsky.social' },

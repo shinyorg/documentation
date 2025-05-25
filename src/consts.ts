@@ -5,6 +5,21 @@ export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
 export const DEFAULT_VERSION: string = "3.3.4";
 
+// Brand colors from logo
+export const BRAND_COLORS = {
+    purple: '#9A81EA',
+    green: '#91F5AD',
+    lime: '#CFFA12',
+    white: '#FFFFFF',
+    // Derived colors for contrast and accessibility
+    purpleDark: '#6347c9',
+    purpleLight: '#c3b5f5',
+    greenDark: '#40d172',
+    greenLight: '#b5f8ca', 
+    limeDark: '#abcb00',
+    limeLight: '#e4fa7b'
+};
+
 export type ShinyComponent = {
     id: string;
     nuget: string;
