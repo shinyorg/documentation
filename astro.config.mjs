@@ -193,8 +193,7 @@ export default defineConfig({
                   { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' },
                   { label: 'HTTP', link: 'mediator/extensions/http' },
                   { label: 'Prism', link: 'mediator/extensions/prism' },
-                  { label: 'Dapper', link: 'mediator/extensions/dapper' },
-                  { label: 'Sentry', link: 'mediator/extensions/sentry' },
+                  { label: 'Dapper', link: 'mediator/extensions/dapper' }
                 ]
             },
           ]
