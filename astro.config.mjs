@@ -146,6 +146,12 @@ export default defineConfig({
               ]
             },
             {
+                label: 'Shiny MAUI Shell',
+                items:[
+                  { label: 'Getting Started', link: 'client/maui/' }
+                ]
+            },
+            {
               label: 'Other',
               items: [
                 { label: 'Configuration Extensions', link: 'client/other/configuration' },
