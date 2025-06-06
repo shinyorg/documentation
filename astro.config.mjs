@@ -146,7 +146,7 @@ export default defineConfig({
               ]
             },
             {
-                label: 'Shiny MAUI Shell',
+                label: 'MAUI Shell',
                 items:[
                   { label: 'Getting Started', link: 'client/maui/' }
                 ]
