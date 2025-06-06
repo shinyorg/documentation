@@ -2,14 +2,178 @@
 title: .NET MAUI Shiny Shell | Getting Started
 ---
 
-Shiny MAUI Shell is our attempt at making .NET MAUI Shell code "Shiny".  
+Make .NET MAUI Shell shinier with viewmodel lifecycle management, navigation, and source generation to remove boilerplate,
+reduce errors, and make your app testable!  We try to take care of all the gaps with .NET MAUI Shell
 
-# TODO
+Inspired by [Prism Library](https://prismlibrary) by Dan Siegel and Brian Lagunas
 
-## Features
 
-## Setup
+### Features/Roadmap
+* Registration
+* Auto ViewModel Attach to Page BindingContext
+* Navigation Service
+  * NavigateTo(string uri, args)
+  * NavigateTo`<TViewModel>`
+    * With Strongly Typed Init
+  * GoBack(args)
+  * Modals/Tabs
 
-## Navigation
+* No special AppShell class to implement
+* Source Generation
+  * Static Routes Class
+  * Navigator extension methods for strongly typed navigation
+  * Dependency injection source generated method
+* ViewModel lifecycle
+  * Strongly Typed Navigation Args (when navigating by viewmodel - Take a look at [Shiny Mediator](https://shinylib.net/mediator) shell for this
+  * OnAppearing/OnDisappearing
+  * Navigation Confirmation
+  * Disposable/Destroy
+  * Navigation Awareness
+    * Direction pop, uri from where?
 
-## Source Generation
+### Setup
+1. Install Nuget [![nuget](https://img.shields.io/nuget/v/Shiny.Maui.Shell?style=for-the-badge)](https://www.nuget.org/packages/Shiny.Maui.Shell)
+2. In your MauiProgram.cs, add the following
+```csharp
+public static class MauiProgram
+{
+    public static MauiApp CreateMauiApp()
+    {
+        var builder = MauiApp.CreateBuilder();
+        builder
+            .UseMauiApp<App>()
+            .UseShinyShell(x => x
+                .Add<MainPage, MainViewModel>(registerRoute: false)
+                .Add<AnotherPage, AnotherViewModel>("another")
+            )
+            .ConfigureFonts(fonts =>
+            {
+                fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+                fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+            });
+
+#if DEBUG
+        builder.Logging.SetMinimumLevel(LogLevel.Trace);
+        builder.Logging.AddDebug();
+#endif
+
+        return builder.Build();
+    }
+}
+```
+3. Now you can inject `Shiny.INavigator` into your VIewModels and navigate away
+
+:::note
+The default MAUI template emits an AppShell.xaml and registers as startup against the Window.  You don't not have to modify
+this code in any way to work with this library.  You do need to have Shell (obviously)
+:::
+
+### Navigation
+Shiny.INavigator
+```csharp
+// navigate by route name with args
+INavigator navigator; // injected into your viewmodel
+
+// navigate to a registered route (in XAML or with our .Add in UseShinyShell)
+await navigator.NavigateTo("MyPageOrRoute", ("MyArg", 99), ("Arg2", "Hello"));
+
+// navigate by viewmodel with strongly typed args
+await navigator.NavigateTo<MyViewModel(viewmodel => viewmodel.MyArg = 99);
+
+// goback or pop model
+await navigator.GoBack(("SendAnotherArg", "I'm back"));
+```
+:::note
+If you're setting arguments on the viewmodel navigation, you should make them observable if they are bound on the Page.
+:::
+
+### ViewModel Lifecycle
+
+ViewModel lifecycles work basically exactly like [Prism Library](https://prismlibrary.com) - Implement the following interfaces
+to get the behaviour
+
+* System.IDisposable
+  * Fires when the page/viewmodel is being removed entirely.  Destroy any hooks here to prevent leaks
+* Shiny.IPageLifecycleAware
+  * OnAppearing() - when the page becomes visible
+  * OnDisppearing() - fires when the page becomes hidden or popped
+* Shiny.INavigationConfirmation
+  * `Task<bool>` CanNavigate() - decide if the user is allowed to leave or not
+* Shiny.INavigationAware
+  * void OnNavigatingFrom(`IDictionary<string, object>` parameters) - allows you to mutate the navigation args before leaving the page
+* Microsoft.Maui.Controls.IQueryAttributable 
+  * void ApplyQueryAttributes(`IDictionary<string, object>` query) - Receives arguments navigating to or back
+
+### Source Generation
+
+Our source generators help you achieve a lot of the above with less boilerplate and less code overall
+
+THIS
+```csharp
+// INPUT
+[ShellMap<MyPage>("MyRoute")]
+public class MyViewModel 
+{
+    [ShellProperty]
+    public string Arg { get; set; }
+}
+```
+
+GENERATES ALL OF THIS FOR YOU TO PLUGIN SEAMLESSLY WITH YOUR CODE
+* Strong Typed Routes with arguments
+* Easy Dependency Injection Registration of Routes
+
+```csharp
+public static class NavigationBuilderExtensions
+{
+    public static global::Shiny.ShinyAppBuilder AddGeneratedMaps(this global::Shiny.ShinyAppBuilder builder)
+    {
+        builder.Add<Sample.MyPage, Sample.MyViewModel>(Routes.My);
+        return builder;
+    }
+}
+
+
+public static class NavigationExtensions
+{
+    public static global::System.Threading.Tasks.Task NavigateToModal(this global::Shiny.INavigator navigator, string arg1)
+    {
+        return navigator.NavigateTo<Sample.ModalViewModel>(x => { x.Arg = arg; });
+    }
+}
+
+public static class Routes
+{
+    public const string My = "MyPage";
+}
+
+```
+and lastly, put it to use
+```
+// MauiProgram.cs
+public static MauiApp CreateMauiApp()
+{
+    var builder = MauiApp
+        .CreateBuilder()
+        .UseMauiApp<App>()
+        .UseShinyShell(x => x.AddGeneratedMaps()) // All that add code - gone
+        .ConfigureFonts(fonts =>
+        {
+            fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+            fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+        });
+        
+    return builder.Build();
+}
+
+
+// Some ViewModel that navigates
+public class SomeViewModel(INavigator navigator) 
+{
+    async Task Command() 
+    {
+        // no more guess work for what parameters to pass and how
+        await navigator.NavigateToModal("pass the arg");
+    }
+}
+```
