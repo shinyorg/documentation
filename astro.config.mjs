@@ -203,7 +203,16 @@ export default defineConfig({
                 ]
             },
           ]
-        },        
+        },
+        {
+          label: 'Extensions',
+          items:[
+            { label: 'Reflector', link: 'extensions/reflector' },
+            { label: 'Dependency Injection', link: 'extensions/di' },
+            { label: 'Stores', link: 'extensions/stores' },
+            { label: 'Localization Generator', link: 'extensions/localizegen' }
+          ]
+        },    
         {
           label: 'Releases',
           items:[
@@ -214,6 +223,10 @@ export default defineConfig({
             {
               label: 'Mediator',
               link: 'release-notes/mediator'
+            },
+            {
+              label: 'Extensions',
+              link: 'release-notes/extensions'
             }
           ]
         }
