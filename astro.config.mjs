@@ -2,23 +2,13 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
-// import tailwind from '@astrojs/tailwind';
 import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
-// import rehypeMermaid from "rehype-mermaid";
 
-// import { defineMiddleware } from "astro:middleware";
-
-// // `context` and `next` are automatically typed
-// export const onRequest = defineMiddleware((context, next) => {
-
-// });
+const googleAnalyticsId = 'G-SZKGGX6M5W';
 
 
 export default defineConfig({
-  // markdown: {
-  //   rehypePlugins: [rehypeMermaid],
-  // },
   output: 'static',
   redirects: {
       '/client/mediator/': '/mediator/',
@@ -28,7 +18,6 @@ export default defineConfig({
   },
   integrations: [
     react(),
-    // tailwind(),
     expressiveCode({
       themes: ['github-dark', 'github-light'],
       styleOverrides: {
@@ -53,6 +42,25 @@ export default defineConfig({
         { icon: 'github', label: 'GitHub', href: 'https://github.com/shinyorg' },
         { icon: 'blueSky', label: 'BlueSky', href: 'https://bsky.app/profile/shinydotnet.bsky.social' },
         { icon: 'x.com', label: 'X', href: 'https://x.com/shinydotnet' }
+      ],
+      head: [
+        // Adding google analytics
+        {
+          tag: 'script',
+          attrs: {
+            src: `https://www.googletagmanager.com/gtag/js?id=${googleAnalyticsId}`,
+          },
+        },
+        {
+          tag: 'script',
+          content: `
+          window.dataLayer = window.dataLayer || [];
+          function gtag(){dataLayer.push(arguments);}
+          gtag('js', new Date());
+
+          gtag('config', '${googleAnalyticsId}');
+          `,
+        },
       ],
       plugins:[
         starlightBlog({
