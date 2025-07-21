@@ -236,6 +236,10 @@ export default defineConfig({
             {
               label: 'Extensions',
               link: 'release-notes/extensions'
+            },
+            {
+              label: 'Templates',
+              link: 'release-notes/templates'
             }
           ]
         }
