@@ -32,7 +32,7 @@ const AndroidManifest = (props: Props) => {
   };
   const addF = (feature:  string) => {
     return `
-      <uses-feature android:name="android.permission.${feature.toUpperCase()}" android:required="false" />`;
+      <uses-feature android:name="android.hardware.${feature.toUpperCase()}" android:required="false" />`;
   };
   const has = (feature: string): boolean => {
     return Data.hasComponent(feature, props.components);
