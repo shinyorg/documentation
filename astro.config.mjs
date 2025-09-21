@@ -35,12 +35,12 @@ export default defineConfig({
         baseUrl: 'https://github.com/shinyorg/documentation/edit/main/'
       },
       logo: {
-        src: '/src/assets/logo.svg',
+        src: '/src/assets/logo.png',
       },
       customCss: ['/src/styles/custom.css'],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/shinyorg' },
-        { icon: 'blueSky', label: 'BlueSky', href: 'https://bsky.app/profile/shinydotnet.bsky.social' },
+        { icon: 'blueSky', label: 'BlueSky', href: 'https://bsky.app/profile/shinylib.net' },
         { icon: 'x.com', label: 'X', href: 'https://x.com/shinydotnet' }
       ],
       head: [
