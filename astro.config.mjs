@@ -82,7 +82,6 @@ export default defineConfig({
           items: [
             { label: 'App Builder', link: 'client/appbuilder' },
             { label: 'Architecture', link: 'client/architecture' },
-            { label: 'Logging', link: 'client/logging' },
             {
               label: 'Hosting Models',
               items:[
