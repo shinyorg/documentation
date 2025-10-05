@@ -30,18 +30,20 @@ export default defineConfig({
     mdx(),
     starlight({
       title: 'Shiny.NET',
+      favicon: '/favicon.png',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
       editLink: {
         baseUrl: 'https://github.com/shinyorg/documentation/edit/main/'
       },
       logo: {
-        src: '/src/assets/logo.png',
+        src: '/src/assets/logo.png'
       },
       customCss: ['/src/styles/custom.css'],
       social: [
         { icon: 'github', label: 'GitHub', href: 'https://github.com/shinyorg' },
         { icon: 'blueSky', label: 'BlueSky', href: 'https://bsky.app/profile/shinylib.net' },
-        { icon: 'x.com', label: 'X', href: 'https://x.com/shinydotnet' }
+        { icon: 'x.com', label: 'X', href: 'https://x.com/shinydotnet' },
+        { icon: 'youtube', label: 'YouTube', href: 'https://www.youtube.com/@GoneDotnet' },
       ],
       head: [
         // Adding google analytics
