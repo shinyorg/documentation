@@ -30,6 +30,7 @@ export default defineConfig({
     mdx(),
     starlight({
       title: 'Shiny.NET',
+      pagefind: false,
       favicon: '/favicon.png',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
       editLink: {
