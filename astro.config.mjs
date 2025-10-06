@@ -4,6 +4,7 @@ import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
 import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
+import starlightDocSearch from '@astrojs/starlight-docsearch';
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
 
@@ -66,6 +67,11 @@ export default defineConfig({
         },
       ],
       plugins:[
+        starlightDocSearch({
+          appId: 'JHE1F0X28B',
+          apiKey: '92258958b2d4448dc6b24bf03f14b97b',
+          indexName: 'Shiny .NET',
+        }),
         starlightBlog({
           authors: {
             allanritchie: {
