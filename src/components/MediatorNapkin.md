@@ -5,6 +5,7 @@ hardly any effort whatsoever.  Checkout our [Getting Started](/mediator/getting-
 
 ## Features
 - A Mediator for your ALL .NET Apps
+- Built with ahead-of-time (AOT) compilation and trimming in mind
 - [Request/Response Handling](/mediator/requests)
 - [Event Publication](/mediator/events)
 - [Async Enumerable Stream Requests](/mediator/streams)

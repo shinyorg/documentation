@@ -188,7 +188,7 @@ export default defineConfig({
             { label: 'Streams', link: 'mediator/streams' },
             { label: 'Events', link: 'mediator/events' },
             { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
-            { label: 'Request Keys', link: 'mediator/requestkeys' },
+            { label: 'Contract Keys', link: 'mediator/contractkeys' },
             { label: 'Execution Contexts', link: 'mediator/context' },
             { label: 'Advanced', link: 'mediator/advanced' },
             { 
