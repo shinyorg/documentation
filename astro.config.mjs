@@ -189,6 +189,7 @@ export default defineConfig({
             { label: 'Events', link: 'mediator/events' },
             { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
             { label: 'Contract Keys', link: 'mediator/contractkeys' },
+            { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration' },
             { label: 'Execution Contexts', link: 'mediator/context' },
             { label: 'Advanced', link: 'mediator/advanced' },
             { 
