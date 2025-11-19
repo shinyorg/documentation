@@ -10,6 +10,7 @@ const googleAnalyticsId = 'G-SZKGGX6M5W';
 
 
 export default defineConfig({
+  site: 'https://www.shinylib.net',
   output: 'static',
   redirects: {
       '/client/mediator/': '/mediator/',
