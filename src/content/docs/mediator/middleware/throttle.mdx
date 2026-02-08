@@ -1,0 +1,85 @@
+---
+title: Event Throttle
+---
+import { Steps } from '@astrojs/starlight/components';
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+:::note
+Throttle middleware is applied only to [Events](/mediator/events)
+
+Your handler class must be marked as partial for source generation to work correctly on the ThrottleAttribute.
+:::
+
+# Event Throttle
+
+When publishing events rapidly (e.g. search text changed, sensor data updates, UI gestures), you often don't want every single event to trigger handler execution.  The `[Throttle]` attribute implements a debounce pattern — only the **last** event in a time window is actually processed.
+
+This is particularly useful for scenarios like:
+- **Search-as-you-type** — only search after the user stops typing
+- **Sensor data** — avoid overwhelming handlers with rapid sensor readings
+- **UI events** — debounce resize, scroll, or input change events
+
+## Setup
+
+<Steps>
+1. Register the throttle event middleware in your host startup:
+    ```csharp
+    services.AddShinyMediator(cfg => cfg.AddThrottleEventMiddleware());
+    ```
+
+2. Mark your event handler method with the `[Throttle]` attribute.  The handler class **must be `partial`**:
+    ```csharp
+    [MediatorSingleton]
+    public partial class SearchChangedHandler : IEventHandler<SearchChangedEvent>
+    {
+        [Throttle(500)] // 500 milliseconds
+        public async Task Handle(SearchChangedEvent @event, IMediatorContext context, CancellationToken ct)
+        {
+            // This only executes after 500ms of no new SearchChangedEvent publications
+            await PerformSearch(@event.Query);
+        }
+    }
+    ```
+</Steps>
+
+## How It Works
+
+When an event is published and the handler has a `[Throttle]` attribute:
+
+1. The middleware starts a timer for the specified delay (in milliseconds)
+2. If the same event is published again before the timer expires, the timer resets and the previous event is discarded
+3. Only after the full delay passes with no new events does the handler execute with the most recent event
+
+This means rapid-fire events result in a single handler execution with the latest data.
+
+## Example — Search Debounce
+
+```csharp
+public record SearchChangedEvent(string Query) : IEvent;
+
+[MediatorSingleton]
+public partial class SearchHandler : IEventHandler<SearchChangedEvent>
+{
+    readonly ISearchService searchService;
+
+    public SearchHandler(ISearchService searchService)
+    {
+        this.searchService = searchService;
+    }
+
+    [Throttle(300)] // wait 300ms after last keystroke
+    public async Task Handle(SearchChangedEvent @event, IMediatorContext context, CancellationToken ct)
+    {
+        var results = await this.searchService.Search(@event.Query, ct);
+        // update UI with results
+    }
+}
+```
+
+:::warning
+If the throttle delay is set to 0 or less, the middleware will execute the handler immediately without any throttling.
+:::
+
+:::note
+Each unique combination of event type and handler type has its own throttle timer.  This means different handlers for the same event type throttle independently.
+:::

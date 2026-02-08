@@ -1,0 +1,92 @@
+---
+title: Middleware Ordering
+---
+import { Steps } from '@astrojs/starlight/components';
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+# Middleware Ordering
+
+By default, middleware executes in the order it was registered with dependency injection.  While this works for simple cases, as your middleware pipeline grows you may need explicit control over execution order.
+
+The `[MiddlewareOrder]` attribute lets you define a numeric order on your middleware classes.  **Lower values run first** (outermost in the pipeline), and **higher values run closer to the handler**.
+
+## Usage
+
+Apply `[MiddlewareOrder(int)]` to your middleware class:
+
+```csharp
+[MiddlewareOrder(-100)]
+[MediatorSingleton]
+public class ValidationMiddleware<TRequest, TResult> : IRequestMiddleware<TRequest, TResult>
+    where TRequest : IRequest<TResult>
+{
+    public async Task<TResult> Process(
+        IMediatorContext context,
+        RequestHandlerDelegate<TResult> next,
+        CancellationToken cancellationToken)
+    {
+        // Validation runs first (outermost) — before logging, caching, etc.
+        Validate(context.Message);
+        return await next();
+    }
+}
+
+[MiddlewareOrder(0)]
+[MediatorSingleton]
+public class LoggingMiddleware<TRequest, TResult> : IRequestMiddleware<TRequest, TResult>
+    where TRequest : IRequest<TResult>
+{
+    public async Task<TResult> Process(
+        IMediatorContext context,
+        RequestHandlerDelegate<TResult> next,
+        CancellationToken cancellationToken)
+    {
+        // Logging wraps the inner middleware and handler
+        Log.Debug("Before {Request}", typeof(TRequest).Name);
+        var result = await next();
+        Log.Debug("After {Request}", typeof(TRequest).Name);
+        return result;
+    }
+}
+
+[MiddlewareOrder(100)]
+[MediatorSingleton]
+public class CachingMiddleware<TRequest, TResult> : IRequestMiddleware<TRequest, TResult>
+    where TRequest : IRequest<TResult>
+{
+    public async Task<TResult> Process(
+        IMediatorContext context,
+        RequestHandlerDelegate<TResult> next,
+        CancellationToken cancellationToken)
+    {
+        // Caching runs last (closest to handler) — cache the final result
+        return await next();
+    }
+}
+```
+
+With the configuration above, the execution flows as:
+
+**Validation → Logging → Caching → Handler → Caching → Logging → Validation**
+
+## Rules
+
+| Rule | Description |
+|------|-------------|
+| **Lower = first** | A middleware with order `-100` runs before order `0` which runs before order `100` |
+| **Default is 0** | Middleware without `[MiddlewareOrder]` defaults to order `0` |
+| **Stable sort** | Middleware with the same order value preserves DI registration order |
+| **All types** | Works for request, command, event, and stream middleware |
+| **Open generics** | Works with both open generic and closed generic middleware |
+
+## Backwards Compatibility
+
+If you don't use `[MiddlewareOrder]` at all, everything works exactly as before — middleware executes in DI registration order.  The attribute is completely opt-in.
+
+:::note
+`[MiddlewareOrder]` is a class-level attribute placed on the **middleware class**, not on handler methods.  This is different from handler-level attributes like `[Cache]` or `[Throttle]`.
+:::
+
+:::warning
+Choose a consistent ordering convention for your project.  A common pattern is to use negative values for cross-cutting concerns that should run first (validation, auth) and positive values for middleware that should be close to the handler (caching, offline).
+:::
