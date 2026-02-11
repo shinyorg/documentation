@@ -1,0 +1,396 @@
+
+---
+title: 'Shiny Mediator - Getting Started'
+description: 'A Mediator Pattern with a focus on Apps written with .NET'
+heroImage: '../../../assets/shinymediator-getting-started-hero.svg'
+date: 2026-01-30
+authors:
+  - allanritchie
+tags:
+  - Mediator
+---
+
+Mediator patterns have been getting a lot of attention lately, and for good reason. They help to decouple components in an application, making it easier to manage complexity and improve maintainability.  Mediator patterns also go by the names "Vertical slice architecture" and CQRS (Command Query Responsibility Segregation). 
+The big guy in .NET mediation is obviously [MediatR](https://mediatr.io/) by Jimmy Bogard.  It's an amazing library that has been used by an absolute ton of applications.  It recently went to a paid model, which is understandable given the amount of work that goes into maintaining a library of that size.
+
+The reason for building Shiny Mediator was to create a mediation library, but make sure it works with apps built on platforms like .NET MAUI and Blazor WebAssembly while also including some more "batteries included" features.  This doesn't mean I've neglected things like ASPNET support, but we'll get to that in a future article.
+
+## The Haters
+
+Many engineers will call mediators "over engineering" or "an anti-pattern".  I disagree.  In fact, I think mediators are one of the best patterns for building complex applications without going full bat stuff crazy with microservices out of the gate.  You can run in a monolith while still keeping things decoupled and manageable thereby making it easy to "SLICE" a piece out and move it to a microservice as your application traffic grows.
+Another advantage of a mediation pattern is can remove the "dependency injection hell" of adding a services for things like logging, caching, and other cross cutting concerns.  Instead of having to add these services to every handler, you can just add them to the mediator pipeline, configure them or stick an attribute on a handler.
+
+```csharp
+public class MyViewModel(IDataService data, ICacheManager cache, IConfiguration configuration, ILogger<MyViewModel> logger)  {
+    public async Task LoadData() {
+        this.Data = cache.TryGet("MyKey", ct => await data.GetData());
+    }
+}
+```
+
+The above code doesn't look too bad, but 
+* Imagine you have 20 view models that all need these services.  
+* How do I make sure I'm grabbing from the same cache everytime or clearing it for that matter?
+* Building cache keys can be a pain
+
+
+```csharp
+[ContractKey("{UserId}-{IsActive}")]
+public record GetDataRequest(bool IsActive, string UserId) : IRequest<GetDataResponse>;
+
+
+public class MyViewModel(IMediator mediator) {
+    [Cache(300)]
+    public async Task LoadData() {
+        var response = await mediator.Send(new GetDataRequest());
+        this.Data = response.Result;
+    }
+}
+```
+
+Homegrown/built in mediation patterns are often added, but require you do the growing.  Middleware management is also not a simple process.  Creating keys for caching requests, another whamo of complexity.  These are all things solved by Shiny Mediator.
+AI generated code solutions is another one I hear.  "Just use AI to generate the code for you".  AI is great at boilerplate or when you give it a very specific input & output, but architecture... it will throw "slop" at you.
+
+## Some of the Current Challenges
+
+As with all patterns, there are some trade offs.  Mediators map objects to handlers (methods or controllers).  It is currently not tool friendly to find a corresponding handler for a contract, so you want to make sure you structure your solution and projects well to find
+handlers without too much effort.  Another problem that can occur is middleware executes in a pipeline, so if you have a lot of middleware, you can end up with performance issues if you're not careful about managing the middleware to ensure quick execution.
+
+## Experience of the Past
+
+I've seen some large .NET MAUI applications
+that had so many engineers working on them, there was constant "fire drills" (the running joke that came to be).  Team A would change something that would break Team B's work.  Team C would have to make changes to Team A's code to update navigation or data retrieval.  
+Quite often, these breaking changes wouldn't even be picked up until a regression test.  
+
+In this post, we'll explore how to get started with Shiny Mediator, a library that implements the Mediator pattern with a focus on apps written with .NET.
+
+## What are some of the "batteries included"?
+
+Most mediator libraries hand you a pipe and say "good luck".  Shiny Mediator hands you a pipe, a toolbox, a hard hat, and a coffee.  Here's what's in the box:
+
+### Offline Mode
+
+Your users don't always have internet. Shocking, I know. But building offline support from scratch is the kind of soul-crushing work that makes devs question their career choices. With Shiny Mediator, slap an attribute on your handler and you're done:
+
+```csharp
+public partial class GetOrdersHandler : IRequestHandler<GetOrdersRequest, IReadOnlyList<Order>>
+{
+    [OfflineAvailable]
+    public async Task<IReadOnlyList<Order>> Handle(
+        GetOrdersRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // When online: calls your API, stores the result
+        // When offline: returns the last stored result
+        // You did nothing. You're welcome.
+        return await api.GetOrders(ct);
+    }
+}
+```
+
+You can also configure it via `appsettings.json` if attributes aren't your thing:
+
+```json
+{
+    "Mediator": {
+        "Offline": {
+            "MyNamespace.GetOrdersRequest": true
+        }
+    }
+}
+```
+
+Want to know if the data came from the offline store?  The context tells you:
+
+```csharp
+var response = await mediator.Request(new GetOrdersRequest());
+var offline = response.Context.Offline();
+if (offline != null)
+{
+    // data is from offline store
+    // offline.Timestamp tells you WHEN it was stored
+    // maybe show a "stale data" indicator to the user
+}
+```
+
+### Caching
+
+Caching is one of the two hardest problems in computer science (the other being naming things and off-by-one errors).  Shiny Mediator makes it embarrassingly easy:
+
+```csharp
+public partial class GetProductsHandler : IRequestHandler<GetProductsRequest, List<Product>>
+{
+    [Cache(AbsoluteExpirationSeconds = 300, SlidingExpirationSeconds = 60)]
+    public async Task<List<Product>> Handle(
+        GetProductsRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // This only runs when cache misses.
+        // No cache key management. No IMemoryCache injection. No tears.
+        return await db.GetProducts(ct);
+    }
+}
+```
+
+Setup is one line:
+
+```csharp
+services.AddShinyMediator(x => x.AddMemoryCaching());
+```
+
+Need a cache that survives app restarts?  The MAUI and Uno extensions have a **persistent cache** that writes to disk.  Same attribute, same config — it just doesn't evaporate when the user kills your app:
+
+```csharp
+services.AddShinyMediator(x => x.AddMauiPersistentCache());
+```
+
+You can also force a cache refresh when you need fresh data (pull-to-refresh, anyone?):
+
+```csharp
+var response = await mediator.Request(
+    new GetProductsRequest(), 
+    CancellationToken.None, 
+    ctx => ctx.ForceCacheRefresh()
+);
+// response.Result is guaranteed fresh
+```
+
+### Validation
+
+Validation: where developers go to argue about whether to throw exceptions or return error objects.  We support both.  Pick your poison.
+
+**Data Annotations** (built-in, no extra package):
+
+```csharp
+services.AddShinyMediator(cfg => cfg.AddDataAnnotations());
+
+[Validate]
+public class CreateUserCommand : ICommand
+{
+    [Required]
+    public string Name { get; set; }
+
+    [Range(1, 150)] // optimistic about human lifespans
+    public int Age { get; set; }
+}
+```
+
+**FluentValidation** (for the overachievers):
+
+```csharp
+services.AddShinyMediator(cfg => cfg.AddFluentValidation());
+
+[Validate]
+public class CreateUserCommand : ICommand
+{
+    public string? Name { get; set; }
+}
+
+public class CreateUserValidator : AbstractValidator<CreateUserCommand>
+{
+    public CreateUserValidator()
+    {
+        RuleFor(x => x.Name).NotEmpty().WithMessage("A user needs a name. Even 'Bob' will do.");
+    }
+}
+```
+
+Validation runs *before* your handler ever sees the request.  Invalid data never touches your business logic.  It's like a bouncer for your code.
+
+### Performance Logging
+
+Want to know which handler is being a lazy bum? Performance logging middleware tracks execution time through built-in diagnostics via `Microsoft.Extensions.Diagnostics`.  No extra setup, no third-party APM required.  Your handlers are already emitting telemetry — you just need to listen.
+
+### HTTP Client Generation
+
+This one deserves its own blog post (coming soon), but the short version: point Shiny Mediator at your OpenAPI spec and it generates contracts, handlers, JSON converters, and DI registration.  No HttpClientFactory plumbing. No System.Text.Json serialization contexts.  No Polly setup.  Just:
+
+```xml
+<ItemGroup>
+    <MediatorHttp Include="MyApi"
+                  Uri="https://myapi.com/openapi.json"
+                  Namespace="MyApp.Api"
+                  ContractPostfix="HttpRequest"
+                  GenerateJsonConverters="true"
+                  Visible="false" />
+</ItemGroup>
+```
+
+```csharp
+services.AddShinyMediator(x => x.AddGeneratedOpenApiClient());
+
+// Now just use it like any other mediator request
+var users = await mediator.Request(new GetUsersHttpRequest());
+```
+
+All your middleware (caching, offline, validation, resilience) works with HTTP requests too.  One attribute to cache API calls.  One attribute for offline fallback.  Your API client just became the most resilient thing in your entire codebase — and you wrote zero infrastructure code.
+
+## Getting Started
+
+Enough talk.  Let's build something.  I'll walk you through a .NET MAUI setup since that's where Shiny Mediator really flexes, but this works just as well with Blazor, ASP.NET, or plain old console apps (we don't judge).
+
+### Step 1: Install the packages
+
+```bash
+dotnet add package Shiny.Mediator
+dotnet add package Shiny.Mediator.Maui
+```
+
+For Blazor, swap `Shiny.Mediator.Maui` for `Shiny.Mediator.Blazor`.  For ASP.NET or console apps, just `Shiny.Mediator` on its own is fine.
+
+### Step 2: Define your contracts
+
+Contracts are just plain C# records or classes that implement one of the mediator interfaces.  Think of them as the "what" — what data goes in, what data comes out.
+
+```csharp
+using Shiny.Mediator;
+
+// A command - fire and forget, no return value
+public record CreateTodoCommand(string Title, string Description) : ICommand;
+
+// A request - send something in, get something back
+public record GetTodosRequest(bool IncludeCompleted) : IRequest<List<TodoItem>>;
+
+// An event - broadcast to anyone who's listening
+public record TodoCreatedEvent(TodoItem Item) : IEvent;
+```
+
+### Step 3: Create your handlers
+
+Handlers are where the actual work happens.  One handler per command/request, but you can have multiple event handlers.
+
+```csharp
+using Shiny.Mediator;
+
+[MediatorSingleton] // source generator handles DI registration for you
+public class CreateTodoHandler : ICommandHandler<CreateTodoCommand>
+{
+    readonly IMyDatabase db;
+    readonly IMediator mediator;
+
+    public CreateTodoHandler(IMyDatabase db, IMediator mediator)
+    {
+        this.db = db;
+        this.mediator = mediator;
+    }
+
+    public async Task Handle(
+        CreateTodoCommand command, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        var item = new TodoItem(command.Title, command.Description);
+        await db.Insert(item, ct);
+
+        // broadcast that a todo was created
+        await mediator.Publish(new TodoCreatedEvent(item));
+    }
+}
+
+[MediatorSingleton]
+public partial class GetTodosHandler : IRequestHandler<GetTodosRequest, List<TodoItem>>
+{
+    readonly IMyDatabase db;
+
+    public GetTodosHandler(IMyDatabase db) => this.db = db;
+
+    [Cache(AbsoluteExpirationSeconds = 120)]
+    [OfflineAvailable]
+    public async Task<List<TodoItem>> Handle(
+        GetTodosRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // cached for 2 minutes AND available offline
+        // two attributes, zero infrastructure code, infinite smugness
+        return await db.GetTodos(request.IncludeCompleted, ct);
+    }
+}
+```
+
+### Step 4: Wire it up
+
+```csharp
+public static class MauiProgram
+{
+    public static MauiApp CreateMauiApp()
+    {
+        var builder = MauiApp
+            .CreateBuilder()
+            .UseMauiApp<App>();
+
+        builder.Services.AddShinyMediator(x =>
+        {
+            x.UseMaui();
+            x.AddMemoryCaching();
+            x.AddDataAnnotations();
+        });
+
+        // let the source generator register everything
+        builder.Services.AddMediatorRegistry();
+
+        return builder.Build();
+    }
+}
+```
+
+### Step 5: Use it
+
+```csharp
+public class TodoListViewModel : BaseViewModel, IEventHandler<TodoCreatedEvent>
+{
+    readonly IMediator mediator;
+
+    public TodoListViewModel(IMediator mediator)
+    {
+        this.mediator = mediator;
+    }
+
+    public async Task LoadTodos()
+    {
+        // one line. cached. offline-available. validated.
+        var response = await mediator.Request(new GetTodosRequest(IncludeCompleted: false));
+        this.Todos = response.Result;
+    }
+
+    public async Task CreateTodo(string title, string description)
+    {
+        await mediator.Send(new CreateTodoCommand(title, description));
+        // don't reload manually - the event handler below will fire
+    }
+
+    // this fires automatically when TodoCreatedEvent is published
+    // no subscription. no unsubscription. no memory leaks. no drama.
+    public async Task Handle(
+        TodoCreatedEvent @event, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        await LoadTodos();
+    }
+}
+```
+
+Notice that the ViewModel implements `IEventHandler<TodoCreatedEvent>` directly.  With the MAUI extension, your ViewModels and Pages automatically participate in event broadcasting without being registered in DI.  When the page is popped from navigation, it stops receiving events.  No `MessagingCenter.Unsubscribe` nightmares.  No `WeakReferenceMessenger` gymnastics.  It just works.
+
+## What's the Road Ahead
+
+Shiny Mediator has come a long way from its v1 days.  We're now on v6 with full AOT and trimming support baked into the source generators.  So what's next?
+
+* **Deeper ASP.NET integration** — we've already got minimal API endpoint generation from handlers, server-sent events from stream requests, and HTTP response caching middleware.  Expect more first-class server scenarios.
+* **Event throttling & middleware ordering** — both landed in v6.  `[Throttle(300)]` on your event handlers gives you debounce for free (goodbye, search-as-you-type headaches).  `[MiddlewareOrder]` gives you explicit pipeline control.
+* **Better tooling** — finding the handler for a contract is still a navigation exercise.  We're exploring IDE integrations to make this seamless.
+* **More source generation** — the goal is zero reflection, zero runtime surprises.  If a handler is missing or misconfigured, you should know at compile time, not when your app blows up in production at 2 AM on a Saturday.
+* **Community contributions** — shout out to [codelisk](https://github.com/codelisk) for Prism region navigation and [JeremyBP](https://github.com/JeremyBP) for MAUI modal stack iteration.  Keep 'em coming.
+
+## Wrapping Up
+
+Shiny Mediator isn't trying to replace MediatR.  It's trying to be the mediator that gives app developers — especially those on MAUI, Blazor, and Uno — a batteries-included experience that "just works" out of the box.  Caching, offline, validation, HTTP clients, event broadcasting, source generated registration... all of it designed so you can focus on your actual business logic instead of plumbing.
+
+Give it a spin.  Check out the [full docs](https://shinylib.net/mediator/), play with the [sample apps](https://github.com/shinyorg/mediatorsample), and come yell at me on [BlueSky](https://bsky.app/profile/shinylib.net) if something doesn't work.
+
+Happy coding.  May your caches always be warm and your pipelines always be clean.
+
+Source generation and full blown AOT.  AOT is becoming such an important part of .NET, especially with .NET MAUI and Blazor.  We're working hard on a version 5 release that will be fully AOT compliant out of the box!

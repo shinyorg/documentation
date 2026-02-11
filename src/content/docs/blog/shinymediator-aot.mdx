@@ -1,0 +1,317 @@
+---
+title: "Shiny Mediator & AOT - Zero Reflection, Full Speed"
+description: 'A deep dive into every source generator and design choice that makes Shiny Mediator fully AOT & trimming safe — zero reflection required'
+heroImage: '../../../assets/shinymediator-aot-hero.svg'
+date: 2026-02-10
+authors:
+  - allanritchie
+tags:
+  - Mediator
+---
+
+Native AOT and trimming are no longer "nice to have" — they're table stakes for modern .NET apps.  iOS has never allowed JIT.  Blazor WebAssembly ships every byte to the browser.  ASP.NET minimal APIs are racing toward sub-10ms cold starts.  If your library leans on reflection, you're the bottleneck.
+
+Shiny Mediator took this personally.
+
+Starting in v5 and fully realized in v6, Shiny Mediator has waged a **war on reflection**.  Every piece of runtime introspection has been replaced with compile-time source generation.  The result?  A mediator pipeline that is 100% AOT-safe, fully trimmable, and frankly... faster than it has any right to be.
+
+Let's walk through every source generator and design decision that makes this possible.
+
+---
+
+## 1. Handler & Middleware Registration — `[MediatorSingleton]` / `[MediatorScoped]`
+
+The old way of registering handlers meant scanning assemblies, resolving open generics, and hoping the DI container could figure it all out at runtime.  That's... not AOT-friendly.
+
+Shiny Mediator replaces all of that with two attributes:
+
+```csharp
+[MediatorSingleton]
+public class GetUserHandler : IRequestHandler<GetUserRequest, UserResponse>
+{
+    public async Task<UserResponse> Handle(
+        GetUserRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // your handler logic
+    }
+}
+```
+
+At compile time, the source generator discovers every class decorated with `[MediatorSingleton]` or `[MediatorScoped]` and emits all the DI registration code for you.  No assembly scanning.  No `typeof()` gymnastics.  No reflection.
+
+The generated code feeds into a **module initializer registry** — a static registry that collects every handler and middleware registration across your entire solution.  To wire it all up:
+
+```csharp
+services.AddShinyMediator(x => x.AddMediatorRegistry());
+```
+
+One line.  Every handler.  Every middleware.  All generated at compile time.
+
+These attributes also handle middleware registration — so if you have a custom middleware class, slap `[MediatorSingleton]` on it and it joins the party automatically.
+
+---
+
+## 2. Request & Stream Executors
+
+Here's a fun .NET limitation: you can't easily resolve a generic type at runtime without knowing the type parameters at compile time.  Previous versions of Shiny Mediator used reflection to bridge that gap.  It worked, but it was slow and it was the single biggest AOT blocker.
+
+Starting in v5, source generators create **typed executors** for every request and stream request in your project.  These executors know the exact types at compile time, so the mediator can dispatch directly without any `MakeGenericType` or `Activator.CreateInstance` shenanigans.
+
+You don't need to do anything extra — if you're using `[MediatorSingleton]` / `[MediatorScoped]`, the executor generation comes along for the ride.
+
+---
+
+## 3. JSON Converter Source Generation
+
+AOT's nemesis is `System.Text.Json` with reflection-based serialization.  The standard fix is `JsonSerializerContext` and `[JsonSerializable]` — but here's the problem: **you can't chain source generators**.  Shiny Mediator's source generator runs first, and `System.Text.Json`'s source generator can't see the types that were just generated.
+
+So Shiny Mediator built its own JSON serialization source generator.
+
+### For HTTP Contracts (OpenAPI)
+
+When you generate HTTP clients from OpenAPI specs, just flip one switch:
+
+```xml
+<ItemGroup>
+    <MediatorHttp Include="MyApi"
+                  Uri="https://api.example.com/openapi.json"
+                  Namespace="MyApp.Api"
+                  GenerateJsonConverters="true"
+                  Visible="false" />
+</ItemGroup>
+```
+
+Setting `GenerateJsonConverters="true"` tells the source generator to emit high-performance, AOT-safe JSON converters for every contract and response type it produces.  No reflection.  No `JsonSerializerContext` registration.  The `[JsonConverter]` attribute is placed directly on each type.
+
+### For Your Own Types
+
+Got your own classes that need serialization — maybe for offline storage, caching, or custom contracts?  Use the `[SourceGenerateJsonConverter]` attribute:
+
+```csharp
+[SourceGenerateJsonConverter]
+public partial class WeatherForecast
+{
+    public string? City { get; set; }
+    public double Temperature { get; set; }
+    public DateTime Date { get; set; }
+}
+```
+
+The class must be `partial` (the generator needs to attach code to it).  That's it — you get a compile-time JSON converter without ever touching `System.Text.Json` source generation configuration.
+
+---
+
+## 4. Contract Key Source Generation
+
+Middleware like caching, offline storage, and stream replay all need a **key** to identify unique requests.  The "old school" way was implementing `IContractKey` on your contract:
+
+```csharp
+// Before — manual, tedious, error-prone
+public class SearchRequest : IRequest<SearchResult>, IContractKey
+{
+    public string? Query { get; set; }
+    public int? Page { get; set; }
+    public DateTime? Since { get; set; }
+
+    public string GetKey()
+    {
+        var key = "SearchRequest";
+        if (Query != null) key += $"_{Query}";
+        if (Page != null) key += $"_{Page}";
+        if (Since != null) key += $"_{Since:yyyyMMdd}";
+        return key;
+    }
+}
+```
+
+Writing null checks and format strings for every property on every contract gets old fast.  And the default `IContractKeyProvider` used reflection to build keys when you didn't implement the interface.
+
+The source-generated version:
+
+```csharp
+// After — one attribute, zero reflection
+[ContractKey("SearchRequest_{Query}_{Page}_{Since:yyyyMMdd}")]
+public partial class SearchRequest : IRequest<SearchResult>
+{
+    public string? Query { get; set; }
+    public int? Page { get; set; }
+    public DateTime? Since { get; set; }
+}
+```
+
+The source generator handles null checks, `ToString()` calls, format strings — everything.  If a property is null, that portion of the key is replaced with an empty string.  The class must be `partial`, and you can use the same format specifiers you'd use in string interpolation.
+
+Leave the format string blank and it uses **all public instance properties** automatically.
+
+---
+
+## 5. Middleware Attribute Source Generation
+
+This one is subtle but critical.  Many of Shiny Mediator's middleware components are driven by attributes on handler methods:
+
+```csharp
+public partial class GetProductHandler : IRequestHandler<GetProductRequest, Product>
+{
+    [Cache(MaxAgeSeconds = 300)]
+    [OfflineAvailable]
+    public async Task<Product> Handle(
+        GetProductRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // fetch product from API
+    }
+}
+```
+
+Reading attributes from methods at runtime requires deep reflection — `MethodInfo.GetCustomAttributes()` and friends.  In an AOT world, that can fail silently or crash spectacularly.
+
+Shiny Mediator's source generator scans handler methods at compile time, extracts every attribute that inherits from `MediatorMiddlewareAttribute`, and emits code that makes them available via `context.GetHandlerAttribute<T>()` — no reflection needed at runtime.
+
+**Your handler class must be `partial`** for this to work.  That's the one rule.
+
+### Custom Middleware Attributes
+
+Best of all, this works with your own attributes too.  Just inherit from `MediatorMiddlewareAttribute`:
+
+```csharp
+public class AuditLogAttribute : MediatorMiddlewareAttribute
+{
+    public string Category { get; set; } = "General";
+}
+
+public partial class CreateOrderHandler : IRequestHandler<CreateOrderRequest, Order>
+{
+    [AuditLog(Category = "Orders")]
+    public async Task<Order> Handle(
+        CreateOrderRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // ...
+    }
+}
+
+// In your middleware — zero reflection
+public class AuditLogMiddleware<TRequest, TResult> 
+    : IRequestMiddleware<TRequest, TResult> where TRequest : IRequest<TResult>
+{
+    public async Task<TResult> Process(
+        IMediatorContext context,
+        RequestHandlerDelegate<TResult> next,
+        CancellationToken ct)
+    {
+        var attr = context.GetHandlerAttribute<AuditLogAttribute>();
+        if (attr != null)
+        {
+            // log with attr.Category
+        }
+        return await next();
+    }
+}
+```
+
+---
+
+## 6. OpenAPI HTTP Client Generation
+
+The HTTP extension's OpenAPI source generator is arguably the crown jewel of Shiny Mediator's AOT story.  From a single OpenAPI spec, it generates:
+
+- **Request contracts** with proper HTTP verb, route, query, header, and body annotations
+- **Response types** matching the API schema
+- **A typed request handler** that uses `HttpClient` under the hood
+- **JSON converters** (when `GenerateJsonConverters="true"`) for every generated type
+- **DI registration** via `.AddGeneratedOpenApiClient()`
+
+All from a csproj item:
+
+```xml
+<ItemGroup>
+    <MediatorHttp Include="PetStore"
+                  Uri="https://petstore.swagger.io/v2/swagger.json"
+                  Namespace="MyApp.PetStore"
+                  ContractPostfix="HttpRequest"
+                  GenerateJsonConverters="true"
+                  Visible="false" />
+</ItemGroup>
+```
+
+```csharp
+services.AddShinyMediator(x =>
+{
+    x.AddMediatorRegistry();
+    x.AddGeneratedOpenApiClient();
+});
+```
+
+Now every HTTP call flows through the mediator pipeline — which means caching, offline, validation, performance logging, and every other middleware you've configured **automatically applies** to your API calls.  And it's all AOT-safe because every type is known at compile time.
+
+---
+
+## 7. ASP.NET Endpoint Source Generation
+
+On the server side, Shiny Mediator can source-generate minimal API endpoints directly from your handlers:
+
+```csharp
+[MediatorScoped]
+public partial class CreateUserHandler : IRequestHandler<CreateUserRequest, UserResponse>
+{
+    [Post("/api/users")]
+    public async Task<UserResponse> Handle(
+        CreateUserRequest request, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // create user
+    }
+}
+```
+
+The source generator emits the `app.MapPost("/api/users", ...)` call and the DI wiring.  No controller classes.  No manual endpoint mapping.  Just your handler with an HTTP attribute and the generator does the rest.
+
+---
+
+## The Big Picture
+
+Here's what Shiny Mediator source-generates at compile time — and what it **doesn't** do at runtime:
+
+| Feature | Compile Time (Source Gen) | Runtime (Reflection) |
+|---|---|---|
+| Handler DI Registration | ✅ `[MediatorSingleton]` / `[MediatorScoped]` | ❌ No scanning |
+| Request/Stream Executors | ✅ Typed dispatch | ❌ No `MakeGenericType` |
+| JSON Serialization | ✅ `[SourceGenerateJsonConverter]` | ❌ No reflection-based serializers |
+| Contract Keys | ✅ `[ContractKey]` | ❌ No property reflection |
+| Middleware Attributes | ✅ `[Cache]`, `[OfflineAvailable]`, custom | ❌ No `GetCustomAttributes` |
+| HTTP Clients | ✅ `MediatorHttp` MSBuild item | ❌ No runtime proxy generation |
+| ASP.NET Endpoints | ✅ Handler method attributes | ❌ No controller discovery |
+
+The result is a mediator library that:
+- **Ships on iOS** without fighting the linker
+- **Runs in Blazor WASM** without bloating the download
+- **Cold-starts fast** on ASP.NET because there's nothing to scan or JIT
+- **Trims clean** because every code path is statically reachable
+
+## Getting Started with AOT
+
+If you're already using Shiny Mediator, the path to full AOT is straightforward:
+
+1. **Make handler and contract classes `partial`** — the source generators need this
+2. **Add `[MediatorSingleton]` or `[MediatorScoped]`** to your handlers and middleware
+3. **Use `[ContractKey]`** instead of implementing `IContractKey` manually
+4. **Set `GenerateJsonConverters="true"`** on your `MediatorHttp` items
+5. **Use `[SourceGenerateJsonConverter]`** on custom types that need serialization
+6. **Call `x.AddMediatorRegistry()`** in your startup instead of manual registration
+
+That's it.  No reflection.  No runtime surprises.  Just compile-time confidence.
+
+---
+
+## Wrapping Up
+
+AOT and trimming aren't just performance checkboxes — they're the foundation of where .NET is heading.  Shiny Mediator has gone all-in on source generation to make sure you can take your mediator pipeline anywhere .NET runs: mobile, browser, server, and beyond.
+
+If reflection was the training wheels, source generation is the carbon fiber frame.  Time to ride.
+
+Check out the full [source generation docs](https://shinylib.net/mediator/sourcegeneration) and the [HTTP extension docs](https://shinylib.net/mediator/extensions/http) for all the details.

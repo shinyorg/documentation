@@ -1,0 +1,166 @@
+---
+title: "What's New in Shiny Mediator 6"
+description: 'A look at all the new features, improvements, and breaking changes in Shiny Mediator v6'
+heroImage: '../../../assets/shinymediator-v6-hero.svg'
+date: 2026-02-10
+authors:
+  - allanritchie
+tags:
+  - Mediator
+---
+
+Shiny Mediator v6 has landed and it's packed with some exciting new features and improvements. This release is a big step forward for the library, focusing on better source generation, AOT readiness, ASP.NET interop, and some slick new middleware.  Let's dive in.
+
+## .NET 8 & 10 Minimum Targets
+
+The biggest (and breaking) change is that Shiny Mediator v6 now targets .NET 8 and .NET 10 as minimum versions.  This allows us to take advantage of the latest runtime features for performance, trimming, and AOT compilation.  If you're still on older versions, you'll need to stay on v5.
+
+## Revamped HTTP Client Source Generation
+
+The HTTP client source generation has been completely overhauled.  In v5, the OpenAPI generation would produce contracts, but you'd still need to wire up handlers and serialization yourself.  In v6, the source generator now produces **everything** — handlers, contracts, JSON converters, and dependency injection registration.  
+
+This is a breaking change because you'll need to call a new registration method, but the setup through `MediatorHttpItem` in your csproj remains the same:
+
+```xml
+<ItemGroup>
+    <MediatorHttp Include="OpenApiRemote"
+                  Uri="https://yourapi.com/openapi.json"
+                  Namespace="My.Namespace"
+                  ContractPostfix="HttpRequest"
+                  GenerateJsonConverters="true"
+                  Visible="false" />
+</ItemGroup>
+```
+
+And then in your startup:
+
+```csharp
+builder.Services.AddShinyMediator(x => x.AddGeneratedOpenApiClient());
+```
+
+That's it.  Full HTTP client with AOT-safe serialization, middleware support, and zero boilerplate.
+
+Another nice improvement: if your OpenAPI spec doesn't have an `OperationId`, the source generator now **infers** a name using the HTTP verb and path.  For example, `GET /user/list` becomes `GetUserList`.  No more missing contracts because someone forgot to set an operation ID.
+
+## DirectHttpRequest is Gone
+
+The `DirectHttpRequest` type has been removed.  You can still create your own HTTP objects with the `[Http]` attribute which will source generate a handler for you.  This was cleaned up to reduce confusion between the direct approach and the more powerful generated approach.
+
+## PublishToBackground 
+
+One of the more subtle but impactful additions is `PublishToBackground` on `IMediator`.  If you've ever tried to fire-and-forget an event in ASP.NET, you've probably run into scoping issues where the `HttpContext` or scoped services get disposed before your event handlers finish.
+
+`PublishToBackground` solves this by spawning a **new child scope**, so you can fire events without worrying about disposal:
+
+```csharp
+public class MyController(IMediator mediator) : ControllerBase
+{
+    [HttpPost]
+    public async Task<IActionResult> DoSomething()
+    {
+        // this returns immediately and the event handlers
+        // run in a separate scope
+        await mediator.PublishToBackground(new SomethingHappenedEvent());
+        return Ok();
+    }
+}
+```
+
+You can still use the standard `Publish` to await all event handlers in the same scope.
+
+## Async Enumerable Responses & Server-Sent Events
+
+Stream requests now support `IAsyncEnumerable<T>` responses that can be wired directly to **Server-Sent Events** endpoints.  Just mark your contract with `IServerSentEventsStream`:
+
+```csharp
+[Get("/api/sse")]
+public class ServerSentEventsRequest : IStreamRequest<EventItem>, IServerSentEventsStream
+{
+}
+```
+
+If your endpoint does **not** support server-sent events, you can still use `IStreamRequest<T>` — just drop the `IServerSentEventsStream` interface and you get a standard async enumerable response.
+
+## Event Throttling
+
+The new `[Throttle]` attribute implements a **debounce pattern** for event handlers.  This is huge for scenarios like search-as-you-type, sensor data processing, or any rapid-fire event where you only care about the latest value:
+
+```csharp
+services.AddShinyMediator(cfg => cfg.AddMediatorRegistry().AddThrottleEventMiddleware());
+
+[MediatorSingleton]
+public partial class SearchHandler : IEventHandler<SearchChangedEvent>
+{
+    [Throttle(300)] // wait 300ms after last event
+    public async Task Handle(
+        SearchChangedEvent @event, 
+        IMediatorContext context, 
+        CancellationToken ct)
+    {
+        // only fires once the user stops typing for 300ms
+        var results = await searchService.Search(@event.Query, ct);
+    }
+}
+```
+
+How it works:
+1. When an event is published, a timer starts
+2. If the same event fires again before the timer expires, the timer resets and the previous event is discarded
+3. Only after the full delay with no new events does the handler execute with the latest data
+
+Your handler class must be `partial` for source generation to work.
+
+:::tip
+Know what else is epic?  That `[MediatorSingleton]` & `[MediatorScoped]` also work on middleware!
+:::
+
+## Middleware Ordering
+
+Previously, middleware executed in DI registration order.  That's fine for simple scenarios, but as your pipeline grows you need more control.  The new `[MiddlewareOrder]` attribute gives you explicit ordering:
+
+```csharp
+[MiddlewareOrder(-100)] // runs first (outermost)
+public class ValidationMiddleware<TRequest, TResult> 
+    : IRequestMiddleware<TRequest, TResult> { ... }
+
+[MiddlewareOrder(0)] // default
+public class LoggingMiddleware<TRequest, TResult> 
+    : IRequestMiddleware<TRequest, TResult> { ... }
+
+[MiddlewareOrder(100)] // runs last (closest to handler)
+public class CachingMiddleware<TRequest, TResult> 
+    : IRequestMiddleware<TRequest, TResult> { ... }
+```
+
+This produces: **Validation → Logging → Caching → Handler → Caching → Logging → Validation**
+
+Lower values run first.  If you don't use the attribute, everything works exactly as before — it's fully opt-in.
+
+## HTTP Response Cache Middleware
+
+A new built-in middleware that caches HTTP responses based on `CacheControl` `MaxAge` headers.  If your API sends proper cache headers, Shiny Mediator will respect them automatically without any extra configuration on your part.
+
+## Additional Improvements & Fixes
+
+Beyond the headline features, v6 includes a steady stream of refinements:
+
+- **EventStream redesigned** — `IMediator.EventStream` was dropping events under load.  It's been completely redesigned for speed and reliability.
+- **RuntimeEventRegister is now thread-safe** — dynamic event handler registration no longer has race conditions.
+- **BaseHttpRequestHandler now handles commands** — not just requests.
+- **OpenAPI source generation fixes** — proper URI path generation for PUT/POST, fixed nullable support, TimeSpan handling, and duplicate type issues.
+- **Prism RegionNavigationCommand** — contributed by [codelisk](https://github.com/codelisk) for region-based navigation in Prism.
+
+## Migration Tips
+
+If you're coming from v5, here's the key things to watch for:
+
+1. **Update your target framework** to .NET 8 or .NET 10
+2. **HTTP client registration** — call the new `AddGeneratedOpenApiClient()` method
+3. **Remove DirectHttpRequest usages** — switch to `[Http]` attribute-based contracts
+4. **OpenAPI contracts** may have slightly different names due to the automatic `HttpRequest` postfix
+
+## Wrapping Up
+
+Shiny Mediator v6 continues the push toward zero-boilerplate, AOT-ready mediation for .NET.  The revamped HTTP source generation alone is worth the upgrade — and features like event throttling and middleware ordering bring capabilities that would take significant effort to build yourself.
+
+Check out the [full documentation](https://shinylib.net/mediator/) and the [complete release notes](https://shinylib.net/release-notes/mediator/) for all the details.
