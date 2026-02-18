@@ -225,6 +225,16 @@ export default defineConfig({
           ]
         },
         {
+          label: 'TableView',
+          items:[
+            { label: 'Getting Started', link: 'tableview/' },
+            { label: 'Cell Types', link: 'tableview/cells' },
+            { label: 'Sections & Dynamic Content', link: 'tableview/sections' },
+            { label: 'Styling', link: 'tableview/styling' },
+            { label: 'Advanced Features', link: 'tableview/advanced' }
+          ]
+        },
+        {
           label: 'Extensions',
           items:[
             { label: 'Reflector', link: 'extensions/reflector' },
