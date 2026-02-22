@@ -1,0 +1,237 @@
+---
+title: 'Introducing Shiny.SqliteDocumentDb — Schema-Free JSON Documents in SQLite'
+description: 'A new library that turns SQLite into a document database with LINQ queries, streaming, indexes, projections, and full AOT support — no migrations required'
+date: 2026-02-22
+authors:
+  - allanritchie
+tags:
+  - Extensions
+---
+
+I've been building .NET apps long enough to know that SQLite is the workhorse of local storage.  It's everywhere — mobile apps, desktop apps, embedded systems, even server-side caches.  But every time I reach for sqlite-net or raw ADO.NET, I end up in the same loop: design tables, write migrations, manage foreign keys, rehydrate object graphs from JOINs.
+
+For a lot of use cases — settings stores, offline caches, app state, anything with nested data — that ceremony is overkill.  What I actually want is to throw an object in and get it back out.  So I built [Shiny.SqliteDocumentDb](https://github.com/shinyorg/SqliteDocumentDb).
+
+---
+
+## What Is It?
+
+It's a lightweight document store that sits on top of SQLite.  You give it a .NET object, it serializes it to JSON and stores it.  You query it with LINQ expressions, and it translates those to `json_extract` SQL under the hood.  No schema, no migrations, no table design.
+
+```csharp
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    ConnectionString = "Data Source=mydata.db"
+});
+
+// Store a document
+var id = await store.Set(new User { Name = "Alice", Age = 25 }, ctx.User);
+
+// Query with LINQ
+var results = await store.Query<User>(u => u.Name == "Alice", ctx.User);
+```
+
+That `ctx.User` parameter is a `JsonTypeInfo<User>` from a source-generated JSON context — every API has an AOT-safe overload.  No reflection, fully trimmable.
+
+---
+
+## Why Not Just Use sqlite-net?
+
+sqlite-net is great for flat, single-table CRUD.  But the moment your data has structure — an order with line items, a user with addresses, a config with nested sections — things get painful.  You need multiple tables, foreign keys, multiple inserts per save, and multiple queries plus manual rehydration per read.
+
+The document store approach collapses all of that into a single operation.  One write, one read, one document.
+
+The benchmarks tell the story:
+
+**Nested insert (Order + Address + OrderLines + Tags, 100 records):**
+| Method | Mean |
+|---|---|
+| DocumentStore | 5.0 ms |
+| sqlite-net (3 tables) | 170 ms |
+
+**Nested get by ID:**
+| Method | Mean |
+|---|---|
+| DocumentStore | 4.8 us |
+| sqlite-net (3 queries) | 48.6 us |
+
+That's **34x faster inserts** and **10x faster reads** for nested data.  The document store wins because it does one write and one read instead of multiple table operations.
+
+For flat data, sqlite-net can be faster on indexed column queries (it queries columns directly vs. `json_extract`).  Use the right tool for the shape of your data.
+
+---
+
+## LINQ Expression Translation
+
+This is the part I'm most proud of.  The expression visitor translates C# LINQ expressions into SQLite `json_extract` SQL, resolving property names from `JsonTypeInfo` metadata so `[JsonPropertyName]` and camelCase policies work correctly.
+
+```csharp
+// Nested properties
+var portland = await store.Query<Order>(
+    o => o.ShippingAddress.City == "Portland", ctx.Order);
+// → json_extract(Data, '$.shippingAddress.city') = @p0
+
+// Collection queries with Any()
+var hasWidgets = await store.Query<Order>(
+    o => o.Lines.Any(l => l.ProductName == "Widget"), ctx.Order);
+// → EXISTS (SELECT 1 FROM json_each(Data, '$.lines') WHERE ...)
+
+// Collection Count()
+var bigOrders = await store.Query<Order>(
+    o => o.Lines.Count() > 5, ctx.Order);
+// → json_array_length(Data, '$.lines') > 5
+
+// String methods
+var matches = await store.Query<User>(
+    u => u.Name.Contains("li"), ctx.User);
+// → LIKE '%' || @p0 || '%'
+```
+
+Equality, comparisons, logical operators (`&&`, `||`, `!`), null checks, `DateTime`/`DateTimeOffset`, captured variables — they all work.  The full expression reference is in the [README](https://github.com/shinyorg/SqliteDocumentDb).
+
+---
+
+## SQL-Level Projections
+
+Need just a few fields from a large document?  Projections extract only the selected properties at the database level using `json_object` — no full deserialization.
+
+```csharp
+var summaries = await store.Query<Order, OrderSummary>(
+    o => o.Status == "Shipped",
+    o => new OrderSummary
+    {
+        Customer = o.CustomerName,
+        City = o.ShippingAddress.City,
+        LineCount = o.Lines.Count()
+    },
+    ctx.Order,
+    ctx.OrderSummary);
+```
+
+That `Lines.Count()` becomes `json_array_length(Data, '$.lines')` in SQL.  You can also use `Any()`, `Any(predicate)`, and `Count(predicate)` inside selectors.
+
+---
+
+## Streaming with IAsyncEnumerable
+
+Every method that returns `IReadOnlyList<T>` has a streaming counterpart returning `IAsyncEnumerable<T>`.  Results yield one-at-a-time without buffering the entire set into memory.
+
+```csharp
+await foreach (var order in store.QueryStream<Order>(
+    o => o.Status == "Pending", ctx.Order))
+{
+    await ProcessOrder(order);
+}
+```
+
+The benchmarks show streaming eliminates Gen1 GC collections entirely at 1,000+ documents while maintaining within ~2% of buffered throughput.  If you're processing results incrementally, streaming is free performance.
+
+---
+
+## Expression-Based JSON Indexes
+
+The default query performance is solid, but for hot paths you can create indexes on `json_extract` expressions:
+
+```csharp
+await store.CreateIndexAsync<User>(u => u.Name, ctx.User);
+// CREATE INDEX IF NOT EXISTS idx_json_User_name
+// ON documents (json_extract(Data, '$.name'))
+// WHERE TypeName = 'User';
+```
+
+**Impact on a 1,000-record flat query:**
+| Method | Mean |
+|---|---|
+| Without index | 274 us |
+| With index | 9.2 us |
+
+**~30x faster.**  The index lets SQLite use a B-tree lookup instead of scanning every row with `json_extract`.  Works with nested properties too:
+
+```csharp
+await store.CreateIndexAsync<Order>(o => o.ShippingAddress.City, ctx.Order);
+```
+
+---
+
+## AOT and Trimming — First Class
+
+Every API method has a `JsonTypeInfo<T>` overload.  The reflection-based overloads exist for convenience but are marked with `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]` so the trimmer will warn you.
+
+Setup is straightforward:
+
+```csharp
+[JsonSerializable(typeof(User))]
+[JsonSerializable(typeof(Order))]
+public partial class AppJsonContext : JsonSerializerContext;
+
+var ctx = new AppJsonContext(new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+});
+```
+
+Pass `ctx.Options` to `DocumentStoreOptions.JsonSerializerOptions` so the expression visitor and serializer share the same naming configuration.  That's the one thing people forget — and then their LINQ queries silently return zero results because property names don't match.
+
+---
+
+## Transactions
+
+Atomic multi-document operations with automatic commit/rollback:
+
+```csharp
+await store.RunInTransaction(async tx =>
+{
+    await tx.Set("order-1", order, ctx.Order);
+    await tx.Set("user-1", user, ctx.User);
+    // Exception → automatic rollback
+});
+```
+
+The `tx` parameter is a full `IDocumentStore`, so you can use any operation inside the transaction — queries, counts, removes, everything.
+
+---
+
+## DI Registration
+
+One line:
+
+```csharp
+services.AddSqliteDocumentStore("Data Source=mydata.db");
+```
+
+Registers `IDocumentStore` as a singleton.  For full configuration:
+
+```csharp
+services.AddSqliteDocumentStore(opts =>
+{
+    opts.ConnectionString = "Data Source=mydata.db";
+    opts.TypeNameResolution = TypeNameResolution.FullName;
+    opts.JsonSerializerOptions = ctx.Options;
+});
+```
+
+---
+
+## When to Use It
+
+**Good fit:**
+- Offline caches and app state
+- Settings and configuration stores
+- Data with nested objects and child collections
+- Rapid prototyping without schema design
+- Any scenario where you want to store and query object graphs without table design
+
+**Not the best fit:**
+- Complex reporting queries with aggregations across types
+- Bulk operations on millions of rows where raw SQL shines
+- Simple flat-table CRUD where sqlite-net is already working well
+
+---
+
+## Get Started
+
+```bash
+dotnet add package Shiny.SqliteDocumentDb
+```
+
+Full documentation at [shinylib.net/extensions/sqlite-document-db](https://shinylib.net/extensions/sqlite-document-db/) and the [GitHub repository](https://github.com/shinyorg/SqliteDocumentDb) has the complete README with benchmarks, expression reference tables, and examples.

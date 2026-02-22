@@ -240,6 +240,7 @@ export default defineConfig({
             { label: 'Reflector', link: 'extensions/reflector' },
             { label: 'Dependency Injection', link: 'extensions/di' },
             { label: 'Stores', link: 'extensions/stores' },
+            { label: 'SQLite Document DB', link: 'extensions/sqlite-document-db' },
             { label: 'Localization Generator', link: 'extensions/localizegen' },
             { label: 'Web Hosting', link: 'extensions/webhost' }
           ]
