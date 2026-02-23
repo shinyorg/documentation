@@ -274,6 +274,18 @@ export default defineConfig({
             {
               label: 'Templates',
               link: 'release-notes/templates'
+            },
+            {
+              label: 'TableView',
+              link: 'release-notes/tableview'
+            },
+            {
+              label: 'Spatial DB',
+              link: 'release-notes/spatial'
+            },
+            {
+              label: 'SQLite DocumentDB',
+              link: 'release-notes/sqlite-documentdb'
             }
           ]
         }
