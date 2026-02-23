@@ -16,7 +16,8 @@ export default defineConfig({
       '/client/mediator/': '/mediator/',
       '/client/mediator/middleware/': '/mediator/middleware/',
       '/client/mediator/extensions/': '/mediator/extensions/',
-      '/release-notes/client/v30/' : '/release-notes/client/'
+      '/release-notes/client/v30/' : '/release-notes/client/',
+      '/extensions/sqlite-document-db/': '/sqlite-docdb/'
   },
   integrations: [
     react(),
@@ -246,12 +247,22 @@ export default defineConfig({
           ]
         },
         {
+          label: 'SQLite Document DB',
+          items:[
+            { label: 'Getting Started', link: 'sqlite-docdb/' },
+            { label: 'AOT Setup', link: 'sqlite-docdb/aot' },
+            { label: 'CRUD Operations', link: 'sqlite-docdb/crud' },
+            { label: 'Querying', link: 'sqlite-docdb/querying' },
+            { label: 'Projections & Streaming', link: 'sqlite-docdb/projections' },
+            { label: 'Indexes & Transactions', link: 'sqlite-docdb/indexes' }
+          ]
+        },
+        {
           label: 'Extensions',
           items:[
             { label: 'Reflector', link: 'extensions/reflector' },
             { label: 'Dependency Injection', link: 'extensions/di' },
             { label: 'Stores', link: 'extensions/stores' },
-            { label: 'SQLite Document DB', link: 'extensions/sqlite-document-db' },
             { label: 'Localization Generator', link: 'extensions/localizegen' },
             { label: 'Web Hosting', link: 'extensions/webhost' }
           ]

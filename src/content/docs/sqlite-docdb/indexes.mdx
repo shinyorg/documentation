@@ -1,0 +1,59 @@
+---
+title: Indexes & Transactions
+---
+
+## Index Management
+
+For frequently queried JSON properties, create expression indexes on `json_extract` to speed up lookups. These methods are on `SqliteDocumentStore` directly (not on `IDocumentStore`).
+
+```csharp
+// Create an index — up to 30x faster queries
+await store.CreateIndexAsync<User>(u => u.Name, ctx.User);
+
+// Nested properties
+await store.CreateIndexAsync<Order>(o => o.ShippingAddress.City, ctx.Order);
+
+// Drop a specific index
+await store.DropIndexAsync<User>(u => u.Name, ctx.User);
+
+// Drop all indexes for a type
+await store.DropAllIndexesAsync<User>();
+```
+
+`CreateIndexAsync` uses `IF NOT EXISTS`, so calling it multiple times is safe. Index names are deterministic (`idx_json_{typeName}_{jsonPath}`).
+
+### Generated SQL
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_json_User_name
+ON documents (json_extract(Data, '$.name'))
+WHERE TypeName = 'User';
+```
+
+### Performance impact
+
+JSON property indexes dramatically speed up equality queries by letting SQLite use a B-tree lookup instead of scanning every row with `json_extract`.
+
+**Flat query (filter by name, 1,000 records):**
+
+| Method | Mean |
+|---|---|
+| Without index | 274 us |
+| With index | 9.2 us |
+
+**~30x faster.** Indexes give the biggest wins on selective queries that return few results.
+
+## Transactions
+
+Atomic multi-document operations with automatic commit/rollback:
+
+```csharp
+await store.RunInTransaction(async tx =>
+{
+    await tx.Set("u1", new User { Name = "Alice", Age = 25 }, ctx.User);
+    await tx.Set("u2", new User { Name = "Bob", Age = 30 }, ctx.User);
+    // Commits on success, rolls back on exception
+});
+```
+
+The `tx` parameter is a full `IDocumentStore`, so you can use any operation inside the transaction — queries, counts, removes, `SetProperty`, `RemoveProperty`, everything.

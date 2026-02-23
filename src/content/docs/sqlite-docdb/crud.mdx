@@ -1,0 +1,122 @@
+---
+title: CRUD Operations
+---
+
+## Store a document
+
+```csharp
+// Auto-generated GUID key — returns the ID
+var id = await store.Set(new User { Name = "Alice", Age = 25 }, ctx.User);
+
+// Explicit key
+await store.Set("user-1", new User { Name = "Alice", Age = 25 }, ctx.User);
+```
+
+## Upsert with JSON Merge Patch
+
+`Upsert` uses SQLite's `json_patch()` (RFC 7396 JSON Merge Patch) to deep-merge a partial patch into an existing document. If the document doesn't exist, it is inserted as-is. Unlike `Set`, which replaces the entire document, `Upsert` only overwrites the fields present in the patch.
+
+```csharp
+// Insert a full document
+await store.Set("user-1", new User { Name = "Alice", Age = 25, Email = "alice@test.com" }, ctx.User);
+
+// Merge patch — only update Name and Age, preserve Email
+await store.Upsert("user-1", new User { Name = "Alice", Age = 30 }, ctx.User);
+
+var user = await store.Get<User>("user-1", ctx.User);
+// user.Name == "Alice", user.Age == 30, user.Email == "alice@test.com" (preserved)
+```
+
+**How it works:**
+- On **insert** (new ID): the patch is stored as the full document.
+- On **conflict** (existing ID): `json_patch(existing, patch)` deep-merges the patch into the stored JSON. Objects are recursively merged; scalars and arrays are replaced.
+- **Null properties are excluded** from the patch automatically. In C#, unset nullable properties (e.g. `string? Email`) serialize as `null`, which would remove the key under RFC 7396. The library strips these so that unset fields are preserved rather than deleted.
+
+:::note
+For true partial updates, use nullable properties in your patch type so that unset fields are `null` and excluded from the merge. Non-nullable properties with default initializers (e.g. `string Name = ""`) will always be included in the patch.
+:::
+
+## Update a single property (SetProperty)
+
+`SetProperty` updates a single scalar field in-place using SQLite's `json_set()` — no deserialization, no full document replacement. Returns `true` if the document was found and updated, `false` if not found.
+
+```csharp
+// Update a scalar field
+await store.SetProperty<User>("user-1", u => u.Age, 31, ctx.User);
+
+// Update a string field
+await store.SetProperty<User>("user-1", u => u.Email, "newemail@test.com", ctx.User);
+
+// Set a field to null
+await store.SetProperty<User>("user-1", u => u.Email, null, ctx.User);
+
+// Nested property
+await store.SetProperty<Order>("order-1", o => o.ShippingAddress.City, "Portland", ctx.Order);
+
+// Check if document existed
+bool updated = await store.SetProperty<User>("user-1", u => u.Age, 31, ctx.User);
+```
+
+**How it works:** The expression `u => u.Age` is resolved to the JSON path `$.age` (respecting `[JsonPropertyName]` attributes and naming policies). The SQL executed is:
+
+```sql
+UPDATE documents
+SET Data = json_set(Data, '$.age', json('31')), UpdatedAt = @now
+WHERE Id = @id AND TypeName = @typeName;
+```
+
+**Supported value types:** `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`, and `null`. To replace a collection or nested object, use `Set` (full replacement) or `Upsert` (merge patch).
+
+## Remove a single property (RemoveProperty)
+
+`RemoveProperty` strips a field from the stored JSON using SQLite's `json_remove()`. Returns `true` if the document was found and updated, `false` if not found. The removed field will have its C# default value on next read.
+
+```csharp
+// Remove a nullable field
+await store.RemoveProperty<User>("user-1", u => u.Email, ctx.User);
+
+// Remove a nested property
+await store.RemoveProperty<Order>("order-1", o => o.ShippingAddress.City, ctx.Order);
+
+// Remove a collection property (removes the entire array)
+await store.RemoveProperty<Order>("order-1", o => o.Tags, ctx.Order);
+```
+
+Unlike `SetProperty`, `RemoveProperty` works on any property type — scalar, nested object, or collection — because it simply removes the key from the JSON.
+
+## Choosing an update strategy
+
+| Operation | Use when | Scope | Collections |
+|---|---|---|---|
+| `SetProperty` | Changing one scalar field | Single field via `json_set` | Scalar values only |
+| `RemoveProperty` | Stripping a field from the document | Single field via `json_remove` | Any property type |
+| `Upsert` | Patching multiple fields at once | Deep merge via `json_patch` | Replaces arrays (RFC 7396) |
+| `Set` | Replacing the entire document | Full replacement | Full control |
+
+## Get a document
+
+```csharp
+var user = await store.Get<User>("user-1", ctx.User);
+```
+
+## Get all documents of a type
+
+```csharp
+var users = await store.GetAll<User>(ctx.User);
+```
+
+## Remove a document
+
+```csharp
+// By ID
+bool deleted = await store.Remove<User>("user-1");
+
+// By expression — returns number deleted
+int deleted = await store.Remove<User>(u => u.Age < 18, ctx.User);
+```
+
+## Clear all documents of a type
+
+```csharp
+int deletedCount = await store.Clear<User>();
+```

@@ -1,0 +1,83 @@
+---
+title: Projections & Streaming
+---
+
+## Projections
+
+Project query results into a different shape at the SQL level via `json_object` — no full document deserialization needed.
+
+```csharp
+// Flat projection
+var results = await store.Query<User, UserSummary>(
+    u => u.Age == 25,
+    u => new UserSummary { Name = u.Name, Email = u.Email },
+    ctx.User,
+    ctx.UserSummary);
+
+// Nested source properties
+var results = await store.Query<Order, OrderSummary>(
+    o => o.Status == "Shipped",
+    o => new OrderSummary { Customer = o.CustomerName, City = o.ShippingAddress.City },
+    ctx.Order,
+    ctx.OrderSummary);
+
+// GetAll with projection
+var results = await store.GetAll<Order, OrderDetail>(
+    o => new OrderDetail { Customer = o.CustomerName, LineCount = o.Lines.Count() },
+    ctx.Order,
+    ctx.OrderDetail);
+
+// Collection methods in projections: Count(), Any(), Count(predicate), Any(predicate)
+o => new OrderDetail { HasLines = o.Lines.Any(), GadgetCount = o.Lines.Count(l => l.ProductName == "Gadget") }
+```
+
+### Projection expressions reference
+
+| Expression | SQL Output |
+|---|---|
+| `x => new R { A = x.Name }` | `json_object('name', json_extract(Data, '$.name'))` |
+| `x => new R { C = x.Nav.Prop }` | `json_object('c', json_extract(Data, '$.nav.prop'))` |
+| `x => new R { N = x.Lines.Count() }` | `json_array_length(Data, '$.lines')` |
+| `x => new R { N = x.Lines.Count(l => ...) }` | `(SELECT COUNT(*) FROM json_each(Data, '$.lines') WHERE ...)` |
+| `x => new R { B = x.Tags.Any() }` | `CASE WHEN json_array_length(...) > 0 THEN json('true') ELSE json('false') END` |
+| `x => new R { B = x.Tags.Any(t => ...) }` | `CASE WHEN EXISTS (...) THEN json('true') ELSE json('false') END` |
+
+## Streaming
+
+All list-returning methods have `IAsyncEnumerable<T>` streaming counterparts that yield results one-at-a-time without buffering.
+
+```csharp
+// Stream all documents
+await foreach (var user in store.GetAllStream<User>(ctx.User))
+{
+    Console.WriteLine(user.Name);
+}
+
+// Stream with expression filter
+await foreach (var user in store.QueryStream<User>(u => u.Age > 30, ctx.User))
+{
+    Console.WriteLine(user.Name);
+}
+
+// Stream with projection
+await foreach (var summary in store.GetAllStream<Order, OrderSummary>(
+    o => new OrderSummary { Customer = o.CustomerName, City = o.ShippingAddress.City },
+    ctx.Order,
+    ctx.OrderSummary))
+{
+    Console.WriteLine($"{summary.Customer} in {summary.City}");
+}
+
+// Stream with raw SQL
+await foreach (var user in store.QueryStream<User>(
+    "json_extract(Data, '$.name') = @name",
+    ctx.User,
+    new { name = "Alice" }))
+{
+    Console.WriteLine(user.Name);
+}
+```
+
+:::note
+Streaming methods hold the internal semaphore for the duration of enumeration. Consume results promptly and avoid interleaving other store operations within the same `await foreach` loop.
+:::

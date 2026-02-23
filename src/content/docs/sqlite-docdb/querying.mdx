@@ -1,0 +1,110 @@
+---
+title: Querying
+---
+
+## Expression-based queries (AOT-safe)
+
+Property names are resolved from `JsonTypeInfo` metadata, so `[JsonPropertyName]` attributes and naming policies are respected automatically.
+
+```csharp
+// Equality and comparisons
+var results = await store.Query<User>(u => u.Name == "Alice", ctx.User);
+var older = await store.Query<User>(u => u.Age > 30, ctx.User);
+
+// Logical operators
+var results = await store.Query<User>(u => u.Age == 25 && u.Name == "Alice", ctx.User);
+var results = await store.Query<User>(u => u.Name == "Alice" || u.Name == "Bob", ctx.User);
+
+// Null checks
+var noEmail = await store.Query<User>(u => u.Email == null, ctx.User);
+
+// String methods
+var results = await store.Query<User>(u => u.Name.Contains("li"), ctx.User);
+var results = await store.Query<User>(u => u.Name.StartsWith("Al"), ctx.User);
+
+// Nested properties
+var results = await store.Query<Order>(o => o.ShippingAddress.City == "Portland", ctx.Order);
+
+// Collection queries with Any()
+var results = await store.Query<Order>(
+    o => o.Lines.Any(l => l.ProductName == "Widget"), ctx.Order);
+var results = await store.Query<Order>(
+    o => o.Tags.Any(t => t == "priority"), ctx.Order);
+
+// Collection queries with Count()
+var results = await store.Query<Order>(o => o.Lines.Count() > 1, ctx.Order);
+
+// DateTime comparisons (ISO 8601 formatted)
+var cutoff = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+var upcoming = await store.Query<Event>(e => e.StartDate > cutoff, ctx.Event);
+
+// Captured variables
+var targetName = "Alice";
+var results = await store.Query<User>(u => u.Name == targetName, ctx.User);
+```
+
+## Counting
+
+```csharp
+var count = await store.Count<User>(u => u.Age == 25, ctx.User);
+
+// Raw SQL
+var count = await store.Count<User>(
+    "json_extract(Data, '$.age') > @minAge",
+    new { minAge = 30 });
+```
+
+## Raw SQL queries
+
+```csharp
+var results = await store.Query<User>(
+    "json_extract(Data, '$.name') = @name",
+    ctx.User,
+    new { name = "Alice" });
+
+// With dictionary parameters (fully AOT-safe)
+var parms = new Dictionary<string, object?> { ["name"] = "Alice" };
+var results = await store.Query<User>(
+    "json_extract(Data, '$.name') = @name",
+    ctx.User,
+    parms);
+```
+
+## Removing with expressions
+
+Delete documents matching a predicate in a single SQL DELETE — no need to query first.
+
+```csharp
+// Simple predicate — returns number of deleted rows
+int deleted = await store.Remove<User>(u => u.Age < 18, ctx.User);
+
+// Complex predicates
+int deleted = await store.Remove<Order>(
+    o => o.ShippingAddress.City == "Portland" || o.Status == "Cancelled", ctx.Order);
+
+// Captured variables
+var cutoffAge = 65;
+int deleted = await store.Remove<User>(u => u.Age > cutoffAge, ctx.User);
+```
+
+## Supported Expression Reference
+
+| Expression | SQL Output |
+|---|---|
+| `u.Name == "Alice"` | `json_extract(Data, '$.name') = @p0` |
+| `u.Age > 25` | `json_extract(Data, '$.age') > @p0` |
+| `u.Age == 25 && u.Name == "Alice"` | `(... AND ...)` |
+| `u.Name == "A" \|\| u.Name == "B"` | `(... OR ...)` |
+| `!(u.Name == "Alice")` | `NOT (...)` |
+| `u.Email == null` | `... IS NULL` |
+| `u.Email != null` | `... IS NOT NULL` |
+| `u.Name.Contains("li")` | `... LIKE '%' \|\| @p0 \|\| '%'` |
+| `u.Name.StartsWith("Al")` | `... LIKE @p0 \|\| '%'` |
+| `u.Name.EndsWith("ob")` | `... LIKE '%' \|\| @p0` |
+| `o.ShippingAddress.City == "X"` | `json_extract(Data, '$.shippingAddress.city') = @p0` |
+| `o.Lines.Any(l => l.Name == "X")` | `EXISTS (SELECT 1 FROM json_each(...) WHERE ...)` |
+| `o.Tags.Any(t => t == "priority")` | `EXISTS (SELECT 1 FROM json_each(...) WHERE value = @p0)` |
+| `o.Tags.Any()` | `json_array_length(Data, '$.tags') > 0` |
+| `o.Lines.Count() > 1` | `json_array_length(Data, '$.lines') > 1` |
+| `o.Lines.Count(l => l.Qty > 2)` | `(SELECT COUNT(*) FROM json_each(...) WHERE ...)` |
+| `e.StartDate > cutoff` | `json_extract(Data, '$.startDate') > @p0` (ISO 8601) |
