@@ -1,0 +1,160 @@
+---
+title: Getting Started
+description: A dependency-free, cross-platform .NET geospatial database powered by SQLite R*Tree indexing
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+A lightweight, dependency-free geospatial database for .NET that combines SQLite R*Tree spatial indexing with custom C# geometry algorithms for high-performance spatial queries. No SpatiaLite, no NetTopologySuite — just SQLite and math.
+
+- [GitHub Repository](https://github.com/shinyorg/spatialdb)
+- <NugetBadge name="Shiny.Spatial" showLabel={true} />
+
+## Features
+
+- **Two-pass query pipeline** — R*Tree bounding box filter (SQL, O(log n)) followed by C# geometry refinement for exact results
+- **Dual coordinate systems** — WGS84 (GPS/geographic) with Haversine distance and Cartesian with Euclidean distance
+- **Full geometry type support** — Point, LineString, Polygon, MultiPoint, MultiLineString, MultiPolygon, GeometryCollection
+- **WKB serialization** — Well-Known Binary encoding/decoding for all geometry types
+- **Fluent query builder** — Chain spatial filters, property filters, sorting, and paging
+- **Bulk insert** — Transaction-wrapped batch inserts, ~20% faster than individual inserts
+- **Pre-built databases** — US states, US cities, Canadian provinces, and Canadian cities included
+- **AOT-compatible and trimmable** — works with ahead-of-time compilation on all .NET platforms
+- **Zero geospatial dependencies** — only depends on `Microsoft.Data.Sqlite`
+
+## Setup
+
+<Steps>
+1. Install the NuGet package
+
+   <NugetBadge name="Shiny.Spatial" showLabel={true} />
+
+   ```bash
+   dotnet add package Shiny.Spatial
+   ```
+
+2. Create a database and spatial table
+
+   ```csharp
+   using Shiny.Spatial.Database;
+   using Shiny.Spatial.Geometry;
+
+   using var db = new SpatialDatabase("mydata.db");
+
+   var table = db.CreateTable(
+       "cities",
+       CoordinateSystem.Wgs84,
+       new PropertyDefinition("name", PropertyType.Text),
+       new PropertyDefinition("population", PropertyType.Integer)
+   );
+   ```
+
+3. Insert features
+
+   ```csharp
+   var feature = new SpatialFeature(new Point(-104.99, 39.74))
+   {
+       Properties = { ["name"] = "Denver", ["population"] = 715000L }
+   };
+   long id = table.Insert(feature);
+   ```
+
+4. Query spatially
+
+   ```csharp
+   // Find all cities within 150km of Denver
+   var results = table.FindWithinDistance(
+       new Coordinate(-104.99, 39.74),
+       distanceMeters: 150_000
+   );
+   ```
+</Steps>
+
+## Quick Examples
+
+### Bulk insert
+
+```csharp
+var features = cities.Select(c => new SpatialFeature(new Point(c.Longitude, c.Latitude))
+{
+    Properties = { ["name"] = c.Name, ["population"] = c.Population }
+}).ToList();
+
+table.BulkInsert(features);
+```
+
+### Polygon intersection
+
+```csharp
+var colorado = new Polygon(new[]
+{
+    new Coordinate(-109.05, 37.0),
+    new Coordinate(-102.05, 37.0),
+    new Coordinate(-102.05, 41.0),
+    new Coordinate(-109.05, 41.0),
+    new Coordinate(-109.05, 37.0)
+});
+
+var citiesInColorado = table.FindIntersecting(colorado);
+```
+
+### Fluent query builder
+
+```csharp
+var center = new Coordinate(-104.99, 39.74);
+
+var results = table.Query()
+    .WithinDistance(center, 150_000)
+    .WhereProperty("population", ">", 200000L)
+    .OrderByDistance(center)
+    .Limit(10)
+    .ToList();
+```
+
+### Using a pre-built database
+
+```csharp
+using var db = new SpatialDatabase("databases/us-states.db");
+var states = db.GetTable("states");
+
+var denver = new Point(-104.99, 39.74);
+var result = states.FindIntersecting(denver);
+// result[0].Properties["name"] == "Colorado"
+```
+
+## Architecture
+
+Shiny.Spatial uses a **two-pass query pipeline** to deliver both speed and accuracy:
+
+1. **Pass 1 — R*Tree bounding box filter (SQL)**: SQLite's R*Tree index rapidly eliminates candidates whose bounding boxes don't overlap the query region. This runs entirely in SQL at O(log n).
+
+2. **Pass 2 — C# geometry refinement**: Remaining candidates are tested with exact geometry algorithms (point-in-polygon, segment intersection, Haversine distance). This eliminates false positives from the bounding box approximation.
+
+This approach eliminates 99%+ of candidates before expensive geometry checks, delivering sub-millisecond queries on datasets of 100K+ features.
+
+### SQLite Schema
+
+Each spatial table creates an R*Tree virtual table with auxiliary columns:
+
+```sql
+CREATE VIRTUAL TABLE {name}_rtree USING rtree(
+    id,
+    min_x, max_x, min_y, max_y,
+    +geometry BLOB,                -- WKB-encoded geometry
+    +prop_name TEXT,               -- user-defined property columns
+    +prop_population INTEGER
+);
+```
+
+Metadata is tracked in two internal tables:
+- `__spatial_meta` — table coordinate systems
+- `__spatial_columns` — property definitions
+
+## Supported Platforms
+
+| Framework | Support |
+|---|---|
+| .NET 10+ | Full support with AOT/trimming |
+| .NET Standard 2.0 | Full support (Xamarin, .NET Framework, etc.) |
+| iOS / Android | Full support via Microsoft.Data.Sqlite |
+| Windows / macOS / Linux | Full support |

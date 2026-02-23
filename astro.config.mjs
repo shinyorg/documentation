@@ -235,6 +235,17 @@ export default defineConfig({
           ]
         },
         {
+          label: 'Spatial',
+          items:[
+            { label: 'Getting Started', link: 'spatial/' },
+            { label: 'Geometry Types', link: 'spatial/geometry' },
+            { label: 'Database Operations', link: 'spatial/database' },
+            { label: 'Querying', link: 'spatial/queries' },
+            { label: 'Algorithms & Serialization', link: 'spatial/algorithms' },
+            { label: 'Pre-built Databases', link: 'spatial/prebuilt' }
+          ]
+        },
+        {
           label: 'Extensions',
           items:[
             { label: 'Reflector', link: 'extensions/reflector' },

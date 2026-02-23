@@ -1,0 +1,178 @@
+---
+title: Querying
+description: Spatial queries, property filters, and the fluent query builder in Shiny.Spatial
+---
+
+Shiny.Spatial provides both direct query methods for common spatial operations and a fluent query builder for composing complex queries.
+
+## Direct Query Methods
+
+### Find in envelope (bounding box)
+
+Returns all features whose bounding box overlaps the given envelope. This is the fastest query type — it uses only the R*Tree index without C# geometry refinement.
+
+```csharp
+var envelope = new Envelope(
+    minX: -109.05, maxX: -102.05,
+    minY: 37.0, maxY: 41.0
+);
+
+var results = table.FindInEnvelope(envelope);
+```
+
+### Find intersecting
+
+Returns features whose geometry actually intersects with the query geometry (two-pass: R*Tree filter + exact geometry check).
+
+```csharp
+var colorado = new Polygon(new[]
+{
+    new Coordinate(-109.05, 37.0),
+    new Coordinate(-102.05, 37.0),
+    new Coordinate(-102.05, 41.0),
+    new Coordinate(-109.05, 41.0),
+    new Coordinate(-109.05, 37.0)
+});
+
+var results = table.FindIntersecting(colorado);
+```
+
+### Find contained by
+
+Returns features that are fully contained within the given geometry.
+
+```csharp
+var results = table.FindContainedBy(colorado);
+```
+
+### Find within distance
+
+Returns features within a specified distance (in meters for WGS84) from a center point.
+
+```csharp
+var results = table.FindWithinDistance(
+    center: new Coordinate(-104.99, 39.74),
+    distanceMeters: 150_000  // 150km
+);
+```
+
+## Fluent Query Builder
+
+The fluent query builder lets you compose complex queries by chaining spatial filters, property filters, sorting, and paging.
+
+```csharp
+var results = table.Query()
+    .WithinDistance(center, 150_000)
+    .WhereProperty("population", ">", 200000L)
+    .OrderByDistance(center)
+    .Limit(10)
+    .ToList();
+```
+
+### Spatial filters
+
+| Method | Description |
+|---|---|
+| `InEnvelope(envelope)` | Bounding box filter |
+| `Intersecting(geometry)` | Geometry intersection filter |
+| `ContainedBy(container)` | Geometry containment filter |
+| `WithinDistance(center, meters)` | Distance radius filter |
+
+```csharp
+// Combine spatial filters
+var results = table.Query()
+    .InEnvelope(envelope)
+    .Intersecting(polygon)
+    .ToList();
+```
+
+### Property filters
+
+Filter by user-defined properties using standard comparison operators.
+
+```csharp
+var results = table.Query()
+    .WhereProperty("name", "=", "Denver")
+    .ToList();
+
+var results = table.Query()
+    .WhereProperty("population", ">", 500000L)
+    .ToList();
+
+var results = table.Query()
+    .WhereProperty("name", "LIKE", "%ville")
+    .ToList();
+```
+
+**Supported operators:** `=`, `!=`, `<`, `<=`, `>`, `>=`, `LIKE`
+
+:::caution
+Property-only queries (without spatial filters) require a full table scan. Always combine property filters with a spatial filter when possible for best performance.
+:::
+
+### Sorting and paging
+
+```csharp
+var center = new Coordinate(-104.99, 39.74);
+
+var results = table.Query()
+    .WithinDistance(center, 500_000)
+    .OrderByDistance(center)     // sort by distance from center
+    .Offset(10)                  // skip first 10 results
+    .Limit(10)                   // return next 10
+    .ToList();
+```
+
+### Terminal operations
+
+| Method | Returns | Description |
+|---|---|---|
+| `ToList()` | `List<SpatialFeature>` | Execute query and return all results |
+| `Count()` | `int` | Execute query and return result count |
+| `FirstOrDefault()` | `SpatialFeature?` | Execute query and return first result or null |
+
+### Complete example
+
+```csharp
+using var db = new SpatialDatabase("us-cities.db");
+var cities = db.GetTable("cities");
+
+var denver = new Coordinate(-104.99, 39.74);
+
+// Find the 5 most populous cities within 500km of Denver
+var nearbyCities = cities.Query()
+    .WithinDistance(denver, 500_000)
+    .WhereProperty("population", ">", 100000L)
+    .OrderByDistance(denver)
+    .Limit(5)
+    .ToList();
+
+foreach (var city in nearbyCities)
+{
+    Console.WriteLine($"{city.Properties["name"]} - Pop: {city.Properties["population"]}");
+}
+```
+
+## Performance Considerations
+
+Benchmark results on 100K points (Apple M2, .NET 10, in-memory SQLite):
+
+| Query Type | Mean | Allocated |
+|---|---|---|
+| `FindWithinDistance` | 183 us | 85 KB |
+| `FindContainedBy` | 987 us | 448 KB |
+| `FindIntersecting` (polygon) | 1.15 ms | 448 KB |
+| `FindInEnvelope` (small, ~1% area) | 1.82 ms | 693 KB |
+| `FindInEnvelope` (large, ~25% area) | 60.6 ms | 17.8 MB |
+| `GetById` | 9.4 us | 3.5 KB |
+
+| Fluent Query | Mean | Allocated |
+|---|---|---|
+| Distance + order + limit | 254 us | 85 KB |
+| Spatial + property filter | 1.44 ms | 426 KB |
+| Spatial only (envelope) | 2.02 ms | 852 KB |
+| Property filter only (no spatial) | 87 ms | 7.23 MB |
+
+:::tip
+Distance queries are the fastest spatial query type. Large envelope queries that match many features are the slowest. Always combine property filters with spatial filters to avoid full table scans.
+:::
