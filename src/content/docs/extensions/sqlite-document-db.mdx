@@ -16,7 +16,6 @@ A lightweight SQLite-based document store for .NET that turns SQLite into a sche
 - **`IAsyncEnumerable<T>` streaming** — yield results one-at-a-time with `GetAllStream` and `QueryStream`
 - **Expression-based JSON indexes** — up to **30x faster** queries on indexed properties
 - **SQL-level projections** — project into DTOs with `json_object` at the database level
-- **Full AOT/trimming support** — every API has a `JsonTypeInfo<T>` overload for source-generated JSON
 - **10-30x faster nested inserts** vs sqlite-net — one write per document vs multiple table inserts
 - **Transactions** — `RunInTransaction` with automatic commit/rollback
 
@@ -76,6 +75,18 @@ This library avoids both problems:
            PropertyNamingPolicy = JsonNamingPolicy.CamelCase
        };
    });
+
+   // AOT-safe — attach a JsonSerializerContext so all overloads auto-resolve type info
+   var ctx = new AppJsonContext(new JsonSerializerOptions
+   {
+       PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+   });
+   services.AddSqliteDocumentStore(opts =>
+   {
+       opts.ConnectionString = "Data Source=mydata.db";
+       opts.JsonSerializerOptions = ctx.Options;
+       opts.UseReflectionFallback = false; // throw instead of using reflection for unregistered types
+   });
    ```
 
    Or instantiate directly:
@@ -109,7 +120,8 @@ This library avoids both problems:
 |----------|------|---------|-------------|
 | `ConnectionString` | `string` (required) | — | SQLite connection string |
 | `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored (`ShortName` or `FullName`) |
-| `JsonSerializerOptions` | `JsonSerializerOptions?` | camelCase, no indent | JSON serialization settings |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | camelCase, no indent | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, overloads without `JsonTypeInfo<T>` auto-resolve type info from the context |
+| `UseReflectionFallback` | `bool` | `true` | When `false`, throws `InvalidOperationException` if a type can't be resolved from the configured `TypeInfoResolver` instead of falling back to reflection. Recommended for AOT deployments |
 
 ## AOT Setup
 
@@ -123,18 +135,92 @@ For AOT/trimming compatibility, create a source-generated JSON context:
 public partial class AppJsonContext : JsonSerializerContext;
 ```
 
-Create an instance with your desired options:
+Create an instance with your desired options and attach it to the store:
 
 ```csharp
 var ctx = new AppJsonContext(new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 });
+
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    ConnectionString = "Data Source=mydata.db",
+    JsonSerializerOptions = ctx.Options,
+    UseReflectionFallback = false // recommended for AOT
+});
 ```
 
 :::caution
 Pass `ctx.Options` to `DocumentStoreOptions.JsonSerializerOptions` so the expression visitor and serializer share the same naming configuration. Without this, property names in LINQ expressions won't match the stored JSON.
 :::
+
+### Multiple JSON contexts
+
+If your types are spread across multiple `JsonSerializerContext` classes, use `TypeInfoResolverChain` to combine them. The chain is tried in order — the first context that knows about the requested type wins.
+
+```csharp
+var options = new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+};
+options.TypeInfoResolverChain.Add(UserJsonContext.Default);
+options.TypeInfoResolverChain.Add(OrderJsonContext.Default);
+
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    ConnectionString = "Data Source=mydata.db",
+    JsonSerializerOptions = options,
+    UseReflectionFallback = false
+});
+```
+
+### Auto-resolving type info from the context
+
+When a `JsonSerializerContext` is attached to `JsonSerializerOptions`, the reflection-marked overloads (without `JsonTypeInfo<T>`) automatically resolve type info from the configured resolver. You can configure the context once and skip passing `JsonTypeInfo<T>` on every call — while retaining full AOT safety.
+
+| Without resolver (explicit `JsonTypeInfo<T>`) | With resolver (auto-resolved) |
+|---|---|
+| `store.Set(user, ctx.User)` | `store.Set(user)` |
+| `store.Set("id", user, ctx.User)` | `store.Set("id", user)` |
+| `store.Get<User>("id", ctx.User)` | `store.Get<User>("id")` |
+| `store.GetAll<User>(ctx.User)` | `store.GetAll<User>()` |
+| `store.Upsert("id", patch, ctx.User)` | `store.Upsert("id", patch)` |
+| `store.Query<User>(sql, ctx.User, parms)` | `store.Query<User>(sql, parms)` |
+| `store.GetAllStream<User>(ctx.User)` | `store.GetAllStream<User>()` |
+| `store.QueryStream<User>(sql, ctx.User, parms)` | `store.QueryStream<User>(sql, parms)` |
+
+```csharp
+// All of these are AOT-safe when ctx.Options is configured
+var id = await store.Set(new User { Name = "Alice", Age = 25 });
+var user = await store.Get<User>(id);
+var all = await store.GetAll<User>();
+await store.Upsert("user-1", new User { Name = "Alice", Age = 30 });
+
+var results = await store.Query<User>(
+    "json_extract(Data, '$.age') > @minAge",
+    new { minAge = 30 });
+
+await foreach (var u in store.GetAllStream<User>())
+    Console.WriteLine(u.Name);
+```
+
+:::note
+Expression-based queries (`store.Query(u => u.Age > 30, ctx.User)`) and projections always require explicit `JsonTypeInfo<T>` because the LINQ expression visitor needs type metadata to resolve JSON property names. Auto-resolution applies to the 8 methods in the table above.
+:::
+
+### Disabling reflection fallback
+
+By default (`UseReflectionFallback = true`), if no resolver is configured or the type isn't registered, methods fall back to reflection-based serialization. This preserves backwards compatibility.
+
+**For AOT deployments, set `UseReflectionFallback = false`.** Reflection-based serialization produces hard-to-diagnose errors under trimming and AOT. With this flag disabled, you get a clear `InvalidOperationException` at the point of use:
+
+```
+InvalidOperationException: No JsonTypeInfo registered for type 'MyApp.UnregisteredType'.
+Register it in your JsonSerializerContext or pass a JsonTypeInfo<UnregisteredType> explicitly.
+```
+
+This tells you exactly which type is missing and what to do about it. Every type must either be registered in your `JsonSerializerContext` via `[JsonSerializable(typeof(T))]` or passed with an explicit `JsonTypeInfo<T>` parameter.
 
 ## Basic CRUD Operations
 
