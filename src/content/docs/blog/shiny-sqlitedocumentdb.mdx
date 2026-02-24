@@ -1,6 +1,6 @@
 ---
 title: 'Introducing Shiny.SqliteDocumentDb — Schema-Free JSON Documents in SQLite'
-description: 'A new library that turns SQLite into a document database with LINQ queries, streaming, indexes, projections, and full AOT support — no migrations required'
+description: 'A new library that turns SQLite into a document database with a fluent LINQ query builder, streaming, pagination, aggregates, indexes, projections, and full AOT support — no migrations required'
 date: 2026-02-22
 authors:
   - allanritchie
@@ -16,7 +16,7 @@ For a lot of use cases — settings stores, offline caches, app state, anything 
 
 ## What Is It?
 
-It's a lightweight document store that sits on top of SQLite.  You give it a .NET object, it serializes it to JSON and stores it.  You query it with LINQ expressions, and it translates those to `json_extract` SQL under the hood.  No schema, no migrations, no table design.
+It's a lightweight document store that sits on top of SQLite.  You give it a .NET object, it serializes it to JSON and stores it.  You query it with a fluent LINQ query builder, and it translates those expressions to `json_extract` SQL under the hood.  No schema, no migrations, no table design.
 
 ```csharp
 var store = new SqliteDocumentStore(new DocumentStoreOptions
@@ -25,13 +25,16 @@ var store = new SqliteDocumentStore(new DocumentStoreOptions
 });
 
 // Store a document
-var id = await store.Set(new User { Name = "Alice", Age = 25 }, ctx.User);
+var id = await store.Set(new User { Name = "Alice", Age = 25 });
 
-// Query with LINQ
-var results = await store.Query<User>(u => u.Name == "Alice", ctx.User);
+// Fluent query builder
+var results = await store.Query<User>()
+    .Where(u => u.Name == "Alice")
+    .OrderBy(u => u.Age)
+    .ToList();
 ```
 
-That `ctx.User` parameter is a `JsonTypeInfo<User>` from a source-generated JSON context — every API has an AOT-safe overload.  No reflection, fully trimmable.
+All `JsonTypeInfo<T>` parameters are optional — configure a `JsonSerializerContext` once and type info is auto-resolved on every call.  No per-call `ctx.User` needed.  Full AOT, fully trimmable, zero reflection.
 
 ---
 
@@ -77,7 +80,7 @@ Android doesn't prohibit JIT, but AOT (`PublishAot` or `AndroidEnableProfiledAot
 
 | Concern | EF Core | Shiny.SqliteDocumentDb |
 |---|---|---|
-| **AOT / trimming** | Reflection-heavy; no AOT support | Every API has a `JsonTypeInfo<T>` overload; zero reflection |
+| **AOT / trimming** | Reflection-heavy; no AOT support | Optional `JsonTypeInfo<T>` on every API; auto-resolves from context |
 | **Migrations** | Required for every schema change | Not needed — schema-free JSON |
 | **Nested objects** | Normalized tables, foreign keys, JOINs | Single document, single write, single read |
 | **App bundle size** | Large dependency tree | Single dependency on `Microsoft.Data.Sqlite` |
@@ -87,29 +90,60 @@ The .NET trimmer makes this worse.  Libraries that depend on reflection break un
 
 ---
 
-## LINQ Expression Translation
+## The Fluent Query Builder
 
-This is the part I'm most proud of.  The expression visitor translates C# LINQ expressions into SQLite `json_extract` SQL, resolving property names from `JsonTypeInfo` metadata so `[JsonPropertyName]` and camelCase policies work correctly.
+This is the heart of the API.  `store.Query<T>()` returns a fluent builder where you chain `.Where()`, `.OrderBy()`, `.Paginate()`, `.Select()` — then terminate with `.ToList()`, `.ToAsyncEnumerable()`, `.Count()`, `.Any()`, `.Remove()`, or any aggregate method.
+
+```csharp
+// Filter + sort + paginate
+var page = await store.Query<User>()
+    .Where(u => u.Age > 18)
+    .OrderBy(u => u.Name)
+    .Paginate(0, 20)
+    .ToList();
+
+// Count matching documents
+var count = await store.Query<Order>()
+    .Where(o => o.Status == "Pending")
+    .Count();
+
+// Delete by predicate — returns count deleted
+int deleted = await store.Query<User>()
+    .Where(u => u.Age < 18)
+    .Remove();
+
+// Scalar aggregates
+var maxAge = await store.Query<User>().Max(u => u.Age);
+var avgAge = await store.Query<User>()
+    .Where(u => u.IsActive)
+    .Average(u => u.Age);
+```
+
+The expression visitor translates C# LINQ expressions into SQLite `json_extract` SQL, resolving property names from `JsonTypeInfo` metadata so `[JsonPropertyName]` and camelCase policies work correctly.
 
 ```csharp
 // Nested properties
-var portland = await store.Query<Order>(
-    o => o.ShippingAddress.City == "Portland", ctx.Order);
+var portland = await store.Query<Order>()
+    .Where(o => o.ShippingAddress.City == "Portland")
+    .ToList();
 // → json_extract(Data, '$.shippingAddress.city') = @p0
 
 // Collection queries with Any()
-var hasWidgets = await store.Query<Order>(
-    o => o.Lines.Any(l => l.ProductName == "Widget"), ctx.Order);
+var hasWidgets = await store.Query<Order>()
+    .Where(o => o.Lines.Any(l => l.ProductName == "Widget"))
+    .ToList();
 // → EXISTS (SELECT 1 FROM json_each(Data, '$.lines') WHERE ...)
 
 // Collection Count()
-var bigOrders = await store.Query<Order>(
-    o => o.Lines.Count() > 5, ctx.Order);
+var bigOrders = await store.Query<Order>()
+    .Where(o => o.Lines.Count() > 5)
+    .ToList();
 // → json_array_length(Data, '$.lines') > 5
 
 // String methods
-var matches = await store.Query<User>(
-    u => u.Name.Contains("li"), ctx.User);
+var matches = await store.Query<User>()
+    .Where(u => u.Name.Contains("li"))
+    .ToList();
 // → LIKE '%' || @p0 || '%'
 ```
 
@@ -119,32 +153,79 @@ Equality, comparisons, logical operators (`&&`, `||`, `!`), null checks, `DateTi
 
 ## SQL-Level Projections
 
-Need just a few fields from a large document?  Projections extract only the selected properties at the database level using `json_object` — no full deserialization.
+Need just a few fields from a large document?  Chain `.Select()` to extract only the selected properties at the database level using `json_object` — no full deserialization.
 
 ```csharp
-var summaries = await store.Query<Order, OrderSummary>(
-    o => o.Status == "Shipped",
-    o => new OrderSummary
+var summaries = await store.Query<Order>()
+    .Where(o => o.Status == "Shipped")
+    .OrderBy(o => o.CustomerName)
+    .Paginate(0, 50)
+    .Select(o => new OrderSummary
     {
         Customer = o.CustomerName,
         City = o.ShippingAddress.City,
         LineCount = o.Lines.Count()
-    },
-    ctx.Order,
-    ctx.OrderSummary);
+    })
+    .ToList();
 ```
 
-That `Lines.Count()` becomes `json_array_length(Data, '$.lines')` in SQL.  You can also use `Any()`, `Any(predicate)`, and `Count(predicate)` inside selectors.
+That `Lines.Count()` becomes `json_array_length(Data, '$.lines')` in SQL.  You can also use `Any()`, `Any(predicate)`, `Count(predicate)`, `Sum()`, `Max()`, `Min()`, and `Average()` inside selectors.
+
+---
+
+## Aggregate Projections
+
+For GROUP BY queries, use the `Sql` marker class inside `.Select()`:
+
+```csharp
+var stats = await store.Query<Order>()
+    .Where(o => o.Status != "Cancelled")
+    .Select(o => new OrderStats
+    {
+        Status = o.Status,            // GROUP BY column
+        OrderCount = Sql.Count(),     // COUNT(*)
+        TotalRevenue = Sql.Sum(o.TotalAmount),
+    })
+    .ToList();
+```
+
+Non-aggregate columns are automatically grouped.  `Sql.Count()`, `Sql.Max()`, `Sql.Min()`, `Sql.Sum()`, `Sql.Avg()` — all available.
+
+---
+
+## Surgical Field Updates
+
+Don't always need to replace an entire document.  `SetProperty` updates a single field in-place via `json_set()`, and `RemoveProperty` strips a field via `json_remove()` — both without deserializing the document.
+
+```csharp
+// Update a single field
+await store.SetProperty<User>("user-1", u => u.Age, 31);
+
+// Nested paths work too
+await store.SetProperty<Order>("order-1", o => o.ShippingAddress.City, "Portland");
+
+// Strip a field entirely
+await store.RemoveProperty<User>("user-1", u => u.Email);
+```
+
+For multi-field patches, `Upsert` does RFC 7396 JSON Merge Patch — deep-merging only the provided fields while preserving everything else:
+
+```csharp
+await store.Upsert("user-1", new User { Name = "Alice", Age = 31 });
+// Email and other fields are preserved
+```
 
 ---
 
 ## Streaming with IAsyncEnumerable
 
-Every method that returns `IReadOnlyList<T>` has a streaming counterpart returning `IAsyncEnumerable<T>`.  Results yield one-at-a-time without buffering the entire set into memory.
+Use `.ToAsyncEnumerable()` instead of `.ToList()` to stream results one-at-a-time without buffering the entire set into memory.
 
 ```csharp
-await foreach (var order in store.QueryStream<Order>(
-    o => o.Status == "Pending", ctx.Order))
+await foreach (var order in store.Query<Order>()
+    .Where(o => o.Status == "Pending")
+    .OrderBy(o => o.CustomerName)
+    .ToAsyncEnumerable())
 {
     await ProcessOrder(order);
 }
@@ -181,9 +262,7 @@ await store.CreateIndexAsync<Order>(o => o.ShippingAddress.City, ctx.Order);
 
 ## AOT and Trimming — First Class
 
-Every API method has a `JsonTypeInfo<T>` overload.  The reflection-based overloads exist for convenience but are marked with `[RequiresUnreferencedCode]` and `[RequiresDynamicCode]` so the trimmer will warn you.
-
-Setup is straightforward:
+All `JsonTypeInfo<T>` parameters are optional with `= null` defaults.  Configure a `JsonSerializerContext` once at setup and every method auto-resolves type info — no per-call parameters needed.
 
 ```csharp
 [JsonSerializable(typeof(User))]
@@ -194,9 +273,22 @@ var ctx = new AppJsonContext(new JsonSerializerOptions
 {
     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
 });
+
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    ConnectionString = "Data Source=mydata.db",
+    JsonSerializerOptions = ctx.Options,
+    UseReflectionFallback = false // recommended for AOT
+});
+
+// Now every call is AOT-safe without passing JsonTypeInfo explicitly
+var id = await store.Set(new User { Name = "Alice", Age = 25 });
+var users = await store.Query<User>().Where(u => u.Age > 18).ToList();
 ```
 
 Pass `ctx.Options` to `DocumentStoreOptions.JsonSerializerOptions` so the expression visitor and serializer share the same naming configuration.  That's the one thing people forget — and then their LINQ queries silently return zero results because property names don't match.
+
+Set `UseReflectionFallback = false` for AOT deployments.  Instead of opaque runtime failures, you get a clear `InvalidOperationException` telling you exactly which type is missing from your `JsonSerializerContext`.
 
 ---
 
@@ -207,8 +299,8 @@ Atomic multi-document operations with automatic commit/rollback:
 ```csharp
 await store.RunInTransaction(async tx =>
 {
-    await tx.Set("order-1", order, ctx.Order);
-    await tx.Set("user-1", user, ctx.User);
+    await tx.Set("order-1", order);
+    await tx.Set("user-1", user);
     // Exception → automatic rollback
 });
 ```
@@ -233,6 +325,7 @@ services.AddSqliteDocumentStore(opts =>
     opts.ConnectionString = "Data Source=mydata.db";
     opts.TypeNameResolution = TypeNameResolution.FullName;
     opts.JsonSerializerOptions = ctx.Options;
+    opts.UseReflectionFallback = false;
 });
 ```
 
@@ -248,7 +341,6 @@ services.AddSqliteDocumentStore(opts =>
 - Any scenario where you want to store and query object graphs without table design
 
 **Not the best fit:**
-- Complex reporting queries with aggregations across types
 - Bulk operations on millions of rows where raw SQL shines
 - Simple flat-table CRUD where sqlite-net is already working well
 
@@ -260,4 +352,4 @@ services.AddSqliteDocumentStore(opts =>
 dotnet add package Shiny.SqliteDocumentDb
 ```
 
-Full documentation at [shinylib.net/extensions/sqlite-document-db](https://shinylib.net/extensions/sqlite-document-db/) and the [GitHub repository](https://github.com/shinyorg/SqliteDocumentDb) has the complete README with benchmarks, expression reference tables, and examples.
+Full documentation at [shinylib.net/sqlite-docdb](https://shinylib.net/sqlite-docdb/) and the [GitHub repository](https://github.com/shinyorg/SqliteDocumentDb) has the complete README with benchmarks, expression reference tables, and examples.
