@@ -12,14 +12,15 @@ A lightweight SQLite-based document store for .NET that turns SQLite into a sche
 ## Features
 
 - **Zero schema, zero migrations** — store objects as JSON documents
-- **LINQ expression queries** — `o => o.ShippingAddress.City == "Portland"` translates to `json_extract` SQL automatically
-- **`IAsyncEnumerable<T>` streaming** — yield results one-at-a-time with `GetAllStream` and `QueryStream`
+- **Fluent query builder** — `store.Query<User>().Where(u => u.Age > 30).OrderBy(u => u.Name).Paginate(0, 20).ToList()` with full LINQ expression support for nested properties, `Any()`, `Count()`, string methods, null checks, and captured variables
+- **`IAsyncEnumerable<T>` streaming** — yield results one-at-a-time with `.ToAsyncEnumerable()`
 - **Expression-based JSON indexes** — up to **30x faster** queries on indexed properties
-- **SQL-level projections** — project into DTOs with `json_object` at the database level
-- **Aggregates** — scalar Max, Min, Sum, Average with optional predicate filters; aggregate projections with automatic GROUP BY via `Sql.*` markers; collection-level Sum, Min, Max, Average on child collections
-- **Expression-based ordering** — `OrderBy<T>.Ascending(u => u.Age)` translates to `ORDER BY json_extract` SQL, available on all query and GetAll methods
+- **SQL-level projections** — project into DTOs with `json_object` via `.Select()` at the database level
+- **Aggregates** — scalar `.Max()`, `.Min()`, `.Sum()`, `.Average()` as terminal methods; aggregate projections with automatic GROUP BY via `Sql.*` markers; collection-level Sum, Min, Max, Average on child collections
+- **Ordering** — `.OrderBy(u => u.Age)` and `.OrderByDescending(u => u.Name)` on the fluent query builder
+- **Pagination** — `.Paginate(offset, take)` translates to SQL `LIMIT`/`OFFSET`
 - **Surgical field updates** — `SetProperty` updates a single JSON field via `json_set()` without deserialization. `RemoveProperty` strips a field via `json_remove()`. Both support nested paths
-- **Full AOT/trimming support** — every API has a `JsonTypeInfo<T>` overload for source-generated JSON. Configure a `JsonSerializerContext` once and all overloads auto-resolve type info — no per-call `JsonTypeInfo<T>` needed. Set `UseReflectionFallback = false` to catch missing registrations with clear exceptions
+- **Full AOT/trimming support** — all `JsonTypeInfo<T>` parameters are optional and auto-resolve from a configured `JsonSerializerContext`. Set `UseReflectionFallback = false` to catch missing registrations with clear exceptions
 - **10-30x faster nested inserts** vs sqlite-net — one write per document vs multiple table inserts
 - **Transactions** — `RunInTransaction` with automatic commit/rollback
 
@@ -36,7 +37,7 @@ Entity Framework Core is a natural choice for server-side .NET, but it becomes a
 
 | Concern | EF Core | Shiny.SqliteDocumentDb |
 |---|---|---|
-| **AOT / trimming** | Reflection-heavy; no AOT support | Every API has a `JsonTypeInfo<T>` overload; zero reflection |
+| **AOT / trimming** | Reflection-heavy; no AOT support | All `JsonTypeInfo<T>` params optional; auto-resolves from context |
 | **Migrations** | Required for every schema change | Not needed — schema-free JSON |
 | **Nested objects** | Normalized tables, foreign keys, JOINs | Single document, single write, single read |
 | **App bundle size** | Large dependency tree | Single dependency on `Microsoft.Data.Sqlite` |
@@ -80,7 +81,7 @@ This library avoids both problems:
        };
    });
 
-   // AOT-safe — attach a JsonSerializerContext so all overloads auto-resolve type info
+   // AOT-safe — attach a JsonSerializerContext so all methods auto-resolve type info
    var ctx = new AppJsonContext(new JsonSerializerOptions
    {
        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -107,12 +108,20 @@ This library avoids both problems:
    {
        public async Task SaveUser(User user)
        {
-           await store.Set("user-1", user, ctx.User);
+           await store.Set("user-1", user);
        }
 
        public async Task<User?> GetUser(string id)
        {
-           return await store.Get<User>(id, ctx.User);
+           return await store.Get<User>(id);
+       }
+
+       public async Task<IReadOnlyList<User>> GetActiveUsers()
+       {
+           return await store.Query<User>()
+               .Where(u => u.IsActive)
+               .OrderBy(u => u.Name)
+               .ToList();
        }
    }
    ```
@@ -124,5 +133,6 @@ This library avoids both problems:
 |----------|------|---------|-------------|
 | `ConnectionString` | `string` (required) | — | SQLite connection string |
 | `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored (`ShortName` or `FullName`) |
-| `JsonSerializerOptions` | `JsonSerializerOptions?` | camelCase, no indent | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, overloads without `JsonTypeInfo<T>` auto-resolve type info from the context |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, all methods auto-resolve type info from the context |
 | `UseReflectionFallback` | `bool` | `true` | When `false`, throws `InvalidOperationException` if a type can't be resolved from the configured `TypeInfoResolver` instead of falling back to reflection. Recommended for AOT deployments |
+| `Logging` | `Action<string>?` | `null` | Callback invoked with every SQL statement executed |

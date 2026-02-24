@@ -4,31 +4,35 @@ title: Projections & Streaming
 
 ## Projections
 
-Project query results into a different shape at the SQL level via `json_object` — no full document deserialization needed.
+Project query results into a different shape at the SQL level via `json_object` using `.Select()` — no full document deserialization needed.
 
 ```csharp
 // Flat projection
-var results = await store.Query<User, UserSummary>(
-    u => u.Age == 25,
-    u => new UserSummary { Name = u.Name, Email = u.Email },
-    ctx.User,
-    ctx.UserSummary);
+var results = await store.Query<User>()
+    .Where(u => u.Age == 25)
+    .Select(u => new UserSummary { Name = u.Name, Email = u.Email })
+    .ToList();
 
 // Nested source properties
-var results = await store.Query<Order, OrderSummary>(
-    o => o.Status == "Shipped",
-    o => new OrderSummary { Customer = o.CustomerName, City = o.ShippingAddress.City },
-    ctx.Order,
-    ctx.OrderSummary);
+var results = await store.Query<Order>()
+    .Where(o => o.Status == "Shipped")
+    .Select(o => new OrderSummary { Customer = o.CustomerName, City = o.ShippingAddress.City })
+    .ToList();
 
-// GetAll with projection
-var results = await store.GetAll<Order, OrderDetail>(
-    o => new OrderDetail { Customer = o.CustomerName, LineCount = o.Lines.Count() },
-    ctx.Order,
-    ctx.OrderDetail);
+// All documents with projection
+var results = await store.Query<Order>()
+    .Select(o => new OrderDetail { Customer = o.CustomerName, LineCount = o.Lines.Count() })
+    .ToList();
+
+// With ordering and pagination
+var results = await store.Query<User>()
+    .OrderBy(u => u.Name)
+    .Paginate(0, 10)
+    .Select(u => new UserSummary { Name = u.Name, Email = u.Email })
+    .ToList();
 
 // Collection methods in projections: Count(), Any(), Count(predicate), Any(predicate)
-o => new OrderDetail { HasLines = o.Lines.Any(), GadgetCount = o.Lines.Count(l => l.ProductName == "Gadget") }
+// .Select(o => new OrderDetail { HasLines = o.Lines.Any(), GadgetCount = o.Lines.Count(l => l.ProductName == "Gadget") })
 ```
 
 ### Projection expressions reference
@@ -48,35 +52,46 @@ o => new OrderDetail { HasLines = o.Lines.Any(), GadgetCount = o.Lines.Count(l =
 
 ## Streaming
 
-All list-returning methods have `IAsyncEnumerable<T>` streaming counterparts that yield results one-at-a-time without buffering.
+Use `.ToAsyncEnumerable()` instead of `.ToList()` to stream results one-at-a-time without buffering the entire result set into memory.
 
 ```csharp
 // Stream all documents
-await foreach (var user in store.GetAllStream<User>(ctx.User))
+await foreach (var user in store.Query<User>().ToAsyncEnumerable())
 {
     Console.WriteLine(user.Name);
 }
 
-// Stream with expression filter
-await foreach (var user in store.QueryStream<User>(u => u.Age > 30, ctx.User))
+// Stream with filter and sort
+await foreach (var user in store.Query<User>()
+    .Where(u => u.Age > 30)
+    .OrderBy(u => u.Name)
+    .ToAsyncEnumerable())
 {
     Console.WriteLine(user.Name);
 }
 
 // Stream with projection
-await foreach (var summary in store.GetAllStream<Order, OrderSummary>(
-    o => new OrderSummary { Customer = o.CustomerName, City = o.ShippingAddress.City },
-    ctx.Order,
-    ctx.OrderSummary))
+await foreach (var summary in store.Query<Order>()
+    .Where(o => o.Status == "Shipped")
+    .Select(o => new OrderSummary { Customer = o.CustomerName, City = o.ShippingAddress.City })
+    .ToAsyncEnumerable())
 {
     Console.WriteLine($"{summary.Customer} in {summary.City}");
+}
+
+// Stream with pagination
+await foreach (var user in store.Query<User>()
+    .OrderBy(u => u.Name)
+    .Paginate(0, 50)
+    .ToAsyncEnumerable())
+{
+    Console.WriteLine(user.Name);
 }
 
 // Stream with raw SQL
 await foreach (var user in store.QueryStream<User>(
     "json_extract(Data, '$.name') = @name",
-    ctx.User,
-    new { name = "Alice" }))
+    parameters: new { name = "Alice" }))
 {
     Console.WriteLine(user.Name);
 }

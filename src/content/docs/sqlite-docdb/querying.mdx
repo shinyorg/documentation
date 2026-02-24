@@ -2,100 +2,111 @@
 title: Querying
 ---
 
-## Expression-based queries (AOT-safe)
+## Fluent Query Builder
+
+The fluent query builder is the primary way to query documents. Start with `store.Query<T>()` and chain builder methods, then terminate with a materialization method.
+
+### Builder methods (non-executing)
+
+| Method | Description |
+|---|---|
+| `.Where(predicate)` | Filter by LINQ expression. Multiple calls combine with AND. |
+| `.OrderBy(selector)` | Sort ascending by property. |
+| `.OrderByDescending(selector)` | Sort descending by property. |
+| `.GroupBy(selector)` | Group by property (for aggregate projections with `Sql.*` markers). |
+| `.Paginate(offset, take)` | Limit results with SQL `LIMIT`/`OFFSET`. |
+| `.Select(selector, resultTypeInfo?)` | Project into a different shape via `json_object`. |
+
+### Terminal methods (execute SQL)
+
+| Method | Returns | Description |
+|---|---|---|
+| `.ToList()` | `Task<IReadOnlyList<T>>` | Materialize all results into a list. |
+| `.ToAsyncEnumerable()` | `IAsyncEnumerable<T>` | Stream results one-at-a-time without buffering. |
+| `.Count()` | `Task<long>` | Count matching documents. |
+| `.Any()` | `Task<bool>` | Check if any documents match. |
+| `.Remove()` | `Task<int>` | Delete matching documents and return count deleted. |
+| `.Max(selector)` | `Task<TValue>` | Maximum value of a property. |
+| `.Min(selector)` | `Task<TValue>` | Minimum value of a property. |
+| `.Sum(selector)` | `Task<TValue>` | Sum of a property. |
+| `.Average(selector)` | `Task<double>` | Average of a property. |
+
+## Expression-based queries
 
 Property names are resolved from `JsonTypeInfo` metadata, so `[JsonPropertyName]` attributes and naming policies are respected automatically.
 
 ```csharp
 // Equality and comparisons
-var results = await store.Query<User>(u => u.Name == "Alice", ctx.User);
-var older = await store.Query<User>(u => u.Age > 30, ctx.User);
+var results = await store.Query<User>().Where(u => u.Name == "Alice").ToList();
+var older = await store.Query<User>().Where(u => u.Age > 30).ToList();
 
 // Logical operators
-var results = await store.Query<User>(u => u.Age == 25 && u.Name == "Alice", ctx.User);
-var results = await store.Query<User>(u => u.Name == "Alice" || u.Name == "Bob", ctx.User);
+var results = await store.Query<User>().Where(u => u.Age == 25 && u.Name == "Alice").ToList();
+var results = await store.Query<User>().Where(u => u.Name == "Alice" || u.Name == "Bob").ToList();
 
 // Null checks
-var noEmail = await store.Query<User>(u => u.Email == null, ctx.User);
+var noEmail = await store.Query<User>().Where(u => u.Email == null).ToList();
 
 // String methods
-var results = await store.Query<User>(u => u.Name.Contains("li"), ctx.User);
-var results = await store.Query<User>(u => u.Name.StartsWith("Al"), ctx.User);
+var results = await store.Query<User>().Where(u => u.Name.Contains("li")).ToList();
+var results = await store.Query<User>().Where(u => u.Name.StartsWith("Al")).ToList();
 
 // Nested properties
-var results = await store.Query<Order>(o => o.ShippingAddress.City == "Portland", ctx.Order);
+var results = await store.Query<Order>().Where(o => o.ShippingAddress.City == "Portland").ToList();
 
 // Collection queries with Any()
-var results = await store.Query<Order>(
-    o => o.Lines.Any(l => l.ProductName == "Widget"), ctx.Order);
-var results = await store.Query<Order>(
-    o => o.Tags.Any(t => t == "priority"), ctx.Order);
+var results = await store.Query<Order>()
+    .Where(o => o.Lines.Any(l => l.ProductName == "Widget"))
+    .ToList();
+var results = await store.Query<Order>()
+    .Where(o => o.Tags.Any(t => t == "priority"))
+    .ToList();
 
 // Collection queries with Count()
-var results = await store.Query<Order>(o => o.Lines.Count() > 1, ctx.Order);
+var results = await store.Query<Order>().Where(o => o.Lines.Count() > 1).ToList();
 
 // DateTime comparisons (ISO 8601 formatted)
 var cutoff = new DateTime(2025, 1, 1, 0, 0, 0, DateTimeKind.Utc);
-var upcoming = await store.Query<Event>(e => e.StartDate > cutoff, ctx.Event);
+var upcoming = await store.Query<Event>().Where(e => e.StartDate > cutoff).ToList();
 
 // Captured variables
 var targetName = "Alice";
-var results = await store.Query<User>(u => u.Name == targetName, ctx.User);
+var results = await store.Query<User>().Where(u => u.Name == targetName).ToList();
 ```
 
 ## Counting
 
 ```csharp
-var count = await store.Count<User>(u => u.Age == 25, ctx.User);
+var count = await store.Query<User>().Where(u => u.Age == 25).Count();
 
-// Raw SQL
+// Check existence
+var any = await store.Query<User>().Where(u => u.Name == "Alice").Any();
+
+// Raw SQL count
 var count = await store.Count<User>(
     "json_extract(Data, '$.age') > @minAge",
     new { minAge = 30 });
 ```
 
-## Raw SQL queries
-
-```csharp
-var results = await store.Query<User>(
-    "json_extract(Data, '$.name') = @name",
-    ctx.User,
-    new { name = "Alice" });
-
-// With dictionary parameters (fully AOT-safe)
-var parms = new Dictionary<string, object?> { ["name"] = "Alice" };
-var results = await store.Query<User>(
-    "json_extract(Data, '$.name') = @name",
-    ctx.User,
-    parms);
-```
-
 ## Ordering
 
-Sort results at the SQL level using `OrderBy<T>`. Works with all `GetAll`, `Query`, `GetAllStream`, and `QueryStream` methods that accept expression predicates.
+Sort results at the SQL level using `.OrderBy()` and `.OrderByDescending()`.
 
 ```csharp
 // Ascending order
-var youngest = await store.GetAll(ctx.User, OrderBy<User>.Ascending(u => u.Age));
+var youngest = await store.Query<User>().OrderBy(u => u.Age).ToList();
 
 // Descending order
-var oldest = await store.GetAll(ctx.User, OrderBy<User>.Descending(u => u.Age));
+var oldest = await store.Query<User>().OrderByDescending(u => u.Age).ToList();
 
-// Combined with query predicate
-var results = await store.Query<User>(
-    u => u.Age > 25,
-    ctx.User,
-    OrderBy<User>.Ascending(u => u.Name));
-
-// With projections
-var results = await store.GetAll<User, UserSummary>(
-    u => new UserSummary { Name = u.Name, Email = u.Email },
-    ctx.User,
-    ctx.UserSummary,
-    OrderBy<User>.Ascending(u => u.Name));
+// Combined with filter
+var results = await store.Query<User>()
+    .Where(u => u.Age > 25)
+    .OrderBy(u => u.Name)
+    .ToList();
 
 // With streaming
-await foreach (var user in store.GetAllStream(ctx.User, OrderBy<User>.Descending(u => u.Age)))
+await foreach (var user in store.Query<User>().OrderByDescending(u => u.Age).ToAsyncEnumerable())
 {
     Console.WriteLine(user.Name);
 }
@@ -107,7 +118,46 @@ SELECT Data FROM documents WHERE TypeName = @typeName
 ORDER BY json_extract(Data, '$.age') ASC;
 ```
 
-The `orderBy` parameter is optional (`null` by default) so all existing call sites continue to work without changes.
+## Pagination
+
+`Paginate(offset, take)` appends `LIMIT {take} OFFSET {offset}` to the generated SQL. It is a builder method that does not execute the query — it stores state until a terminal method is called.
+
+```csharp
+// First page (items 0-19)
+var page1 = await store.Query<User>()
+    .OrderBy(u => u.Name)
+    .Paginate(0, 20)
+    .ToList();
+
+// Second page (items 20-39)
+var page2 = await store.Query<User>()
+    .OrderBy(u => u.Name)
+    .Paginate(20, 20)
+    .ToList();
+
+// With filtering
+var page = await store.Query<User>()
+    .Where(u => u.Age >= 18)
+    .OrderBy(u => u.Age)
+    .Paginate(0, 10)
+    .ToList();
+
+// With projection
+var page = await store.Query<User>()
+    .OrderBy(u => u.Name)
+    .Paginate(0, 10)
+    .Select(u => new UserSummary { Name = u.Name, Email = u.Email })
+    .ToList();
+
+// With streaming
+await foreach (var user in store.Query<User>()
+    .OrderBy(u => u.Name)
+    .Paginate(0, 50)
+    .ToAsyncEnumerable())
+{
+    Console.WriteLine(user.Name);
+}
+```
 
 ## Removing with expressions
 
@@ -115,15 +165,38 @@ Delete documents matching a predicate in a single SQL DELETE — no need to quer
 
 ```csharp
 // Simple predicate — returns number of deleted rows
-int deleted = await store.Remove<User>(u => u.Age < 18, ctx.User);
+int deleted = await store.Query<User>().Where(u => u.Age < 18).Remove();
 
 // Complex predicates
-int deleted = await store.Remove<Order>(
-    o => o.ShippingAddress.City == "Portland" || o.Status == "Cancelled", ctx.Order);
+int deleted = await store.Query<Order>()
+    .Where(o => o.ShippingAddress.City == "Portland" || o.Status == "Cancelled")
+    .Remove();
 
 // Captured variables
 var cutoffAge = 65;
-int deleted = await store.Remove<User>(u => u.Age > cutoffAge, ctx.User);
+int deleted = await store.Query<User>().Where(u => u.Age > cutoffAge).Remove();
+```
+
+## Raw SQL queries
+
+```csharp
+var results = await store.Query<User>(
+    "json_extract(Data, '$.name') = @name",
+    parameters: new { name = "Alice" });
+
+// With dictionary parameters (fully AOT-safe)
+var parms = new Dictionary<string, object?> { ["name"] = "Alice" };
+var results = await store.Query<User>(
+    "json_extract(Data, '$.name') = @name",
+    parameters: parms);
+
+// Streaming with raw SQL
+await foreach (var user in store.QueryStream<User>(
+    "json_extract(Data, '$.name') = @name",
+    parameters: new { name = "Alice" }))
+{
+    Console.WriteLine(user.Name);
+}
 ```
 
 ## Supported Expression Reference

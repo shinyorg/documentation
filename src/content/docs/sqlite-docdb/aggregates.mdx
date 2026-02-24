@@ -4,16 +4,16 @@ title: Aggregates
 
 ## Scalar Aggregates
 
-Compute a single aggregate value across all documents of a type, or filtered by a predicate. All scalar aggregates are AOT-safe.
+Compute a single aggregate value across documents using terminal methods on the fluent query builder.
 
 ### Max / Min
 
 ```csharp
-var maxAge = await store.Max<User, int>(u => u.Age, ctx.User);
-var minAge = await store.Min<User, int>(u => u.Age, ctx.User);
+var maxAge = await store.Query<User>().Max(u => u.Age);
+var minAge = await store.Query<User>().Min(u => u.Age);
 
 // With predicate filter
-var maxAge = await store.Max<User, int>(u => u.Age < 35, u => u.Age, ctx.User);
+var maxAge = await store.Query<User>().Where(u => u.Age < 35).Max(u => u.Age);
 ```
 
 Generated SQL:
@@ -24,20 +24,19 @@ SELECT MAX(json_extract(Data, '$.age')) FROM documents WHERE TypeName = @typeNam
 ### Sum
 
 ```csharp
-var totalAge = await store.Sum<User, int>(u => u.Age, ctx.User);
-var totalPrice = await store.Sum<Product, decimal>(p => p.Price, ctx.Product);
+var totalAge = await store.Query<User>().Sum(u => u.Age);
 
 // With predicate filter
-var over25 = await store.Sum<User, int>(u => u.Age > 25, u => u.Age, ctx.User);
+var over25 = await store.Query<User>().Where(u => u.Age > 25).Sum(u => u.Age);
 ```
 
 ### Average
 
 ```csharp
-var avgAge = await store.Average<User>(u => u.Age, ctx.User);
+var avgAge = await store.Query<User>().Average(u => u.Age);
 
 // With predicate filter
-var avgAge = await store.Average<User>(u => u.Age > 25, u => u.Age, ctx.User);
+var avgAge = await store.Query<User>().Where(u => u.Age > 25).Average(u => u.Age);
 ```
 
 Returns `double`. Returns `0d` for empty result sets.
@@ -46,7 +45,7 @@ Returns `double`. Returns `0d` for empty result sets.
 
 ## Aggregate Projections (GROUP BY)
 
-Use the `Sql` marker class to build aggregate projections with automatic GROUP BY. Non-aggregate columns are automatically grouped.
+Use the `Sql` marker class to build aggregate projections with automatic GROUP BY via `.Select()`. Non-aggregate columns are automatically grouped.
 
 ### Available Sql Markers
 
@@ -61,14 +60,13 @@ Use the `Sql` marker class to build aggregate projections with automatic GROUP B
 ### Group By with Count
 
 ```csharp
-var results = await store.Aggregate<Order, OrderStats>(
-    o => new OrderStats
+var results = await store.Query<Order>()
+    .Select(o => new OrderStats
     {
         Status = o.Status,            // GROUP BY column
         OrderCount = Sql.Count(),     // COUNT(*)
-    },
-    ctx.Order,
-    ctx.OrderStats);
+    })
+    .ToList();
 // Status = "Shipped", OrderCount = 2
 // Status = "Pending", OrderCount = 1
 ```
@@ -78,50 +76,56 @@ var results = await store.Aggregate<Order, OrderStats>(
 When every column uses a `Sql.*` marker, no GROUP BY is generated — the query returns a single summary row.
 
 ```csharp
-var results = await store.Aggregate<Product, PriceSummary>(
-    p => new PriceSummary
+var results = await store.Query<Product>()
+    .Select(p => new PriceSummary
     {
         TotalCount = Sql.Count(),
         MaxPrice = Sql.Max(p.Price),
         MinPrice = Sql.Min(p.Price),
         SumPrice = Sql.Sum(p.Price),
         AvgPrice = Sql.Avg(p.Price),
-    },
-    ctx.Product,
-    ctx.PriceSummary);
+    })
+    .ToList();
 ```
 
 ### With Predicate Filter
 
 ```csharp
-var results = await store.Aggregate<Order, OrderStats>(
-    o => o.Status == "Shipped",          // WHERE filter
-    o => new OrderStats
+var results = await store.Query<Order>()
+    .Where(o => o.Status == "Shipped")          // WHERE filter
+    .Select(o => new OrderStats
     {
         Status = o.Status,
         OrderCount = Sql.Count(),
-    },
-    ctx.Order,
-    ctx.OrderStats);
+    })
+    .ToList();
+```
+
+### Explicit GroupBy
+
+```csharp
+var results = await store.Query<Order>()
+    .GroupBy(o => o.Status)
+    .Select(o => new OrderStats { Status = o.Status, OrderCount = Sql.Count() })
+    .ToList();
 ```
 
 ---
 
 ## Collection Aggregates in Projections
 
-Aggregate over child collections within a single document using standard LINQ methods in projection expressions.
+Aggregate over child collections within a single document using standard LINQ methods in `.Select()` projection expressions.
 
 ### Sum on Collection
 
 ```csharp
-var results = await store.GetAll<Order, OrderLineAggregates>(
-    o => new OrderLineAggregates
+var results = await store.Query<Order>()
+    .Select(o => new OrderLineAggregates
     {
         Customer = o.CustomerName,
         TotalQty = o.Lines.Sum(l => l.Quantity)
-    },
-    ctx.Order,
-    ctx.OrderLineAggregates);
+    })
+    .ToList();
 ```
 
 Generated SQL:
@@ -135,12 +139,14 @@ SELECT json_object(
 ### Max / Min on Collection
 
 ```csharp
-o => new OrderLineAggregates
-{
-    Customer = o.CustomerName,
-    MaxPrice = o.Lines.Max(l => l.UnitPrice),
-    MinPrice = o.Lines.Min(l => l.UnitPrice)
-}
+var results = await store.Query<Order>()
+    .Select(o => new OrderLineAggregates
+    {
+        Customer = o.CustomerName,
+        MaxPrice = o.Lines.Max(l => l.UnitPrice),
+        MinPrice = o.Lines.Min(l => l.UnitPrice)
+    })
+    .ToList();
 ```
 
 ### Multiple Collection Aggregates
@@ -148,17 +154,16 @@ o => new OrderLineAggregates
 Combine multiple collection aggregates in a single projection:
 
 ```csharp
-var results = await store.Query<Order, OrderLineAggregates>(
-    o => o.CustomerName == "Alice",
-    o => new OrderLineAggregates
+var results = await store.Query<Order>()
+    .Where(o => o.CustomerName == "Alice")
+    .Select(o => new OrderLineAggregates
     {
         Customer = o.CustomerName,
         TotalQty = o.Lines.Sum(l => l.Quantity),
         MaxPrice = o.Lines.Max(l => l.UnitPrice),
         MinPrice = o.Lines.Min(l => l.UnitPrice),
-    },
-    ctx.Order,
-    ctx.OrderLineAggregates);
+    })
+    .ToList();
 ```
 
 ### Collection Aggregate Reference
