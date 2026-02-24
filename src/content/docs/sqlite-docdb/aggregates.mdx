@@ -1,0 +1,171 @@
+---
+title: Aggregates
+---
+
+## Scalar Aggregates
+
+Compute a single aggregate value across all documents of a type, or filtered by a predicate. All scalar aggregates are AOT-safe.
+
+### Max / Min
+
+```csharp
+var maxAge = await store.Max<User, int>(u => u.Age, ctx.User);
+var minAge = await store.Min<User, int>(u => u.Age, ctx.User);
+
+// With predicate filter
+var maxAge = await store.Max<User, int>(u => u.Age < 35, u => u.Age, ctx.User);
+```
+
+Generated SQL:
+```sql
+SELECT MAX(json_extract(Data, '$.age')) FROM documents WHERE TypeName = @typeName;
+```
+
+### Sum
+
+```csharp
+var totalAge = await store.Sum<User, int>(u => u.Age, ctx.User);
+var totalPrice = await store.Sum<Product, decimal>(p => p.Price, ctx.Product);
+
+// With predicate filter
+var over25 = await store.Sum<User, int>(u => u.Age > 25, u => u.Age, ctx.User);
+```
+
+### Average
+
+```csharp
+var avgAge = await store.Average<User>(u => u.Age, ctx.User);
+
+// With predicate filter
+var avgAge = await store.Average<User>(u => u.Age > 25, u => u.Age, ctx.User);
+```
+
+Returns `double`. Returns `0d` for empty result sets.
+
+---
+
+## Aggregate Projections (GROUP BY)
+
+Use the `Sql` marker class to build aggregate projections with automatic GROUP BY. Non-aggregate columns are automatically grouped.
+
+### Available Sql Markers
+
+| Method | SQL Output |
+|---|---|
+| `Sql.Count()` | `COUNT(*)` |
+| `Sql.Max(x.Prop)` | `MAX(json_extract(Data, '$.prop'))` |
+| `Sql.Min(x.Prop)` | `MIN(json_extract(Data, '$.prop'))` |
+| `Sql.Sum(x.Prop)` | `SUM(json_extract(Data, '$.prop'))` |
+| `Sql.Avg(x.Prop)` | `AVG(json_extract(Data, '$.prop'))` |
+
+### Group By with Count
+
+```csharp
+var results = await store.Aggregate<Order, OrderStats>(
+    o => new OrderStats
+    {
+        Status = o.Status,            // GROUP BY column
+        OrderCount = Sql.Count(),     // COUNT(*)
+    },
+    ctx.Order,
+    ctx.OrderStats);
+// Status = "Shipped", OrderCount = 2
+// Status = "Pending", OrderCount = 1
+```
+
+### All Aggregate Functions (No GROUP BY)
+
+When every column uses a `Sql.*` marker, no GROUP BY is generated — the query returns a single summary row.
+
+```csharp
+var results = await store.Aggregate<Product, PriceSummary>(
+    p => new PriceSummary
+    {
+        TotalCount = Sql.Count(),
+        MaxPrice = Sql.Max(p.Price),
+        MinPrice = Sql.Min(p.Price),
+        SumPrice = Sql.Sum(p.Price),
+        AvgPrice = Sql.Avg(p.Price),
+    },
+    ctx.Product,
+    ctx.PriceSummary);
+```
+
+### With Predicate Filter
+
+```csharp
+var results = await store.Aggregate<Order, OrderStats>(
+    o => o.Status == "Shipped",          // WHERE filter
+    o => new OrderStats
+    {
+        Status = o.Status,
+        OrderCount = Sql.Count(),
+    },
+    ctx.Order,
+    ctx.OrderStats);
+```
+
+---
+
+## Collection Aggregates in Projections
+
+Aggregate over child collections within a single document using standard LINQ methods in projection expressions.
+
+### Sum on Collection
+
+```csharp
+var results = await store.GetAll<Order, OrderLineAggregates>(
+    o => new OrderLineAggregates
+    {
+        Customer = o.CustomerName,
+        TotalQty = o.Lines.Sum(l => l.Quantity)
+    },
+    ctx.Order,
+    ctx.OrderLineAggregates);
+```
+
+Generated SQL:
+```sql
+SELECT json_object(
+  'customer', json_extract(Data, '$.customerName'),
+  'totalQty', (SELECT SUM(json_extract(value, '$.quantity')) FROM json_each(Data, '$.lines'))
+) FROM documents WHERE TypeName = @typeName;
+```
+
+### Max / Min on Collection
+
+```csharp
+o => new OrderLineAggregates
+{
+    Customer = o.CustomerName,
+    MaxPrice = o.Lines.Max(l => l.UnitPrice),
+    MinPrice = o.Lines.Min(l => l.UnitPrice)
+}
+```
+
+### Multiple Collection Aggregates
+
+Combine multiple collection aggregates in a single projection:
+
+```csharp
+var results = await store.Query<Order, OrderLineAggregates>(
+    o => o.CustomerName == "Alice",
+    o => new OrderLineAggregates
+    {
+        Customer = o.CustomerName,
+        TotalQty = o.Lines.Sum(l => l.Quantity),
+        MaxPrice = o.Lines.Max(l => l.UnitPrice),
+        MinPrice = o.Lines.Min(l => l.UnitPrice),
+    },
+    ctx.Order,
+    ctx.OrderLineAggregates);
+```
+
+### Collection Aggregate Reference
+
+| Expression | SQL Output |
+|---|---|
+| `x.Lines.Sum(l => l.Qty)` | `(SELECT SUM(json_extract(value, '$.qty')) FROM json_each(Data, '$.lines'))` |
+| `x.Lines.Max(l => l.Price)` | `(SELECT MAX(json_extract(value, '$.price')) FROM json_each(Data, '$.lines'))` |
+| `x.Lines.Min(l => l.Price)` | `(SELECT MIN(json_extract(value, '$.price')) FROM json_each(Data, '$.lines'))` |
+| `x.Lines.Average(l => l.Price)` | `(SELECT AVG(json_extract(value, '$.price')) FROM json_each(Data, '$.lines'))` |

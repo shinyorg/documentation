@@ -254,6 +254,7 @@ export default defineConfig({
             { label: 'CRUD Operations', link: 'sqlite-docdb/crud' },
             { label: 'Querying', link: 'sqlite-docdb/querying' },
             { label: 'Projections & Streaming', link: 'sqlite-docdb/projections' },
+            { label: 'Aggregates', link: 'sqlite-docdb/aggregates' },
             { label: 'Indexes & Transactions', link: 'sqlite-docdb/indexes' }
           ]
         },
