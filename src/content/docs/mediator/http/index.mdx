@@ -1,0 +1,131 @@
+---
+title: HTTP Extension
+---
+import { Steps } from '@astrojs/starlight/components';
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+<NugetBadge name="Shiny.Mediator" showLabel={true} />
+
+HTTP requests are a must in every app. The Shiny Mediator HTTP extension eliminates the boilerplate of creating mediator contracts, request handlers,
+and manual `HttpClient` usage for every API call. Instead, you define a simple contract with attributes and let Mediator handle the rest.
+
+## Why Use the HTTP Extension?
+
+- **Zero boilerplate** - Stop writing repetitive request handlers for every API call. Define a contract, decorate it with attributes, and you're done. No handler class, no manual `HttpClient`, no serialization code.
+- **AOT-ready out of the box** - All generated code is fully AOT compliant, including optional source-generated JSON serializers. No reflection surprises at runtime.
+- **Full middleware pipeline** - Every HTTP request flows through the Mediator pipeline, giving you access to [caching](../middleware/caching), [resilience](../middleware/resilience), [offline support](../middleware/offline), [performance logging](../middleware/performancelogging), and any custom middleware you've built.
+- **DI-powered request decorators** - Inject services like authentication providers, device info, or telemetry into [HTTP decorators](./decorators) that automatically enrich every outgoing request with headers, tokens, and more.
+
+### The Problem
+
+Consider what you'd normally have to write for every HTTP call:
+
+```csharp
+public class MyHttpRequest : IRequest<MyResponse>
+{
+    public string SomeArg { get; set; }
+}
+
+public class MyHttpRequestHandler(IConfiguration config) : IRequestHandler<MyHttpRequest, MyResponse>
+{
+    public async Task<MyResponse> Handle(MyHttpRequest request, IMediatorContext context, CancellationToken cancellationToken)
+    {
+        var baseUri = config.GetValue<string>("HttpUri");
+        var httpClient = new HttpClient();
+        var json = JsonSerializer.Serialize(request);
+        var content = new StringContent(json);
+        var message = new HttpRequestMessage(HttpMethod.Post, baseUri + "/somerequest");
+        // what about headers and auth?  OMG... too much
+
+        var response = await httpClient.PostAsync(message);
+        response.EnsureSuccessStatusCode();
+
+        var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
+        var result = JsonSerializer.Deserialize<MyResponse>(responseJson);
+
+        return result;
+    }
+}
+```
+
+### The Solution
+
+With Shiny Mediator HTTP, the same thing becomes:
+
+```csharp
+[Http(HttpVerb.Post, "/somerequest")]
+public class MyHttpRequest : IHttpRequest<MyResponse>
+{
+    [HttpBody]
+    public string SomeArg { get; set; }
+}
+
+// No handler needed! Just send the request:
+var response = await mediator.Request(new MyHttpRequest { SomeArg = "value" });
+```
+
+:::note
+There is a covariant request handler registered internally with Shiny Mediator listening for `IHttpRequest` requests.
+You don't need to write a handler for each HTTP contract.
+:::
+
+## Getting Started
+
+<Steps>
+1. Install the Shiny.Mediator NuGet package (the HTTP extension is included)
+
+2. Define your request contract with HTTP attributes
+
+    ```csharp
+    using Shiny.Mediator;
+    using Shiny.Mediator.Http;
+
+    [Http(HttpVerb.Post, "/api/users")]
+    public class CreateUserRequest : IHttpRequest<UserResponse>
+    {
+        [HttpBody]
+        public CreateUserDto Body { get; set; }
+    }
+    ```
+
+3. Configure the base URI in your `appsettings.json` or other configuration provider
+
+    ```json
+    {
+        "Mediator": {
+            "Http": {
+                "MyApp.Contracts.*": "https://api.myapp.com"
+            }
+        }
+    }
+    ```
+
+4. Send the request through Mediator
+
+    ```csharp
+    var response = await mediator.Request(new CreateUserRequest
+    {
+        Body = new CreateUserDto { Name = "John", Email = "john@example.com" }
+    });
+    ```
+</Steps>
+
+## How It Works
+
+Internally, Shiny Mediator registers a covariant request handler that listens for any `IHttpRequest<TResult>` contract. When you send a request:
+
+1. The handler reads the `[Http]` attribute to determine the HTTP verb and route
+2. Path, query, and header parameters are extracted from properties marked with `[HttpParameter]`
+3. The body (if any) is serialized from the property marked with `[HttpBody]`
+4. The base URI is resolved from configuration
+5. Any registered [decorators](./decorators) run to modify the `HttpRequestMessage` (e.g. adding auth tokens)
+6. The request is sent and the response is deserialized back to your result type
+
+## What's Next
+
+| Topic | Description |
+|-------|-------------|
+| [Request Contracts](./contracts) | Deep dive into `IHttpRequest`, `[Http]`, `[HttpParameter]`, and `[HttpBody]` attributes |
+| [Decorators](./decorators) | Add authentication, custom headers, and other cross-cutting concerns to all HTTP requests |
+| [OpenAPI Generation](./openapi) | Generate contracts automatically from OpenAPI/Swagger specifications |
+| [Configuration & AOT](./configuration) | Base URI resolution, debug mode, timeouts, and AOT/JSON source generation |

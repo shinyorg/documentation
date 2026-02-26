@@ -1,0 +1,139 @@
+---
+title: HTTP Request Decorators
+---
+
+Decorators allow you to modify every outgoing HTTP request before it is sent. Common use cases include adding authentication tokens, injecting device information headers, or appending correlation IDs.
+
+## What Are Decorators?
+
+An HTTP request decorator implements `IHttpRequestDecorator` and runs against every HTTP request made through the Mediator HTTP extension. This is different from middleware - decorators operate on the raw `HttpRequestMessage` rather than the mediator pipeline.
+
+:::warning
+Decorators apply to all HTTP requests made through the Mediator HTTP extension.
+:::
+
+## IHttpRequestDecorator Interface
+
+```csharp
+public interface IHttpRequestDecorator
+{
+    Task Decorate(HttpRequestMessage httpMessage, IMediatorContext context);
+}
+```
+
+The `Decorate` method receives:
+- `httpMessage` - The outgoing `HttpRequestMessage` you can modify (add headers, set auth, etc.)
+- `context` - The mediator context containing the original request contract and any context values
+
+## Authentication Decorator
+
+A common scenario is refreshing an access token and adding it to the request:
+
+```csharp
+public class AuthHttpRequestDecorator(IAuthService authService) : IHttpRequestDecorator
+{
+    public async Task Decorate(HttpRequestMessage httpMessage, IMediatorContext context)
+    {
+        // Refresh token if expired
+        if (authService.TokenExpiry < DateTimeOffset.UtcNow)
+            await authService.RefreshToken();
+
+        httpMessage.Headers.Authorization = new AuthenticationHeaderValue(
+            "Bearer",
+            authService.AccessToken
+        );
+    }
+}
+```
+
+## Device/App Info Decorator
+
+The `Shiny.Mediator.Maui` package includes a built-in decorator that adds device and app information headers. Here's a similar example showing the pattern:
+
+```csharp
+public class MauiHttpRequestDecorator(
+    IConfiguration configuration,
+    IAppInfo appInfo,
+    IDeviceInfo deviceInfo,
+    IGeolocation geolocation
+) : IHttpRequestDecorator
+{
+    public async Task Decorate(HttpRequestMessage httpMessage, IMediatorContext context)
+    {
+        httpMessage.Headers.Add("AppId", appInfo.PackageName);
+        httpMessage.Headers.Add("AppVersion", appInfo.Version.ToString());
+        httpMessage.Headers.Add("DeviceManufacturer", deviceInfo.Manufacturer);
+        httpMessage.Headers.Add("DeviceModel", deviceInfo.Model);
+        httpMessage.Headers.Add("DevicePlatform", deviceInfo.Platform.ToString());
+        httpMessage.Headers.Add("DeviceVersion", deviceInfo.Version.ToString());
+        httpMessage.Headers.AcceptLanguage.Add(
+            new StringWithQualityHeaderValue(CultureInfo.CurrentCulture.Name)
+        );
+
+        if (configuration["Mediator:Http:GpsHeader"] == "true")
+        {
+            var gps = await geolocation.GetLastKnownLocationAsync();
+            if (gps != null)
+                httpMessage.Headers.Add("GpsCoords", $"{gps.Latitude},{gps.Longitude}");
+        }
+    }
+}
+```
+
+## Common Decorator Patterns
+
+### API Key Injection
+
+```csharp
+public class ApiKeyDecorator(IConfiguration config) : IHttpRequestDecorator
+{
+    public Task Decorate(HttpRequestMessage httpMessage, IMediatorContext context)
+    {
+        var apiKey = config["ApiKey"];
+        httpMessage.Headers.Add("X-Api-Key", apiKey);
+        return Task.CompletedTask;
+    }
+}
+```
+
+### Correlation ID
+
+```csharp
+public class CorrelationIdDecorator : IHttpRequestDecorator
+{
+    public Task Decorate(HttpRequestMessage httpMessage, IMediatorContext context)
+    {
+        httpMessage.Headers.Add("X-Correlation-Id", Guid.NewGuid().ToString());
+        return Task.CompletedTask;
+    }
+}
+```
+
+### Locale Header
+
+```csharp
+public class LocaleDecorator : IHttpRequestDecorator
+{
+    public Task Decorate(HttpRequestMessage httpMessage, IMediatorContext context)
+    {
+        httpMessage.Headers.AcceptLanguage.Add(
+            new StringWithQualityHeaderValue(CultureInfo.CurrentCulture.Name)
+        );
+        return Task.CompletedTask;
+    }
+}
+```
+
+## Multiple Decorators
+
+You can register multiple decorators and they will all run on every HTTP request. Register them with dependency injection:
+
+```csharp
+services.AddSingletonAsImplementedInterfaces<AuthHttpRequestDecorator>();
+services.AddSingletonAsImplementedInterfaces<CorrelationIdDecorator>();
+services.AddSingletonAsImplementedInterfaces<LocaleDecorator>();
+```
+
+:::note
+Just like middleware and handlers, HTTP decorators support covariance as well.
+:::

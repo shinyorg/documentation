@@ -55,6 +55,7 @@ export default defineConfig({
       '/spatial/algorithms': '/data/spatial/algorithms',
       '/spatial/prebuilt': '/data/spatial/prebuilt',
       '/spatial/release-notes': '/data/spatial/release-notes',
+      '/mediator/extensions/http': '/mediator/http/',
   },
   integrations: [
     react(),
@@ -247,13 +248,22 @@ export default defineConfig({
                   ]
               },
               {
+                  label: 'HTTP',
+                  items:[
+                    { label: 'Getting Started', link: 'mediator/http/' },
+                    { label: 'Request Contracts', link: 'mediator/http/contracts' },
+                    { label: 'Decorators', link: 'mediator/http/decorators' },
+                    { label: 'OpenAPI Generation', link: 'mediator/http/openapi' },
+                    { label: 'Configuration & AOT', link: 'mediator/http/configuration' },
+                  ]
+              },
+              {
                   label: 'Extensions',
                   items:[
                     { label: 'MAUI', link: 'mediator/extensions/maui' },
                     { label: 'Blazor', link: 'mediator/extensions/blazor' },
                     { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },
                     { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' },
-                    { label: 'HTTP', link: 'mediator/extensions/http' },
                     { label: 'Prism', link: 'mediator/extensions/prism' },
                     { label: 'Dapper', link: 'mediator/extensions/dapper' }
                   ]
