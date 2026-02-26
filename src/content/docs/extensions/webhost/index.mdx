@@ -4,48 +4,158 @@ title: Web Hosting
 import NugetBadge from '/src/components/NugetBadge.tsx';
 import { Steps } from '@astrojs/starlight/components';
 
-This is a simple library that allows you to add infrastructure to a `WebApplicationBuilder` and post-app build against the `WebApplication` to set all of the infrastructure up in one places.
-This allows for modular chunks of code to install things like authentication, authorization, logging, etc. without having to add them to the main application startup code.
+ASP.NET applications often end up with a bloated `Program.cs` where every cross-cutting concern — authentication, CORS, Swagger, logging, health checks — is mixed together. Shiny Web Hosting lets you break that apart into modular `IInfrastructureModule` classes, each responsible for its own service registration and middleware configuration. Modules are discovered automatically, keeping your startup clean.
 
 - [GitHub Repository](https://github.com/shinyorg/extensions)
 - <NugetBadge name="Shiny.Extensions.WebHosting" />
 
 ## Features
-- Merges service container build and post build scenarios into a single class
-- All IInfrastructureModule implementations are automatically detected and run
+
+- Modular `IInfrastructureModule` interface — combines service registration and middleware configuration in one class
+- Automatic assembly scanning to discover and run all modules
+- Explicit registration option for reflection-free, AOT-compatible setups
+- Clean separation of concerns — one module per infrastructure component
 
 ## Setup
+
 <Steps>
-1. Install the NuGet package <NugetBadge name="Shiny.Extensions.WebHosting" showLabel={true} />
+1. Install the NuGet package:
+   ```bash
+   dotnet add package Shiny.Extensions.WebHosting
+   ```
 
-2. Add an infrastructure module by implementing IInfrastructureModule:
-    ```csharp
-    using Shiny.Extensions.WebHosting;
+2. Create infrastructure modules for each concern:
+   ```csharp
+   using Shiny.Extensions.WebHosting;
 
-    public class MyInfrastructureModule : IInfrastructureModule
-    {
-        public void Add(WebApplicationBuilder builder)
-        {
-            // Register your services here
-        }
+   public class SwaggerModule : IInfrastructureModule
+   {
+       public void Add(WebApplicationBuilder builder)
+       {
+           builder.Services.AddEndpointsApiExplorer();
+           builder.Services.AddSwaggerGen();
+       }
 
-        public void Configure(WebApplication app)
-        {
-            // Configure your application here
-        }
-    }
-    ```
+       public void Use(WebApplication app)
+       {
+           if (app.Environment.IsDevelopment())
+           {
+               app.UseSwagger();
+               app.UseSwaggerUI();
+           }
+       }
+   }
+   ```
 
-3. In your application hosting startup, add the following:
-    ```csharp
-    using Shiny.Extensions.WebHosting;
+3. Wire up modules in `Program.cs`:
+   ```csharp
+   var builder = WebApplication.CreateBuilder(args);
+   builder.AddInfrastructure(Assembly.GetExecutingAssembly());
 
-    var builder = WebApplication.CreateBuilder(args);
-    builder.AddInfrastructure(params Assembly[] assemblies)(); // this scans the assemblies for IInfrastructureModule implementations and runs Add methods
-    // OR
-    builder.AddInfrastructureModules(params IInfrastructureModule[] modules); // this doesn't use reflection
+   var app = builder.Build();
+   app.UseInfrastructure();
 
-    var app = builder.Build();
-    app.UseInfrastructure(); // this runs all IInfrastructureModule.Use methods
-    ```
+   app.Run();
+   ```
 </Steps>
+
+## Creating Modules
+
+Each module implements `IInfrastructureModule` with two methods:
+
+- **`Add(WebApplicationBuilder builder)`** — register services, configuration, and anything that happens before `Build()`
+- **`Use(WebApplication app)`** — configure middleware, endpoints, and anything that happens after `Build()`
+
+```csharp
+public class CorsModule : IInfrastructureModule
+{
+    public void Add(WebApplicationBuilder builder)
+    {
+        builder.Services.AddCors(options =>
+        {
+            options.AddDefaultPolicy(policy =>
+                policy.AllowAnyOrigin().AllowAnyMethod().AllowAnyHeader());
+        });
+    }
+
+    public void Use(WebApplication app)
+    {
+        app.UseCors();
+    }
+}
+
+public class AuthModule : IInfrastructureModule
+{
+    public void Add(WebApplicationBuilder builder)
+    {
+        builder.Services.AddAuthentication()
+            .AddJwtBearer();
+        builder.Services.AddAuthorization();
+    }
+
+    public void Use(WebApplication app)
+    {
+        app.UseAuthentication();
+        app.UseAuthorization();
+    }
+}
+
+public class HealthCheckModule : IInfrastructureModule
+{
+    public void Add(WebApplicationBuilder builder)
+    {
+        builder.Services.AddHealthChecks();
+    }
+
+    public void Use(WebApplication app)
+    {
+        app.MapHealthChecks("/health");
+    }
+}
+```
+
+## Registration Options
+
+### Assembly Scanning
+
+Automatically discovers all `IInfrastructureModule` implementations in the specified assemblies:
+
+```csharp
+// Scan specific assemblies
+builder.AddInfrastructure(Assembly.GetExecutingAssembly());
+
+// Scan all loaded assemblies in the AppDomain
+builder.AddInfrastructureForAppDomain();
+```
+
+### Explicit Registration
+
+For AOT-compatible setups or when you want full control over which modules run:
+
+```csharp
+builder.AddInfrastructureModules(
+    new SwaggerModule(),
+    new CorsModule(),
+    new AuthModule(),
+    new HealthCheckModule()
+);
+```
+
+## Clean Program.cs
+
+The end result is a minimal `Program.cs`:
+
+```csharp
+using System.Reflection;
+using Shiny.Extensions.WebHosting;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.AddInfrastructure(Assembly.GetExecutingAssembly());
+
+var app = builder.Build();
+app.UseInfrastructure();
+
+app.Run();
+```
+
+All the complexity lives in focused, testable module classes instead of a single monolithic startup file.

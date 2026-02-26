@@ -27,7 +27,8 @@ export default defineConfig({
       '/release-notes/templates/': '/maui/tableview/release-notes-templates/',
       '/release-notes/extensions/': '/extensions/di/release-notes/',
       '/extensions/release-notes/': '/extensions/di/release-notes/',
-      '/release-notes/aspire/': '/aspire/release-notes/',
+      '/release-notes/aspire/': '/aspire/orleans/release-notes/',
+      '/aspire/release-notes/': '/aspire/orleans/release-notes/',
 
       '/client/maui/': '/maui/shell/',
       '/client/maui/navigation': '/maui/shell/navigation',
@@ -347,6 +348,9 @@ export default defineConfig({
                 label: 'Reflector',
                 items:[
                   { label: 'Getting Started', link: 'extensions/reflector/' },
+                  { label: 'JSON Serialization', link: 'extensions/reflector/json' },
+                  { label: 'Assembly Info', link: 'extensions/reflector/assembly-info' },
+                  { label: 'Configuration', link: 'extensions/reflector/configuration' },
                   { label: 'Release Notes', link: 'extensions/reflector/release-notes' }
                 ]
               },
@@ -354,6 +358,9 @@ export default defineConfig({
                 label: 'Dependency Injection',
                 items:[
                   { label: 'Getting Started', link: 'extensions/di/' },
+                  { label: 'Advanced Registration', link: 'extensions/di/advanced' },
+                  { label: 'Categories & Tasks', link: 'extensions/di/categories' },
+                  { label: 'Configuration', link: 'extensions/di/configuration' },
                   { label: 'Release Notes', link: 'extensions/di/release-notes' }
                 ]
               },
@@ -361,6 +368,7 @@ export default defineConfig({
                 label: 'Stores',
                 items:[
                   { label: 'Getting Started', link: 'extensions/stores/' },
+                  { label: 'Persistent Services', link: 'extensions/stores/persistent-services' },
                   { label: 'Release Notes', link: 'extensions/stores/release-notes' }
                 ]
               },
@@ -368,6 +376,7 @@ export default defineConfig({
                 label: 'Localization Generator',
                 items:[
                   { label: 'Getting Started', link: 'extensions/localizegen/' },
+                  { label: 'Usage Examples', link: 'extensions/localizegen/usage' },
                   { label: 'Release Notes', link: 'extensions/localizegen/release-notes' }
                 ]
               },
@@ -391,7 +400,8 @@ export default defineConfig({
                   { label: 'Getting Started', link: 'aspire/orleans/' },
                   { label: 'Hosting (AppHost)', link: 'aspire/orleans/hosting' },
                   { label: 'Server (Silo)', link: 'aspire/orleans/server' },
-                  { label: 'Client', link: 'aspire/orleans/client' }
+                  { label: 'Client', link: 'aspire/orleans/client' },
+                  { label: 'Release Notes', link: 'aspire/orleans/release-notes' }
                 ]
               },
               {
@@ -399,10 +409,10 @@ export default defineConfig({
                 items:[
                   { label: 'Getting Started', link: 'aspire/gluetun/' },
                   { label: 'Configuration', link: 'aspire/gluetun/configuration' },
-                  { label: 'Container Routing', link: 'aspire/gluetun/routing' }
+                  { label: 'Container Routing', link: 'aspire/gluetun/routing' },
+                  { label: 'Release Notes', link: 'aspire/gluetun/release-notes' }
                 ]
-              },
-              { label: 'Release Notes', link: 'aspire/release-notes' }
+              }
             ]
           }
         ], {

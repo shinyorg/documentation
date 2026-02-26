@@ -4,71 +4,141 @@ title: Localization Generator
 import NugetBadge from '/src/components/NugetBadge.tsx';
 import { Steps } from '@astrojs/starlight/components';
 
-Do you use `Microsoft.Extensions.Localization`? It provides a great set of abstractions, but it removes the IDE tooling that provided strong typing of the available keys.  This library
-looks to solve that by generating a class around a `IStringLocalizer` class.
+`Microsoft.Extensions.Localization` provides great abstractions, but you lose the strong typing and IDE tooling that `.resx` files originally gave you. This library fixes that — it source-generates a strongly-typed class for each `.resx` file, giving you compile-time safety, IntelliSense, and format-string methods with the correct number of parameters.
 
 - [GitHub Repository](https://github.com/shinyorg/localizegen)
 - <NugetBadge name="Shiny.Extensions.Localization.Generator" />
 
-## Usage
+## Features
 
-Given this directory structure:
-- MyViewModel.cs
-- MyViewModel.resx
-- MyViewModel.fr-ca.rex
-- Folder1\FolderViewModel.cs
-- Folder1\FolderViewModel.resx
-- Folder1\FolderViewModel.fr-ca.resx
-
-We will generate these:
-- MyViewModelLocalized.g.cs (RootNamespace.MyViewModelLocalized)
-- Folder1.FolderViewModelLocalized.g.cs (RootNamespace.Folder1.FolderViewModelLocalized)
-- ServiceCollections.g.cs 
+- Strongly-typed localization classes generated from `.resx` files at compile time
+- Properties for simple strings, methods for format strings (`{0}`, `{1}`, etc.)
+- XML documentation comments generated from `.resx` comment fields — see default values in IntelliSense
+- Full XAML and Razor binding support with IntelliSense
+- Namespace follows folder structure automatically
+- DI registration generated via `AddStronglyTypedLocalizations()`
+- Supports `internal` accessor generation
 
 ## Setup
-<Steps>
-1. Install <NugetBadge name="Microsoft.Extensions.Localization" showLabel={true} />
-2. Install <NugetBadge name="Shiny.Extensions.Localization.Generator" showLabel={true} /> 
-3. In your MauiProgram.cs, do the following
-    ```csharp
-    builder.Services.AddStronglyTypedLocalizations(); // this will also add the AddLocalization() call
-    ```
-4. Now add an `.resx` file to your project that matches the name of class (ie. ViewModel, Controller, Service, etc).
-5. Now inject the strongly typed classes
-    ```csharp
-    public class MyViewModel
-    {
-        public MyViewModel(MyViewModelLocalized localizer) // same namespace and class name with "Localized" suffix
-            => this.Localizer = localizer;
 
-        public MyViewModelLocalized Localizer { get; }
-    }
-    ```
-6. Now bind (xaml intellisense will pick it up)
-    ```xml
-    <Label Text="{Binding Localizer.MyKey}" />
-    ```
+<Steps>
+1. Install the NuGet packages:
+   ```bash
+   dotnet add package Microsoft.Extensions.Localization
+   dotnet add package Shiny.Extensions.Localization.Generator
+   ```
+
+2. Register in your DI container:
+   ```csharp
+   builder.Services.AddStronglyTypedLocalizations(); // also calls AddLocalization() internally
+   ```
+
+3. Create a `.resx` file alongside an existing class (the names must match):
+   ```
+   MyViewModel.cs
+   MyViewModel.resx              ← default locale
+   MyViewModel.fr-ca.resx        ← French-Canadian locale
+   ```
+
+4. Inject the generated `{ClassName}Localized` class:
+   ```csharp
+   public class MyViewModel
+   {
+       public MyViewModel(MyViewModelLocalized localizer)
+           => this.Localizer = localizer;
+
+       public MyViewModelLocalized Localizer { get; }
+   }
+   ```
 </Steps>
 
 :::warning
-If the "class" beside the resource does not exist, a compile error will occur with the generated code
+Every `.resx` file **must** have a matching C# class with the same name in the same namespace. If the class doesn't exist, the generated code will produce a compile error.
 :::
 
-## Generate Classes with Internal Accessor
+## How It Works
+
+### Resource File
+
+Create a `.resx` file with your localization keys:
 
 ```xml
-<PropertyGroup>
-    <GenerateLocalizersInternal>True</GenerateLocalizersInternal>
-</PropertyGroup>
+<?xml version="1.0" encoding="utf-8"?>
+<root>
+  <data name="Welcome" xml:space="preserve">
+    <value>Welcome to our app!</value>
+    <comment>Greeting shown on the home page</comment>
+  </data>
+  <data name="UserGreeting" xml:space="preserve">
+    <value>Hello {0}, welcome to {1}!</value>
+    <comment>Personalized greeting with user name and app name</comment>
+  </data>
+  <data name="ItemCount" xml:space="preserve">
+    <value>You have {0} items in your cart</value>
+  </data>
+</root>
 ```
 
-## AI Coding Assistant
+### Generated Class
 
-An AI skill is available for the Localization Generator to help generate localized classes, configure .resx files, and follow best practices directly in your IDE.
+The generator produces a class with properties for simple strings and methods for format strings:
 
-**Claude Code**
-```bash
-claude plugin add github:shinyorg/skills
+```csharp
+public partial class MyViewModelLocalized
+{
+    readonly IStringLocalizer localizer;
+
+    public MyViewModelLocalized(IStringLocalizer<MyViewModel> localizer)
+        => this.localizer = localizer;
+
+    /// <summary>
+    /// Greeting shown on the home page
+    /// Default: Welcome to our app!
+    /// </summary>
+    public string Welcome => this.localizer["Welcome"];
+
+    /// <summary>
+    /// Personalized greeting with user name and app name
+    /// Default: Hello {0}, welcome to {1}!
+    /// </summary>
+    public string UserGreetingFormat(object parameter0, object parameter1)
+        => string.Format(this.localizer["UserGreeting"], parameter0, parameter1);
+
+    /// <summary>
+    /// Default: You have {0} items in your cart
+    /// </summary>
+    public string ItemCountFormat(object parameter0)
+        => string.Format(this.localizer["ItemCount"], parameter0);
+
+    /// <summary>
+    /// Access the underlying IStringLocalizer for edge cases
+    /// </summary>
+    public IStringLocalizer Localizer => this.localizer;
+}
 ```
 
-**GitHub Copilot** — Copy the [localizegen](https://github.com/shinyorg/skills/blob/main/skills/localizegen/SKILL.md) skill file into your repository's [custom instructions](https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions).
+### Key Naming Rules
+
+- Dots (`.`), hyphens (`-`), and spaces in resource keys are converted to underscores (`_`)
+- Format parameters (`{0}`, `{1}`, etc.) are detected automatically and generate a method
+- Method names get a `Format` suffix unless the key already ends with `Format`
+
+## Directory Structure and Namespaces
+
+The folder structure determines the generated namespace:
+
+```
+MyApp/
+├── MyViewModel.cs
+├── MyViewModel.resx                  → MyApp.MyViewModelLocalized
+├── MyViewModel.fr-ca.resx
+├── Features/
+│   ├── Settings/
+│   │   ├── SettingsPage.cs
+│   │   ├── SettingsPage.resx         → MyApp.Features.Settings.SettingsPageLocalized
+│   │   └── SettingsPage.fr-ca.resx
+```
+
+:::note
+Only the default locale `.resx` file (without a locale suffix) is processed by the generator. Locale-specific files like `.fr-ca.resx` are handled by the localization framework at runtime.
+:::
