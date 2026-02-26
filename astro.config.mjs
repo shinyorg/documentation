@@ -18,15 +18,43 @@ export default defineConfig({
       '/client/mediator/middleware/': '/mediator/middleware/',
       '/client/mediator/extensions/': '/mediator/extensions/',
       '/release-notes/client/v30/' : '/client/release-notes/',
-      '/extensions/sqlite-document-db/': '/sqlite-docdb/',
+      '/extensions/sqlite-document-db/': '/data/sqlite-docdb/',
       '/release-notes/client/': '/client/release-notes/',
       '/release-notes/mediator/': '/mediator/release-notes/',
-      '/release-notes/spatial/': '/spatial/release-notes/',
-      '/release-notes/sqlite-documentdb/': '/sqlite-docdb/release-notes/',
-      '/release-notes/tableview/': '/tableview/release-notes/',
-      '/release-notes/templates/': '/tableview/release-notes-templates/',
+      '/release-notes/spatial/': '/data/spatial/release-notes/',
+      '/release-notes/sqlite-documentdb/': '/data/sqlite-docdb/release-notes/',
+      '/release-notes/tableview/': '/maui/tableview/release-notes/',
+      '/release-notes/templates/': '/maui/tableview/release-notes-templates/',
       '/release-notes/extensions/': '/extensions/release-notes/',
       '/release-notes/aspire/': '/aspire/release-notes/',
+
+      '/client/maui/': '/maui/shell/',
+      '/client/maui/navigation': '/maui/shell/navigation',
+      '/client/maui/lifecycle': '/maui/shell/lifecycle',
+      '/client/maui/sourcegen': '/maui/shell/sourcegen',
+      '/tableview/': '/maui/tableview/',
+      '/tableview/cells': '/maui/tableview/cells',
+      '/tableview/sections': '/maui/tableview/sections',
+      '/tableview/styling': '/maui/tableview/styling',
+      '/tableview/advanced': '/maui/tableview/advanced',
+      '/tableview/release-notes': '/maui/tableview/release-notes',
+      '/tableview/release-notes-templates': '/maui/tableview/release-notes-templates',
+
+      '/sqlite-docdb/': '/data/sqlite-docdb/',
+      '/sqlite-docdb/aot': '/data/sqlite-docdb/aot',
+      '/sqlite-docdb/crud': '/data/sqlite-docdb/crud',
+      '/sqlite-docdb/querying': '/data/sqlite-docdb/querying',
+      '/sqlite-docdb/projections': '/data/sqlite-docdb/projections',
+      '/sqlite-docdb/aggregates': '/data/sqlite-docdb/aggregates',
+      '/sqlite-docdb/indexes': '/data/sqlite-docdb/indexes',
+      '/sqlite-docdb/release-notes': '/data/sqlite-docdb/release-notes',
+      '/spatial/': '/data/spatial/',
+      '/spatial/geometry': '/data/spatial/geometry',
+      '/spatial/database': '/data/spatial/database',
+      '/spatial/queries': '/data/spatial/queries',
+      '/spatial/algorithms': '/data/spatial/algorithms',
+      '/spatial/prebuilt': '/data/spatial/prebuilt',
+      '/spatial/release-notes': '/data/spatial/release-notes',
   },
   integrations: [
     react(),
@@ -236,66 +264,66 @@ export default defineConfig({
           },
           {
             label: 'MAUI',
-            link: '/client/maui/',
+            link: '/maui/shell/',
             icon: 'laptop',
             items:[
               {
                 label: 'Shell',
                 items:[
-                  { label: 'Getting Started', link: 'client/maui/' },
-                  { label: 'Navigation', link: 'client/maui/navigation' },
-                  { label: 'ViewModel Lifecycle', link: 'client/maui/lifecycle' },
-                  { label: 'Source Generation', link: 'client/maui/sourcegen' }
+                  { label: 'Getting Started', link: 'maui/shell/' },
+                  { label: 'Navigation', link: 'maui/shell/navigation' },
+                  { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
+                  { label: 'Source Generation', link: 'maui/shell/sourcegen' }
                 ]
               },
               {
                 label: 'TableView',
                 items:[
-                  { label: 'Getting Started', link: 'tableview/' },
-                  { label: 'Cell Types', link: 'tableview/cells' },
-                  { label: 'Sections & Dynamic Content', link: 'tableview/sections' },
-                  { label: 'Styling', link: 'tableview/styling' },
-                  { label: 'Advanced Features', link: 'tableview/advanced' }
+                  { label: 'Getting Started', link: 'maui/tableview/' },
+                  { label: 'Cell Types', link: 'maui/tableview/cells' },
+                  { label: 'Sections & Dynamic Content', link: 'maui/tableview/sections' },
+                  { label: 'Styling', link: 'maui/tableview/styling' },
+                  { label: 'Advanced Features', link: 'maui/tableview/advanced' }
                 ]
               },
-              
+
               {
                 label: 'Release Notes',
                 items:[
-                  { label: 'TableView', link: 'tableview/release-notes' },
-                  { label: 'Templates', link: 'tableview/release-notes-templates' }
+                  { label: 'TableView', link: 'maui/tableview/release-notes' },
+                  { label: 'Templates', link: 'maui/release-notes-templates' }
                 ]
               }
             ]
           },
           {
             label: 'Data',
-            link: '/sqlite-docdb/',
+            link: '/data/sqlite-docdb/',
             icon: 'document',
             items:[
               {
                 label: 'SQLite Document DB',
                 items:[
-                  { label: 'Getting Started', link: 'sqlite-docdb/' },
-                  { label: 'AOT Setup', link: 'sqlite-docdb/aot' },
-                  { label: 'CRUD Operations', link: 'sqlite-docdb/crud' },
-                  { label: 'Querying', link: 'sqlite-docdb/querying' },
-                  { label: 'Projections & Streaming', link: 'sqlite-docdb/projections' },
-                  { label: 'Aggregates', link: 'sqlite-docdb/aggregates' },
-                  { label: 'Indexes & Transactions', link: 'sqlite-docdb/indexes' },
-                  { label: 'Release Notes', link: 'sqlite-docdb/release-notes' }
+                  { label: 'Getting Started', link: 'data/sqlite-docdb/' },
+                  { label: 'AOT Setup', link: 'data/sqlite-docdb/aot' },
+                  { label: 'CRUD Operations', link: 'data/sqlite-docdb/crud' },
+                  { label: 'Querying', link: 'data/sqlite-docdb/querying' },
+                  { label: 'Projections & Streaming', link: 'data/sqlite-docdb/projections' },
+                  { label: 'Aggregates', link: 'data/sqlite-docdb/aggregates' },
+                  { label: 'Indexes & Transactions', link: 'data/sqlite-docdb/indexes' },
+                  { label: 'Release Notes', link: 'data/sqlite-docdb/release-notes' }
                 ]
               },
               {
                 label: 'Spatial',
                 items:[
-                  { label: 'Getting Started', link: 'spatial/' },
-                  { label: 'Geometry Types', link: 'spatial/geometry' },
-                  { label: 'Database Operations', link: 'spatial/database' },
-                  { label: 'Querying', link: 'spatial/queries' },
-                  { label: 'Algorithms & Serialization', link: 'spatial/algorithms' },
-                  { label: 'Pre-built Databases', link: 'spatial/prebuilt' },
-                  { label: 'Release Notes', link: 'spatial/release-notes' }
+                  { label: 'Getting Started', link: 'data/spatial/' },
+                  { label: 'Geometry Types', link: 'data/spatial/geometry' },
+                  { label: 'Database Operations', link: 'data/spatial/database' },
+                  { label: 'Querying', link: 'data/spatial/queries' },
+                  { label: 'Algorithms & Serialization', link: 'data/spatial/algorithms' },
+                  { label: 'Pre-built Databases', link: 'data/spatial/prebuilt' },
+                  { label: 'Release Notes', link: 'data/spatial/release-notes' }
                 ]
               }
             ]
