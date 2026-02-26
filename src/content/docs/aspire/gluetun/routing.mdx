@@ -1,0 +1,67 @@
+---
+title: Container Routing
+description: Route container traffic through the Gluetun VPN tunnel
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+<NugetBadge name="Shiny.Aspire.Hosting.Gluetun" showLabel={true} />
+
+## Routing Containers Through the VPN
+
+Use `WithRoutedContainer` to send a container's traffic through the Gluetun VPN tunnel:
+
+```csharp
+var vpn = builder.AddGluetun("vpn")
+    .WithVpnProvider("mullvad")
+    .WithWireGuard(builder.AddParameter("wireguard-key", secret: true));
+
+var scraper = builder.AddContainer("scraper", "my-scraper")
+    .WithHttpEndpoint(targetPort: 8080);
+
+var downloader = builder.AddContainer("downloader", "my-downloader")
+    .WithHttpEndpoint(targetPort: 9090);
+
+vpn.WithRoutedContainer(scraper);
+vpn.WithRoutedContainer(downloader);
+```
+
+You can route multiple containers through the same VPN.
+
+## What Happens
+
+Each `WithRoutedContainer` call:
+
+1. Adds a `GluetunRoutedResourceAnnotation` to the Gluetun resource
+2. Sets `--network container:<vpn-name>` runtime args on the routed container, so at runtime the container shares the Gluetun network namespace
+3. On Docker Compose publish, sets `network_mode: "service:<vpn-name>"` on the routed container and transfers its port mappings to the Gluetun service
+
+## Docker Compose Output
+
+When you publish as Docker Compose, the generated output handles networking and port forwarding automatically:
+
+```yaml
+services:
+  vpn:
+    image: qmcgaw/gluetun:latest
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+    environment:
+      - VPN_SERVICE_PROVIDER=mullvad
+      - VPN_TYPE=wireguard
+      - WIREGUARD_PRIVATE_KEY=${wireguard-key}
+    ports:
+      - "8080:8080"    # forwarded from scraper
+      - "9090:9090"    # forwarded from downloader
+  scraper:
+    image: my-scraper
+    network_mode: "service:vpn"
+    # ports moved to vpn service
+  downloader:
+    image: my-downloader
+    network_mode: "service:vpn"
+    # ports moved to vpn service
+```
+
+Containers using `network_mode: "service:vpn"` share the Gluetun network stack. Since they no longer have their own network namespace, their ports must be exposed on the Gluetun container instead — this transfer is handled automatically.

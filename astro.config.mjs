@@ -364,6 +364,14 @@ export default defineConfig({
                   { label: 'Client', link: 'aspire/orleans/client' }
                 ]
               },
+              {
+                label: 'Gluetun VPN',
+                items:[
+                  { label: 'Getting Started', link: 'aspire/gluetun/' },
+                  { label: 'Configuration', link: 'aspire/gluetun/configuration' },
+                  { label: 'Container Routing', link: 'aspire/gluetun/routing' }
+                ]
+              },
               { label: 'Release Notes', link: 'aspire/release-notes' }
             ]
           }
