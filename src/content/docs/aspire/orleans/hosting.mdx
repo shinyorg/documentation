@@ -1,0 +1,93 @@
+---
+title: Hosting (AppHost)
+description: Aspire AppHost integration for automatic Orleans database schema provisioning
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+<NugetBadge name="Shiny.Aspire.Orleans.Hosting" showLabel={true} />
+
+The hosting package runs inside your Aspire AppHost project. It subscribes to Aspire's `ResourceReadyEvent` for the database resource and automatically executes the Orleans SQL schema scripts when the database is ready.
+
+## Setup
+
+```csharp
+using Shiny.Aspire.Orleans.Hosting;
+
+var builder = DistributedApplication.CreateBuilder(args);
+
+var db = builder.AddPostgres("pg")
+    .AddDatabase("orleans-db");
+
+var orleans = builder.AddOrleans("cluster")
+    .WithClustering(db)
+    .WithGrainStorage("Default", db)
+    .WithReminders(db)
+    .WithDatabaseSetup(db); // creates all Orleans tables automatically
+
+builder.AddProject<Projects.MySilo>("silo")
+    .WithReference(orleans)
+    .WaitFor(db);
+
+builder.Build().Run();
+```
+
+## API
+
+### WithDatabaseSetup
+
+```csharp
+public static OrleansService WithDatabaseSetup(
+    this OrleansService orleans,
+    IResourceBuilder<IResourceWithConnectionString> database,
+    OrleansFeature features = OrleansFeature.All
+)
+```
+
+Registers an event handler that runs embedded SQL scripts against the specified database when Aspire raises `ResourceReadyEvent`. The database type (PostgreSQL, SQL Server, or MySQL) is auto-detected from the resource.
+
+## Feature Selection
+
+By default, `WithDatabaseSetup` creates schemas for all Orleans features. Limit this with the `OrleansFeature` flags enum:
+
+```csharp
+// Only clustering and persistence (no reminders)
+orleans.WithDatabaseSetup(db, OrleansFeature.Clustering | OrleansFeature.Persistence);
+
+// Only clustering
+orleans.WithDatabaseSetup(db, OrleansFeature.Clustering);
+```
+
+| Flag | Value | Description |
+|---|---|---|
+| `Clustering` | 1 | Membership tables for silo discovery |
+| `Persistence` | 2 | Grain storage tables |
+| `Reminders` | 4 | Reminder tables |
+| `All` | 7 | All of the above (default) |
+
+## Using Different Databases
+
+Swap the Aspire resource builder — everything else stays the same:
+
+```csharp
+// PostgreSQL
+var db = builder.AddPostgres("pg").AddDatabase("orleans-db");
+
+// SQL Server
+var db = builder.AddSqlServer("sql").AddDatabase("orleans-db");
+
+// MySQL
+var db = builder.AddMySql("mysql").AddDatabase("orleans-db");
+```
+
+The correct SQL scripts, connection provider, and ADO.NET invariant are selected automatically.
+
+## Schema Provisioning
+
+`WithDatabaseSetup` runs embedded SQL scripts in order:
+
+1. **Main** — creates the `OrleansQuery` table (Orleans' query registry)
+2. **Clustering** — creates `OrleansMembershipVersionTable`, `OrleansMembershipTable`, and related stored procedures/functions
+3. **Persistence** — creates the `OrleansStorage` table and related stored procedures/functions
+4. **Reminders** — creates `OrleansRemindersTable` and related stored procedures/functions
+
+Scripts are executed when Aspire raises the `ResourceReadyEvent` for the database, ensuring the database is accepting connections before any schema setup runs.

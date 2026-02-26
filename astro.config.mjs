@@ -164,12 +164,6 @@ export default defineConfig({
               ]
             },
             {
-                label: 'MAUI Shell',
-                items:[
-                  { label: 'Getting Started', link: 'client/maui/' }
-                ]
-            },
-            {
               label: 'Other',
               items: [
                 { label: 'Configuration Extensions', link: 'client/other/configuration' },
@@ -226,36 +220,69 @@ export default defineConfig({
           ]
         },
         {
-          label: 'TableView',
+          label: 'MAUI',
           items:[
-            { label: 'Getting Started', link: 'tableview/' },
-            { label: 'Cell Types', link: 'tableview/cells' },
-            { label: 'Sections & Dynamic Content', link: 'tableview/sections' },
-            { label: 'Styling', link: 'tableview/styling' },
-            { label: 'Advanced Features', link: 'tableview/advanced' }
+            {
+              label: 'TableView',
+              items:[
+                { label: 'Getting Started', link: 'tableview/' },
+                { label: 'Cell Types', link: 'tableview/cells' },
+                { label: 'Sections & Dynamic Content', link: 'tableview/sections' },
+                { label: 'Styling', link: 'tableview/styling' },
+                { label: 'Advanced Features', link: 'tableview/advanced' }
+              ]
+            },
+            {
+              label: 'Shell',
+              items:[
+                { label: 'Getting Started', link: 'client/maui/' },
+                { label: 'Navigation', link: 'client/maui/navigation' },
+                { label: 'ViewModel Lifecycle', link: 'client/maui/lifecycle' },
+                { label: 'Source Generation', link: 'client/maui/sourcegen' }
+              ]
+            }
           ]
         },
         {
-          label: 'Spatial',
+          label: 'Data',
           items:[
-            { label: 'Getting Started', link: 'spatial/' },
-            { label: 'Geometry Types', link: 'spatial/geometry' },
-            { label: 'Database Operations', link: 'spatial/database' },
-            { label: 'Querying', link: 'spatial/queries' },
-            { label: 'Algorithms & Serialization', link: 'spatial/algorithms' },
-            { label: 'Pre-built Databases', link: 'spatial/prebuilt' }
+            {
+              label: 'Spatial',
+              items:[
+                { label: 'Getting Started', link: 'spatial/' },
+                { label: 'Geometry Types', link: 'spatial/geometry' },
+                { label: 'Database Operations', link: 'spatial/database' },
+                { label: 'Querying', link: 'spatial/queries' },
+                { label: 'Algorithms & Serialization', link: 'spatial/algorithms' },
+                { label: 'Pre-built Databases', link: 'spatial/prebuilt' }
+              ]
+            },
+            {
+              label: 'SQLite Document DB',
+              items:[
+                { label: 'Getting Started', link: 'sqlite-docdb/' },
+                { label: 'AOT Setup', link: 'sqlite-docdb/aot' },
+                { label: 'CRUD Operations', link: 'sqlite-docdb/crud' },
+                { label: 'Querying', link: 'sqlite-docdb/querying' },
+                { label: 'Projections & Streaming', link: 'sqlite-docdb/projections' },
+                { label: 'Aggregates', link: 'sqlite-docdb/aggregates' },
+                { label: 'Indexes & Transactions', link: 'sqlite-docdb/indexes' }
+              ]
+            }
           ]
         },
         {
-          label: 'SQLite Document DB',
+          label: 'Aspire',
           items:[
-            { label: 'Getting Started', link: 'sqlite-docdb/' },
-            { label: 'AOT Setup', link: 'sqlite-docdb/aot' },
-            { label: 'CRUD Operations', link: 'sqlite-docdb/crud' },
-            { label: 'Querying', link: 'sqlite-docdb/querying' },
-            { label: 'Projections & Streaming', link: 'sqlite-docdb/projections' },
-            { label: 'Aggregates', link: 'sqlite-docdb/aggregates' },
-            { label: 'Indexes & Transactions', link: 'sqlite-docdb/indexes' }
+            {
+              label: 'Orleans',
+              items:[
+                { label: 'Getting Started', link: 'aspire/orleans/' },
+                { label: 'Hosting (AppHost)', link: 'aspire/orleans/hosting' },
+                { label: 'Server (Silo)', link: 'aspire/orleans/server' },
+                { label: 'Client', link: 'aspire/orleans/client' }
+              ]
+            }
           ]
         },
         {
@@ -267,10 +294,14 @@ export default defineConfig({
             { label: 'Localization Generator', link: 'extensions/localizegen' },
             { label: 'Web Hosting', link: 'extensions/webhost' }
           ]
-        },    
+        },
         {
           label: 'Releases',
           items:[
+            {
+              label: 'Aspire',
+              link: 'release-notes/aspire'
+            },
             {
               label: 'Client',
               link: 'release-notes/client'

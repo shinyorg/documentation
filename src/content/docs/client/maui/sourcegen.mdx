@@ -1,0 +1,158 @@
+---
+title: Shell | Source Generation
+description: Eliminate boilerplate with ShellMap and ShellProperty source generation attributes
+---
+
+Shiny Shell includes source generators that eliminate route registration boilerplate and create strongly-typed navigation extensions. Decorate your ViewModels with attributes and the generators handle the rest.
+
+## ShellMap Attribute
+
+Apply `[ShellMap<TPage>]` to a ViewModel to register it with a page and route.
+
+```csharp
+[ShellMap<DetailPage>("detail")]
+public class DetailViewModel
+{
+}
+```
+
+| Parameter | Type | Description |
+|---|---|---|
+| `route` | `string` | The Shell route name for this page |
+| `registerRoute` | `bool` | Whether to register the route with Shell (default: `true`). Set to `false` for pages already defined in `AppShell.xaml` |
+
+```csharp
+// Root page defined in AppShell.xaml — don't re-register the route
+[ShellMap<MainPage>("main", registerRoute: false)]
+public class MainViewModel
+{
+}
+```
+
+## ShellProperty Attribute
+
+Mark ViewModel properties with `[ShellProperty]` to include them in the generated navigation extension methods.
+
+```csharp
+[ShellMap<DetailPage>("detail")]
+public class DetailViewModel
+{
+    [ShellProperty]
+    public int Id { get; set; }
+
+    [ShellProperty]
+    public string Name { get; set; }
+}
+```
+
+The generator creates a strongly-typed extension method with parameters matching each `[ShellProperty]`:
+
+```csharp
+// Generated — you call this instead of manual NavigateTo
+await navigator.NavigateToDetail(id: 42, name: "Allan");
+```
+
+## What Gets Generated
+
+The source generators produce three files:
+
+### Routes.g.cs
+
+A static class with `const string` fields for every route.
+
+```csharp
+public static class Routes
+{
+    public const string Detail = "detail";
+    public const string Main = "main";
+    public const string Modal = "modal";
+}
+```
+
+### NavigationExtensions.g.cs
+
+Strongly-typed extension methods on `INavigator` for each ViewModel with `[ShellProperty]` attributes.
+
+```csharp
+public static class NavigationExtensions
+{
+    public static Task NavigateToDetail(this INavigator navigator, int id, string name)
+    {
+        return navigator.NavigateTo<DetailViewModel>(x =>
+        {
+            x.Id = id;
+            x.Name = name;
+        });
+    }
+}
+```
+
+### NavigationBuilderExtensions.g.cs
+
+A DI registration method that replaces all manual `.Add<TPage, TViewModel>()` calls.
+
+```csharp
+internal static class __ShinyMauiNavigationRegistry
+{
+    [global::System.Runtime.CompilerServices.ModuleInitializerAttribute]
+    public static void Initialize()
+    {
+        global::Shiny.Infrastructure.ShinyMauiShellRegistry.RegisterCallback(builder =>
+        {
+            builder.Add<DetailPage, DetailViewModel>(Routes.Detail);
+            builder.Add<MainPage, MainViewModel>(Routes.Main, registerRoute: false);
+            builder.Add<ModalPage, ModalViewModel>(Routes.Modal);
+        });
+    }
+}
+```
+
+## Before & After
+
+### Without source generation
+
+```csharp
+// MauiProgram.cs — manual registration
+builder
+    .UseShinyShell(x => x
+        .Add<MainPage, MainViewModel>(registerRoute: false)
+        .Add<DetailPage, DetailViewModel>("detail")
+        .Add<ModalPage, ModalViewModel>("modal")
+    );
+
+// Navigation — string-based, error-prone
+await navigator.NavigateTo("detail", ("Id", 42), ("Name", "Allan"));
+```
+
+### With source generation
+
+```csharp
+// MauiProgram.cs — one line
+builder.UseShinyShell(x => x.AddGeneratedMaps());
+
+// Navigation — strongly typed, compile-time checked
+await navigator.NavigateToDetail(id: 42, name: "Allan");
+```
+
+## Using AddGeneratedMaps
+
+Replace your manual route registrations with the generated method in `MauiProgram.cs`:
+
+```csharp
+public static MauiApp CreateMauiApp()
+{
+    var builder = MauiApp.CreateBuilder();
+    builder
+        .UseMauiApp<App>()
+        .UseShinyShell(x => x.AddGeneratedMaps())
+        .ConfigureFonts(fonts =>
+        {
+            fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
+            fonts.AddFont("OpenSans-Semibold.ttf", "OpenSansSemibold");
+        });
+
+    return builder.Build();
+}
+```
+
+All `[ShellMap]` decorated ViewModels are automatically registered — no manual `.Add()` calls needed.

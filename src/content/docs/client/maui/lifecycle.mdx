@@ -1,0 +1,175 @@
+---
+title: Shell | ViewModel Lifecycle
+description: Lifecycle interfaces for page appearing, navigation confirmation, navigation awareness, and disposal
+---
+
+Shiny Shell provides lifecycle management for your ViewModels by implementing simple interfaces. These work similarly to [Prism Library](https://prismlibrary.com) — implement the interface and the behavior is automatic.
+
+## IPageLifecycleAware
+
+Notifies your ViewModel when the page becomes visible or hidden.
+
+```csharp
+using Shiny;
+
+public class MyViewModel : IPageLifecycleAware
+{
+    public void OnAppearing()
+    {
+        // Page is now visible — start timers, refresh data, etc.
+    }
+
+    public void OnDisappearing()
+    {
+        // Page is being hidden or popped — pause timers, save state, etc.
+    }
+}
+```
+
+## INavigationConfirmation
+
+Allows you to prevent navigation away from the page (e.g. unsaved changes).
+
+```csharp
+using Shiny;
+
+public class EditViewModel : INavigationConfirmation
+{
+    public bool HasUnsavedChanges { get; set; }
+
+    public async Task<bool> CanNavigate()
+    {
+        if (!HasUnsavedChanges)
+            return true;
+
+        // Return false to block navigation
+        return await ShowConfirmDialog("You have unsaved changes. Discard?");
+    }
+}
+```
+
+If `CanNavigate()` returns `false`, the navigation is cancelled and the user stays on the current page.
+
+## INavigationAware
+
+Allows you to add or modify navigation arguments before leaving the page.
+
+```csharp
+using Shiny;
+
+public class FormViewModel : INavigationAware
+{
+    public string DraftText { get; set; }
+
+    public void OnNavigatingFrom(IDictionary<string, object> parameters)
+    {
+        // Attach data that the previous page can receive
+        parameters["DraftText"] = DraftText;
+    }
+}
+```
+
+The parameters dictionary is delivered to the target ViewModel via `IQueryAttributable.ApplyQueryAttributes`.
+
+## IDisposable
+
+When a page is removed from the navigation stack entirely, `Dispose()` is called on the ViewModel. Use this to clean up event handlers, subscriptions, or other resources.
+
+```csharp
+public class StreamViewModel : IDisposable
+{
+    private readonly IDisposable _subscription;
+
+    public StreamViewModel(IDataService dataService)
+    {
+        _subscription = dataService.Stream.Subscribe(OnData);
+    }
+
+    public void Dispose()
+    {
+        _subscription.Dispose();
+    }
+}
+```
+
+## IQueryAttributable
+
+This is a built-in .NET MAUI interface (not from Shiny) that receives navigation arguments. Implement it to handle arguments from `NavigateTo`, `GoBack`, and `PopToRoot`.
+
+```csharp
+using Microsoft.Maui.Controls;
+
+public class DetailViewModel : IQueryAttributable
+{
+    public int Id { get; set; }
+    public string Name { get; set; }
+
+    public void ApplyQueryAttributes(IDictionary<string, object> query)
+    {
+        if (query.TryGetValue("Id", out var id))
+            Id = (int)id;
+
+        if (query.TryGetValue("Name", out var name))
+            Name = (string)name;
+    }
+}
+```
+
+## Complete Example
+
+A ViewModel implementing all lifecycle interfaces:
+
+```csharp
+using Shiny;
+using Microsoft.Maui.Controls;
+
+public class FullViewModel :
+    IPageLifecycleAware,
+    INavigationConfirmation,
+    INavigationAware,
+    IQueryAttributable,
+    IDisposable
+{
+    private IDisposable _subscription;
+    public int ItemId { get; set; }
+    public bool IsDirty { get; set; }
+
+    // Receive navigation arguments
+    public void ApplyQueryAttributes(IDictionary<string, object> query)
+    {
+        if (query.TryGetValue("ItemId", out var id))
+            ItemId = (int)id;
+    }
+
+    // Page became visible
+    public void OnAppearing()
+    {
+        _subscription = SomeService.Subscribe(OnUpdate);
+    }
+
+    // Page being hidden
+    public void OnDisappearing()
+    {
+        _subscription?.Dispose();
+        _subscription = null;
+    }
+
+    // Guard navigation
+    public Task<bool> CanNavigate()
+    {
+        return Task.FromResult(!IsDirty);
+    }
+
+    // Attach outgoing arguments
+    public void OnNavigatingFrom(IDictionary<string, object> parameters)
+    {
+        parameters["LastViewedId"] = ItemId;
+    }
+
+    // Final cleanup
+    public void Dispose()
+    {
+        _subscription?.Dispose();
+    }
+}
+```
