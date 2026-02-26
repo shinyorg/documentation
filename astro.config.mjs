@@ -25,7 +25,8 @@ export default defineConfig({
       '/release-notes/sqlite-documentdb/': '/data/sqlite-docdb/release-notes/',
       '/release-notes/tableview/': '/maui/tableview/release-notes/',
       '/release-notes/templates/': '/maui/tableview/release-notes-templates/',
-      '/release-notes/extensions/': '/extensions/release-notes/',
+      '/release-notes/extensions/': '/extensions/di/release-notes/',
+      '/extensions/release-notes/': '/extensions/di/release-notes/',
       '/release-notes/aspire/': '/aspire/release-notes/',
 
       '/client/maui/': '/maui/shell/',
@@ -342,12 +343,41 @@ export default defineConfig({
             link: '/extensions/reflector/',
             icon: 'setting',
             items:[
-              { label: 'Reflector', link: 'extensions/reflector' },
-              { label: 'Dependency Injection', link: 'extensions/di' },
-              { label: 'Stores', link: 'extensions/stores' },
-              { label: 'Localization Generator', link: 'extensions/localizegen' },
-              { label: 'Web Hosting', link: 'extensions/webhost' },
-              { label: 'Release Notes', link: 'extensions/release-notes' }
+              {
+                label: 'Reflector',
+                items:[
+                  { label: 'Getting Started', link: 'extensions/reflector/' },
+                  { label: 'Release Notes', link: 'extensions/reflector/release-notes' }
+                ]
+              },
+              {
+                label: 'Dependency Injection',
+                items:[
+                  { label: 'Getting Started', link: 'extensions/di/' },
+                  { label: 'Release Notes', link: 'extensions/di/release-notes' }
+                ]
+              },
+              {
+                label: 'Stores',
+                items:[
+                  { label: 'Getting Started', link: 'extensions/stores/' },
+                  { label: 'Release Notes', link: 'extensions/stores/release-notes' }
+                ]
+              },
+              {
+                label: 'Localization Generator',
+                items:[
+                  { label: 'Getting Started', link: 'extensions/localizegen/' },
+                  { label: 'Release Notes', link: 'extensions/localizegen/release-notes' }
+                ]
+              },
+              {
+                label: 'Web Hosting',
+                items:[
+                  { label: 'Getting Started', link: 'extensions/webhost/' },
+                  { label: 'Release Notes', link: 'extensions/webhost/release-notes' }
+                ]
+              }
             ]
           },
           {
