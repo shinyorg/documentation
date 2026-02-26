@@ -24,8 +24,10 @@ var store = new SqliteDocumentStore(new DocumentStoreOptions
     ConnectionString = "Data Source=mydata.db"
 });
 
-// Store a document
-var id = await store.Set(new User { Name = "Alice", Age = 25 });
+// Store a document — Id is auto-generated and written back to the object
+var user = new User { Name = "Alice", Age = 25 };
+await store.Set(user);
+// user.Id is now populated
 
 // Fluent query builder
 var results = await store.Query<User>()
@@ -33,6 +35,8 @@ var results = await store.Query<User>()
     .OrderBy(u => u.Age)
     .ToList();
 ```
+
+Every document type must have a public `Id` property of type `Guid`, `int`, `long`, or `string`. The Id is stored in both the SQLite column and the JSON blob, so query results always include it.
 
 All `JsonTypeInfo<T>` parameters are optional — configure a `JsonSerializerContext` once and type info is auto-resolved on every call.  No per-call `ctx.User` needed.  Full AOT, fully trimmable, zero reflection.
 
@@ -49,16 +53,16 @@ The benchmarks tell the story:
 **Nested insert (Order + Address + OrderLines + Tags, 100 records):**
 | Method | Mean |
 |---|---|
-| DocumentStore | 5.0 ms |
-| sqlite-net (3 tables) | 170 ms |
+| DocumentStore | 5.69 ms |
+| sqlite-net (3 tables) | 176.48 ms |
 
 **Nested get by ID:**
 | Method | Mean |
 |---|---|
-| DocumentStore | 4.8 us |
-| sqlite-net (3 queries) | 48.6 us |
+| DocumentStore | 5.04 us |
+| sqlite-net (3 queries) | 48.26 us |
 
-That's **34x faster inserts** and **10x faster reads** for nested data.  The document store wins because it does one write and one read instead of multiple table operations.
+That's **31x faster inserts** and **10x faster reads** for nested data.  The document store wins because it does one write and one read instead of multiple table operations.
 
 For flat data, sqlite-net can be faster on indexed column queries (it queries columns directly vs. `json_extract`).  Use the right tool for the shape of your data.
 
@@ -216,7 +220,7 @@ await store.RemoveProperty<User>("user-1", u => u.Email);
 For multi-field patches, `Upsert` does RFC 7396 JSON Merge Patch — deep-merging only the provided fields while preserving everything else:
 
 ```csharp
-await store.Upsert("user-1", new User { Name = "Alice", Age = 31 });
+await store.Upsert(new User { Id = "user-1", Name = "Alice", Age = 31 });
 // Email and other fields are preserved
 ```
 
@@ -254,10 +258,10 @@ await store.CreateIndexAsync<User>(u => u.Name, ctx.User);
 **Impact on a 1,000-record flat query:**
 | Method | Mean |
 |---|---|
-| Without index | 274 us |
-| With index | 9.2 us |
+| Without index | 270 us |
+| With index | 8.52 us |
 
-**~30x faster.**  The index lets SQLite use a B-tree lookup instead of scanning every row with `json_extract`.  Works with nested properties too:
+**~32x faster.**  The index lets SQLite use a B-tree lookup instead of scanning every row with `json_extract`.  Works with nested properties too:
 
 ```csharp
 await store.CreateIndexAsync<Order>(o => o.ShippingAddress.City, ctx.Order);
@@ -287,7 +291,8 @@ var store = new SqliteDocumentStore(new DocumentStoreOptions
 });
 
 // Now every call is AOT-safe without passing JsonTypeInfo explicitly
-var id = await store.Set(new User { Name = "Alice", Age = 25 });
+var user = new User { Name = "Alice", Age = 25 };
+await store.Set(user); // user.Id is auto-generated
 var users = await store.Query<User>().Where(u => u.Age > 18).ToList();
 ```
 
@@ -304,8 +309,8 @@ Atomic multi-document operations with automatic commit/rollback:
 ```csharp
 await store.RunInTransaction(async tx =>
 {
-    await tx.Set("order-1", order);
-    await tx.Set("user-1", user);
+    await tx.Set(order); // order.Id must be set
+    await tx.Set(user);  // user.Id must be set
     // Exception → automatic rollback
 });
 ```
