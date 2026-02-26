@@ -128,7 +128,6 @@ export default defineConfig({
             link: '/client/appbuilder/',
             icon: 'rocket',
             items: [
-              { label: 'Getting Started', link: 'client/getting-started' },
               { label: 'App Builder', link: 'client/appbuilder' },
               { label: 'Architecture', link: 'client/architecture' },
               {
