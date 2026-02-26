@@ -221,17 +221,22 @@ export default defineConfig({
             link: '/mediator/',
             icon: 'puzzle',
             items:[
-              { label: 'Introduction', link: 'mediator/' },
-              { label: 'Getting Started', link: 'mediator/getting-started' },
-              { label: 'Requests', link: 'mediator/requests' },
-              { label: 'Commands', link: 'mediator/commands' },
-              { label: 'Streams', link: 'mediator/streams' },
-              { label: 'Events', link: 'mediator/events' },
-              { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
-              { label: 'Contract Keys', link: 'mediator/contractkeys' },
-              { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration' },
-              { label: 'Execution Contexts', link: 'mediator/context' },
-              { label: 'Advanced', link: 'mediator/advanced' },
+              {
+                  label: 'General',
+                  items:[
+                    { label: 'Introduction', link: 'mediator/' },
+                    { label: 'Getting Started', link: 'mediator/getting-started' },
+                    { label: 'Requests', link: 'mediator/requests' },
+                    { label: 'Commands', link: 'mediator/commands' },
+                    { label: 'Streams', link: 'mediator/streams' },
+                    { label: 'Events', link: 'mediator/events' },
+                    { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
+                    { label: 'Contract Keys', link: 'mediator/contractkeys' },
+                    { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration' },
+                    { label: 'Execution Contexts', link: 'mediator/context' },
+                    { label: 'Advanced', link: 'mediator/advanced' },
+                  ]
+              },
               {
                   label: 'Middleware',
                   items:[
