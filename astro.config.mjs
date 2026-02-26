@@ -24,7 +24,7 @@ export default defineConfig({
       '/release-notes/spatial/': '/data/spatial/release-notes/',
       '/release-notes/sqlite-documentdb/': '/data/sqlite-docdb/release-notes/',
       '/release-notes/tableview/': '/maui/tableview/release-notes/',
-      '/release-notes/templates/': '/maui/tableview/release-notes-templates/',
+      '/release-notes/templates/': '/maui/templates/release-notes/',
       '/release-notes/extensions/': '/extensions/di/release-notes/',
       '/extensions/release-notes/': '/extensions/di/release-notes/',
       '/release-notes/aspire/': '/aspire/orleans/release-notes/',
@@ -294,15 +294,17 @@ export default defineConfig({
                   { label: 'Cell Types', link: 'maui/tableview/cells' },
                   { label: 'Sections & Dynamic Content', link: 'maui/tableview/sections' },
                   { label: 'Styling', link: 'maui/tableview/styling' },
-                  { label: 'Advanced Features', link: 'maui/tableview/advanced' }
+                  { label: 'Advanced Features', link: 'maui/tableview/advanced' },
+                  { label: 'Release Notes', link: 'maui/tableview/release-notes' }
                 ]
               },
-
               {
-                label: 'Release Notes',
+                label: 'Templates',
                 items:[
-                  { label: 'TableView', link: 'maui/tableview/release-notes' },
-                  { label: 'Templates', link: 'maui/release-notes-templates' }
+                  { label: 'Getting Started', link: 'maui/templates/' },
+                  { label: 'Shiny Libraries', link: 'maui/templates/shiny-libraries' },
+                  { label: '3rd Party Libraries', link: 'maui/templates/third-party' },
+                  { label: 'Release Notes', link: 'maui/templates/release-notes' }
                 ]
               }
             ]
