@@ -1,0 +1,100 @@
+---
+title: Event Sample
+---
+import { Steps } from '@astrojs/starlight/components';
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+:::note
+Sample middleware is applied only to [Events](/mediator/events)
+
+Your handler class must be marked as partial for source generation to work correctly on the SampleAttribute.
+:::
+
+# Event Sample
+
+When publishing events rapidly (e.g. search text changed, sensor data updates, UI gestures), you often don't want every single event to trigger handler execution.  The `[Sample]` attribute implements a fixed-window sampling pattern — the first event starts a timer, subsequent events replace the pending delegate without resetting the timer, and the **last** event is executed when the window expires.
+
+This is particularly useful for scenarios like:
+- **Search-as-you-type** — only search after user input settles within a fixed window
+- **Sensor data** — avoid overwhelming handlers with rapid sensor readings, process the latest reading at a fixed interval
+- **UI events** — batch resize, scroll, or input change events into fixed windows
+
+:::tip
+If you want the **first** event to execute immediately and ignore the rest, use the [Throttle](/mediator/middleware/throttle) middleware instead.
+:::
+
+## Setup
+
+<Steps>
+1. Register the sample event middleware in your host startup:
+    ```csharp
+    services.AddShinyMediator(cfg => cfg.AddSampleEventMiddleware());
+    ```
+
+2. Mark your event handler method with the `[Sample]` attribute.  The handler class **must be `partial`**:
+    ```csharp
+    [MediatorSingleton]
+    public partial class SearchChangedHandler : IEventHandler<SearchChangedEvent>
+    {
+        [Sample(500)] // 500 millisecond window
+        public async Task Handle(SearchChangedEvent @event, IMediatorContext context, CancellationToken ct)
+        {
+            // Executes once at the end of the 500ms window with the last event received
+            await PerformSearch(@event.Query);
+        }
+    }
+    ```
+</Steps>
+
+## How It Works
+
+When an event is published and the handler has a `[Sample]` attribute:
+
+1. The first event starts a fixed timer for the specified window duration (in milliseconds)
+2. If the same event is published again before the timer expires, the pending delegate is **replaced** but the timer is **not reset**
+3. When the timer fires at the end of the window, the handler executes with the most recent event
+4. After execution, the state resets so the next event starts a new window
+
+This means rapid-fire events result in a single handler execution with the latest data at predictable intervals.
+
+## Example — Search Debounce
+
+```csharp
+public record SearchChangedEvent(string Query) : IEvent;
+
+[MediatorSingleton]
+public partial class SearchHandler : IEventHandler<SearchChangedEvent>
+{
+    readonly ISearchService searchService;
+
+    public SearchHandler(ISearchService searchService)
+    {
+        this.searchService = searchService;
+    }
+
+    [Sample(300)] // 300ms fixed window
+    public async Task Handle(SearchChangedEvent @event, IMediatorContext context, CancellationToken ct)
+    {
+        var results = await this.searchService.Search(@event.Query, ct);
+        // update UI with results
+    }
+}
+```
+
+## Sample vs Throttle
+
+| Behavior | `[Sample]` | `[Throttle]` |
+|----------|-----------|-------------|
+| First event | Deferred (starts timer) | Executes immediately |
+| During window | Replaces pending delegate | Discards events |
+| Window expiry | Executes last event | Resets, next event executes immediately |
+| Timer reset | Never (fixed window) | N/A (cooldown-based) |
+| Best for | Batching rapid updates | Preventing duplicate actions |
+
+:::warning
+If the sample delay is set to 0 or less, the middleware will execute the handler immediately without any sampling.
+:::
+
+:::note
+Each unique combination of event type and handler type has its own sample timer.  This means different handlers for the same event type sample independently.
+:::

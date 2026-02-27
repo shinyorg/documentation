@@ -12,12 +12,16 @@ Your handler class must be marked as partial for source generation to work corre
 
 # Event Throttle
 
-When publishing events rapidly (e.g. search text changed, sensor data updates, UI gestures), you often don't want every single event to trigger handler execution.  The `[Throttle]` attribute implements a debounce pattern — only the **last** event in a time window is actually processed.
+When publishing events rapidly (e.g. button clicks, form submissions, navigation triggers), you often want to act on the **first** event immediately but ignore subsequent duplicates for a cooldown period.  The `[Throttle]` attribute implements this true throttle pattern — the first event executes right away, then all further events within the cooldown window are discarded.
 
 This is particularly useful for scenarios like:
-- **Search-as-you-type** — only search after the user stops typing
-- **Sensor data** — avoid overwhelming handlers with rapid sensor readings
-- **UI events** — debounce resize, scroll, or input change events
+- **Button clicks** — prevent double-submit by executing the first click and ignoring rapid follow-ups
+- **Navigation events** — act on the first trigger immediately, ignore duplicates
+- **API calls** — fire the first request instantly, suppress bursts
+
+:::tip
+If you want the **last** event in a time window instead of the **first**, use the [Sample](/mediator/middleware/sample) middleware.
+:::
 
 ## Setup
 
@@ -30,13 +34,14 @@ This is particularly useful for scenarios like:
 2. Mark your event handler method with the `[Throttle]` attribute.  The handler class **must be `partial`**:
     ```csharp
     [MediatorSingleton]
-    public partial class SearchChangedHandler : IEventHandler<SearchChangedEvent>
+    public partial class ButtonClickHandler : IEventHandler<ButtonClickedEvent>
     {
-        [Throttle(500)] // 500 milliseconds
-        public async Task Handle(SearchChangedEvent @event, IMediatorContext context, CancellationToken ct)
+        [Throttle(1000)] // 1000 milliseconds cooldown
+        public async Task Handle(ButtonClickedEvent @event, IMediatorContext context, CancellationToken ct)
         {
-            // This only executes after 500ms of no new SearchChangedEvent publications
-            await PerformSearch(@event.Query);
+            // Executes immediately on first event.
+            // All events within the next 1000ms are discarded.
+            await ProcessClick();
         }
     }
     ```
@@ -46,32 +51,31 @@ This is particularly useful for scenarios like:
 
 When an event is published and the handler has a `[Throttle]` attribute:
 
-1. The middleware starts a timer for the specified delay (in milliseconds)
-2. If the same event is published again before the timer expires, the timer resets and the previous event is discarded
-3. Only after the full delay passes with no new events does the handler execute with the most recent event
+1. If no cooldown is active, the handler executes **immediately** and a cooldown timer starts
+2. Any events published during the cooldown period are **discarded**
+3. Once the cooldown expires, the next event will execute immediately again (back to step 1)
 
-This means rapid-fire events result in a single handler execution with the latest data.
+This means the first event in a burst always runs instantly, and duplicates are suppressed until the cooldown passes.
 
-## Example — Search Debounce
+## Example — Preventing Double-Click
 
 ```csharp
-public record SearchChangedEvent(string Query) : IEvent;
+public record SubmitOrderEvent(int OrderId) : IEvent;
 
 [MediatorSingleton]
-public partial class SearchHandler : IEventHandler<SearchChangedEvent>
+public partial class SubmitOrderHandler : IEventHandler<SubmitOrderEvent>
 {
-    readonly ISearchService searchService;
+    readonly IOrderService orderService;
 
-    public SearchHandler(ISearchService searchService)
+    public SubmitOrderHandler(IOrderService orderService)
     {
-        this.searchService = searchService;
+        this.orderService = orderService;
     }
 
-    [Throttle(300)] // wait 300ms after last keystroke
-    public async Task Handle(SearchChangedEvent @event, IMediatorContext context, CancellationToken ct)
+    [Throttle(2000)] // 2 second cooldown after submission
+    public async Task Handle(SubmitOrderEvent @event, IMediatorContext context, CancellationToken ct)
     {
-        var results = await this.searchService.Search(@event.Query, ct);
-        // update UI with results
+        await this.orderService.Submit(@event.OrderId, ct);
     }
 }
 ```

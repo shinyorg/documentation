@@ -249,6 +249,7 @@ export default defineConfig({
                     { label: 'Main Thread', link: 'mediator/middleware/mainthread' },
                     { label: 'Replay', link: 'mediator/middleware/replay' },
                     { label: 'Refresh Timer', link: 'mediator/middleware/refresh' },
+                    { label: 'Event Sample', link: 'mediator/middleware/sample' },
                     { label: 'Event Throttle', link: 'mediator/middleware/throttle' },
                     { label: 'Command Scheduling', link: 'mediator/middleware/scheduling' },
                     { label: 'Middleware Ordering', link: 'mediator/middleware/ordering' }
