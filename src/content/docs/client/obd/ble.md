@@ -110,16 +110,18 @@ Register BLE and the scanner in your `MauiProgram.cs`:
 
 ```csharp
 using Shiny;
-using Shiny.Obd;
-using Shiny.Obd.Ble;
 
 var builder = MauiApp.CreateBuilder();
 builder.UseMauiApp<App>();
 
 builder.Services.AddBluetoothLE();
-builder.Services.AddSingleton(new BleObdConfiguration { DeviceNameFilter = "OBD" });
-builder.Services.AddSingleton<IObdDeviceScanner, BleObdDeviceScanner>();
+builder.Services.AddShinyObdBluetoothLE(new BleObdConfiguration
+{
+    DeviceNameFilter = "OBD"
+});
 ```
+
+`AddShinyObdBluetoothLE` registers `BleObdConfiguration` and `IObdDeviceScanner` (`BleObdDeviceScanner`).
 
 :::note
 In Shiny.BluetoothLE v4, use `services.AddBluetoothLE()` (namespace `Shiny`). There is no `UseShiny()` or `AddBle()` call needed.

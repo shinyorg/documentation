@@ -18,7 +18,7 @@ Shiny.Obd is a .NET library for communicating with vehicles through OBD-II (On-B
 
 | Package | Target | Description |
 |---------|--------|-------------|
-| `Shiny.Obd` | `netstandard2.1` | Core library — commands, connection, transport abstraction |
+| `Shiny.Obd` | `net10.0` | Core library — commands, connection, transport abstraction |
 | `Shiny.Obd.Ble` | `net10.0` | BLE transport using Shiny.BluetoothLE |
 
 ## Quick Start
