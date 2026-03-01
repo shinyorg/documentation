@@ -4,6 +4,15 @@ title: Custom Transports
 
 The `IObdTransport` interface abstracts the communication channel between your app and the OBD adapter. The library ships with BLE, but you can implement WiFi, USB, or any other transport.
 
+For transports that support discovery (BLE, WiFi), implement `IObdDeviceScanner` as well:
+
+```csharp
+public interface IObdDeviceScanner
+{
+    Task Scan(Action<ObdDiscoveredDevice> onDeviceFound, CancellationToken ct = default);
+}
+```
+
 ## IObdTransport Interface
 
 ```csharp

@@ -45,6 +45,35 @@ If the defaults don't work, use a BLE scanner app (like nRF Connect) to discover
 
 ## Creating a Transport
 
+### From a Discovered Device (recommended)
+
+Use `BleObdDeviceScanner` to find adapters, then pass the selected device:
+
+```csharp
+IBleManager bleManager = /* from DI or Shiny setup */;
+
+var scanner = new BleObdDeviceScanner(bleManager, new BleObdConfiguration
+{
+    DeviceNameFilter = "OBDII"  // optional: matches any device name containing "OBDII"
+});
+
+var cts = new CancellationTokenSource();
+var devices = new List<ObdDiscoveredDevice>();
+
+await scanner.Scan(device =>
+{
+    devices.Add(device);
+    Console.WriteLine($"Found: {device.Name} ({device.Id})");
+}, cts.Token);
+
+// Connect to a selected device
+var transport = new BleObdTransport(devices[0], new BleObdConfiguration());
+var connection = new ObdConnection(transport);
+await connection.Connect();
+```
+
+`BleObdDeviceScanner` deduplicates by peripheral UUID — each device is reported once. Cancel the token to stop scanning.
+
 ### Auto-Scan
 
 Let the transport scan for the first device matching your filter:
@@ -74,6 +103,27 @@ var transport = new BleObdTransport(peripheral, new BleObdConfiguration());
 var connection = new ObdConnection(transport);
 await connection.Connect(); // connects to known peripheral, initializes
 ```
+
+## MAUI Setup
+
+Register BLE and the scanner in your `MauiProgram.cs`:
+
+```csharp
+using Shiny;
+using Shiny.Obd;
+using Shiny.Obd.Ble;
+
+var builder = MauiApp.CreateBuilder();
+builder.UseMauiApp<App>();
+
+builder.Services.AddBluetoothLE();
+builder.Services.AddSingleton(new BleObdConfiguration { DeviceNameFilter = "OBD" });
+builder.Services.AddSingleton<IObdDeviceScanner, BleObdDeviceScanner>();
+```
+
+:::note
+In Shiny.BluetoothLE v4, use `services.AddBluetoothLE()` (namespace `Shiny`). There is no `UseShiny()` or `AddBle()` call needed.
+:::
 
 ## Full Example
 
@@ -143,7 +193,7 @@ public class DashboardData
 
 The BLE transport:
 
-1. **Scans** for a peripheral matching the configured service UUID and optional device name filter (or uses a pre-provided peripheral)
+1. **Scans** for a peripheral matching the configured service UUID and optional device name filter (or uses a pre-provided peripheral / discovered device)
 2. **Connects** using Shiny's task-based `ConnectAsync`
 3. **Subscribes** to notifications on the read characteristic via `NotifyCharacteristic`
 4. **Sends commands** by writing bytes to the write characteristic via `WriteCharacteristicAsync`

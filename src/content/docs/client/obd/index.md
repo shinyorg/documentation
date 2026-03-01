@@ -9,6 +9,7 @@ Shiny.Obd is a .NET library for communicating with vehicles through OBD-II (On-B
 - **Command-object pattern** — OBD commands are objects, not methods. Pass built-in commands or create your own for custom PIDs.
 - **Generic return types** — each command declares its return type (`int`, `double`, `string`, `TimeSpan`, etc.) with compile-time safety.
 - **Pluggable transports** — `IObdTransport` abstracts the communication channel. Ships with BLE; add WiFi or USB later.
+- **Device discovery** — `IObdDeviceScanner` finds available adapters before connecting. BLE scanner included.
 - **Adapter auto-detection** — detects ELM327 vs OBDLink (STN) adapters via ATI and runs the appropriate initialization sequence.
 - **Task-based async** — fully async/await throughout, no Reactive Extensions required in consuming code.
 - **9 standard commands included** — speed, RPM, coolant temp, throttle, fuel level, engine load, intake air temp, runtime, and VIN.
@@ -32,13 +33,21 @@ using Shiny.Obd;
 using Shiny.Obd.Ble;
 using Shiny.Obd.Commands;
 
-// Create BLE transport
-var transport = new BleObdTransport(bleManager, new BleObdConfiguration
+// Scan for an adapter
+var scanner = new BleObdDeviceScanner(bleManager, new BleObdConfiguration
 {
     DeviceNameFilter = "OBDLink"
 });
+var cts = new CancellationTokenSource();
+ObdDiscoveredDevice? selected = null;
+await scanner.Scan(device =>
+{
+    selected = device;
+    cts.Cancel();
+}, cts.Token);
 
-// Create connection (auto-detects adapter type)
+// Connect using the discovered device
+var transport = new BleObdTransport(selected!, new BleObdConfiguration());
 var connection = new ObdConnection(transport);
 await connection.Connect();
 
@@ -65,8 +74,8 @@ var vin = await connection.Execute(StandardCommands.Vin);              // string
 └──────────────────────┬──────────────────────────┘
                        │
 ┌──────────────────────▼──────────────────────────┐
-│             IObdTransport                       │
-│  Pluggable transport layer                      │
+│  IObdDeviceScanner ──▶ IObdTransport            │
+│  Discover adapters     Pluggable transport layer │
 │  ┌────────────────┐  ┌────────┐  ┌─────────┐   │
 │  │ BleObdTransport│  │ WiFi   │  │  USB    │   │
 │  │ (Shiny BLE)    │  │(future)│  │(future) │   │
