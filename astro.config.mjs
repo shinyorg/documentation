@@ -160,6 +160,16 @@ export default defineConfig({
                 ]
               },
               {
+                label: 'OBD',
+                items: [
+                  { label: 'Getting Started', link: 'client/obd' },
+                  { label: 'Commands', link: 'client/obd/commands' },
+                  { label: 'Connection & Adapters', link: 'client/obd/connection' },
+                  { label: 'BLE Transport', link: 'client/obd/ble' },
+                  { label: 'Custom Transports', link: 'client/obd/transports' }
+                ]
+              },
+              {
                 label: 'Jobs',
                 items:[
                   { label: 'Getting Started', link: 'client/jobs/' },
