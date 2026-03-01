@@ -213,6 +213,16 @@ export default defineConfig({
                   { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
                 ]
               },
+              {
+                label: 'Music',
+                items: [
+                  { label: 'Getting Started', link: 'client/music/' },
+                  { label: 'Permissions', link: 'client/music/permissions' },
+                  { label: 'Querying Music', link: 'client/music/querying' },
+                  { label: 'Playback', link: 'client/music/playback' },
+                  { label: 'Copying Tracks', link: 'client/music/copying' }
+                ]
+              },
               { label: 'Release Notes', link: 'client/release-notes' }
             ],
           },
@@ -342,6 +352,7 @@ export default defineConfig({
                   { label: 'Querying', link: 'data/spatial/queries' },
                   { label: 'Algorithms & Serialization', link: 'data/spatial/algorithms' },
                   { label: 'Pre-built Databases', link: 'data/spatial/prebuilt' },
+                  { label: 'Geofencing', link: 'data/spatial/geofencing' },
                   { label: 'Release Notes', link: 'data/spatial/release-notes' }
                 ]
               }
