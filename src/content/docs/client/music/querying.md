@@ -45,6 +45,7 @@ Each track is represented by a `MusicMetadata` record with the following propert
 | `Genre` | `string?` | The genre, or `null` if unavailable. |
 | `Duration` | `TimeSpan` | The playback duration. |
 | `AlbumArtUri` | `string?` | URI to album artwork. Available on Android via MediaStore; `null` on iOS where artwork is accessed through `MPMediaItem.Artwork`. |
+| `IsExplicit` | `bool?` | Whether the track is marked as explicit content. iOS only via `MPMediaItem.IsExplicitItem`; always `null` on Android. |
 | `ContentUri` | `string` | URI used for playback and file operations. On Android, this is a `content://` URI. On iOS, this is an `ipod-library://` asset URL. **Empty for DRM-protected Apple Music subscription tracks.** |
 
 ## ContentUri and DRM
