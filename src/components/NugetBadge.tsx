@@ -9,7 +9,7 @@ export interface Props {
   
 const NugetBadge = (props: Props) => {
     const v = props.showPreviewVersion === true ? 'vpre' : 'v';
-    let imgUrl: string = `https://img.shields.io/nuget/${v}/${props.name}?style=for-the-badge`;
+    let imgUrl: string = `https://img.shields.io/nuget/${v}/${props.name}?style=for-the-badge&logo=nuget`;
     if (props.showLabel === true) {
         imgUrl += `&label=${props.name}`;
     }
