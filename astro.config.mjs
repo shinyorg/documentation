@@ -166,7 +166,8 @@ export default defineConfig({
                   { label: 'Commands', link: 'client/obd/commands' },
                   { label: 'Connection & Adapters', link: 'client/obd/connection' },
                   { label: 'BLE Transport', link: 'client/obd/ble' },
-                  { label: 'Custom Transports', link: 'client/obd/transports' }
+                  { label: 'Custom Transports', link: 'client/obd/transports' },
+                  { label: 'Release Notes', link: 'client/obd/release-notes' }
                 ]
               },
               {
@@ -230,7 +231,8 @@ export default defineConfig({
                   { label: 'Permissions', link: 'client/music/permissions' },
                   { label: 'Querying Music', link: 'client/music/querying' },
                   { label: 'Playback', link: 'client/music/playback' },
-                  { label: 'Copying Tracks', link: 'client/music/copying' }
+                  { label: 'Copying Tracks', link: 'client/music/copying' },
+                  { label: 'Release Notes', link: 'client/music/release-notes' }
                 ]
               },
               { label: 'Release Notes', link: 'client/release-notes' }
