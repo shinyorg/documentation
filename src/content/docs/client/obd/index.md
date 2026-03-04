@@ -59,6 +59,17 @@ var rpm = await connection.Execute(StandardCommands.EngineRpm);        // int
 var vin = await connection.Execute(StandardCommands.Vin);              // string
 ```
 
+## AI Coding Assistant
+
+An AI skill is available for Shiny OBD to help generate OBD-II commands, configure transports, and follow best practices directly in your IDE.
+
+**Claude Code**
+```bash
+claude plugin add github:shinyorg/skills
+```
+
+**GitHub Copilot** — Copy the [shiny-obd](https://github.com/shinyorg/skills/blob/main/skills/shiny-obd/SKILL.md) skill file into your repository's [custom instructions](https://docs.github.com/en/copilot/customizing-copilot/adding-repository-custom-instructions).
+
 ## Architecture
 
 ```
