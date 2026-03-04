@@ -312,7 +312,8 @@ export default defineConfig({
                   { label: 'Getting Started', link: 'maui/shell/' },
                   { label: 'Navigation', link: 'maui/shell/navigation' },
                   { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
-                  { label: 'Source Generation', link: 'maui/shell/sourcegen' }
+                  { label: 'Source Generation', link: 'maui/shell/sourcegen' },
+                  { label: 'Release Notes', link: 'maui/shell/release-notes' }
                 ]
               },
               {
