@@ -39,40 +39,45 @@ Each track is represented by a `MusicMetadata` record with the following propert
 | Property | Type | Description |
 |---|---|---|
 | `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore row ID. On iOS, it is the `MPMediaItem` persistent ID. |
-| `Title` | `string` | The track title. |
-| `Artist` | `string` | The artist or performer. |
-| `Album` | `string` | The album name. |
+| `Title` | `string?` | The track title, or `null` if not available. |
+| `Artist` | `string?` | The artist or performer, or `null` if not available. |
+| `Album` | `string?` | The album name, or `null` if not available. |
 | `Genre` | `string?` | The genre, or `null` if unavailable. |
 | `Duration` | `TimeSpan` | The playback duration. |
 | `AlbumArtUri` | `string?` | URI to album artwork. Available on Android via MediaStore; `null` on iOS where artwork is accessed through `MPMediaItem.Artwork`. |
 | `IsExplicit` | `bool?` | Whether the track is marked as explicit content. iOS only via `MPMediaItem.IsExplicitItem`; always `null` on Android. |
 | `ContentUri` | `string` | URI used for playback and file operations. On Android, this is a `content://` URI. On iOS, this is an `ipod-library://` asset URL. **Empty for DRM-protected Apple Music subscription tracks.** |
+| `StoreId` | `string?` | Apple Music catalog ID (from `PlayParams.Id`). Enables streaming playback via `MPMusicPlayerController` on iOS. Always `null` on Android. |
 
-## ContentUri and DRM
+## ContentUri, StoreId, and DRM
 
-The `ContentUri` property is critical for understanding what operations are available for a track:
+The `ContentUri` and `StoreId` properties determine what operations are available for a track:
 
 ```csharp
 var tracks = await _library.GetAllTracksAsync();
 
 foreach (var track in tracks)
 {
-    if (string.IsNullOrEmpty(track.ContentUri))
+    if (!string.IsNullOrEmpty(track.ContentUri))
     {
-        // DRM-protected Apple Music track
-        // Cannot be played via AVAudioPlayer or copied
-        Console.WriteLine($"⚠️ {track.Title} - DRM protected, playback/copy unavailable");
+        // Locally synced or purchased track — full access
+        Console.WriteLine($"✅ {track.Title} - available for local playback and copy");
+    }
+    else if (!string.IsNullOrEmpty(track.StoreId))
+    {
+        // Apple Music subscription track with catalog ID — streaming playback only
+        Console.WriteLine($"🎧 {track.Title} - available for streaming playback (no copy)");
     }
     else
     {
-        // Locally synced or purchased track — full access
-        Console.WriteLine($"✅ {track.Title} - available for playback and copy");
+        // No playback or copy available
+        Console.WriteLine($"⚠️ {track.Title} - not playable or copyable");
     }
 }
 ```
 
 :::note
-On Android, `ContentUri` is always populated for all music files. The DRM limitation only applies to iOS Apple Music subscription tracks.
+On Android, `ContentUri` is always populated for all music files. `StoreId` is always `null` on Android. The DRM and streaming distinction only applies to iOS Apple Music subscription tracks.
 :::
 
 ## Platform Details

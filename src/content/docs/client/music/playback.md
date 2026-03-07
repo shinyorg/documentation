@@ -4,6 +4,10 @@ title: Playback
 
 The `IMusicPlayer` interface provides full playback control for music tracks from the device library.
 
+On iOS, the player supports two modes that are automatically selected based on the track's properties:
+- **Local playback** via `AVPlayer` when `ContentUri` is available (purchased/synced tracks)
+- **Streaming playback** via `MPMusicPlayerController.SystemMusicPlayer` when `StoreId` is available (Apple Music subscription tracks)
+
 ## Playing a Track
 
 ```csharp
@@ -11,10 +15,10 @@ var tracks = await _library.GetAllTracksAsync();
 await _player.PlayAsync(tracks[0]);
 ```
 
-Calling `PlayAsync` stops any currently playing track, loads the new one, and begins playback immediately.
+Calling `PlayAsync` stops any currently playing track, loads the new one, and begins playback immediately. The player automatically selects the appropriate playback engine based on whether `StoreId` or `ContentUri` is available.
 
 :::caution
-`PlayAsync` will throw an `InvalidOperationException` if the track's `ContentUri` is empty (DRM-protected on iOS) or if the platform player fails to initialize. Always check `ContentUri` before playing.
+`PlayAsync` will throw an `InvalidOperationException` if both `ContentUri` and `StoreId` are empty, or if the platform player fails to initialize.
 :::
 
 ## Pause, Resume, and Stop
@@ -98,9 +102,8 @@ If you register the player as a singleton in DI, it will be disposed when the ap
 - Seeking uses millisecond precision.
 
 ### iOS
-- Playback uses `AVFoundation.AVAudioPlayer` with the track's `ipod-library://` asset URL.
-- The `AVAudioSession` category is set to `Playback` to support background audio (if configured).
-- Seeking uses second precision.
+- **Local tracks** (with `ContentUri`): Playback uses `AVPlayer` with the track's `ipod-library://` asset URL. The `AVAudioSession` category is set to `Playback` to support background audio (if configured). Seeking uses second precision.
+- **Streaming tracks** (with `StoreId`): Playback uses `MPMusicPlayerController.SystemMusicPlayer` with the Apple Music catalog ID. This enables playback of DRM-protected Apple Music subscription content. The system player manages its own audio session.
 
 :::note
 Music library access requires a **physical device**. Simulators and emulators typically have no music content and cannot test playback.
