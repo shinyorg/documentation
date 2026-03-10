@@ -391,7 +391,7 @@ export default defineConfig({
                 items:[
                   { label: 'Getting Started', link: 'extensions/di/' },
                   { label: 'Advanced Registration', link: 'extensions/di/advanced' },
-                  { label: 'Categories & Tasks', link: 'extensions/di/categories' },
+                  { label: 'Categories', link: 'extensions/di/categories' },
                   { label: 'Configuration', link: 'extensions/di/configuration' },
                   { label: 'Release Notes', link: 'extensions/di/release-notes' }
                 ]
@@ -417,6 +417,13 @@ export default defineConfig({
                 items:[
                   { label: 'Getting Started', link: 'extensions/webhost/' },
                   { label: 'Release Notes', link: 'extensions/webhost/release-notes' }
+                ]
+              },
+              {
+                label: 'MAUI Hosting',
+                items:[
+                  { label: 'Getting Started', link: 'extensions/mauihost/' },
+                  { label: 'Release Notes', link: 'extensions/mauihost/release-notes' }
                 ]
               }
             ]

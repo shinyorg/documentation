@@ -1,0 +1,166 @@
+---
+title: MAUI Hosting
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+MAUI apps often end up with a massive `MauiProgram.cs` where every plugin, service, and lifecycle hook is crammed together. Shiny MAUI Hosting lets you break that apart into modular `IMauiModule` classes — each responsible for its own service registration and post-build initialization. It also provides a static `Host.Services` accessor and platform lifecycle dispatch so your services can respond to foreground/background events, activity results, and more.
+
+- <GitHubStars org="shinyorg" repo="extensions" />
+- <NugetBadge name="Shiny.Extensions.MauiHosting" />
+
+## Features
+
+- Modular `IMauiModule` interface — combines service registration and post-build initialization in one class
+- Static `Host.Services` for accessing the service provider from anywhere
+- `ILifecycleExecutor` for centralized platform lifecycle event dispatch
+- Shared lifecycle hooks: `IAppForeground`, `IAppBackground`
+- Apple lifecycle hooks: `IContinueActivity`, `IOnFinishedLaunching`
+- Android lifecycle hooks: `IOnApplicationCreated`, `IOnActivityOnCreate`, `IOnActivityRequestPermissionsResult`, `IOnActivityNewIntent`, `IOnActivityResult`
+
+## Setup
+
+<Steps>
+1. Install the NuGet package:
+   ```bash
+   dotnet add package Shiny.Extensions.MauiHosting
+   ```
+
+2. Create a module for each concern:
+   ```csharp
+   using Shiny;
+
+   public class MyModule : IMauiModule
+   {
+       public void Add(MauiAppBuilder builder)
+       {
+           builder.Services.AddSingleton<IMyService, MyService>();
+       }
+
+       public void Use(IPlatformApplication app)
+       {
+           // Post-build initialization (do NOT block here)
+       }
+   }
+   ```
+
+3. Wire up modules in `MauiProgram.cs`:
+   ```csharp
+   using Shiny;
+
+   var builder = MauiApp.CreateBuilder();
+   builder
+       .UseMauiApp<App>()
+       .AddInfrastructureModules(new MyModule());
+
+   return builder.Build();
+   ```
+</Steps>
+
+## Creating Modules
+
+Each module implements `IMauiModule` with two methods:
+
+- **`Add(MauiAppBuilder builder)`** — register services, configure the builder. This runs before the app is built.
+- **`Use(IPlatformApplication app)`** — post-build initialization. The service provider is available via `Host.Services`. **Do NOT block here** — this runs on the main thread during app startup.
+
+```csharp
+public class AnalyticsModule : IMauiModule
+{
+    public void Add(MauiAppBuilder builder)
+    {
+        builder.Services.AddSingleton<IAnalytics, AppCenterAnalytics>();
+    }
+
+    public void Use(IPlatformApplication app)
+    {
+        var analytics = Host.Services.GetRequiredService<IAnalytics>();
+        analytics.TrackEvent("AppStarted");
+    }
+}
+```
+
+## Static Host Access
+
+After the app is built and initialized, `Host.Services` provides access to the service provider from anywhere:
+
+```csharp
+// Resolve a service from anywhere in your app
+var service = Host.Services.GetRequiredService<IMyService>();
+```
+
+:::caution
+`Host.Services` throws `InvalidOperationException` if accessed before the app is initialized. Only use it after `MauiApp.Build()` completes.
+:::
+
+## Platform Lifecycle Hooks
+
+Register services that implement lifecycle interfaces to respond to platform events. The `ILifecycleExecutor` dispatches events to all registered handlers automatically.
+
+### Shared (All Platforms)
+
+```csharp
+[Singleton]
+public class AppLifecycleHandler : IAppForeground, IAppBackground
+{
+    public void OnForeground()
+    {
+        // App came to foreground — refresh data, reconnect, etc.
+    }
+
+    public void OnBackground()
+    {
+        // App went to background — save state, pause work, etc.
+    }
+}
+```
+
+### Apple (iOS / macOS)
+
+```csharp
+[Singleton]
+public class DeepLinkHandler : IContinueActivity
+{
+    public bool Handle(NSUserActivity activity)
+    {
+        // Handle universal links, handoff, etc.
+        return true;
+    }
+}
+```
+
+| Interface | Purpose |
+|-----------|---------|
+| `IContinueActivity` | Universal links, handoff |
+| `IOnFinishedLaunching` | App finished launching |
+
+### Android
+
+```csharp
+[Singleton]
+public class AppStartHandler : IOnApplicationCreated
+{
+    public void Handle(Application application)
+    {
+        // App-level initialization
+    }
+}
+
+[Singleton]
+public class PermissionHandler : IOnActivityRequestPermissionsResult
+{
+    public void Handle(Activity activity, int requestCode, string[] permissions, Permission[] grantResults)
+    {
+        // Handle permission results
+    }
+}
+```
+
+| Interface | Purpose |
+|-----------|---------|
+| `IOnApplicationCreated` | Application creation |
+| `IOnActivityOnCreate` | Activity creation |
+| `IOnActivityRequestPermissionsResult` | Permission request results |
+| `IOnActivityNewIntent` | New intent received |
+| `IOnActivityResult` | Activity result callback |
