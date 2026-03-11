@@ -311,6 +311,7 @@ export default defineConfig({
                 items:[
                   { label: 'Getting Started', link: 'maui/shell/' },
                   { label: 'Navigation', link: 'maui/shell/navigation' },
+                  { label: 'Dialogs', link: 'maui/shell/dialogs' },
                   { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
                   { label: 'Source Generation', link: 'maui/shell/sourcegen' },
                   { label: 'Release Notes', link: 'maui/shell/release-notes' }
