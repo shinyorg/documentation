@@ -32,6 +32,21 @@ foreach (var track in results)
 
 The search is case-insensitive and matches partial strings against the title, artist, and album fields.
 
+## Get Genres
+
+Returns all distinct genre names from the user's music library, sorted alphabetically:
+
+```csharp
+var genres = await _library.GetGenresAsync();
+
+foreach (var genre in genres)
+{
+    Console.WriteLine(genre);
+}
+```
+
+Tracks with no genre are excluded from the results. On Android, genres are queried from `MediaStore.Audio.Genres`. On iOS, genres are enumerated via `MPMediaQuery.GenresQuery`.
+
 ## MusicMetadata
 
 Each track is represented by a `MusicMetadata` record with the following properties:
