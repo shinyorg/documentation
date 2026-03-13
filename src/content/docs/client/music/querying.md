@@ -163,6 +163,49 @@ public record GroupedCount<T>(T Value, int Count);
 - `GetYearsAsync` returns `GroupedCount<int>` — the year and its track count
 - `GetDecadesAsync` returns `GroupedCount<int>` — the decade start year and its track count
 
+## Playlists
+
+### Get All Playlists
+
+Returns all playlists from the device music library with their song counts, sorted alphabetically:
+
+```csharp
+var playlists = await _library.GetPlaylistsAsync();
+
+foreach (var playlist in playlists)
+{
+    Console.WriteLine($"{playlist.Name} ({playlist.SongCount} songs)");
+}
+```
+
+On Android, playlists are queried from `MediaStore.Audio.Playlists`. On iOS, playlists are queried via `MPMediaQuery.PlaylistsQuery`.
+
+### Get Playlist Tracks
+
+Returns all tracks in a specific playlist, in playlist order:
+
+```csharp
+var playlists = await _library.GetPlaylistsAsync();
+var tracks = await _library.GetPlaylistTracksAsync(playlists[0].Id);
+
+foreach (var track in tracks)
+{
+    Console.WriteLine($"{track.Title} by {track.Artist}");
+}
+```
+
+The `playlistId` parameter is the platform-specific identifier from `PlaylistInfo.Id`.
+
+### PlaylistInfo
+
+Each playlist is represented by a `PlaylistInfo` record:
+
+| Property | Type | Description |
+|---|---|---|
+| `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore playlist row ID. On iOS, it is the persistent ID. |
+| `Name` | `string` | The display name of the playlist. |
+| `SongCount` | `int` | The number of tracks in the playlist. |
+
 ## MusicMetadata
 
 Each track is represented by a `MusicMetadata` record with the following properties:
