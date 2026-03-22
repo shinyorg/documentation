@@ -20,11 +20,15 @@ A lightweight SQLite-based document store for .NET that turns SQLite into a sche
 - **Aggregates** — scalar `.Max()`, `.Min()`, `.Sum()`, `.Average()` as terminal methods; aggregate projections with automatic GROUP BY via `Sql.*` markers; collection-level Sum, Min, Max, Average on child collections
 - **Ordering** — `.OrderBy(u => u.Age)` and `.OrderByDescending(u => u.Name)` on the fluent query builder
 - **Pagination** — `.Paginate(offset, take)` translates to SQL `LIMIT`/`OFFSET`
+- **Table-per-type mapping** — `MapTypeToTable<T>()` gives a document type its own dedicated SQLite table. Unmapped types share a configurable default table
+- **Custom Id properties** — `MapTypeToTable<T>("table", x => x.MyProp)` uses an alternate property as the document Id
+- **Document diffing** — `GetDiff` compares a modified object against the stored document and returns an RFC 6902 `JsonPatchDocument<T>` with deep nested-object diffing
 - **Surgical field updates** — `SetProperty` updates a single JSON field via `json_set()` without deserialization. `RemoveProperty` strips a field via `json_remove()`. Both support nested paths
 - **Typed Id lookups** — `Get`, `Remove`, `SetProperty`, and `RemoveProperty` accept the Id as `object` so you can pass a `Guid`, `int`, `long`, or `string` directly. Unsupported types throw `ArgumentException`
 - **Full AOT/trimming support** — all `JsonTypeInfo<T>` parameters are optional and auto-resolve from a configured `JsonSerializerContext`. Set `UseReflectionFallback = false` to catch missing registrations with clear exceptions
 - **10-30x faster nested inserts** vs sqlite-net — one write per document vs multiple table inserts
 - **Transactions** — `RunInTransaction` with automatic commit/rollback
+- **Batch insert** — `BatchInsert` inserts a collection in a single transaction with prepared command reuse, auto-generates IDs, and rolls back atomically on failure
 - **Hot backup** — `Backup` copies the database to a file using the SQLite Online Backup API while the store remains usable
 
 ## Replacing EF Core on .NET MAUI
@@ -43,7 +47,7 @@ Entity Framework Core is a natural choice for server-side .NET, but it becomes a
 | **AOT / trimming** | Reflection-heavy; no AOT support | All `JsonTypeInfo<T>` params optional; auto-resolves from context |
 | **Migrations** | Required for every schema change | Not needed — schema-free JSON |
 | **Nested objects** | Normalized tables, foreign keys, JOINs | Single document, single write, single read |
-| **App bundle size** | Large dependency tree | Single dependency on `Microsoft.Data.Sqlite` |
+| **App bundle size** | Large dependency tree | `Microsoft.Data.Sqlite` + `SystemTextJsonPatch` |
 | **Startup time** | DbContext model building, migration checks | Open connection and go |
 
 ### Why AOT and trimming matter on mobile
@@ -61,7 +65,7 @@ This library avoids both problems:
 ## Setup
 
 <Steps>
-1. Install the NuGet package
+1. Install the NuGet packages
 
    <NugetBadge name="Shiny.SqliteDocumentDb" showLabel={true} />
 
@@ -69,8 +73,18 @@ This library avoids both problems:
    dotnet add package Shiny.SqliteDocumentDb
    ```
 
+   For dependency injection, also install the DI extensions package:
+
+   <NugetBadge name="Shiny.SqliteDocumentDb.Extensions.DependencyInjection" showLabel={true} />
+
+   ```bash
+   dotnet add package Shiny.SqliteDocumentDb.Extensions.DependencyInjection
+   ```
+
 2. Register with dependency injection:
    ```csharp
+   using Shiny.SqliteDocumentDb.Extensions.DependencyInjection;
+
    services.AddSqliteDocumentStore("Data Source=mydata.db");
 
    // or with full options
@@ -97,8 +111,12 @@ This library avoids both problems:
    });
    ```
 
-   Or instantiate directly:
+   Or instantiate directly (no DI package needed):
    ```csharp
+   // Quick setup
+   var store = new SqliteDocumentStore("Data Source=mydata.db");
+
+   // Full options
    var store = new SqliteDocumentStore(new DocumentStoreOptions
    {
        ConnectionString = "Data Source=mydata.db"
@@ -135,10 +153,64 @@ This library avoids both problems:
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `ConnectionString` | `string` (required) | — | SQLite connection string |
+| `TableName` | `string` | `"documents"` | Default table name for all document types not mapped via `MapTypeToTable` |
 | `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored (`ShortName` or `FullName`) |
 | `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, all methods auto-resolve type info from the context |
 | `UseReflectionFallback` | `bool` | `true` | When `false`, throws `InvalidOperationException` if a type can't be resolved from the configured `TypeInfoResolver` instead of falling back to reflection. Recommended for AOT deployments |
 | `Logging` | `Action<string>?` | `null` | Callback invoked with every SQL statement executed |
+
+### Table-Per-Type Mapping
+
+By default all document types share a single table. Use `MapTypeToTable` to give a type its own dedicated table. Tables are lazily created on first use. Two types cannot map to the same custom table.
+
+```csharp
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    ConnectionString = "Data Source=mydata.db",
+    TableName = "docs"                 // change the default table name (optional)
+}
+.MapTypeToTable<Order>("orders")       // explicit table name
+.MapTypeToTable<AuditLog>()            // auto-derived table name "AuditLog"
+// User stays in the default "docs" table
+);
+```
+
+#### Custom Id property
+
+By default every document type must have a property named `Id`. When mapping a type to a table, you can also specify a custom Id property via an expression. Custom Id requires a table mapping.
+
+```csharp
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    ConnectionString = "Data Source=mydata.db"
+}
+.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey)      // Guid DeviceKey as Id
+.MapTypeToTable<Tenant>("tenants", t => t.TenantCode)     // string TenantCode as Id
+);
+```
+
+#### MapTypeToTable overloads
+
+| Overload | Description |
+|----------|-------------|
+| `MapTypeToTable<T>()` | Auto-derive table name from type name |
+| `MapTypeToTable<T>(string tableName)` | Explicit table name |
+| `MapTypeToTable<T>(Expression<Func<T, object>> idProperty)` | Auto-derive table + custom Id |
+| `MapTypeToTable<T>(string tableName, Expression<Func<T, object>> idProperty)` | Explicit table + custom Id |
+
+All overloads return `DocumentStoreOptions` for fluent chaining. Duplicate table names throw `InvalidOperationException`.
+
+#### DI Registration with Table Mapping
+
+```csharp
+services.AddSqliteDocumentStore(opts =>
+{
+    opts.ConnectionString = "Data Source=mydata.db";
+    opts.MapTypeToTable<User>();
+    opts.MapTypeToTable<Order>("orders");
+    opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
+});
+```
 
 ## AI Coding Assistant
 
