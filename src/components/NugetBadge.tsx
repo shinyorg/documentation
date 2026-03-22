@@ -14,6 +14,6 @@ const NugetBadge = (props: Props) => {
         imgUrl += `&label=${props.name}`;
     }
     const nugetUrl: string = `https://www.nuget.org/packages/${props.name}`;
-    return (<span style={{ display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle' }}><a href={nugetUrl} target="_NEWWINDOW"><img src={imgUrl} /></a></span>);
+    return (<span style={{ display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle' }}><a href={nugetUrl} target="_blank" rel="noopener noreferrer"><img src={imgUrl} alt={`NuGet package ${props.name}`} /></a></span>);
 };
 export default NugetBadge;
