@@ -337,6 +337,15 @@ export default defineConfig({
                 ]
               },
               {
+                label: 'Contact Store',
+                items:[
+                  { label: 'Getting Started', link: 'maui/contactstore/' },
+                  { label: 'Permissions', link: 'maui/contactstore/permissions' },
+                  { label: 'Querying', link: 'maui/contactstore/querying' },
+                  { label: 'Release Notes', link: 'maui/contactstore/release-notes' }
+                ]
+              },
+              {
                 label: 'Templates',
                 items:[
                   { label: 'Getting Started', link: 'maui/templates/' },
