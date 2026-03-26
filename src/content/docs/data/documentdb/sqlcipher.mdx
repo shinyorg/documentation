@@ -1,0 +1,96 @@
+---
+title: SQLCipher (Encrypted SQLite)
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.Sqlite.SqlCipher` package provides an encrypted SQLite provider using [SQLCipher](https://www.zetetic.net/sqlcipher/). It shares all query generation, expression translation, and LINQ support with the standard SQLite provider — the only differences are the native bundle and encryption-aware backup/rekey support.
+
+<NugetBadge name="Shiny.DocumentDb.Sqlite.SqlCipher" showLabel={true} />
+
+## Setup
+
+<Steps>
+1. Install the package
+
+   ```bash
+   dotnet add package Shiny.DocumentDb.Sqlite.SqlCipher
+   ```
+
+   This replaces `Shiny.DocumentDb.Sqlite` — do **not** install both. The SqlCipher package references `Microsoft.Data.Sqlite.Core` (without the default unencrypted bundle) and adds `SQLitePCLRaw.bundle_e_sqlcipher` for the SQLCipher native library.
+
+2. Register with dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb.Sqlite.SqlCipher;
+
+   services.AddSqlCipherDocumentStore("mydata.db", "mySecretKey");
+
+   // or with full options
+   services.AddSqlCipherDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey");
+       opts.TypeNameResolution = TypeNameResolution.FullName;
+       opts.JsonSerializerOptions = new JsonSerializerOptions
+       {
+           PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+       };
+   });
+   ```
+
+   Or instantiate directly:
+
+   ```csharp
+   // Quick setup
+   var store = new SqlCipherDocumentStore("mydata.db", "mySecretKey");
+
+   // Full options
+   var store = new SqlCipherDocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey")
+   });
+   ```
+</Steps>
+
+The constructor takes a **file path** and **password** as separate parameters so requirements are explicit. All other `DocumentStoreOptions` (table mapping, AOT, logging, etc.) work identically to the standard SQLite provider.
+
+## Rekeying
+
+Change the encryption key of an existing database using the `RekeyAsync` extension method on `IDocumentStore`. This issues `PRAGMA rekey` with SQL injection protection via SQLite's `quote()` function.
+
+```csharp
+using Shiny.DocumentDb.Sqlite.SqlCipher;
+
+await store.RekeyAsync("newPassword");
+```
+
+:::caution
+After rekeying, the store still holds the old password internally. You must create a new store instance with the new password for subsequent operations.
+:::
+
+`RekeyAsync` throws `InvalidOperationException` if the store is not using `SqlCipherDatabaseProvider`.
+
+## Backup
+
+Backup works the same as the standard SQLite provider. The encryption password is automatically propagated to the backup database — the backup file will be encrypted with the same key.
+
+```csharp
+await store.Backup("/path/to/backup.db");
+```
+
+## Differences from Shiny.DocumentDb.Sqlite
+
+| | `Shiny.DocumentDb.Sqlite` | `Shiny.DocumentDb.Sqlite.SqlCipher` |
+|---|---|---|
+| **Native bundle** | `bundle_e_sqlite3` (via `Microsoft.Data.Sqlite`) | `bundle_e_sqlcipher` (via `SQLitePCLRaw.bundle_e_sqlcipher`) |
+| **Encryption** | Not supported | AES-256 via SQLCipher |
+| **Constructor** | Connection string | File path + password |
+| **Backup** | Unencrypted destination | Password propagated to destination |
+| **Rekey** | N/A | `store.RekeyAsync("newPassword")` |
+| **Query/LINQ** | Full support | Identical — inherits from `SqliteDatabaseProvider` |
+| **Package size** | Smaller (no encryption native libs) | Larger (includes SQLCipher native binaries) |
+
+## When to use which
+
+- Use **`Shiny.DocumentDb.Sqlite`** when encryption is not needed — smaller package, simpler setup.
+- Use **`Shiny.DocumentDb.Sqlite.SqlCipher`** when the database file must be encrypted at rest (mobile apps with sensitive data, HIPAA/PCI compliance, etc.).

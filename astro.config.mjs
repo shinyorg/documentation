@@ -371,6 +371,7 @@ export default defineConfig({
                   { label: 'Projections & Streaming', link: 'data/documentdb/projections' },
                   { label: 'Aggregates', link: 'data/documentdb/aggregates' },
                   { label: 'Indexes & Transactions', link: 'data/documentdb/indexes' },
+                  { label: 'SQLCipher (Encrypted)', link: 'data/documentdb/sqlcipher' },
                   { label: 'Release Notes', link: 'data/documentdb/release-notes' }
                 ]
               },
