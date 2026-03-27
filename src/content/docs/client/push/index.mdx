@@ -1,250 +1,177 @@
 ---
-title: Getting Started
+title: Push Notifications
 ---
-import NugetBadge from '/src/components/NugetBadge.tsx';
-import { Steps } from '@astrojs/starlight/components';
 import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
 
+## Getting Started
+
+Push notifications are server-driven notifications delivered via platform services (APNs on iOS, FCM on Android). Shiny provides a unified API that works across providers while giving you access to native capabilities.
+
 :::caution
-This document does NOT cover server side push setup.  Please consult the platform documentation for how to set that up including
-the necessary payloads.  This covers the client setup only!
-
-- [Android Firebase Server Documentation](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages)
-- [iOS Apple Server Documentation](https://developer.apple.com/documentation/usernotifications/setting_up_a_remote_notification_server/sending_notification_requests_to_apns)
+This documentation covers the client-side setup only. For server-side push configuration, refer to [Apple APNs](https://developer.apple.com/documentation/usernotifications) and [Firebase Cloud Messaging](https://firebase.google.com/docs/cloud-messaging) documentation.
 :::
-
-Push notifications come in so many flavours these days.  The community needed one way of doing things, but the ability to swap providers in and out at will.  The reason, push providers, aside from native have been dropping
-like flies the last several years.  The latest to go was AppCenter which it turns out the Xamarin community was heavily invested in. 
-
-Native push is the root of all other push providers.  It works at the native OS level and is usually feeding other providers like Azure Notification Hubs and Firebase.  As such, the setup instructions found
-within this document generally apply to all.
 
 ## Setup
 
-General OS setup is mostly the same on all platforms, but please review the specific provider you intend to use from the menu for more information
-
 <LibBuilder componentName="push" client:load />
 
-### Additional Android Setup
+### Android Firebase Configuration
 
-Android has two options for configuration.  
+:::note[Option 1: google-services.json (Recommended)]
+Place your `google-services.json` file in the `Platforms/Android` folder of your project and set the build action to `GoogleServicesJson`.
+:::
 
-#### Option 1 - google-services.json
-You can download the google-services.json file from Firebase, you can place it in the Platforms/Android part of your MAUI project.
-
-Next, open your csproj file and add the following:
-
-```xml
-<ItemGroup>
-    <GoogleServicesJson Include="Platforms\Android\google-services.json" />
-</ItemGroup>
-
-<ItemGroup>
-    <!--If your project is having trouble picking up the json file, add this package as it contains the necessary msbuild tasks to include this file-->
-    <PackageReference Include="Xamarin.GooglePlayServices.Basement" Version="118.2.0.5" />
-</ItemGroup>
+:::note[Option 2: Manual Configuration]
+If you can't use `google-services.json`, configure Firebase manually:
+```csharp
+services.AddPush<MyPushDelegate>(new FirebaseConfig(
+    UseEmbeddedConfiguration: false,
+    AppId: "your-app-id",
+    SenderId: "your-sender-id",
+    ProjectId: "your-project-id",
+    ApiKey: "your-api-key"
+));
 ```
+:::
 
-#### Options 2 - Configuration Variables
-You still need to download the google-services.json, but this time, open it in a text editor
+### Android Activity Setup
+
+Add the intent filter for handling notification taps:
 
 ```csharp
-// mauiprogram.cs or your host building portion
-builder.Services.AddPush<YourDelegate>(
-#if ANDROID
-    new Shiny.Push.FirebaseConfig(
-        false, // false to ignore embedded configuration
-        "1:111111111111", // appid
-        "1:111111111111:android:1101a1bc1111111d", // sender id/project_number
-        "shiny-sample", // project_id
-        "random string" // api_key
-    )
-#endif
-);
-```
-
-Lastly, if you wish to process the user tapping on a notification event processed by the PushDelegate, you must add the following to your Android main activity
-
-```csharp
-using Android.App;
-using Android.Content.PM;
-
-namespace YourNamespace;
-
-
 [Activity(
     Theme = "@style/Maui.SplashTheme",
     MainLauncher = true,
-    ConfigurationChanges =
-        ConfigChanges.ScreenSize |
-        ConfigChanges.Orientation |
-        ConfigChanges.UiMode |
-        ConfigChanges.ScreenLayout |
-        ConfigChanges.SmallestScreenSize |
-        ConfigChanges.Density
+    LaunchMode = LaunchMode.SingleTop
 )]
 [IntentFilter(
-    new[] {
-        Shiny.ShinyPushIntents.NotificationClickAction
-    },
-    Categories = new[] { 
-        "android.intent.category.DEFAULT" 
-    }
+    new[] { Shiny.Push.ShinyPushIntents.NotificationClickAction },
+    Categories = new[] { "android.intent.category.DEFAULT" }
 )]
 public class MainActivity : MauiAppCompatActivity
 {
 }
 ```
 
-With 1 of these options now in place, follow the base setup instructions above
+## IPushManager
 
-
-## Registration
-Look to each appropriate provider to see setups for each.  The most important function otherwise, is RequestAccess shown below which will give you the push notification token that you can send to your backend. 
-
-All providers use the native implementations on the platform to some degree, as such, you will always need to call
+`IPushManager` handles registration and token management.
 
 ```csharp
-using System;
-using System.Threading.Tasks;
-using Shiny;
-using Shiny.Push;
+IPushManager pushManager; // injected
 
-public class PushRegistration
+// Request access and get token
+var result = await pushManager.RequestAccess();
+if (result.Status == AccessState.Available)
 {
-    public async Task CheckPermission()
-    {
-        var push = Host.Current.Services.GetService<IPushManager>();
-        var result = await push.RequestAccess();
-        if (result.Status == AccessState.Available)
-        {
-            // good to go
-
-            // you should send this to your server with a userId attached if you want to do custom work
-            var value = result.RegistrationToken;
-        }
-    }
+    var token = result.RegistrationToken;
+    // Send token to your server
 }
 
+// Current tokens
+var regToken = pushManager.RegistrationToken;       // Provider token
+var nativeToken = pushManager.NativeRegistrationToken; // Raw APNs/FCM token
+
+// Unregister
+await pushManager.UnRegister();
 ```
 
+## Push Delegate
 
-### Background Delegate
-
-This is where all of the standard push functions route through and is what is registered with AddPush
+Implement `IPushDelegate` (or extend `PushDelegate`) to handle push events.
 
 ```csharp
-using System;
-using System.Collections.Generic;
-using System.Threading.Tasks;
-using Shiny.Push;
-
-namespace YourNamespace;
-
-public class PushDelegate : IPushDelegate
+public class MyPushDelegate : PushDelegate
 {
-    public async Task OnEntry(PushEntryArgs args)
+    readonly ILogger<MyPushDelegate> logger;
+
+    public MyPushDelegate(ILogger<MyPushDelegate> logger)
     {
-        // fires when the user taps on a push notification
-            // please read specific android documentation below on how to make this work
+        this.logger = logger;
     }
 
-    public async Task OnReceived(IDictionary<string, string> data)
+    public override Task OnEntry(PushNotification notification)
     {
-        // fires when a push notification is received 
-            // iOS: set content-available: 1  or this won't fire
-            // Android: Set data portion of payload
+        // User tapped the notification
+        this.logger.LogInformation("Push tapped: {Title}", notification.Notification?.Title);
+
+        // Access data payload
+        foreach (var (key, value) in notification.Data)
+        {
+            this.logger.LogInformation("{Key}: {Value}", key, value);
+        }
+        return Task.CompletedTask;
     }
 
-    public async Task OnNewToken(string token)
+    public override Task OnReceived(PushNotification notification)
     {
-        // fires when a push registration token change is set by the operating system or provider
-        // also fires with RequestAccess value changes (or initial request)
+        // Push received (background or foreground)
+        this.logger.LogInformation("Push received: {Title}", notification.Notification?.Title);
+        return Task.CompletedTask;
     }
 
-
-    public async Task OnUnRegistered(string token) 
+    public override Task OnNewToken(string token)
     {
-        // fires when IPushManager.UnRegister is called 
-        // or on startup when permissions are denied to push
+        // Token changed - send to your server
+        this.logger.LogInformation("New push token: {Token}", token);
+        return Task.CompletedTask;
+    }
+
+    public override Task OnUnRegistered(string token)
+    {
+        // Unregistered - notify your server
+        this.logger.LogInformation("Push unregistered: {Token}", token);
+        return Task.CompletedTask;
     }
 }
+```
+
+## Registration
+
+```csharp
+services.AddPush<MyPushDelegate>();
 ```
 
 ## Tags
-Like other modules in Shiny, there are certain providers that support additional feature sets.  Push really only has 1 extra, tagging.
 
-The following providers, support tagging
-* Azure Notification Hubs
-* Firebase
-* Android Firebase (Native)
-
-:::note
-Make sure to RequestAccess before using tags
-:::
+Tags allow you to target push notifications to specific groups of users. Tag support depends on your push provider.
 
 ```csharp
-var push = Host.GetService<IPushManager>();
+IPushManager pushManager; // injected
 
-if (push.Tags == null) 
+if (pushManager.IsTagsSupport())
 {
-    // tags are not supported
+    await pushManager.Tags.SetTags("premium", "news");
+    await pushManager.Tags.AddTag("sports");
+    await pushManager.Tags.RemoveTag("news");
+
+    var tags = pushManager.Tags.RegisteredTags;
+
+    await pushManager.Tags.ClearTags();
 }
-else {
-    // current tags
-    var tags = push.Tags.RegisteredTags;
 
-    // clears all tags
-    await push.Tags.ClearTags();
-
-    // replace all tags with new set
-    await push.Tags.SetTags("tag1", "tag2");
-
-    // remove a tag
-    await push.Tags.RemoveTag("tag3");
-
-    // add a new tag
-    await push.Tags.AddTag("tag4");
-}
+// Or use convenience extensions
+await pushManager.TrySetTags("premium", "news");
+var tags = pushManager.TryGetTags();
 ```
 
+## iOS Customization
 
-## Customization
-
-### iOS
-
-iOS is generally pretty straight forward, but does require a few extra steps shown at the top of this page in the library builder.
-
-:::caution
-Push does not work in an iOS Simulator
-:::
-
-### Customizing iOS Responses
-
-Your push delegate can implement the IApplePushDelegate interface to customize the presentation options and background fetch result.  The following is an example of how to do this:
+Implement `IApplePushDelegate` for iOS-specific control over notification presentation.
 
 ```csharp
 #if IOS
-using UIKit;
-using UserNotifications;
-#endif
-
-public partial class MyPushDelegate : Shiny.Push.IPushDelegate 
+public class MyPushDelegate : PushDelegate, IApplePushDelegate
 {
-    // .. left empty for brevity
-}
-
-#if IOS
-public partial class MyPushDelegate : Shiny.Push.IApplePushDelegate
-{
-    // this is only used in a foreground call
     public UNNotificationPresentationOptions? GetPresentationOptions(PushNotification notification)
     {
-        return UNNotificationPresentationOptions.Alert;
+        // Control how notifications appear when app is in foreground
+        return UNNotificationPresentationOptions.Banner |
+               UNNotificationPresentationOptions.Sound |
+               UNNotificationPresentationOptions.Badge;
     }
 
-    // this is executed on any content-available push notification
-    public UIBackgroundFetchResult? GetFetchResult(PushNotification notification) 
+    public UIBackgroundFetchResult? GetFetchResult(PushNotification notification)
     {
         return UIBackgroundFetchResult.NewData;
     }
@@ -252,64 +179,27 @@ public partial class MyPushDelegate : Shiny.Push.IApplePushDelegate
 #endif
 ```
 
-### Android
+## Android Customization
 
-Please ensure to read [Firebase Cloud Messaging Documentation](https://firebase.google.com/docs/reference/fcm/rest/v1/projects.messages) for how to implement
-server side code.
+Cast `PushNotification` to `AndroidPushNotification` for full control.
 
 ```csharp
-public class YourPushDelegate : IPushDelegate
+#if ANDROID
+public override Task OnReceived(PushNotification notification)
 {
-    public Task OnEntry(PushNotification notification)
+    if (notification is AndroidPushNotification androidPush)
     {
-        return Task.CompletedTask;
+        // Use the default builder and send
+        androidPush.SendDefault(1001);
+
+        // Or customize the notification
+        var builder = androidPush.CreateBuilder();
+        builder
+            .SetContentTitle("Custom Title")
+            .SetSmallIcon(Resource.Mipmap.appicon);
+        androidPush.Notify(1001, builder);
     }
-
-
-    public Task OnReceived(PushNotification notification)
-    {
-        #if __ANDROID__
-        var received = (AndroidPushNotification)notification;
-        
-        received.Config // the firebase config if needed
-        received.Platform // to read app state
-        received.NativeMessage // the raw firebase message (even if you're using something like azure, you're still using firebase)
-        received.Data // the dictionary of data we pulled from the native message
-        received.Notification // the notification structure we parsed from native message (can be null)
-        
-        received.CreateBuilder() // create your own message android native notification builder
-        // OR
-        received.SendDefault(10); // alter the notification object however, set the id, and let us send it for you
-        #endif
-        return Task.CompletedTask;
-    }
-
-    public Task OnNewToken(string token)
-    {
-        return Task.CompletedTask;
-    }
-
-    public Task OnUnRegistered(string token)
-    {
-        return Task.CompletedTask;
-    }    
-}    
+    return Task.CompletedTask;
+}
+#endif
 ```
-
-:::note
-With all AddPush registrations, we allow you to pass a Firebase Android argument that allows you to create a default channel for your notifications.  You must either
-include the CHANNEL with your push payload or set the default channel in your AndroidManifest.xml like so:
-
-```xml
-<application>
-    <meta-data
-        android:name="com.google.firebase.messaging.default_notification_channel_id"
-        android:value="your_channel_id"/>
-</application>
-```
-:::
-
-:::note
-Push notifications to Android MUST include click_action with the value "SHINY_PUSH_NOTIFICATION_CLICK" in the payload in order
-for IPushDelegate.OnEntry to fire.  For purely background silent notifications, you must include "data" in the payload.
-:::

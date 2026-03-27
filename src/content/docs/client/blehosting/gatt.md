@@ -2,145 +2,189 @@
 title: GATT Service
 ---
 
-# Peripheral Manager (GATT Server)
+## Overview
 
-This allows you to accept client connections
+GATT services define the data your BLE peripheral exposes. Each service contains characteristics that centrals can read from, write to, or subscribe to for notifications.
 
-Each OS has different limitations and functions
+## Creating a Service (Inline)
 
-**On iOS - you need to advertise as well as create a gatt server**
-
-# Services
-
-Services are nothing more than categories in the overall perspective of BluetoothLE.  You should be aware that
-you must setup all characters & descriptors that belong to a service BEFORE starting advertising or adding a service
-to a running server!
-
-You should always know your service UUID for future client consumption!
-
-From a functionality perspective, there is not a lot you do with services
-
-## General Setup
-
-After creating your server instance and a service, you can do the following:
-
-You should always assign a known GUID ID to your characteristic in order for your GATT service to be consumed by a client.
-
-Below are examples of a basic read/write characteristic and a notification characteristic setup
+Use the builder pattern to create services dynamically.
 
 ```csharp
-var service = CrossBleAdapter.Current.AddService(new Guid(...));
+IBleHostingManager hostingManager; // injected
 
-var characteristic = service.AddCharacteristic(
-    Guid.NewGuid(),
-    CharacteristicProperties.Read | CharacteristicProperties.Write | CharacteristicProperties.WriteWithoutResponse,
-    GattPermissions.Read | GattPermissions.Write
-);
-
-var notifyCharacteristic = service.AddCharacteristic
-(
-    Guid.NewGuid(),
-    CharacteristicProperties.Indicate | CharacteristicProperties.Notify,
-    GattPermissions.Read | GattPermissions.Write
-);
-
-```
-
-## Setup a Service
-
-These are the heart and soul of BLE.  This is where data is exchanged between client & server
-
-```csharp
- await hostingManager.AddService(
-    "Your Service UUID",
-    true,
+var service = await hostingManager.AddService(
+    "Your-Service-UUID",
+    true, // primary service
     sb =>
     {
-        byte[]? currentData = null;
-
-        var notifier = sb.AddCharacteristic("Your NotifyCharacteristicUuid" , x => x.SetNotification(sub =>
+        sb.AddCharacteristic("char-uuid-1", cb =>
         {
-            var smsg = sub.IsSubscribing ? "Subscribed" : "UnSubscribed";
-            this.Log($"{sub.Peripheral.Uuid} {smsg} to Characteristic");
-
-            return Task.CompletedTask;
-        }));
-
-        sb.AddCharacteristic(BleConfiguration.ReadCharacteristicUuid, x => x.SetRead(request =>
-        {
-            var data = currentData ?? new byte[] { 0x0 };
-            this.Log($"{request.Peripheral.Uuid} Read Characteristic", data);
-
-            return Task.FromResult(GattResult.Success(data));
-        }));
-
-        sb.AddCharacteristic(BleConfiguration.WriteCharacteristicUuid, cb => cb.SetWrite(async request =>
-        {
-            currentData = request.Data;
-            this.Log($"{request.Peripheral.Uuid} Wrote to Characteristic", request.Data);
-
-            if (notifier.SubscribedCentrals.Count > 0)
+            cb.SetRead(request =>
             {
-                await notifier.Notify(request.Data);
-                this.Log("Notification Broadcasted to subscribers");
-            }
-        }, WriteOptions.Write | WriteOptions.WriteWithoutResponse));
+                var data = System.Text.Encoding.UTF8.GetBytes("Hello");
+                return Task.FromResult(GattResult.Success(data));
+            });
+
+            cb.SetWrite(request =>
+            {
+                var receivedData = request.Data;
+                Console.WriteLine($"Received: {System.Text.Encoding.UTF8.GetString(receivedData)}");
+                return Task.CompletedTask;
+            });
+
+            cb.SetNotification((subscription) =>
+            {
+                Console.WriteLine(subscription.IsSubscribing
+                    ? "Central subscribed"
+                    : "Central unsubscribed");
+                return Task.CompletedTask;
+            });
+        });
     }
 );
-
 ```
 
+## Characteristic Operations
 
-## Managed Characteristic
+### Read
 
-A managed characteristic as shown below, respresents a single characteristic but multiple operations
+Return a `GattResult` with your data or an error status.
 
 ```csharp
-[BleGattCharacteristic("Your Service UUID", "Your Characteristic UUID")]
-public class MyManagedCharacteristics : BleGattCharacteristic
+cb.SetRead(request =>
 {
-    readonly SampleSqliteConnection conn;
+    // request.Peripheral - the connecting central
+    // request.Offset - data offset
+    var data = GetYourData();
+    return Task.FromResult(GattResult.Success(data));
+}, encrypted: false);
+```
 
-    public MyManagedCharacteristics(SampleSqliteConnection conn)
-        => this.conn = conn;
+### Write
 
-    // setup any initial wiring before the characteristic is started
-    public override Task OnStart()
+Handle incoming writes from centrals.
+
+```csharp
+cb.SetWrite(request =>
+{
+    // request.Data - the written bytes
+    // request.Peripheral - the connecting central
+    // request.IsReplyNeeded - whether a response is expected
+    // request.Respond(GattState) - send response if needed
+
+    if (request.IsReplyNeeded)
+        request.Respond(GattState.Success);
+
+    return Task.CompletedTask;
+}, WriteOptions.Write);
+```
+
+`WriteOptions` flags: `Write`, `WriteWithoutResponse`, `AuthenticatedSignedWrites`, `EncryptionRequired`
+
+### Notifications
+
+Send data to subscribed centrals.
+
+```csharp
+// After setting up notification on a characteristic:
+var characteristic = service.Characteristics.First();
+
+// Notify all subscribed centrals
+await characteristic.Notify(data);
+
+// Notify specific centrals
+await characteristic.Notify(data, central1, central2);
+
+// Check who is subscribed
+var subscribers = characteristic.SubscribedCentrals;
+```
+
+`NotificationOptions` flags: `Notify`, `Indicate`, `EncryptionRequired`
+
+## Managing Services
+
+```csharp
+// Remove a specific service
+hostingManager.RemoveService("Your-Service-UUID");
+
+// Clear all services
+hostingManager.ClearServices();
+
+// List active services
+var services = hostingManager.Services;
+```
+
+## Managed Characteristics
+
+For more complex scenarios, use the managed characteristic pattern with dependency injection.
+
+### 1. Create the Characteristic Class
+
+```csharp
+[BleGattCharacteristic(
+    "Your-Service-UUID",
+    "Your-Characteristic-UUID",
+    Notifications = NotificationOptions.Notify,
+    Write = WriteOptions.Write
+)]
+public class MyCharacteristic : BleGattCharacteristic
+{
+    readonly ILogger<MyCharacteristic> logger;
+
+    public MyCharacteristic(ILogger<MyCharacteristic> logger)
     {
-        return Task.Completed;
+        this.logger = logger;
     }
 
-    // cleanup any resources/timers/etc you may have had running
-    public override void OnStop() => base.OnStop();
+    public override Task OnStart()
+    {
+        this.logger.LogInformation("Characteristic started");
+        return Task.CompletedTask;
+    }
 
-    // override this to make your characteristic readable
-    public override Task<GattResult> OnRead(ReadRequest request) => base.OnRead(request);
+    public override void OnStop()
+    {
+        this.logger.LogInformation("Characteristic stopped");
+    }
 
-    // override this to make your characteristic writeable
-    public override Task OnWrite(WriteRequest request) => base.OnWrite(request);
+    public override Task<GattResult> OnRead(ReadRequest request)
+    {
+        var data = System.Text.Encoding.UTF8.GetBytes("Hello from managed");
+        return Task.FromResult(GattResult.Success(data));
+    }
 
-    // override this to make your characteristic notify based
-    public override Task OnSubscriptionChanged(IPeripheral peripheral, bool subscribed) => base.OnSubscriptionChanged(peripheral, subscribed);
+    public override Task OnWrite(WriteRequest request)
+    {
+        this.logger.LogInformation("Received: {Data}", request.Data.Length);
+        return Task.CompletedTask;
+    }
+
+    public override Task OnSubscriptionChanged(IPeripheral peripheral, bool subscribed)
+    {
+        this.logger.LogInformation("Subscription: {Subscribed}", subscribed);
+        return Task.CompletedTask;
+    }
 }
-
 ```
 
-To register your managed characteristic, during your host building operation (ie. MauiProgram.cs), add the following:
+### 2. Register
 
 ```csharp
-builder.Services.AddBleHostedCharacteristic<MyManagedCharacteristics>();
+services.AddBleHostedCharacteristic<MyCharacteristic>();
 ```
 
-And lastly to start/stop your managed characteristic
+### 3. Attach/Detach
+
 ```csharp
-// now inject/resolve the Shiny.BluetoothLE.Hosting.IBleHostingManager and now you can toggle on/off
-Shiny.BluetoothLE.Hosting.IBleHostingManager hostingManager;
-if (hostingManager.IsRegisteredServicesAttached)
-{
-    hostingManager.DetachRegisteredServices();
-}
-else
-{
-    await hostingManager.AttachRegisteredServices();
-}
+IBleHostingManager hostingManager; // injected
+
+// Attach all registered managed characteristics as GATT services
+await hostingManager.AttachRegisteredServices();
+
+// Detach when done
+hostingManager.DetachRegisteredServices();
+
+// Check if attached
+var isAttached = hostingManager.IsRegisteredServicesAttached;
 ```

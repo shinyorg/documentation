@@ -183,8 +183,7 @@ export default defineConfig({
                 items:[
                   { label: 'Getting Started', link: 'client/jobs/' },
                   { label: 'Create a Job', link: 'client/jobs/create' },
-                  { label: 'Additional Functions', link: 'client/jobs/functions' },
-                  { label: 'Testing', link: 'client/jobs/testing' },
+                  { label: 'Managing Jobs', link: 'client/jobs/managing' },
                   { label: 'FAQ', link: 'client/jobs/faq' }
                 ]
               },
@@ -198,7 +197,9 @@ export default defineConfig({
               {
                 label: 'HTTP Transfers',
                 items: [
-                  { label: 'How To', link: 'client/httptransfers/' }
+                  { label: 'Getting Started', link: 'client/httptransfers/' },
+                  { label: 'Transfers', link: 'client/httptransfers/transfers' },
+                  { label: 'Monitoring', link: 'client/httptransfers/monitoring' }
                 ]
               },
               {
@@ -212,7 +213,9 @@ export default defineConfig({
                 label: 'Local Notifications',
                 items:[
                   { label: 'Getting Started', link: 'client/notifications/' },
-                  { label: 'Channels', link: 'client/notifications/channels' }
+                  { label: 'Sending Notifications', link: 'client/notifications/sending' },
+                  { label: 'Channels', link: 'client/notifications/channels' },
+                  { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' }
                 ]
               },
               {

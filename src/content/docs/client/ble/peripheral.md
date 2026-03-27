@@ -2,109 +2,123 @@
 title: Peripheral
 ---
 
-This section deals with gatt connections and state monitoring for a peripheral.
-You should maintain a reference to a peripheral if you intend to connect to it.
+## Overview
 
-Once you have scanned and found your peripheral, you can move on to connecting to it.  BLE operates on something called GATT (Generic Attributes).  
+`IPeripheral` represents a BLE device discovered during scanning. It provides connection management and GATT operations.
 
-GATT is composed of 3 components
-1. Services - this is a logical grouping of characteristics
-2. Characteristics - this is the MAIN area of things that you will work with.  This is where the reading, writing, & notifications take place
-3. Descriptors - these are less important in terms of use cases, but do support read/write scenarios.  They are grouped under each characteristic
+| Property | Type | Description |
+|----------|------|-------------|
+| `Uuid` | `string` | Unique identifier for this peripheral |
+| `Name` | `string?` | Local name (may be null) |
+| `Mtu` | `int` | Current MTU size |
+| `Status` | `ConnectionState` | Current connection state |
 
 ## Connecting
 
-Connect simply issues a request to connect.  It may connect now or days from now when the peripheral is nearby.  You should use IBleCentralDelegate when using this method.  We'll talk more about that later
-
 ```csharp
+IPeripheral peripheral; // from scan result
+
+// Fire and forget - connects when in range
 peripheral.Connect();
+
+// Async - waits for connection to establish
+await peripheral.ConnectAsync(cancelToken: cts.Token, timeout: TimeSpan.FromSeconds(10));
 ```
 
-If you need to wait for a connection and you know your peripheral is nearby, you can use 
+### Auto Connect (Android)
+
+On Android, `AutoConnect` controls whether the system should automatically connect when the peripheral comes into range.
 
 ```csharp
-await peripheral.ConnectAsync();
+peripheral.Connect(new ConnectionConfig(AutoConnect: true));
 ```
 
-It is important to put your own timeout on these things using RX Timeout or supplying a cancellation token as shown below
+:::note
+On iOS, `AutoConnect` controls whether the system will attempt to reconnect if the connection drops.
+:::
+
+## Disconnecting
 
 ```csharp
-// this will throw an exception if it times out
-await peripheral.Timeout(TimeSpan.FromSeconds(10)).WithConnectIf();
-
-// or supply your own cancellation token
-var cancelSource = new CancellationTokenSource();
-await peripheral.ConnectAsync(cancelSource.Token);
-
-cancelSource.Cancel();
-```
-
-### Android Connection Control
-
-Using AutoConnect is suggested in scenarios where you don't know if the device is in-range
-This will cause Android to connect when it sees the device.  WARNING: initial connections take much
-longer with this option enabled
-
-```csharp
-
-
-IPeripheral peripheral; // scanned peripheral
-device.Connect(new AndroidConnectionConfig {
-	AutoConnect = true,
-    ConnectionPriority = Android.Bluetooth.GattConnectionPriority.Balanced
-});
-```
-
-## Cancelling Connection
-Even if you are not connected, it is especially important to cancel the connection request or the peripheral will continue to try to connect.
-
-```csharp
-// this will disconnect a current connection, cancel a connection attempt, and
-// remove persistent connections
 peripheral.CancelConnection();
+
+// or async
+await peripheral.DisconnectAsync();
 ```
 
-## Reliable Write Transactions (Android Only)
+:::warning
+Always call `CancelConnection()` when you're done with a peripheral. Not doing so will leave the connection open and drain the device battery.
+:::
 
+## Monitoring Connection Status
 
 ```csharp
-using (var trans = peripheral.BeginReliableWriteTransaction()) 
+peripheral
+    .WhenStatusChanged()
+    .Subscribe(state =>
+    {
+        // ConnectionState: Connecting, Connected, Disconnecting, Disconnected
+    });
+
+// Convenience extensions
+peripheral.WhenConnected().Subscribe(p => { /* connected */ });
+peripheral.WhenDisconnected().Subscribe(p => { /* disconnected */ });
+```
+
+### Connection Failures
+
+```csharp
+peripheral
+    .WhenConnectionFailed()
+    .Subscribe(ex =>
+    {
+        // BleException with details about the failure
+    });
+```
+
+## MTU Negotiation
+
+MTU (Maximum Transmission Unit) determines the maximum data size per packet. The default is typically 20 bytes.
+
+```csharp
+// Check if MTU requests are supported
+if (peripheral.CanRequestMtu())
 {
-    await trans.Write(theCharacteristicToWriteTo, bytes);
-    // you should do multiple writes here as that is the reason for this mechanism
-    trans.Commit();
+    var newMtu = await peripheral.TryRequestMtuAsync(512);
+    Console.WriteLine($"Negotiated MTU: {newMtu}");
 }
 ```
 
+:::note
+MTU negotiation is only available on Android. On iOS, the MTU is negotiated automatically.
+:::
 
-## Pairing (Android Only)
+## Pairing
 
 ```csharp
-if (peripheral.IsPairingRequestSupported && peripheral.PairingStatus != PairingStatus.Paired) 
+// Check if pairing is available
+if (peripheral.IsPairingRequestsAvailable())
 {
-    // there is an optional argument to pass a PIN in PairRequest as well
-    peripheral.PairRequest().Subscribe(isSuccessful => {});
+    var result = await peripheral
+        .TryPairingRequest()
+        .ToTask();
+
+    if (result == true)
+        Console.WriteLine("Paired successfully");
 }
-```
-## Request MTU (Max Transmission Unit)
-If MTU requests are available (Android Only - API 21+)
 
-This is specific to Android only where this negotiation is not automatic.
-The size can be up to 512, but you should be careful with anything above 255 in practice
-```csharp
-// iOS will return current, Android will return 20 unless changes are observed
-await peripheral.TryRequestMtuAsync(255);
-
-// iOS will return current value and return, Android will continue to monitor changes
-peripheral.TryRequestMtu(255).Subscribe(x => {});
+// Check current pairing status
+var status = peripheral.TryGetPairingStatus();
+// PairingState: NotPaired, Paired
 ```
 
-## Monitor Connection Status Changes
+:::note
+Programmatic pairing is only available on Android.
+:::
+
+## Reading RSSI
 
 ```csharp
-// this will watch the connection states to the peripheral
-peripheral.WhenConnected().Subscribe(x => {});
-peripheral.WhenDisconnected().Subscribe(x => {});
-peripheral.WhenStatusChanged().Subscribe(connectionState => {});
-
+var rssi = await peripheral.ReadRssiAsync();
+Console.WriteLine($"RSSI: {rssi} dBm");
 ```

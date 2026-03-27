@@ -1,220 +1,86 @@
 ---
-title: Getting Started
+title: HTTP Transfers
 ---
-import LibBuilder from '/src/components/Boilerplate/LibBuilder';
+import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
 
-## Getting Started 
+## Getting Started
 
-As developers, we often take internet connectivity and speed for granted.  Mobile phones are taking HUGE sized photos these days that can take quite some time to upload.
+Shiny HTTP Transfers enables background uploads and downloads that continue even when your app is suspended. Transfers are managed by the OS and will resume after app restarts.
 
 :::caution
-HTTP Transfers do not work in an iOS Simulator
+HTTP Transfers do not work on the iOS Simulator. You must test on a real device.
 :::
 
 ## Features
 
-- Background Uploads & Downloads on each platform
-- Supports transfer filtering based on metered connections (iOS & UWP only at the moment)
-- Event Based Metrics
-    - Percentage Complete
-    - Total Bytes Expected
-    - Total Bytes Transferred
-    - Transfer Speed (Bytes Per Second)
-    - Estimated Completion Time
+- Background uploads and downloads
+- Multipart and raw upload support
+- Progress tracking with speed and ETA
+- Automatic resume after app restart
+- Metered/unmetered network control
+- Managed transfer list for UI binding
 
 ## Setup
 
 <LibBuilder componentName="httptransfers" client:load />
 
-
 ## Background Delegate
 
+Implement `IHttpTransferDelegate` to handle transfer completion and errors in the background.
+
 ```csharp
-using System;
-using System.Threading.Tasks;
-using Shiny;
-
-namespace YourNamespace;
-
-
-public partial class MyHttpTransferDelegate : IHttpTransferDelegate
+public partial class MyTransferDelegate : IHttpTransferDelegate
 {
+    readonly ILogger<MyTransferDelegate> logger;
 
-    public async Task OnError(HttpTransferRequest request, Exception ex) 
+    public MyTransferDelegate(ILogger<MyTransferDelegate> logger)
     {
+        this.logger = logger;
     }
 
-    public async Task OnCompleted(HttpTransferRequest request)
+    public Task OnCompleted(HttpTransferRequest request)
     {
+        this.logger.LogInformation("Transfer completed: {Id}", request.Identifier);
+        return Task.CompletedTask;
+    }
+
+    public Task OnError(HttpTransferRequest request, int statusCode, Exception ex)
+    {
+        this.logger.LogError(ex, "Transfer failed: {Id}, Status: {Status}", request.Identifier, statusCode);
+        return Task.CompletedTask;
     }
 }
+```
 
-// in multitargeted solutions on Android, you can completely customize the foreground service notification
+### Android Foreground Service
+
+On Android, background transfers run as a foreground service. Customize the notification:
+
+```csharp
 #if ANDROID
-public partial class TestHttpTransferDelegate : IAndroidForegroundServiceDelegate
+public partial class MyTransferDelegate : IAndroidForegroundServiceDelegate
 {
     public void Configure(AndroidX.Core.App.NotificationCompat.Builder builder)
     {
-            builder
-                .SetContentTitle("MyApp")
-                .SetContentText("My App is sending images")
-                .SetSmallIcon(Resource.Mipmap.youricon);
+        builder
+            .SetContentTitle("My App")
+            .SetContentText("Transferring files...")
+            .SetSmallIcon(Resource.Mipmap.appicon);
     }
 }
-
 #endif
-
 ```
 
-:::note[Android Foreground Service]
-Android creates a foreground service that stays live until all transfers are complete (or have errored out).
-
-The foreground service will also turn off if you CancelAll or Cancel the last transfer
+:::note
+You can also extend `HttpTransferDelegate` base class which combines `IHttpTransferDelegate` and `IAndroidForegroundServiceDelegate` with retry support.
 :::
 
-
-## Creating a Transfer
-
-```csharp
-IHttpTransferManager manager; // injected, resolved, etc
-
-await manager.Queue(new HttpTransferRequest(
-    "your UNIQUE identifier",
-    "http://yourserver.com/upload", 
-    true, // is upload (true) or download (false)
-    "local file path" // local file path to upload from or download to
-));
-
-```
-
-## Canceling a Transfer or All Transfers
+## Registration
 
 ```csharp
-IHttpTransferManager manager; // injected, resolved, etc
-
-await manager.Cancel("Your Transfer ID");
-
-// OR
-
-await manager.CancelAll();
+services.AddHttpTransfers<MyTransferDelegate>();
 ```
 
-## Get All Pending Transfers
+## Samples
 
-```csharp
-IHttpTransferManager manager; // injected, resolved, etc
-
-var yourRequests = await manager.GetTransfers();
-```
-
-## Foreground
-
-### Sending Multipart Data & Headers along with transfer
-
-```csharp
-IHttpTransferManager manager; // injected, resolved, etc
-
-await manager.Queue(new HttpTransferRequest(
-    "Your Identifier",
-    "https://yoururl.com",
-    isUploadBoolean,
-    "upload from or download to file path",
-    Headers: new Dictionary<string, string>
-    {
-        { "Test", "Test" }
-    },
-    HttpContent: TransferHttpContent.FromJson(new { Text = "This is test JSON" });
-));
-```
-
-### Watching All Transfers (Progress)
-
-```csharp
-IHttpTransferManager manager; // injected, resolved, etc
-
-await manager.Queue(new HttpTransferRequest(
-    "Your Identifier",
-    "https://yoururl.com",
-    isUploadBoolean,
-    "upload from or download to file path",
-    Headers: new Dictionary<string, string>
-    {
-        { "Test", "Test" }
-    },
-    HttpContent: TransferHttpContent.FromJson(new { Text = "This is test JSON" });
-));
-```
-
-### Watching a Specific Transfer
-
-```csharp
-IHttpTransferManager manager; // injected, resolved, etc
-
-var sub = manager.WatchTransfer("Your identifier string").Subscribe(
-    x => 
-    {
-        // this fires as progress and state changes come in
-        //x.Progress.PercentComplete
-        //x.Progress.BytesPerSecond
-    },
-    ex => 
-    {
-        // fires when an error outside of connectivity issues occur
-    },
-    () =>
-    {
-        // fires when the transfer is complete
-    }
-);
-
-// dispose of the subscription if you don't want to observe any longer or let it complete
-sub.Dispose();
-
-```
-
-### Managed List
-
-The managed list is meant manage a list of transfers that you can bind against in your UI.  It manages all of the progress 
-updates, completions, and errors.  All you have to do is bind to the list and the models, it takes care of the rest.
-
-* The list is managed in a thread safe manner
-* As new transfers are added, the list is updated
-
-```csharp
-HttpTransferMonitor monitor; // inject, resolve, etc
-
-// Using MVVM, you can bind to the following:
-monitor.Transfers // (of type HttpTransferObject)
-
-// now start the monitor
-monitor.Start(
-    bool removeFinished = true,
-    bool removeErrors = true,
-    IScheduler? scheduler = null
-);
-
-// after this, queuing or cancelling downloads will update list
-```
-
-The second part of this is binding to the `HttpTransferObject` which is also an MVVM based notify object.  Progress, state, & error changes will
-all occur here.  Everything you need to inform users of their transfer progress is here:
-
-```csharp
-public class HttpTransferObject : NotifyPropertyChanged
-{
-    public string Identifier { get; }
-    public string Uri { get; }
-    public bool IsUpload { get; }
-    public double PercentComplete { get; }
-    public long BytesPerSecond { get; }
-    public bool IsDeterministic { get; }
-    public long? BytesToTransfer { get; }
-    public long BytesTransferred { get; }
-    public TimeSpan EstimatedTimeRemaining { get; }
-    public HttpTransferState Status { get; }
-}
-```
-
-## Azure Blob Storage Uploads
-
-TODO
+* [MAUI Sample](https://github.com/shinyorg/shiny/tree/master/samples/Sample.Maui/HttpTransfers)
