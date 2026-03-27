@@ -68,6 +68,8 @@ export default defineConfig({
       '/mediator/extensions/http': '/mediator/http/',
       '/client/appbuilder/': '/appbuilder/',
       '/client/appbuilder': '/appbuilder/',
+      '/client/other/configuration': '/client/configuration/',
+      '/client/other/configuration/': '/client/configuration/',
   },
   integrations: [
     react(),
@@ -241,9 +243,17 @@ export default defineConfig({
                 ]
               },              
               {
+                label: 'Configuration',
+                items: [
+                  { label: 'Getting Started', link: 'client/configuration/' },
+                  { label: 'JSON Platform Bundle', link: 'client/configuration/json' },
+                  { label: 'Platform Preferences', link: 'client/configuration/preferences' },
+                  { label: 'Remote Configuration', link: 'client/configuration/remote' }
+                ]
+              },
+              {
                 label: 'Other',
                 items: [
-                  { label: 'Configuration Extensions', link: 'client/other/configuration' },
                   { label: 'Stateful Services', link: 'client/other/statefulservices' },
                   { label: 'Startup Services', link: 'client/other/startupservices' },
                   { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
