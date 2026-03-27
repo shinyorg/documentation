@@ -38,18 +38,15 @@ const AndroidManifest = (props: Props) => {
     return Data.hasComponent(feature, props.components);
   };
 
-  if (has('ble') || has('blehosting') || has('beacons')) {
+  if (has('ble') || has('blehosting')) {
     src += addF('bluetooth_le');
     src += addP('bluetooth', 30);
     src += addP('bluetooth_admin', 30);
     src += addP('bluetooth_connect');
   }
-  if (has('ble') && !has('beacons')) {
+  if (has('ble')) {
     src += `<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />`;
   }
-  if (!has('ble') && has('beacons')) {
-    src += `<uses-permission android:name="android.permission.BLUETOOTH_SCAN" />`;
-  } 
   if (has('blehosting')) {
     src += addP( 'BLUETOOTH_ADVERTISE');
   }
@@ -60,15 +57,15 @@ const AndroidManifest = (props: Props) => {
     src += addF("location.network");
   }
 
-  if (has('ble') || has('gps') || has('geofencing') || has('beacons')) {
+  if (has('ble') || has('gps') || has('geofencing')) {
     src += addP('ACCESS_COARSE_LOCATION');
     src += addP('ACCESS_FINE_LOCATION');
   }  
 
-  if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('ble') || has('beacons') || has('httptransfers')) {
+  if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('ble') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
   }  
-  if (has('gps') || has('ble') || has('beacons') || has('httptransfers')) {
+  if (has('gps') || has('ble') || has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE');
   }
   if (has('gps')) {

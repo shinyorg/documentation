@@ -203,13 +203,6 @@ export default defineConfig({
                 ]
               },
               {
-                label: 'Beacons',
-                items:[
-                  { label: 'Ranging', link: 'client/beacons/ranging' },
-                  { label: 'Monitoring', link: 'client/beacons/monitoring' },
-                ]
-              },
-              {
                 label: 'Local Notifications',
                 items:[
                   { label: 'Getting Started', link: 'client/notifications/' },

@@ -57,38 +57,14 @@ export type ShinyModule = {
 };
 
 export const ShinyModules: ShinyModule[] = [
-    {
-        id: "beaconranging",
-        nuget: "Shiny.Beacons",
-        description: "Beacon Ranging (Foreground)",
-        service: "Shiny.Beacons.IBeaconRangingManager",
-        builderCommand: "builder.Services.AddBeaconRanging();",
-        version: DEFAULT_VERSION,
-        android: {
-            permissions: [
-                "android.permission.ACCESS_FINE_LOCATION"
-            ]
-        },
-        apple: {
-
-        }
-    }
 ];
 
-// TODO: ranging/monitoring on beacons
 export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "mediator",
         "nuget": "Shiny.Mediator.Maui",
         "description": "Mediator",
         "version" : "2.1.1"
-    },
-    {
-        "id": "beacons",
-        "nuget": "Shiny.Beacons",
-        "description": "Beacons",
-        "foregroundService": true,
-        "version": DEFAULT_VERSION
     },
     {
         "id": "ble",

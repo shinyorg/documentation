@@ -52,11 +52,6 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddBluetoothLeHosting();`;
   }
-  if (has('beacons')) {
-    src += `
-      builder.Services.AddBeaconRanging();
-      builder.Services.AddBeaconMonitoring<ShinyApp.Delegates.YourBeaconMonitorDelegate>();`;
-  }
   if (has('gps')) {
     src += `
       builder.Services.AddGps<ShinyApp.Delegates.YourGpsDelegate>();`;
