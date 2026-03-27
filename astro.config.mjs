@@ -168,17 +168,6 @@ export default defineConfig({
                 ]
               },
               {
-                label: 'OBD',
-                items: [
-                  { label: 'Getting Started', link: 'client/obd' },
-                  { label: 'Commands', link: 'client/obd/commands' },
-                  { label: 'Connection & Adapters', link: 'client/obd/connection' },
-                  { label: 'BLE Transport', link: 'client/obd/ble' },
-                  { label: 'Custom Transports', link: 'client/obd/transports' },
-                  { label: 'Release Notes', link: 'client/obd/release-notes' }
-                ]
-              },
-              {
                 label: 'Jobs',
                 items:[
                   { label: 'Getting Started', link: 'client/jobs/' },
@@ -219,15 +208,18 @@ export default defineConfig({
                     { label: 'FAQ', link: 'client/push/faq' }
                 ]
               },
-              {
-                label: 'Other',
+ {
+                label: 'OBD',
                 items: [
-                  { label: 'Configuration Extensions', link: 'client/other/configuration' },
-                  { label: 'Stateful Services', link: 'client/other/statefulservices' },
-                  { label: 'Startup Services', link: 'client/other/startupservices' },
-                  { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
+                  { label: 'Getting Started', link: 'client/obd' },
+                  { label: 'Commands', link: 'client/obd/commands' },
+                  { label: 'Connection & Adapters', link: 'client/obd/connection' },
+                  { label: 'BLE Transport', link: 'client/obd/ble' },
+                  { label: 'Custom Transports', link: 'client/obd/transports' },
+                  { label: 'Release Notes', link: 'client/obd/release-notes' }
                 ]
               },
+
               {
                 label: 'Music',
                 items: [
@@ -237,6 +229,15 @@ export default defineConfig({
                   { label: 'Playback', link: 'client/music/playback' },
                   { label: 'Copying Tracks', link: 'client/music/copying' },
                   { label: 'Release Notes', link: 'client/music/release-notes' }
+                ]
+              },              
+              {
+                label: 'Other',
+                items: [
+                  { label: 'Configuration Extensions', link: 'client/other/configuration' },
+                  { label: 'Stateful Services', link: 'client/other/statefulservices' },
+                  { label: 'Startup Services', link: 'client/other/startupservices' },
+                  { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
                 ]
               },
               { label: 'Release Notes', link: 'client/release-notes' }
