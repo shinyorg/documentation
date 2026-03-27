@@ -47,18 +47,18 @@ const AppleInfoPlist = (props: Props) => {
         `;
   };
   
-  if (has('gps') || has('geofencing')) {
+  if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
     addKey('NSLocationAlwaysUsageDescription');
     addKey('NSLocationAlwaysAndWhenInUseUsageDescription');
     addKey('NSLocationWhenInUseUsageDescription');
   }
-  if (has('ble')) {
+  if (has('ble') || has('obd')) {
     addKey('NSBluetoothAlwaysUsageDescription');
   }
-  if (has('blehosting') || has('ble')) {
+  if (has('blehosting') || has('ble') || has('obd')) {
     addKey('NSBluetoothPeripheralUsageDescription');
   }
-  if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('bluetoothle') || has('blehosting')) {
+  if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('spatial-geofencing') || has('bluetoothle') || has('blehosting')) {
     src += `
         <key>UIBackgroundModes</key>
         <array>
@@ -68,7 +68,7 @@ const AppleInfoPlist = (props: Props) => {
             <string>remote-notification</string>
             `;
     }
-    if (has('gps') || has('geofencing')) {
+    if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
       src += `
             <string>location</string>
             `;

@@ -3,10 +3,19 @@ import { DEFAULT_VERSION, Data, type ShinyComponent } from '../../../consts';
 import NugetBadge from '../../NugetBadge';
 
 export interface Props {
-  components: ShinyComponent[]
+  components: ShinyComponent[];
+  mode?: 'maui' | 'blazor' | 'aspnet';
 }
 
+const getNuget = (c: ShinyComponent, mode?: string): string => {
+  if (mode === 'blazor' && c.blazorNuget) return c.blazorNuget;
+  if (mode === 'aspnet' && c.aspnetNuget) return c.aspnetNuget;
+  return c.nuget;
+};
+
 const NugetList = (props: Props) => {
+  const isMaui = !props.mode || props.mode === 'maui';
+
   // Collect additional nugets from components that bundle extra packages
   const extras: { id: string; nuget: string; version: string }[] = [];
   props.components.forEach(c => {
@@ -17,7 +26,8 @@ const NugetList = (props: Props) => {
     });
   });
 
-  let nugets = [...props.components, ...extras as ShinyComponent[]]
+  let nugets = [...props.components.map(c => ({ ...c, nuget: getNuget(c, props.mode) })
+  ), ...extras as ShinyComponent[]]
     .filter(
       (thing, i, arr) => arr.findIndex(t => t.nuget === thing.nuget) === i
     )
@@ -25,7 +35,7 @@ const NugetList = (props: Props) => {
       (a.nuget > b.nuget) ? 1 : ((b.nuget > a.nuget) ? -1 : 0))
     );
 
-  if (Data.usesHosting(props.components)) {
+  if (isMaui && Data.usesHosting(props.components)) {
     nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
   }
 

@@ -27,8 +27,14 @@ export type ShinyComponent = {
     version: string;
     androidIntent?: string;
     foregroundService?: boolean;
+    blazorNuget?: string;
+    aspnetNuget?: string;
     additionalNugets?: { nuget: string; version: string }[];
 }
+
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
+export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'reflector', 'di', 'webhost'];
+export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'webhost'];
 
 export type AndroidConfig = {
     usesJobs?: boolean;
@@ -64,6 +70,8 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "mediator",
         "nuget": "Shiny.Mediator.Maui",
+        "blazorNuget": "Shiny.Mediator.Blazor",
+        "aspnetNuget": "Shiny.Mediator.AspNet",
         "description": "Mediator",
         "version" : "6.2.1"
     },
@@ -78,6 +86,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.BluetoothLE.Hosting",
         "description": "Bluetooth LE Hosting",
         "version": DEFAULT_VERSION
+    },
+    {
+        "id": "obd",
+        "nuget": "Shiny.Obd.Ble",
+        "description": "OBD Bluetooth LE",
+        "version": "1.0.0",
+        "additionalNugets": [
+            { "nuget": "Shiny.Obd", "version": "1.0.0" }
+        ]
     },
     {
         "id": "jobs",
@@ -156,7 +173,43 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb",
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
-        "version": "3.2",
+        "version": "3.2.0",
+        "additionalNugets": [
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+        ]
+    },
+    {
+        "id": "documentdb-sqlcipher",
+        "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
+        "description": "Document DB (SqlCipher)",
+        "version": "3.2.0",
+        "additionalNugets": [
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+        ]
+    },
+    {
+        "id": "documentdb-sqlserver",
+        "nuget": "Shiny.DocumentDb.SqlServer",
+        "description": "Document DB (SQL Server)",
+        "version": "3.2.0",
+        "additionalNugets": [
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+        ]
+    },
+    {
+        "id": "documentdb-mysql",
+        "nuget": "Shiny.DocumentDb.MySql",
+        "description": "Document DB (MySQL)",
+        "version": "3.2.0",
+        "additionalNugets": [
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+        ]
+    },
+    {
+        "id": "documentdb-postgresql",
+        "nuget": "Shiny.DocumentDb.PostgreSql",
+        "description": "Document DB (PostgreSQL)",
+        "version": "3.2.0",
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
         ]
@@ -174,9 +227,34 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "2.0.3"
     },
     {
+        "id": "spatial",
+        "nuget": "Shiny.Spatial",
+        "description": "Spatial Database",
+        "version": "1.1.0"
+    },
+    {
+        "id": "spatial-geofencing",
+        "nuget": "Shiny.Spatial.Geofencing",
+        "description": "Spatial Geofencing",
+        "foregroundService": true,
+        "version": "1.1.0"
+    },
+    {
+        "id": "contactstore",
+        "nuget": "Shiny.Maui.ContactStore",
+        "description": "Contact Store",
+        "version": "1.0.0"
+    },
+    {
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
+        "version": "2.0.3"
+    },
+    {
+        "id": "webhost",
+        "nuget": "Shiny.Extensions.WebHosting",
+        "description": "Web Hosting",
         "version": "2.0.3"
     }
 ];
@@ -199,12 +277,12 @@ export const Data = {
     },
 
     usesWindows(compos: ShinyComponent[]): boolean {
-        const windowsIds = ['ble', 'blehosting', 'gps', 'geofencing', 'httptransfers'];
+        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers'];
         return compos.some(x => windowsIds.includes(x.id));
     },
 
     usesHosting(compos: ShinyComponent[]): boolean {
-        const hostingIds = ['ble', 'blehosting', 'jobs', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push'];
+        const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push'];
         return compos.some(x => hostingIds.includes(x.id));
     }
 };

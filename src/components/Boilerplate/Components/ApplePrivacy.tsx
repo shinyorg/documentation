@@ -27,7 +27,7 @@ const ApplePrivacy = (props: Props) => {
   };
 
   let location = '';
-  if (has('gps') || has('geofencing')) {
+  if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
       location += "\n<!--location-->\n";
       location += genPrivDataType('NSPrivacyCollectedDataTypeCoarseLocation', true, true);
       location += genPrivDataType('NSPrivacyCollectedDataTypePreciseLocation', true, true);

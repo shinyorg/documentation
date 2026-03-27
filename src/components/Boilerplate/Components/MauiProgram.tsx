@@ -52,6 +52,14 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddBluetoothLeHosting();`;
   }
+  if (has('obd')) {
+    src += `
+      builder.Services.AddBluetoothLE();
+      builder.Services.AddShinyObdBluetoothLE(new BleObdConfiguration
+      {
+          DeviceNameFilter = "OBD"
+      });`;
+  }
   if (has('gps')) {
     src += `
       builder.Services.AddGps<ShinyApp.Delegates.YourGpsDelegate>();`;
@@ -59,6 +67,14 @@ const MauiProgram = (props: Props) => {
   if (has('geofencing')) {
     src += `
       builder.Services.AddGeofencing<ShinyApp.Delegates.YourGeofenceDelegate>();`;
+  }
+  if (has('spatial-geofencing')) {
+    src += `
+      builder.Services.AddSpatialGps<ShinyApp.Delegates.YourSpatialGeofenceDelegate>(config =>
+      {
+          config.MinimumDistance = Distance.FromMeters(300);
+          config.MinimumTime = TimeSpan.FromMinutes(1);
+      });`;
   }
   if (has('httptransfers')) {
     src += `
@@ -98,7 +114,21 @@ const MauiProgram = (props: Props) => {
   }
   if (has('documentdb')) {
     src += `
-      builder.Services.AddSqliteDocumentStore("Data Source=mydata.db");`;
+      builder.Services.AddDocumentStore(opts =>
+      {
+          opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
+      });`;
+  }
+  if (has('documentdb-sqlcipher')) {
+    src += `
+      builder.Services.AddDocumentStore(opts =>
+      {
+          opts.DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey");
+      });`;
+  }
+  if (has('contactstore')) {
+    src += `
+      builder.Services.AddContactStore();`;
   }
   if (has('di')) {
     src += `

@@ -38,37 +38,37 @@ const AndroidManifest = (props: Props) => {
     return Data.hasComponent(feature, props.components);
   };
 
-  if (has('ble') || has('blehosting')) {
+  if (has('ble') || has('blehosting') || has('obd')) {
     src += addF('bluetooth_le');
     src += addP('bluetooth', 30);
     src += addP('bluetooth_admin', 30);
     src += addP('bluetooth_connect');
   }
-  if (has('ble')) {
+  if (has('ble') || has('obd')) {
     src += `<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />`;
   }
   if (has('blehosting')) {
     src += addP( 'BLUETOOTH_ADVERTISE');
   }
   
-  if (has('gps') || has('geofencing')) {
+  if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
     src += addP('ACCESS_BACKGROUND_LOCATION');
     src += addF("location.gps");
     src += addF("location.network");
   }
 
-  if (has('ble') || has('gps') || has('geofencing')) {
+  if (has('ble') || has('obd') || has('gps') || has('geofencing') || has('spatial-geofencing')) {
     src += addP('ACCESS_COARSE_LOCATION');
     src += addP('ACCESS_FINE_LOCATION');
-  }  
+  }
 
-  if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('ble') || has('httptransfers')) {
+  if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
-  }  
-  if (has('gps') || has('ble') || has('httptransfers')) {
+  }
+  if (has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE');
   }
-  if (has('gps')) {
+  if (has('gps') || has('spatial-geofencing')) {
     src += addP('FOREGROUND_SERVICE_LOCATION');
   }
   if (has('httptransfers')) {

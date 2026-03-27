@@ -3,13 +3,21 @@ import { DEFAULT_VERSION, Data, type ShinyComponent } from '../../../consts';
 import Syntax from '../../Syntax';
 
 export interface Props {
-  components: ShinyComponent[]
+  components: ShinyComponent[];
+  mode?: 'maui' | 'blazor' | 'aspnet';
 }
+
+const getNuget = (c: ShinyComponent, mode?: string): string => {
+    if (mode === 'blazor' && c.blazorNuget) return c.blazorNuget;
+    if (mode === 'aspnet' && c.aspnetNuget) return c.aspnetNuget;
+    return c.nuget;
+};
 
 // TODO: usepush or local notifications
 const ProjectFile = (props: Props) => {
     const { usesPush, usesHosting } = Data;
-    
+    const isMaui = !props.mode || props.mode === 'maui';
+
     // Collect additional nugets from components that bundle extra packages
     const extras: { id: string; nuget: string; version: string }[] = [];
     props.components.forEach(c => {
@@ -20,7 +28,8 @@ const ProjectFile = (props: Props) => {
         });
     });
 
-    let nugets = [...props.components, ...extras as ShinyComponent[]]
+    let nugets = [...props.components.map(c => ({ ...c, nuget: getNuget(c, props.mode) })
+    ), ...extras as ShinyComponent[]]
         .filter(
             (thing, i, arr) => arr.findIndex(t => t.nuget === thing.nuget) === i
         )
@@ -31,7 +40,7 @@ const ProjectFile = (props: Props) => {
     const hasNotifications = nugets.find(x => x.nuget === "Shiny.Notifications") !== undefined;
     const hasPush = usesPush(props.components);
 
-    if (usesHosting(props.components)) {
+    if (isMaui && usesHosting(props.components)) {
         nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
     }
     let pr = "<ItemGroup>\r\n";
@@ -40,7 +49,7 @@ const ProjectFile = (props: Props) => {
     });
     pr += "</ItemGroup>\r\n";
 
-    if (nugets.find(x => x.nuget === "Shiny.Extensions.Configuration") !== undefined) {
+    if (isMaui && nugets.find(x => x.nuget === "Shiny.Extensions.Configuration") !== undefined) {
         pr += "\r\n<ItemGroup>\r\n";
         pr += "\t<!-- Add these to your project file if you are using Shiny.Extensions.Configuration, mix & match your requirements based on platform specific configs -->\r\n";
         pr += "\t<MauiAsset Include=\"appsettings.json\" LogicalName=\"appsettings.json\" />\r\n";
@@ -53,7 +62,7 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
-    if (hasNotifications || hasPush) {
+    if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {
             pr += "\t<!--\r\n";
@@ -68,9 +77,11 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>";
     }
 
-    pr += "\r\n<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' OR $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">";
-    pr += "\r\n\t<BundleResource Include=\"Platforms\\iOS\\PrivacyInfo.xcprivacy\" LogicalName=\"PrivacyInfo.xcprivacy\" />";
-    pr += "\r\n</ItemGroup>";
+    if (isMaui) {
+        pr += "\r\n<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' OR $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">";
+        pr += "\r\n\t<BundleResource Include=\"Platforms\\iOS\\PrivacyInfo.xcprivacy\" LogicalName=\"PrivacyInfo.xcprivacy\" />";
+        pr += "\r\n</ItemGroup>";
+    }
     
 
     return (<Syntax source={pr} language="xml" />);
