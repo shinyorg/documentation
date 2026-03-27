@@ -160,6 +160,24 @@ export const ShinyComponents: ShinyComponent[] = [
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
         ]
+    },
+    {
+        "id": "reflector",
+        "nuget": "Shiny.Reflector",
+        "description": "Reflector",
+        "version": "1.7.0"
+    },
+    {
+        "id": "di",
+        "nuget": "Shiny.Extensions.DependencyInjection",
+        "description": "Dependency Injection",
+        "version": "2.0"
+    },
+    {
+        "id": "mauihost",
+        "nuget": "Shiny.Extensions.MauiHosting",
+        "description": "MAUI Hosting",
+        "version": "2.0"
     }
 ];
 
@@ -183,5 +201,10 @@ export const Data = {
     usesWindows(compos: ShinyComponent[]): boolean {
         const windowsIds = ['ble', 'blehosting', 'gps', 'geofencing', 'httptransfers'];
         return compos.some(x => windowsIds.includes(x.id));
+    },
+
+    usesHosting(compos: ShinyComponent[]): boolean {
+        const hostingIds = ['ble', 'blehosting', 'jobs', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push'];
+        return compos.some(x => hostingIds.includes(x.id));
     }
 };

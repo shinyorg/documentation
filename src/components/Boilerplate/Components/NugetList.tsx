@@ -1,5 +1,5 @@
 import React from 'react';
-import { DEFAULT_VERSION, type ShinyComponent } from '../../../consts';
+import { DEFAULT_VERSION, Data, type ShinyComponent } from '../../../consts';
 import NugetBadge from '../../NugetBadge';
 
 export interface Props {
@@ -25,7 +25,9 @@ const NugetList = (props: Props) => {
       (a.nuget > b.nuget) ? 1 : ((b.nuget > a.nuget) ? -1 : 0))
     );
 
-  nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
+  if (Data.usesHosting(props.components)) {
+    nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
+  }
 
   return (
     <div className="app-builder__nuget-list">

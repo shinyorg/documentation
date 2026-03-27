@@ -19,8 +19,8 @@ const MauiProgram = (props: Props) => {
       {
         var builder = MauiApp
           .CreateBuilder()
-          .UseMauiApp<App>()
-          .UseShiny() // <-- add this line (this is important)
+          .UseMauiApp<App>()${Data.usesHosting(props.components) ? `
+          .UseShiny() // <-- add this line (this is important)` : ''}
           .ConfigureFonts(fonts =>
           {
               fonts.AddFont("OpenSans-Regular.ttf", "OpenSansRegular");
@@ -100,6 +100,15 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddSqliteDocumentStore("Data Source=mydata.db");`;
   }
+  if (has('di')) {
+    src += `
+      builder.Services.AddShinyServiceRegistry();`;
+  }
+  if (has('mauihost')) {
+    src += `
+      builder.AddInfrastructureModules(new YourModule());`;
+  }
+  // Reflector is attribute-based only, no builder registration needed
   src += `
       return builder.Build();
     }

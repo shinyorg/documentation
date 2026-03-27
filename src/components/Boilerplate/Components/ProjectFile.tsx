@@ -8,7 +8,7 @@ export interface Props {
 
 // TODO: usepush or local notifications
 const ProjectFile = (props: Props) => {
-    const { usesPush } = Data;
+    const { usesPush, usesHosting } = Data;
     
     // Collect additional nugets from components that bundle extra packages
     const extras: { id: string; nuget: string; version: string }[] = [];
@@ -31,8 +31,9 @@ const ProjectFile = (props: Props) => {
     const hasNotifications = nugets.find(x => x.nuget === "Shiny.Notifications") !== undefined;
     const hasPush = usesPush(props.components);
 
-    // TODO: what if hosting isn't required
-    nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
+    if (usesHosting(props.components)) {
+        nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
+    }
     let pr = "<ItemGroup>\r\n";
     nugets.map(c => {
         pr += `\t<PackageReference Include="${c.nuget}" version="${c.version}" />\r\n`;
