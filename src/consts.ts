@@ -27,6 +27,7 @@ export type ShinyComponent = {
     version: string;
     androidIntent?: string;
     foregroundService?: boolean;
+    additionalNugets?: { nuget: string; version: string }[];
 }
 
 export type AndroidConfig = {
@@ -123,6 +124,42 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
         "version": DEFAULT_VERSION
+    },
+    {
+        "id": "shell",
+        "nuget": "Shiny.Maui.Shell",
+        "description": "MAUI Shell Navigation",
+        "version": "3.1.1"
+    },
+    {
+        "id": "tableview",
+        "nuget": "Shiny.Maui.TableView",
+        "description": "MAUI TableView",
+        "version": "1.0.2"
+    },
+    {
+        "id": "stores",
+        "nuget": "Shiny.Extensions.Stores",
+        "description": "Key/Value Stores",
+        "version": "2.0"
+    },
+    {
+        "id": "localization",
+        "nuget": "Shiny.Extensions.Localization.Generator",
+        "description": "Localization",
+        "version": "2.0",
+        "additionalNugets": [
+            { "nuget": "Microsoft.Extensions.Localization", "version": "9.0.0" }
+        ]
+    },
+    {
+        "id": "documentdb",
+        "nuget": "Shiny.DocumentDb.Sqlite",
+        "description": "Document DB (SQLite)",
+        "version": "3.2",
+        "additionalNugets": [
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+        ]
     }
 ];
 

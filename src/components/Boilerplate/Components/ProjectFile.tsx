@@ -10,7 +10,17 @@ export interface Props {
 const ProjectFile = (props: Props) => {
     const { usesPush } = Data;
     
-    let nugets = props.components
+    // Collect additional nugets from components that bundle extra packages
+    const extras: { id: string; nuget: string; version: string }[] = [];
+    props.components.forEach(c => {
+        c.additionalNugets?.forEach(a => {
+            if (!extras.find(e => e.nuget === a.nuget)) {
+                extras.push({ id: `extra-${a.nuget}`, nuget: a.nuget, version: a.version });
+            }
+        });
+    });
+
+    let nugets = [...props.components, ...extras as ShinyComponent[]]
         .filter(
             (thing, i, arr) => arr.findIndex(t => t.nuget === thing.nuget) === i
         )

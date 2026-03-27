@@ -73,7 +73,32 @@ const MauiProgram = (props: Props) => {
       builder.Services.AddPush<ShinyApp.Delegates.MyPushDelegate>();`;
   }
   if (has('mediator')) {
-    src += `builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;    
+    src += `
+      builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;
+  }
+  if (has('shell')) {
+    src += `
+      // configure your shell pages & view models
+      builder.UseShinyShell(x => x
+          .Add<MainPage, MainViewModel>(registerRoute: false)
+          .Add<AnotherPage, AnotherViewModel>("another")
+      );`;
+  }
+  if (has('tableview')) {
+    src += `
+      builder.UseShinyTableView();`;
+  }
+  if (has('stores')) {
+    src += `
+      builder.Services.AddShinyStores();`;
+  }
+  if (has('localization')) {
+    src += `
+      builder.Services.AddStronglyTypedLocalizations();`;
+  }
+  if (has('documentdb')) {
+    src += `
+      builder.Services.AddSqliteDocumentStore("Data Source=mydata.db");`;
   }
   src += `
       return builder.Build();

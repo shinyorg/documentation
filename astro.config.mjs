@@ -66,6 +66,8 @@ export default defineConfig({
       '/spatial/prebuilt': '/data/spatial/prebuilt',
       '/spatial/release-notes': '/data/spatial/release-notes',
       '/mediator/extensions/http': '/mediator/http/',
+      '/client/appbuilder/': '/appbuilder/',
+      '/client/appbuilder': '/appbuilder/',
   },
   integrations: [
     react(),
@@ -134,12 +136,19 @@ export default defineConfig({
         }),
         starlightSidebarTopics([
           {
+            label: 'App Builder',
+            link: '/appbuilder/',
+            icon: 'star',
+            items: [
+              { label: 'App Builder', link: 'appbuilder/' }
+            ],
+          },
+          {
             id: 'client',
             label: 'Client',
-            link: '/client/appbuilder/',
+            link: '/client/architecture/',
             icon: 'rocket',
             items: [
-              { label: 'App Builder', link: 'client/appbuilder' },
               { label: 'Architecture', link: 'client/architecture' },
               {
                 label: 'Hosting Models',
