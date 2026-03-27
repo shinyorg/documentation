@@ -7,8 +7,8 @@ export interface Props {
 }
 
 const AndroidActivity = (props: Props) => {
-  if (props.components.length === 0) 
-    return (<div>Nothing Extra Needed</div>);
+  if (props.components.length === 0)
+    return (<div className="app-builder__empty-tab">No additional activity configuration needed.</div>);
 
   const intents = props
     .components

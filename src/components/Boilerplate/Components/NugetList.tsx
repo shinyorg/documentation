@@ -16,16 +16,16 @@ const NugetList = (props: Props) => {
     );
 
   nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
-  
+
   return (
-    <table>
+    <div className="app-builder__nuget-list">
       {nugets.map(c => (
-        <tr key={c.id}>
-          <td>{c.nuget}</td>
-          <td><NugetBadge name={c.nuget} /></td>
-        </tr>
+        <div key={c.id} className="app-builder__nuget-item">
+          <code className="app-builder__nuget-name">{c.nuget}</code>
+          <NugetBadge name={c.nuget} />
+        </div>
       ))}
-    </table>
+    </div>
   );
 };
 export default NugetList;

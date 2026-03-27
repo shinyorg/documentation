@@ -16,13 +16,16 @@ const Syntax = (props: Props) => {
     useEffect(() => Prism.highlightAll());
 
     return (
-    <div>
-        <pre>
+    <div className="syntax-block">
+        <div className="syntax-block__header">
+            <span className="syntax-block__lang">{lang === 'csharp' ? 'C#' : lang.toUpperCase()}</span>
+            <CopyToClipboardButton text={props.source} />
+        </div>
+        <pre className="syntax-block__pre">
             <code className={cls}>
             {props.source}
             </code>
         </pre>
-        <CopyToClipboardButton text={props.source} />
     </div>
     );
 };

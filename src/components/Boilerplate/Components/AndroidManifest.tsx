@@ -7,8 +7,8 @@ export interface Props {
 }
 
 const AndroidManifest = (props: Props) => {
-  if (props.components.length === 0) 
-    return (<div>Nothing Extra Needed</div>);
+  if (props.components.length === 0)
+    return (<div className="app-builder__empty-tab">No additional manifest entries needed.</div>);
 
   let src = `
     <?xml version="1.0" encoding="utf-8"?>

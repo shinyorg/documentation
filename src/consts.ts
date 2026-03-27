@@ -123,12 +123,6 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
         "version": DEFAULT_VERSION
-    },
-    {
-        "id": "sqlite",
-        "nuget": "Shiny.Logging.SQLite",
-        "description": "SQLite Logging",
-        "version": DEFAULT_VERSION
     }
 ];
 
@@ -147,5 +141,10 @@ export const Data = {
 
     usesActivity(compos: ShinyComponent[]): boolean {
         return compos.filter(x => x.androidIntent !== undefined).length > 0;
+    },
+
+    usesWindows(compos: ShinyComponent[]): boolean {
+        const windowsIds = ['ble', 'blehosting', 'gps', 'geofencing', 'httptransfers'];
+        return compos.some(x => windowsIds.includes(x.id));
     }
 };
