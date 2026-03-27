@@ -3,7 +3,7 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-export const DEFAULT_VERSION: string = "4";
+export const DEFAULT_VERSION: string = "4.0.1";
 
 // Brand colors from logo
 export const BRAND_COLORS = {
@@ -65,7 +65,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "mediator",
         "nuget": "Shiny.Mediator.Maui",
         "description": "Mediator",
-        "version" : "2.1.1"
+        "version" : "6.2.1"
     },
     {
         "id": "ble",
@@ -141,15 +141,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "stores",
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
-        "version": "2.0"
+        "version": "2.0.3"
     },
     {
         "id": "localization",
         "nuget": "Shiny.Extensions.Localization.Generator",
         "description": "Localization",
-        "version": "2.0",
+        "version": "2.0.1",
         "additionalNugets": [
-            { "nuget": "Microsoft.Extensions.Localization", "version": "9.0.0" }
+            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.0" }
         ]
     },
     {
@@ -165,19 +165,19 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "reflector",
         "nuget": "Shiny.Reflector",
         "description": "Reflector",
-        "version": "1.7.0"
+        "version": "1.7.1"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
-        "version": "2.0"
+        "version": "2.0.3"
     },
     {
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
-        "version": "2.0"
+        "version": "2.0.3"
     }
 ];
 
