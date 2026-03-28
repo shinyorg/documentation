@@ -137,6 +137,20 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
+        "id": "pushfirebase",
+        "nuget": "Shiny.Push.FirebaseMessaging",
+        "description": "Push Notifications - Firebase (iOS)",
+        "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
+        "version": DEFAULT_VERSION
+    },
+    {
+        "id": "pushazure",
+        "nuget": "Shiny.Push.AzureNotificationHubs",
+        "description": "Push Notifications - Azure Notification Hubs",
+        "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
+        "version": DEFAULT_VERSION
+    },
+    {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",

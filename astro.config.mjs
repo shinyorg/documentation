@@ -215,7 +215,9 @@ export default defineConfig({
                 label: 'Push Notifications',
                 items:[
                     { label: 'Getting Started', link: 'client/push/' },
-                    { label: 'Providers', link: 'client/push/providers/' },
+                    { label: 'Native', link: 'client/push/native' },
+                    { label: 'Azure Push Notifications', link: 'client/push/azure' },
+                    { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
                     { label: 'FAQ', link: 'client/push/faq' }
                 ]
               },
