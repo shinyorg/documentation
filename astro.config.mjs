@@ -191,6 +191,7 @@ export default defineConfig({
                 label: 'Locations',
                 items:[
                   { label: 'GPS', link: 'client/locations/gps' },
+                  { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
                   { label: 'Geofencing', link: 'client/locations/geofencing' }
                 ]
               },
@@ -199,6 +200,8 @@ export default defineConfig({
                 items: [
                   { label: 'Getting Started', link: 'client/httptransfers/' },
                   { label: 'Transfers', link: 'client/httptransfers/transfers' },
+                  { label: 'Azure Blob Storage', link: 'client/httptransfers/azure' },
+                  { label: 'Transfer Delegate', link: 'client/httptransfers/delegate' },
                   { label: 'Monitoring', link: 'client/httptransfers/monitoring' }
                 ]
               },
@@ -208,6 +211,7 @@ export default defineConfig({
                   { label: 'Getting Started', link: 'client/notifications/' },
                   { label: 'Sending Notifications', link: 'client/notifications/sending' },
                   { label: 'Channels', link: 'client/notifications/channels' },
+                  { label: 'Platform Specific', link: 'client/notifications/platform' },
                   { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' }
                 ]
               },
