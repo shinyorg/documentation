@@ -51,6 +51,13 @@ const AppleInfoPlist = (props: Props) => {
     addKey('NSLocationAlwaysUsageDescription');
     addKey('NSLocationAlwaysAndWhenInUseUsageDescription');
     addKey('NSLocationWhenInUseUsageDescription');
+    src += `
+        <key>NSLocationTemporaryUsageDescriptionDictionary</key>
+        <dict>
+            <key>shinygps</key>
+            <string>This app wants to know EXACTLY where you are</string>
+        </dict>
+        `;
   }
   if (has('ble') || has('obd')) {
     addKey('NSBluetoothAlwaysUsageDescription');
