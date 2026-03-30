@@ -151,6 +151,12 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
+        "id": "music",
+        "nuget": "Shiny.Music",
+        "description": "Music Library",
+        "version": "1.0.0"
+    },
+    {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
@@ -298,5 +304,10 @@ export const Data = {
     usesHosting(compos: ShinyComponent[]): boolean {
         const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push'];
         return compos.some(x => hostingIds.includes(x.id));
+    },
+
+    hasPlatformConfig(compos: ShinyComponent[]): boolean {
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore'];
+        return compos.some(x => ids.includes(x.id));
     }
 };

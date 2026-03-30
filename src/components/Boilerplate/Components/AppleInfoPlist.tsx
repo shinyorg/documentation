@@ -47,10 +47,15 @@ const AppleInfoPlist = (props: Props) => {
         `;
   };
   
+  if (has('contactstore')) {
+    addKey('NSContactsUsageDescription');
+  }
   if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
     addKey('NSLocationAlwaysUsageDescription');
     addKey('NSLocationAlwaysAndWhenInUseUsageDescription');
     addKey('NSLocationWhenInUseUsageDescription');
+  }
+  if (has('gps')) {
     src += `
         <key>NSLocationTemporaryUsageDescriptionDictionary</key>
         <dict>

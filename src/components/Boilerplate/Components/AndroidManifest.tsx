@@ -62,6 +62,11 @@ const AndroidManifest = (props: Props) => {
     src += addP('ACCESS_FINE_LOCATION');
   }
 
+  if (has('contactstore')) {
+    src += addP('READ_CONTACTS');
+    src += addP('WRITE_CONTACTS');
+  }
+
   if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
   }

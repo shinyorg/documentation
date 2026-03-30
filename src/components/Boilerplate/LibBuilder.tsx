@@ -25,13 +25,13 @@ interface Props {
 
 const LibBuilder = (props: Props) => {
   const components = ShinyComponents.filter(x => x.id === props.componentName);
-  const { usesPush, usesActivity, usingForeground, usesWindows, usesHosting } = Data;
+  const { usesPush, usesActivity, usingForeground, usesWindows, hasPlatformConfig } = Data;
   const isBlazorCompatible = BLAZOR_COMPATIBLE_IDS.includes(props.componentName);
   const isAspNetCompatible = ASPNET_COMPATIBLE_IDS.includes(props.componentName);
   const [mode, setMode] = useState<AppMode>('maui');
 
   const isMaui = mode === 'maui';
-  const hasPlatformConfig = usesHosting(components);
+  const showPlatformConfig = hasPlatformConfig(components);
   const hasMediator = props.componentName === 'mediator';
 
   const renderTabs = () => {
@@ -85,10 +85,10 @@ const LibBuilder = (props: Props) => {
           <Tab>NuGet Packages</Tab>
           <Tab>Project File</Tab>
           <Tab>MauiProgram.cs</Tab>
-          {hasPlatformConfig && <Tab>AndroidManifest.xml</Tab>}
+          {showPlatformConfig && <Tab>AndroidManifest.xml</Tab>}
           {usesActivity(components) && <Tab>Android Activity</Tab>}
-          {hasPlatformConfig && <Tab>Info.plist</Tab>}
-          {hasPlatformConfig && <Tab>PrivacyInfo.xcprivacy</Tab>}
+          {showPlatformConfig && <Tab>Info.plist</Tab>}
+          {showPlatformConfig && <Tab>PrivacyInfo.xcprivacy</Tab>}
           {usesPush(components) && <Tab>AppDelegate</Tab>}
           {usesWindows(components) && <Tab>Package.appxmanifest</Tab>}
         </TabList>
@@ -101,16 +101,16 @@ const LibBuilder = (props: Props) => {
         <TabPanel>
           <MauiProgram components={components} />
         </TabPanel>
-        {hasPlatformConfig &&
+        {showPlatformConfig &&
           <TabPanel><AndroidManifest components={components} /></TabPanel>
         }
         {usesActivity(components) &&
           <TabPanel><AndroidActivity components={components} /></TabPanel>
         }
-        {hasPlatformConfig &&
+        {showPlatformConfig &&
           <TabPanel><AppleInfoPlist components={components} /></TabPanel>
         }
-        {hasPlatformConfig &&
+        {showPlatformConfig &&
           <TabPanel><ApplePrivacy components={components} /></TabPanel>
         }
         {usesPush(components) &&
