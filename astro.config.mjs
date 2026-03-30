@@ -168,14 +168,16 @@ export default defineConfig({
                   { label: 'Peripheral', link: 'client/ble/peripheral' },
                   { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
                   { label: 'Background Operations', link: 'client/ble/background' },
-                  { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' }
+                  { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' },
+                  { label: 'Release Notes', link: 'client/ble/release-notes' }
                 ]
               },
               {
                 label: 'BluetoothLE Hosting',
                 items: [
                   { label: 'Getting Started', link: 'client/blehosting' },
-                  { label: 'GATT Service', link: 'client/blehosting/gatt' }
+                  { label: 'GATT Service', link: 'client/blehosting/gatt' },
+                  { label: 'Release Notes', link: 'client/blehosting/release-notes' }
                 ]
               },
               {
@@ -184,7 +186,8 @@ export default defineConfig({
                   { label: 'Getting Started', link: 'client/jobs/' },
                   { label: 'Create a Job', link: 'client/jobs/create' },
                   { label: 'Managing Jobs', link: 'client/jobs/managing' },
-                  { label: 'FAQ', link: 'client/jobs/faq' }
+                  { label: 'FAQ', link: 'client/jobs/faq' },
+                  { label: 'Release Notes', link: 'client/jobs/release-notes' }
                 ]
               },
               {
@@ -192,7 +195,8 @@ export default defineConfig({
                 items:[
                   { label: 'GPS', link: 'client/locations/gps' },
                   { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
-                  { label: 'Geofencing', link: 'client/locations/geofencing' }
+                  { label: 'Geofencing', link: 'client/locations/geofencing' },
+                  { label: 'Release Notes', link: 'client/locations/release-notes' }
                 ]
               },
               {
@@ -202,7 +206,8 @@ export default defineConfig({
                   { label: 'Transfers', link: 'client/httptransfers/transfers' },
                   { label: 'Azure Blob Storage', link: 'client/httptransfers/azure' },
                   { label: 'Transfer Delegate', link: 'client/httptransfers/delegate' },
-                  { label: 'Monitoring', link: 'client/httptransfers/monitoring' }
+                  { label: 'Monitoring', link: 'client/httptransfers/monitoring' },
+                  { label: 'Release Notes', link: 'client/httptransfers/release-notes' }
                 ]
               },
               {
@@ -212,7 +217,8 @@ export default defineConfig({
                   { label: 'Sending Notifications', link: 'client/notifications/sending' },
                   { label: 'Channels', link: 'client/notifications/channels' },
                   { label: 'Platform Specific', link: 'client/notifications/platform' },
-                  { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' }
+                  { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' },
+                  { label: 'Release Notes', link: 'client/notifications/release-notes' }
                 ]
               },
               {
@@ -223,7 +229,8 @@ export default defineConfig({
                     { label: 'Platform Specific', link: 'client/push/platform' },
                     { label: 'Azure Push Notifications', link: 'client/push/azure' },
                     { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
-                    { label: 'FAQ', link: 'client/push/faq' }
+                    { label: 'FAQ', link: 'client/push/faq' },
+                    { label: 'Release Notes', link: 'client/push/release-notes' }
                 ]
               },
  {
@@ -255,7 +262,8 @@ export default defineConfig({
                   { label: 'Getting Started', link: 'client/configuration/' },
                   { label: 'JSON Platform Bundle', link: 'client/configuration/json' },
                   { label: 'Platform Preferences', link: 'client/configuration/preferences' },
-                  { label: 'Remote Configuration', link: 'client/configuration/remote' }
+                  { label: 'Remote Configuration', link: 'client/configuration/remote' },
+                  { label: 'Release Notes', link: 'client/configuration/release-notes' }
                 ]
               },
               {
@@ -266,7 +274,7 @@ export default defineConfig({
                   { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
                 ]
               },
-              { label: 'Release Notes', link: 'client/release-notes' }
+              { label: 'Core Release Notes', link: 'client/release-notes' }
             ],
           },
           {
