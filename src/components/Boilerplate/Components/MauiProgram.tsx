@@ -104,6 +104,14 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.UseShinyTableView();`;
   }
+  if (has('scheduler')) {
+    src += `
+      builder.UseShinyScheduler();`;
+  }
+  if (has('mermaiddiagrams')) {
+    src += `
+      builder.UseShinyDiagrams();`;
+  }
   if (has('stores')) {
     src += `
       builder.Services.AddShinyStores();`;

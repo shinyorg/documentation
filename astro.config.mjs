@@ -368,6 +368,26 @@ export default defineConfig({
                 ]
               },
               {
+                label: 'Scheduler',
+                items:[
+                  { label: 'Getting Started', link: 'maui/scheduler/' },
+                  { label: 'Calendar View', link: 'maui/scheduler/calendar' },
+                  { label: 'Agenda View', link: 'maui/scheduler/agenda' },
+                  { label: 'Event List', link: 'maui/scheduler/event-list' },
+                  { label: 'Custom Templates', link: 'maui/scheduler/templates' },
+                  { label: 'Release Notes', link: 'maui/scheduler/release-notes' }
+                ]
+              },
+              {
+                label: 'Mermaid Diagrams',
+                items:[
+                  { label: 'Getting Started', link: 'maui/mermaid-diagrams/' },
+                  { label: 'Control Properties', link: 'maui/mermaid-diagrams/control' },
+                  { label: 'Theming', link: 'maui/mermaid-diagrams/theming' },
+                  { label: 'Release Notes', link: 'maui/mermaid-diagrams/release-notes' }
+                ]
+              },
+              {
                 label: 'Contact Store',
                 items:[
                   { label: 'Getting Started', link: 'maui/contactstore/' },

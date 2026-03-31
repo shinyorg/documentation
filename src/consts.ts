@@ -175,6 +175,18 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "1.0.2"
     },
     {
+        "id": "scheduler",
+        "nuget": "Shiny.Maui.Scheduler",
+        "description": "MAUI Scheduler",
+        "version": "1.0.0"
+    },
+    {
+        "id": "mermaiddiagrams",
+        "nuget": "Shiny.Maui.MermaidDiagrams",
+        "description": "MAUI Mermaid Diagrams",
+        "version": "1.0.0"
+    },
+    {
         "id": "stores",
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
