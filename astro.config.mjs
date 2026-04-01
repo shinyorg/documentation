@@ -66,10 +66,8 @@ export default defineConfig({
       '/spatial/prebuilt': '/data/spatial/prebuilt',
       '/spatial/release-notes': '/data/spatial/release-notes',
       '/mediator/extensions/http': '/mediator/http/',
-      '/client/appbuilder/': '/appbuilder/',
       '/client/appbuilder': '/appbuilder/',
       '/client/other/configuration': '/client/configuration/',
-      '/client/other/configuration/': '/client/configuration/',
   },
   integrations: [
     react(),
