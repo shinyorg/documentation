@@ -154,7 +154,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
-        "version": "1.0.0"
+        "version": "1.3.1"
     },
     {
         "id": "config",
@@ -166,13 +166,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "shell",
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
-        "version": "3.1.1"
+        "version": "3.2.0"
     },
     {
         "id": "tableview",
         "nuget": "Shiny.Maui.TableView",
         "description": "MAUI TableView",
-        "version": "1.0.2"
+        "version": "1.1.1"
     },
     {
         "id": "scheduler",
@@ -198,7 +198,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Localization",
         "version": "2.0.1",
         "additionalNugets": [
-            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.0" }
+            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.5" }
         ]
     },
     {
@@ -207,7 +207,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Document DB (SQLite)",
         "version": "3.2.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
         ]
     },
     {
@@ -216,7 +216,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Document DB (SqlCipher)",
         "version": "3.2.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
         ]
     },
     {
@@ -225,7 +225,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Document DB (SQL Server)",
         "version": "3.2.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
         ]
     },
     {
@@ -234,7 +234,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Document DB (MySQL)",
         "version": "3.2.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
         ]
     },
     {
@@ -243,14 +243,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Document DB (PostgreSQL)",
         "version": "3.2.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
         ]
     },
     {
         "id": "reflector",
         "nuget": "Shiny.Reflector",
         "description": "Reflector",
-        "version": "1.7.1"
+        "version": "1.7.2"
     },
     {
         "id": "di",
@@ -275,7 +275,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "contactstore",
         "nuget": "Shiny.Maui.ContactStore",
         "description": "Contact Store",
-        "version": "1.0.0"
+        "version": "1.0.1"
     },
     {
         "id": "mauihost",
