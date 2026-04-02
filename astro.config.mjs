@@ -265,6 +265,14 @@ export default defineConfig({
                 ]
               },
               {
+                label: 'MSBuild Permissions',
+                items: [
+                  { label: 'Getting Started', link: 'client/permissions/' },
+                  { label: 'Android', link: 'client/permissions/android' },
+                  { label: 'iOS', link: 'client/permissions/ios' }
+                ]
+              },
+              {
                 label: 'Other',
                 items: [
                   { label: 'Stateful Services', link: 'client/other/statefulservices' },
