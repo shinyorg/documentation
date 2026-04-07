@@ -4,12 +4,13 @@ import Syntax from '../../Syntax';
 
 export interface Props {
   components: ShinyComponent[];
-  mode?: 'maui' | 'blazor' | 'aspnet';
+  mode?: 'maui' | 'blazor' | 'aspnet' | 'linux';
 }
 
 const getNuget = (c: ShinyComponent, mode?: string): string => {
     if (mode === 'blazor' && c.blazorNuget) return c.blazorNuget;
     if (mode === 'aspnet' && c.aspnetNuget) return c.aspnetNuget;
+    if (mode === 'linux' && c.linuxNuget) return c.linuxNuget;
     return c.nuget;
 };
 
@@ -41,6 +42,9 @@ const ProjectFile = (props: Props) => {
     const hasPush = usesPush(props.components);
 
     if (isMaui && usesHosting(props.components)) {
+        nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
+    }
+    if (props.mode === 'linux' && usesHosting(props.components)) {
         nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
     }
     let pr = "<ItemGroup>\r\n";

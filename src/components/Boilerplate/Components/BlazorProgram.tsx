@@ -51,6 +51,29 @@ public class Program
     src += `
         builder.Services.AddShinyServiceRegistry();`;
   }
+  if (has('ble')) {
+    src += `
+        // Web Bluetooth - requires user gesture for scanning, no background access
+        builder.Services.AddBluetoothLE();`;
+  }
+  if (has('jobs')) {
+    src += `
+        // Foreground only - the browser will not run jobs after the tab is closed
+        builder.Services.AddJobs();`;
+  }
+  if (has('gps')) {
+    src += `
+        // Foreground GPS only - the browser does not expose background location
+        builder.Services.AddGps();`;
+  }
+  if (has('push')) {
+    src += `
+        // Web Push via the browser PushManager + a service worker - VAPID key required
+        builder.Services.AddPush(new WebPushOptions
+        {
+            VapidPublicKey = "YOUR_VAPID_PUBLIC_KEY"
+        });`;
+  }
   // Reflector is attribute-based only, no builder registration needed
 
   src += `

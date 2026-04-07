@@ -1,7 +1,8 @@
-import { Data, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, ShinyComponents } from '../../consts';
+import { Data, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, LINUX_COMPATIBLE_IDS, ShinyComponents } from '../../consts';
 import { useState } from 'react';
 import NugetList from './Components/NugetList';
 import MauiProgram from './Components/MauiProgram';
+import LinuxProgram from './Components/LinuxProgram';
 import AndroidManifest from './Components/AndroidManifest';
 import AndroidActivity from './Components/AndroidActivity';
 import AppleInfoPlist from './Components/AppleInfoPlist';
@@ -17,7 +18,7 @@ import React from 'react';
 import ApplePrivacy from './Components/ApplePrivacy';
 import WindowsAppxManifest from './Components/WindowsAppxManifest';
 
-type AppMode = 'maui' | 'blazor' | 'aspnet';
+type AppMode = 'maui' | 'blazor' | 'aspnet' | 'linux';
 
 interface Props {
     componentName: string;
@@ -28,6 +29,7 @@ const LibBuilder = (props: Props) => {
   const { usesPush, usesActivity, usingForeground, usesWindows, hasPlatformConfig } = Data;
   const isBlazorCompatible = BLAZOR_COMPATIBLE_IDS.includes(props.componentName);
   const isAspNetCompatible = ASPNET_COMPATIBLE_IDS.includes(props.componentName);
+  const isLinuxCompatible = LINUX_COMPATIBLE_IDS.includes(props.componentName);
   const [mode, setMode] = useState<AppMode>('maui');
 
   const isMaui = mode === 'maui';
@@ -79,6 +81,26 @@ const LibBuilder = (props: Props) => {
         </Tabs>
       );
     }
+    if (mode === 'linux') {
+      return (
+        <Tabs className="app-builder__tabs">
+          <TabList className="app-builder__tablist">
+            <Tab>NuGet Packages</Tab>
+            <Tab>Project File</Tab>
+            <Tab>MauiProgram.cs</Tab>
+          </TabList>
+          <TabPanel>
+            <NugetList components={components} mode="linux" />
+          </TabPanel>
+          <TabPanel>
+            <ProjectFile components={components} mode="linux" />
+          </TabPanel>
+          <TabPanel>
+            <LinuxProgram components={components} />
+          </TabPanel>
+        </Tabs>
+      );
+    }
     return (
       <Tabs className="app-builder__tabs">
         <TabList className="app-builder__tablist">
@@ -125,7 +147,7 @@ const LibBuilder = (props: Props) => {
 
   return (
     <div className="app-builder">
-        {(isBlazorCompatible || isAspNetCompatible) && (
+        {(isBlazorCompatible || isAspNetCompatible || isLinuxCompatible) && (
           <div className="app-builder__mode-toggle">
             <button
               className={`app-builder__mode-btn${mode === 'maui' ? ' app-builder__mode-btn--active' : ''}`}
@@ -139,6 +161,14 @@ const LibBuilder = (props: Props) => {
                 onClick={() => setMode('blazor')}
               >
                 Blazor
+              </button>
+            )}
+            {isLinuxCompatible && (
+              <button
+                className={`app-builder__mode-btn${mode === 'linux' ? ' app-builder__mode-btn--active' : ''}`}
+                onClick={() => setMode('linux')}
+              >
+                Linux (GTK)
               </button>
             )}
             {isAspNetCompatible && (

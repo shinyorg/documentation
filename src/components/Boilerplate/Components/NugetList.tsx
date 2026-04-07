@@ -4,12 +4,13 @@ import NugetBadge from '../../NugetBadge';
 
 export interface Props {
   components: ShinyComponent[];
-  mode?: 'maui' | 'blazor' | 'aspnet';
+  mode?: 'maui' | 'blazor' | 'aspnet' | 'linux';
 }
 
 const getNuget = (c: ShinyComponent, mode?: string): string => {
   if (mode === 'blazor' && c.blazorNuget) return c.blazorNuget;
   if (mode === 'aspnet' && c.aspnetNuget) return c.aspnetNuget;
+  if (mode === 'linux' && c.linuxNuget) return c.linuxNuget;
   return c.nuget;
 };
 

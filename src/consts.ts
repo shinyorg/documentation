@@ -29,10 +29,13 @@ export type ShinyComponent = {
     foregroundService?: boolean;
     blazorNuget?: string;
     aspnetNuget?: string;
+    linuxNuget?: string;
+    macOsSupported?: boolean;
     additionalNugets?: { nuget: string; version: string }[];
 }
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push'];
+export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'webhost'];
 
@@ -78,12 +81,17 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "ble",
         "nuget": "Shiny.BluetoothLE",
+        "blazorNuget": "Shiny.BluetoothLE.Blazor",
+        "linuxNuget": "Shiny.BluetoothLE.Linux",
+        "macOsSupported": true,
         "description": "Bluetooth LE",
         "version": DEFAULT_VERSION
     },
     {
         "id": "blehosting",
         "nuget": "Shiny.BluetoothLE.Hosting",
+        "linuxNuget": "Shiny.BluetoothLE.Hosting.Linux",
+        "macOsSupported": true,
         "description": "Bluetooth LE Hosting",
         "version": DEFAULT_VERSION
     },
@@ -99,12 +107,14 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "jobs",
         "nuget": "Shiny.Jobs",
+        "blazorNuget": "Shiny.Jobs.Blazor",
         "description": "Periodic Jobs",
         "version": DEFAULT_VERSION
     },
     {
         "id": "gps",
-        "nuget": "Shiny.Locations",        
+        "nuget": "Shiny.Locations",
+        "blazorNuget": "Shiny.Locations.Blazor",
         "description": "GPS",
         "foregroundService": true,
         "version": DEFAULT_VERSION
@@ -125,6 +135,8 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "notifications",
         "nuget": "Shiny.Notifications",
+        "linuxNuget": "Shiny.Notifications.Linux",
+        "macOsSupported": true,
         "description": "Local Notifications",
         "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
@@ -132,6 +144,8 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "push",
         "nuget": "Shiny.Push",
+        "blazorNuget": "Shiny.Push.Blazor",
+        "macOsSupported": true,
         "description": "Push Notifications (Native)",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
@@ -316,6 +330,14 @@ export const Data = {
     usesHosting(compos: ShinyComponent[]): boolean {
         const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push'];
         return compos.some(x => hostingIds.includes(x.id));
+    },
+
+    supportsLinux(id: string): boolean {
+        return LINUX_COMPATIBLE_IDS.includes(id);
+    },
+
+    supportsMacOs(c: ShinyComponent): boolean {
+        return c.macOsSupported === true;
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
