@@ -3,37 +3,101 @@ title: Stateful Services
 ---
 
 ## Intro
-Stateful services are simple way of maintaining state across execution/restarts/etc.  Essentially, you make your service a start
 
-There are 3 requirements to having a stateful service
-1. The service must be a singleton
-2. The service must implement `System.ComponentModel.INotifyPropertyChanged`
-3. The service properties you wish to persist must be get/set
-4. Your properties must be "simple" types or JSON serializable
+Stateful services are a simple way to maintain service state across app restarts. You write a regular singleton service, declare the properties you want to persist, and Shiny automatically reads them back from storage on startup and writes them back whenever they change — no manual save/load code.
+
+Under the hood this is powered by Shiny's object store binder, which wires an `INotifyPropertyChanged` object to an `IKeyValueStore`.
+
+## Requirements
+
+1. The service must be registered as a **singleton** (use `AddShinyService<T>`).
+2. The service must implement `System.ComponentModel.INotifyPropertyChanged`. The easiest way is to inherit from `Shiny.NotifyPropertyChanged`.
+3. Every property you want to persist must have a public **get and set**.
+4. Property types must be "simple" (primitives, `string`, `DateTime`, `Guid`, enums) or JSON-serializable.
+
+## Implementation
+
+```csharp
+using Shiny;
+using Shiny.Stores;
+
+namespace MyApp.Services;
+
+// Optional: pick which store backs the service.
+// Defaults to "settings". Use "secure" for sensitive data.
+[ObjectStoreBinder("settings")]
+public class MyStatefulService : NotifyPropertyChanged
+{
+    string userName = string.Empty;
+    public string UserName
+    {
+        get => this.userName;
+        set => this.Set(ref this.userName, value);
+    }
+
+    bool isDarkMode;
+    public bool IsDarkMode
+    {
+        get => this.isDarkMode;
+        set => this.Set(ref this.isDarkMode, value);
+    }
+
+    DateTime? lastSyncedAt;
+    public DateTime? LastSyncedAt
+    {
+        get => this.lastSyncedAt;
+        set => this.Set(ref this.lastSyncedAt, value);
+    }
+}
+```
+
+## Registration
 
 ```csharp
 using Shiny;
 
-namespace Whatever;
+// wherever you register your services with the service collection
+builder.Services.AddShinyService<MyStatefulService>();
+```
 
-public class MyStatefulService : Shiny.NotifyPropertyChanged
+`AddShinyService<T>()` is what triggers the binding. A plain `AddSingleton<T>()` registration will **not** persist — this is the most common reason properties "silently don't save".
+
+## Usage
+
+Inject your service like any other singleton. Reads come back with whatever was persisted last; writes are flushed to the store immediately.
+
+```csharp
+public class SettingsViewModel
 {
+    readonly MyStatefulService state;
+
+    public SettingsViewModel(MyStatefulService state)
+    {
+        this.state = state;
+    }
+
+    public void ToggleDarkMode()
+    {
+        // This assignment is automatically persisted
+        this.state.IsDarkMode = !this.state.IsDarkMode;
+    }
 }
 ```
 
-And registering 
+## Picking a Store
 
-```csharp
-using Shiny; // to emerge the extension methods
+| Store Alias | Backed By | Use For |
+|-------------|-----------|---------|
+| `"settings"` *(default)* | `NSUserDefaults` (iOS) / `SharedPreferences` (Android) | General preferences and non-sensitive state |
+| `"secure"` | iOS Keychain / Android Keystore | Auth tokens, API keys, anything sensitive |
+| `"memory"` | In-memory only | Testing, transient state that should not persist |
 
-// wherever you register your services with the service collection
-ServiceCollection services;
-services.AddShinyService<MyStatefulService>();
-
-```
+Apply the desired alias via `[ObjectStoreBinder("secure")]` on the class, or pass the store alias to the `IObjectStoreBinder.Bind` call if you are binding manually.
 
 :::tip
-You can combine stateful services with [startup services](./startupservices)
+You can combine stateful services with [startup services](./startupservices). A single class can implement both `IShinyStartupTask` and inherit from `NotifyPropertyChanged` — Shiny will rehydrate its state from the store **before** calling `Start()`, so your startup logic sees the persisted values.
 :::
 
-# TODO
+:::caution
+Only properties with public `get` **and** `set` are bound. Read-only, init-only, and computed properties are ignored. Collection properties (`List<T>`, etc.) are persisted as a whole — mutating them in place will not trigger a write; reassign the property to persist changes.
+:::

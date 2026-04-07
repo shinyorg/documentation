@@ -277,7 +277,8 @@ export default defineConfig({
                 items: [
                   { label: 'Stateful Services', link: 'client/other/statefulservices' },
                   { label: 'Startup Services', link: 'client/other/startupservices' },
-                  { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' }
+                  { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' },
+                  { label: 'Android Foreground Service', link: 'client/other/androidforeground' },
                 ]
               },
               { label: 'Core Release Notes', link: 'client/release-notes' }

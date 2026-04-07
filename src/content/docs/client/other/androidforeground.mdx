@@ -2,5 +2,85 @@
 title: Android Foreground Services
 ---
 
-Android foreground services are simply of way of keeping your application running in the background, but WITH a persistent notification that let's the user know 
-something is running (and possibly consuming battery)
+Android foreground services keep your app alive in the background by showing a persistent notification that signals to the user that something is actively running (and potentially consuming battery). Android requires this notification — you cannot perform long-running background work without it.
+
+Several Shiny modules rely on a foreground service to function correctly on Android:
+
+- **GPS** (`Shiny.Locations`) — continuous location tracking
+- **Beacon Monitoring** (`Shiny.Beacons`) — monitoring beacon regions
+- **HTTP Transfers** (`Shiny.Net.Http`) — resumable uploads and downloads
+- **BLE Hosting** (`Shiny.BluetoothLE.Hosting`) — advertising as a peripheral
+
+Shiny manages the foreground service lifecycle for you. You only need to ensure the required manifest entries are in place and — optionally — customize the notification that is shown to the user.
+
+## Manifest Requirements
+
+The supporting Shiny package for each module automatically contributes the required `android.permission.FOREGROUND_SERVICE` and module-specific permissions (e.g. `FOREGROUND_SERVICE_LOCATION` for GPS) into your merged manifest. You must also ensure your app has:
+
+- A valid launcher icon, **or** a drawable named `notification` in your `Resources/drawable` folder. Shiny uses this as the small icon on the persistent notification when you haven't customized it.
+- The appropriate runtime permissions requested (e.g. `ACCESS_BACKGROUND_LOCATION` for GPS) — Shiny's `RequestAccess` methods handle the prompts.
+
+:::caution
+Android 14+ enforces strict foreground service type declarations. The Shiny packages declare the correct `foregroundServiceType` for their module — do not override these unless you know exactly what you are doing.
+:::
+
+## Customizing the Notification
+
+Shiny shows a sensible default notification, but in almost all production apps you will want to control the title, text, icon, and tap behavior. You do this by having your delegate **also** implement `Shiny.IAndroidForegroundServiceDelegate`:
+
+```csharp
+public interface IAndroidForegroundServiceDelegate
+{
+    void Configure(NotificationCompat.Builder builder);
+}
+```
+
+Because this interface lives in the Android-specific `Shiny` namespace, implement it inside an `#if ANDROID` block on a `partial` class so the rest of your delegate stays cross-platform.
+
+### Example — GPS Delegate
+
+```csharp
+using Shiny.Locations;
+
+public partial class MyGpsDelegate : IGpsDelegate
+{
+    public Task OnReading(GpsReading reading)
+    {
+        // cross-platform logic
+        return Task.CompletedTask;
+    }
+}
+
+#if ANDROID
+using AndroidX.Core.App;
+
+public partial class MyGpsDelegate : Shiny.IAndroidForegroundServiceDelegate
+{
+    public void Configure(NotificationCompat.Builder builder)
+    {
+        builder
+            .SetContentTitle("MyApp")
+            .SetContentText("Tracking your route")
+            .SetSmallIcon(Resource.Mipmap.youricon)
+            .SetPriority((int)NotificationCompat.PriorityLow)
+            .SetCategory(NotificationCompat.CategoryService);
+    }
+}
+#endif
+```
+
+The same pattern applies to every module that uses a foreground service:
+
+| Module | Delegate Interface |
+|--------|-------------------|
+| GPS | `Shiny.Locations.IGpsDelegate` + `Shiny.IAndroidForegroundServiceDelegate` |
+| Beacon Monitoring | `Shiny.Beacons.IBeaconMonitorDelegate` + `Shiny.IAndroidForegroundServiceDelegate` |
+| HTTP Transfers | `Shiny.Net.Http.IHttpTransferDelegate` + `Shiny.Net.Http.IAndroidHttpTransferDelegate` |
+
+:::tip
+Keep the notification priority at `Low` or `Min` for background work. High-priority notifications are distracting to users and can cause Play Store review issues for apps that run continuously.
+:::
+
+:::caution
+`Configure` is called once when the foreground service starts. If you need to update the notification while the service runs (e.g. changing the text as a download progresses), post an updated notification manually using the same channel and notification id — do not rely on `Configure` being called again.
+:::

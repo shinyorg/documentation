@@ -2,14 +2,122 @@
 title: Lifecycle Hooks
 ---
 
-Like .NET MAUI, Shiny has always had a bunch of required lifecycle hooks.  Many operations within Shiny require hooking into things like permissions,
-app foregrounding & backgrounding, and more.  Shiny does not have a direct dependency on .NET MAUI and sets out to allow for its own hosting model
-to support the ever growing ecosystem within .NET
+Like .NET MAUI, Shiny has always needed a set of platform lifecycle hooks. Many operations within Shiny — permissions, app foregrounding and backgrounding, push notification registration, deep links, activity results — require reacting to events that only the platform itself can raise. Shiny does not take a direct dependency on .NET MAUI; instead it exposes its own lifecycle interfaces that work in MAUI, native iOS/Android, and other .NET hosts.
+
+## How It Works
+
+Shiny's host wires a platform-specific **lifecycle executor** into the app startup. Any service you register with the DI container that implements one of the lifecycle sub-interfaces below is automatically resolved and called when the corresponding platform event fires. You never call these methods yourself — just implement the interface and register the service.
+
+```csharp
+// In MauiProgram.cs (or your native host setup)
+builder.Services.AddSingleton<IIosLifecycle.IContinueActivity, MyUniversalLinkHandler>();
+builder.Services.AddSingleton<IAndroidLifecycle.IOnActivityNewIntent, MyDeepLinkHandler>();
+```
+
+:::tip
+Prefer `AddShinyService<T>()` if the same class implements multiple lifecycle interfaces (or any other Shiny interface). It registers the implementation for every interface it implements in a single call.
+:::
 
 ## iOS
 
-TODO
+iOS lifecycle interfaces live in `Shiny.Hosting.IIosLifecycle`. Implement any of the nested sub-interfaces below to hook into the corresponding `UIApplicationDelegate` or `UNUserNotificationCenterDelegate` callback.
+
+| Interface | Fires On |
+|-----------|----------|
+| `IApplicationLifecycle` | App entering foreground / background |
+| `IOnFinishedLaunching` | `FinishedLaunching` with launch options |
+| `IContinueActivity` | Universal links & Handoff (`ContinueUserActivity`) |
+| `IRemoteNotifications` | APNs token registration, registration failure, and silent push delivery |
+| `INotificationHandler` | Foreground notification presentation and user tap responses |
+| `IHandleEventsForBackgroundUrl` | Background `NSURLSession` completion |
+
+### Example — Universal Links
+
+```csharp
+using Shiny.Hosting;
+using Foundation;
+using UIKit;
+
+public class UniversalLinkHandler : IIosLifecycle.IContinueActivity
+{
+    public bool Handle(NSUserActivity activity, UIApplicationRestorationHandler completionHandler)
+    {
+        if (activity.ActivityType == NSUserActivityType.BrowsingWeb)
+        {
+            var url = activity.WebPageUrl?.ToString();
+            // route the URL inside your app
+            return true;
+        }
+        return false;
+    }
+}
+
+// Registration
+builder.Services.AddSingleton<IIosLifecycle.IContinueActivity, UniversalLinkHandler>();
+```
 
 ## Android
 
-TODO
+Android lifecycle interfaces live in `Shiny.Hosting.IAndroidLifecycle`. The executor observes the Android `Application` and the currently-attached `Activity`, so these callbacks fire regardless of which activity is active.
+
+| Interface | Fires On |
+|-----------|----------|
+| `IApplicationLifecycle` | App entering foreground / background |
+| `IOnActivityOnCreate` | Activity `OnCreate` (including saved instance state) |
+| `IOnActivityNewIntent` | Activity `OnNewIntent` — used for deep links and push taps |
+| `IOnActivityResult` | Activity result callbacks from `StartActivityForResult` |
+| `IOnActivityRequestPermissionsResult` | Runtime permission request results |
+
+### Example — Deep Links
+
+```csharp
+using Shiny.Hosting;
+using Android.App;
+using Android.Content;
+
+public class DeepLinkHandler : IAndroidLifecycle.IOnActivityNewIntent
+{
+    public void Handle(Activity activity, Intent intent)
+    {
+        var data = intent?.DataString;
+        if (!string.IsNullOrEmpty(data))
+        {
+            // route the URL inside your app
+        }
+    }
+}
+
+// Registration
+builder.Services.AddSingleton<IAndroidLifecycle.IOnActivityNewIntent, DeepLinkHandler>();
+```
+
+## Foreground / Background (Both Platforms)
+
+`IApplicationLifecycle` exists on both `IIosLifecycle` and `IAndroidLifecycle` with the same shape. If you need a single handler that works on both platforms, the easiest route is to inherit from `ShinyLifecycleTask` — it implements the correct interface on each platform **and** runs as an `IShinyStartupTask`, so it is automatically instantiated on app launch.
+
+```csharp
+using Shiny;
+
+public class AppPresenceTask : ShinyLifecycleTask
+{
+    readonly ILogger<AppPresenceTask> logger;
+
+    public AppPresenceTask(ILogger<AppPresenceTask> logger)
+    {
+        this.logger = logger;
+    }
+
+    public override void Start()
+        => this.logger.LogInformation("App launched");
+
+    protected override void OnStateChanged(bool backgrounding)
+        => this.logger.LogInformation(backgrounding ? "Backgrounded" : "Foregrounded");
+}
+
+// Registration
+builder.Services.AddShinyService<AppPresenceTask>();
+```
+
+:::tip
+See [Startup Services](./startupservices) for more on `IShinyStartupTask` and how it relates to `ShinyLifecycleTask`.
+:::

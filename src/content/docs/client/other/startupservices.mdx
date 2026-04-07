@@ -2,43 +2,57 @@
 title: Startup Services
 ---
 
-## What are they?
-Startup services are a great way to hook events IMMEDIATELY after the dependency injection container has been built.  They support full dependency injection like other services.
+## What Are They?
 
-The startup of these services is NOT asynchronous for a reason - the startup of your application is not asynchronous.  If you go async, the platform is not waiting for you to finish.
+Startup services run **immediately** after the dependency injection container is built. They support full constructor injection like any other service, which makes them the perfect place to hook global application events — wiring up a logout handler, warming a cache, subscribing to a message bus, or scheduling jobs.
 
-## Setup
+`IShinyStartupTask.Start()` is **intentionally synchronous**. The platform does not wait for your app startup to finish, so any `async` work you kick off here runs in a fire-and-forget fashion. If you block for too long, the OS can kill your app before it finishes launching.
+
+## Implementing a Startup Task
 
 ```csharp
-namespace Whatever;
+using Shiny;
 
-public class MyStartupService : Shiny.IShinyStartupTask
+namespace MyApp.Infrastructure;
+
+public class MyStartupService : IShinyStartupTask
 {
+    readonly ILogger<MyStartupService> logger;
+
+    public MyStartupService(ILogger<MyStartupService> logger)
+    {
+        this.logger = logger;
+    }
+
     public void Start()
     {
-        // great to hook global events here (ie. Logout, delete local database?)
+        // Hook global events, warm caches, etc.
+        this.logger.LogInformation("App started");
     }
 }
 ```
 
-And registering 
+## Registration
 
 ```csharp
-using Shiny; // to emerge the extension methods
+using Shiny;
 
 // wherever you register your services with the service collection
-ServiceCollection services;
-services.AddShinyService<MyStartupService>(); // registers as a singleton
+builder.Services.AddShinyService<MyStartupService>(); // registers as a singleton
 
-
-services.BuildServiceProvider(); // the Start method will basically execute right here
+// Start() runs automatically when the service provider is built / Shiny host runs
 ```
 
+`AddShinyService<T>()` registers the implementation for every interface it implements (including `IShinyStartupTask`) and wires it into the startup pipeline. You do **not** need a separate `AddSingleton<IShinyStartupTask, MyStartupService>()` call.
 
 :::danger
-Due to this, it is HIGHLY recommended you do not block for long in a startup task as the platform will shut your app down if it does
+Do not block for long inside `Start()`. The platform can shut your app down if startup takes too long. Kick off any slow work on a background task and return quickly.
 :::
 
 :::tip
-You can combine startup services with [stateful services](./statefulservices)
+You can combine startup services with [stateful services](./statefulservices) — a single class can implement both `IShinyStartupTask` and `INotifyPropertyChanged` and Shiny will handle persistence **and** startup wiring in one registration.
+:::
+
+:::tip
+If your startup task also needs to react to the app entering the foreground or background, inherit from `ShinyLifecycleTask` instead. It implements `IShinyStartupTask` **and** the platform `IApplicationLifecycle` interfaces in one base class — see [Lifecycle Hooks](./lifecyclehooks).
 :::
