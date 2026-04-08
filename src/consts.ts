@@ -322,7 +322,7 @@ export const Data = {
     },
 
     usesWindows(compos: ShinyComponent[]): boolean {
-        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers'];
+        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push'];
         return compos.some(x => windowsIds.includes(x.id));
     },
 
