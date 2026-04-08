@@ -40,6 +40,15 @@ const NugetList = (props: Props) => {
     nugets = [...nugets, { id: "hosting", nuget: "Shiny.Hosting.Maui", version: DEFAULT_VERSION } as ShinyComponent];
   }
 
+  // Shiny.Jobs on Blazor needs IBattery + IConnectivity from the Blazor device-monitoring support package.
+  if (props.mode === 'blazor' && Data.hasComponent('jobs', props.components)) {
+    const dm = "Shiny.Support.DeviceMonitoring.Blazor";
+    if (!nugets.find(n => n.nuget === dm)) {
+      nugets = [...nugets, { id: "extra-dm-blazor", nuget: dm, version: DEFAULT_VERSION } as ShinyComponent];
+      nugets.sort((a, b) => (a.nuget > b.nuget) ? 1 : ((b.nuget > a.nuget) ? -1 : 0));
+    }
+  }
+
   return (
     <div className="app-builder__nuget-list">
       {nugets.map(c => (

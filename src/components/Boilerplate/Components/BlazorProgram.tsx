@@ -58,7 +58,10 @@ public class Program
   }
   if (has('jobs')) {
     src += `
-        // Foreground only - the browser will not run jobs after the tab is closed
+        // Foreground only - the browser will not run jobs after the tab is closed.
+        // Jobs needs IBattery + IConnectivity from Shiny.Support.DeviceMonitoring.Blazor.
+        builder.Services.AddBattery();
+        builder.Services.AddConnectivity();
         builder.Services.AddJobs();`;
   }
   if (has('gps')) {

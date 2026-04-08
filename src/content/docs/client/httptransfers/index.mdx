@@ -11,10 +11,11 @@ import NugetDownloads from '/src/components/NugetDownloads.astro';
 
 - <GitHubStars org="shinyorg" repo="shiny" />
 - <NugetDownloads name="Shiny.Net.Http" />
+- <NugetDownloads name="Shiny.Net.Http.Blazor" />
 
-<PlatformSupport os={["android", "ios", "windows"]} />
+<PlatformSupport os={["android", "ios", "windows", "macos", "linux", "web"]} />
 
-Shiny HTTP Transfers enables background uploads and downloads that continue even when your app is suspended. Transfers are managed by the OS and will resume after app restarts.
+Shiny HTTP Transfers enables background uploads and downloads that continue even when your app is suspended. On iOS/Android, transfers are managed by the OS and will resume after app restarts. On Windows, Linux, macOS, and plain .NET hosts a managed `HttpClient` loop drives transfers and supports **resumable downloads** via HTTP Range requests. On Blazor WebAssembly, transfers are queued to IndexedDB and drained by a Service Worker via the Background Sync API.
 
 :::caution
 HTTP Transfers do not work on the iOS Simulator. You must test on a real device.
@@ -26,9 +27,27 @@ HTTP Transfers do not work on the iOS Simulator. You must test on a real device.
 - Multipart and raw upload support
 - Progress tracking with speed and ETA
 - Automatic resume after app restart
+- **Resumable downloads** on plain .NET (Linux/macOS/Windows) via HTTP Range requests
 - Metered/unmetered network control
 - Managed transfer list for UI binding
-- Cross-platform: iOS, Android, Windows
+- Cross-platform: iOS, Android, Windows, Linux, macOS, Blazor WebAssembly
+
+## Platform Notes
+
+| Platform | Package | Backing |
+|----------|---------|---------|
+| iOS | `Shiny.Net.Http` | `NSURLSession` background session |
+| Android | `Shiny.Net.Http` | Foreground service + WorkManager |
+| Windows | `Shiny.Net.Http` | Managed `HttpClient` loop |
+| Linux / macOS / Plain .NET | `Shiny.Net.Http` | Managed `HttpClient` + `IConnectivity` loop; resumable downloads via HTTP Range |
+| Blazor WebAssembly | `Shiny.Net.Http.Blazor` | Service Worker Background Sync + IndexedDB; downloads not resumable |
+
+:::caution[Blazor WebAssembly limitations]
+- **No resumable downloads** — the Service Worker `fetch()` returns a whole `Blob`, and partial-body appending isn't supported.
+- **Upload bodies are base64-bridged through JS interop** and persisted as IndexedDB `Blob`s. Suitable for small/medium files; very large uploads should wait for a future streaming path.
+- **Background Sync support is Chromium-only** (no Firefox, no Safari). On unsupported browsers the queue still drains while the tab is foreground, then sits in IndexedDB until the user returns.
+- Use `GetDownloadBytes(identifier)` on the Blazor `HttpTransferManager` to read a completed download's bytes back from IndexedDB.
+:::
 
 ## Setup
 
@@ -88,7 +107,22 @@ You can also extend `HttpTransferDelegate` base class which combines `IHttpTrans
 ## Registration
 
 ```csharp
+// iOS / Android / Windows / Linux / macOS / plain .NET
 services.AddHttpTransfers<MyTransferDelegate>();
+
+// Blazor WebAssembly
+services.AddBlazorHttpTransfers<MyTransferDelegate>(opts =>
+{
+    // Optional — defaults to the bundled Shiny service worker
+    opts.ServiceWorkerPath = "./_content/Shiny.Net.Http.Blazor/http-transfer-sw.js";
+});
+```
+
+On Blazor, ship the bundled SW at the configured path, or import its handlers from your own service worker:
+
+```js
+// my-sw.js
+importScripts('./_content/Shiny.Net.Http.Blazor/http-transfer-sw.js');
 ```
 
 ## AI Coding Assistant

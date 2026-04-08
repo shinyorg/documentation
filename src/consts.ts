@@ -107,7 +107,6 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "jobs",
         "nuget": "Shiny.Jobs",
-        "blazorNuget": "Shiny.Jobs.Blazor",
         "description": "Periodic Jobs",
         "version": DEFAULT_VERSION
     },
