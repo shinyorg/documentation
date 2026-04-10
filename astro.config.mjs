@@ -162,6 +162,14 @@ export default defineConfig({
             ],
           },
           {
+            label: 'AI Skills',
+            link: '/ai-skills/',
+            icon: 'puzzle',
+            items: [
+              { label: 'AI Skills', link: 'ai-skills/' }
+            ],
+          },
+          {
             id: 'client',
             label: 'Client',
             link: '/client/architecture/',
