@@ -6,7 +6,6 @@ import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 import starlightDocSearch from '@astrojs/starlight-docsearch';
 import starlightSidebarTopics from 'starlight-sidebar-topics';
-import starlightLlmsTxt from 'starlight-llms-txt'
 import starlightAnnouncement from 'starlight-announcement'
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
@@ -159,7 +158,6 @@ export default defineConfig({
           apiKey: '92258958b2d4448dc6b24bf03f14b97b',
           indexName: 'Shiny .NET',
         }),
-        starlightLlmsTxt(),
         starlightBlog({
           authors: {
             allanritchie: {
