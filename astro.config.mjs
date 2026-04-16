@@ -436,7 +436,9 @@ export default defineConfig({
                 ]
               },
               { label: 'BottomSheet', link: 'maui/bottomsheet/' },
+              { label: 'Fab & FabMenu', link: 'maui/fab/' },
               { label: 'PillView', link: 'maui/pillview/' },
+              { label: 'SecurityPin', link: 'maui/securitypin/' },
               { label: 'ImageViewer', link: 'maui/imageviewer/' },
               { label: 'Markdown', link: 'maui/markdown/' },
               {
