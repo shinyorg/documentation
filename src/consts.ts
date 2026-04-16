@@ -25,6 +25,7 @@ export type ShinyComponent = {
     nuget: string;
     description: string;
     version: string;
+    category: ShinyCategoryId;
     androidIntent?: string;
     foregroundService?: boolean;
     blazorNuget?: string;
@@ -33,6 +34,45 @@ export type ShinyComponent = {
     macOsSupported?: boolean;
     additionalNugets?: { nuget: string; version: string }[];
 }
+
+export type ShinyCategoryId =
+    | 'core'
+    | 'maui'
+    | 'notifications'
+    | 'location'
+    | 'storage'
+    | 'bluetooth'
+    | 'background';
+
+export type ShinyCategory = {
+    id: ShinyCategoryId;
+    title: string;
+    /** Column span out of 12 used by the category grid */
+    span: 4 | 6 | 8 | 12;
+    /** Bright, light accent color shown in the category header + border */
+    color: string;
+    /** Very light background tint for the category card */
+    tint: string;
+    /** Slightly darker tint used for dark theme backgrounds */
+    tintDark: string;
+}
+
+/** Ordered so the grid naturally forms balanced rows (12-col).
+ *  Row 1: core (12)
+ *  Row 2: maui (12)
+ *  Row 3: notifications (6) + location (6)
+ *  Row 4: storage (8) + bluetooth (4)
+ *  Row 5: background (12)
+ */
+export const ShinyCategories: ShinyCategory[] = [
+    { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
+    { id: 'maui',          title: 'MAUI Services & Controls',    span: 12, color: '#14B8A6', tint: '#E0FBF6', tintDark: '#103F3A' },
+    { id: 'notifications', title: 'Notifications & Push',        span: 6,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
+    { id: 'location',      title: 'Location & Spatial',          span: 6,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
+    { id: 'storage',       title: 'Data & Storage',              span: 8,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
+    { id: 'bluetooth',     title: 'Bluetooth & Connectivity',    span: 4,  color: '#3B82F6', tint: '#DEEAFE', tintDark: '#14254A' },
+    { id: 'background',    title: 'Background & Tasks',          span: 12, color: '#F97316', tint: '#FFE8D4', tintDark: '#3A2110' },
+];
 
 export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
@@ -76,6 +116,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Mediator.Blazor",
         "aspnetNuget": "Shiny.Mediator.AspNet",
         "description": "Mediator",
+        "category": "core",
         "version" : "6.2.1"
     },
     {
@@ -85,6 +126,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE",
+        "category": "bluetooth",
         "version": DEFAULT_VERSION
     },
     {
@@ -93,12 +135,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Hosting.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE Hosting",
+        "category": "bluetooth",
         "version": DEFAULT_VERSION
     },
     {
         "id": "obd",
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
+        "category": "bluetooth",
         "version": "1.0.0",
         "additionalNugets": [
             { "nuget": "Shiny.Obd", "version": "1.0.0" }
@@ -108,6 +152,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "jobs",
         "nuget": "Shiny.Jobs",
         "description": "Periodic Jobs",
+        "category": "background",
         "version": DEFAULT_VERSION
     },
     {
@@ -115,6 +160,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Locations",
         "blazorNuget": "Shiny.Locations.Blazor",
         "description": "GPS",
+        "category": "location",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -122,12 +168,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "geofencing",
         "nuget": "Shiny.Locations",
         "description": "Geofencing",
+        "category": "location",
         "version": DEFAULT_VERSION
     },
     {
         "id": "httptransfers",
         "nuget": "Shiny.Net.Http",
         "description": "HTTP file uploads and downloads",
+        "category": "background",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -137,6 +185,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Notifications.Linux",
         "macOsSupported": true,
         "description": "Local Notifications",
+        "category": "notifications",
         "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -146,6 +195,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Push.Blazor",
         "macOsSupported": true,
         "description": "Push Notifications (Native)",
+        "category": "notifications",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -153,6 +203,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushfirebase",
         "nuget": "Shiny.Push.FirebaseMessaging",
         "description": "Push Notifications - Firebase (iOS)",
+        "category": "notifications",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -160,6 +211,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushazure",
         "nuget": "Shiny.Push.AzureNotificationHubs",
         "description": "Push Notifications - Azure Notification Hubs",
+        "category": "notifications",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -167,72 +219,84 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
+        "category": "maui",
         "version": "1.3.1"
     },
     {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
+        "category": "core",
         "version": DEFAULT_VERSION
     },
     {
         "id": "shell",
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
+        "category": "maui",
         "version": "3.2.0"
     },
     {
         "id": "tableview",
         "nuget": "Shiny.Maui.Controls",
         "description": "MAUI TableView",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "scheduler",
         "nuget": "Shiny.Maui.Controls",
         "description": "MAUI Scheduler",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "bottomsheet",
         "nuget": "Shiny.Maui.Controls",
         "description": "MAUI BottomSheet",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "pillview",
         "nuget": "Shiny.Maui.Controls",
         "description": "MAUI PillView",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "imageviewer",
         "nuget": "Shiny.Maui.Controls",
         "description": "MAUI ImageViewer",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "markdown",
         "nuget": "Shiny.Maui.Controls.Markdown",
         "description": "MAUI Markdown",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "mermaiddiagrams",
         "nuget": "Shiny.Maui.Controls.MermaidDiagrams",
         "description": "MAUI Mermaid Diagrams",
+        "category": "maui",
         "version": "1.0.0"
     },
     {
         "id": "stores",
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
+        "category": "core",
         "version": "2.0.3"
     },
     {
         "id": "localization",
         "nuget": "Shiny.Extensions.Localization.Generator",
         "description": "Localization",
+        "category": "core",
         "version": "2.0.1",
         "additionalNugets": [
             { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.5" }
@@ -242,6 +306,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb",
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
+        "category": "storage",
         "version": "3.2.0",
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
@@ -251,6 +316,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb-sqlcipher",
         "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
         "description": "Document DB (SqlCipher)",
+        "category": "storage",
         "version": "3.2.0",
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
@@ -260,6 +326,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb-sqlserver",
         "nuget": "Shiny.DocumentDb.SqlServer",
         "description": "Document DB (SQL Server)",
+        "category": "storage",
         "version": "3.2.0",
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
@@ -269,6 +336,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb-mysql",
         "nuget": "Shiny.DocumentDb.MySql",
         "description": "Document DB (MySQL)",
+        "category": "storage",
         "version": "3.2.0",
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
@@ -278,6 +346,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb-postgresql",
         "nuget": "Shiny.DocumentDb.PostgreSql",
         "description": "Document DB (PostgreSQL)",
+        "category": "storage",
         "version": "3.2.0",
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
@@ -287,24 +356,28 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "reflector",
         "nuget": "Shiny.Reflector",
         "description": "Reflector",
+        "category": "core",
         "version": "1.7.2"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
+        "category": "core",
         "version": "2.0.3"
     },
     {
         "id": "spatial",
         "nuget": "Shiny.Spatial",
         "description": "Spatial Database",
+        "category": "location",
         "version": "1.1.0"
     },
     {
         "id": "spatial-geofencing",
         "nuget": "Shiny.Spatial.Geofencing",
         "description": "Spatial Geofencing",
+        "category": "location",
         "foregroundService": true,
         "version": "1.1.0"
     },
@@ -312,18 +385,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "contactstore",
         "nuget": "Shiny.Maui.ContactStore",
         "description": "Contact Store",
+        "category": "maui",
         "version": "1.0.1"
     },
     {
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
+        "category": "core",
         "version": "2.0.3"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
+        "category": "core",
         "version": "2.0.3"
     }
 ];

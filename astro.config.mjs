@@ -6,6 +6,8 @@ import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 import starlightDocSearch from '@astrojs/starlight-docsearch';
 import starlightSidebarTopics from 'starlight-sidebar-topics';
+import starlightLlmsTxt from 'starlight-llms-txt'
+import starlightAnnouncement from 'starlight-announcement'
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
 
@@ -136,19 +138,35 @@ export default defineConfig({
           `,
         },
       ],
+      components: {
+        // Override the default `Sidebar` component with a custom one.
+        Sidebar: './src/components/Sidebar.astro',
+      },
       plugins:[
+        //https://frostybee.github.io/starlight-announcement/
+        starlightAnnouncement({
+          announcements: [
+            {
+              id: 'welcome',
+              content: 'Welcome to our documentation!',
+              variant: 'tip',
+              dismissable: true
+            }
+          ]
+        }),
         starlightDocSearch({
           appId: 'JHE1F0X28B',
           apiKey: '92258958b2d4448dc6b24bf03f14b97b',
           indexName: 'Shiny .NET',
         }),
+        starlightLlmsTxt(),
         starlightBlog({
           authors: {
             allanritchie: {
               name: 'Allan Ritchie',
               title: 'One of the guys who builds this',
               picture: 'https://avatars.githubusercontent.com/u/1431555', // Images in the `public` directory are supported.
-              url: 'https://allanritchie.com',
+              url: 'https://allanritchie.com'
             }
           }
         }),

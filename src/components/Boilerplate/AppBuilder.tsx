@@ -1,4 +1,4 @@
-import { type ShinyComponent, ShinyComponents, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, ASPNET_ONLY_IDS, Data } from '../../consts';
+import { type ShinyComponent, ShinyComponents, ShinyCategories, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, ASPNET_ONLY_IDS, Data } from '../../consts';
 import { useState } from 'react';
 import NugetList from './Components/NugetList';
 import MauiProgram from './Components/MauiProgram';
@@ -164,23 +164,46 @@ const AppBuilder = () => {
             ASP.NET
           </button>
         </div>
-        <div className="app-builder__grid">
-        {availableComponents.map((item, index) => (
-          <label
-            key={item.id}
-            className={`app-builder__card${isSelected(item) ? ' app-builder__card--selected' : ''}`}
-          >
-            <input
-              id={item.id}
-              type="checkbox"
-              checked={isSelected(item)}
-              onChange={() => handleChange(item)}
-              className="app-builder__checkbox"
-            />
-            <span className="app-builder__checkmark" />
-            <span className="app-builder__label">{item.description}</span>
-          </label>
-        ))}
+        <div className="app-builder__categories">
+        {ShinyCategories.map(cat => {
+          const items = availableComponents.filter(c => c.category === cat.id);
+          if (items.length === 0) return null;
+          const style = {
+            '--cat-color': cat.color,
+            '--cat-tint': cat.tint,
+            '--cat-tint-dark': cat.tintDark,
+          } as React.CSSProperties;
+          return (
+            <section
+              key={cat.id}
+              className={`app-builder__category app-builder__category--span-${cat.span}`}
+              style={style}
+            >
+              <header className="app-builder__category-header">
+                <span className="app-builder__category-title">{cat.title}</span>
+                <span className="app-builder__category-count">{items.length}</span>
+              </header>
+              <div className="app-builder__category-items">
+                {items.map(item => (
+                  <label
+                    key={item.id}
+                    className={`app-builder__card${isSelected(item) ? ' app-builder__card--selected' : ''}`}
+                  >
+                    <input
+                      id={item.id}
+                      type="checkbox"
+                      checked={isSelected(item)}
+                      onChange={() => handleChange(item)}
+                      className="app-builder__checkbox"
+                    />
+                    <span className="app-builder__checkmark" />
+                    <span className="app-builder__label">{item.description}</span>
+                  </label>
+                ))}
+              </div>
+            </section>
+          );
+        })}
         </div>
         <div className="app-builder__actions">
           <button className="app-builder__btn app-builder__btn--primary" onClick={selectAll}>Select All</button>
