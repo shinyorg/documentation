@@ -4,7 +4,7 @@ import { getCollection } from 'astro:content';
 const SITE = 'https://www.shinylib.net';
 const PROJECT_NAME = 'Shiny.NET';
 const DESCRIPTION =
-  'A suite of powerful .NET libraries for mobile, desktop, and server applications. Includes Shiny Client (mobile/desktop services), Shiny Mediator, MAUI Services & Controls, Document DB, Spatial, Aspire integrations, and more.';
+  'A suite of powerful .NET libraries for mobile, desktop, and server applications. Includes Shiny Client (mobile/desktop services), Shiny Mediator, MAUI, Controls, Document DB, Spatial, Aspire integrations, and more.';
 
 const EXCLUDE_PATTERNS = [/^blog\//, /^404$/];
 
@@ -20,6 +20,7 @@ const GROUPS: Group[] = [
   { label: 'Client', test: (id) => id.startsWith('client/') },
   { label: 'Mediator', test: (id) => id.startsWith('mediator/') || id === 'mediator' },
   { label: 'MAUI', test: (id) => id.startsWith('maui/') },
+  { label: 'Controls', test: (id) => id.startsWith('controls/') || id === 'controls' },
   { label: 'Data', test: (id) => id.startsWith('data/') },
   { label: 'Extensions', test: (id) => id.startsWith('extensions/') },
   { label: 'Aspire', test: (id) => id.startsWith('aspire/') },

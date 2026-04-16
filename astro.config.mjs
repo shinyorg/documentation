@@ -42,6 +42,8 @@ export default defineConfig({
       '/release-notes/mediator/': '/mediator/release-notes/',
       '/release-notes/spatial/': '/data/spatial/release-notes/',
       '/release-notes/sqlite-documentdb/': '/data/documentdb/release-notes/',
+      '/maui/controls/': '/controls/',
+      '/maui/controls/release-notes/': '/controls/release-notes/',
       '/release-notes/tableview/': '/maui/tableview/release-notes/',
       '/release-notes/templates/': '/maui/templates/release-notes/',
       '/release-notes/extensions/': '/extensions/di/release-notes/',
@@ -390,7 +392,7 @@ export default defineConfig({
             ]
           },
           {
-            label: 'MAUI Services',
+            label: 'MAUI',
             link: '/maui/shell/',
             icon: 'laptop',
             items:[
@@ -427,10 +429,10 @@ export default defineConfig({
           },
           {
             label: 'Controls',
-            link: '/maui/controls/',
+            link: '/controls/',
             icon: 'seti:html',
             items:[
-              { label: 'Getting Started', link: 'maui/controls/' },
+              { label: 'Getting Started', link: 'controls/' },
               {
                 label: 'TableView',
                 items:[
@@ -465,7 +467,7 @@ export default defineConfig({
                   { label: 'Theming', link: 'maui/mermaid-diagrams/theming' },
                 ]
               },
-              { label: 'Release Notes', link: 'maui/controls/release-notes' }
+              { label: 'Release Notes', link: 'controls/release-notes' }
             ]
           },
           {
