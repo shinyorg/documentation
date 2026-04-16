@@ -38,6 +38,7 @@ export type ShinyComponent = {
 export type ShinyCategoryId =
     | 'core'
     | 'maui'
+    | 'controls'
     | 'notifications'
     | 'location'
     | 'storage'
@@ -59,14 +60,15 @@ export type ShinyCategory = {
 
 /** Ordered so the grid naturally forms balanced rows (12-col).
  *  Row 1: core (12)
- *  Row 2: maui (12)
+ *  Row 2: maui (4) + controls (8)
  *  Row 3: notifications (6) + location (6)
  *  Row 4: storage (8) + bluetooth (4)
  *  Row 5: background (12)
  */
 export const ShinyCategories: ShinyCategory[] = [
     { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
-    { id: 'maui',          title: 'MAUI Services & Controls',    span: 12, color: '#14B8A6', tint: '#E0FBF6', tintDark: '#103F3A' },
+    { id: 'maui',          title: 'MAUI',                        span: 4,  color: '#14B8A6', tint: '#E0FBF6', tintDark: '#103F3A' },
+    { id: 'controls',      title: 'Controls',                    span: 8,  color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
     { id: 'notifications', title: 'Notifications & Push',        span: 6,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
     { id: 'location',      title: 'Location & Spatial',          span: 6,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
     { id: 'storage',       title: 'Data & Storage',              span: 8,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
@@ -74,7 +76,7 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'background',    title: 'Background & Tasks',          span: 12, color: '#F97316', tint: '#FFE8D4', tintDark: '#3A2110' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'bottomsheet', 'pillview', 'imageviewer', 'markdown', 'mermaiddiagrams'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'webhost'];
@@ -239,50 +241,57 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "tableview",
         "nuget": "Shiny.Maui.Controls",
-        "description": "MAUI TableView",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "TableView",
+        "category": "controls",
         "version": "1.0.0"
     },
     {
         "id": "scheduler",
         "nuget": "Shiny.Maui.Controls",
-        "description": "MAUI Scheduler",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "Scheduler",
+        "category": "controls",
         "version": "1.0.0"
     },
     {
         "id": "bottomsheet",
         "nuget": "Shiny.Maui.Controls",
-        "description": "MAUI BottomSheet",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "BottomSheet",
+        "category": "controls",
         "version": "1.0.0"
     },
     {
         "id": "pillview",
         "nuget": "Shiny.Maui.Controls",
-        "description": "MAUI PillView",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "PillView",
+        "category": "controls",
         "version": "1.0.0"
     },
     {
         "id": "imageviewer",
         "nuget": "Shiny.Maui.Controls",
-        "description": "MAUI ImageViewer",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "ImageViewer",
+        "category": "controls",
         "version": "1.0.0"
     },
     {
         "id": "markdown",
         "nuget": "Shiny.Maui.Controls.Markdown",
-        "description": "MAUI Markdown",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls.Markdown",
+        "description": "Markdown",
+        "category": "controls",
         "version": "1.0.0"
     },
     {
         "id": "mermaiddiagrams",
         "nuget": "Shiny.Maui.Controls.MermaidDiagrams",
-        "description": "MAUI Mermaid Diagrams",
-        "category": "maui",
+        "blazorNuget": "Shiny.Blazor.Controls.MermaidDiagrams",
+        "description": "Mermaid Diagrams",
+        "category": "controls",
         "version": "1.0.0"
     },
     {

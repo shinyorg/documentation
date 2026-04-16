@@ -426,7 +426,7 @@ export default defineConfig({
             ]
           },
           {
-            label: 'MAUI Controls',
+            label: 'Controls',
             link: '/maui/controls/',
             icon: 'seti:html',
             items:[
