@@ -183,19 +183,43 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "tableview",
-        "nuget": "Shiny.Maui.TableView",
+        "nuget": "Shiny.Maui.Controls",
         "description": "MAUI TableView",
-        "version": "1.1.1"
+        "version": "1.0.0"
     },
     {
         "id": "scheduler",
-        "nuget": "Shiny.Maui.Scheduler",
+        "nuget": "Shiny.Maui.Controls",
         "description": "MAUI Scheduler",
         "version": "1.0.0"
     },
     {
+        "id": "bottomsheet",
+        "nuget": "Shiny.Maui.Controls",
+        "description": "MAUI BottomSheet",
+        "version": "1.0.0"
+    },
+    {
+        "id": "pillview",
+        "nuget": "Shiny.Maui.Controls",
+        "description": "MAUI PillView",
+        "version": "1.0.0"
+    },
+    {
+        "id": "imageviewer",
+        "nuget": "Shiny.Maui.Controls",
+        "description": "MAUI ImageViewer",
+        "version": "1.0.0"
+    },
+    {
+        "id": "markdown",
+        "nuget": "Shiny.Maui.Controls.Markdown",
+        "description": "MAUI Markdown",
+        "version": "1.0.0"
+    },
+    {
         "id": "mermaiddiagrams",
-        "nuget": "Shiny.Maui.MermaidDiagrams",
+        "nuget": "Shiny.Maui.Controls.MermaidDiagrams",
         "description": "MAUI Mermaid Diagrams",
         "version": "1.0.0"
     },

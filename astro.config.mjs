@@ -374,7 +374,7 @@ export default defineConfig({
             ]
           },
           {
-            label: 'MAUI',
+            label: 'MAUI Services',
             link: '/maui/shell/',
             icon: 'laptop',
             items:[
@@ -387,37 +387,6 @@ export default defineConfig({
                   { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
                   { label: 'Source Generation', link: 'maui/shell/sourcegen' },
                   { label: 'Release Notes', link: 'maui/shell/release-notes' }
-                ]
-              },
-              {
-                label: 'TableView',
-                items:[
-                  { label: 'Getting Started', link: 'maui/tableview/' },
-                  { label: 'Cell Types', link: 'maui/tableview/cells' },
-                  { label: 'Sections & Dynamic Content', link: 'maui/tableview/sections' },
-                  { label: 'Styling', link: 'maui/tableview/styling' },
-                  { label: 'Advanced Features', link: 'maui/tableview/advanced' },
-                  { label: 'Release Notes', link: 'maui/tableview/release-notes' }
-                ]
-              },
-              {
-                label: 'Scheduler',
-                items:[
-                  { label: 'Getting Started', link: 'maui/scheduler/' },
-                  { label: 'Calendar View', link: 'maui/scheduler/calendar' },
-                  { label: 'Agenda View', link: 'maui/scheduler/agenda' },
-                  { label: 'Event List', link: 'maui/scheduler/event-list' },
-                  { label: 'Custom Templates', link: 'maui/scheduler/templates' },
-                  { label: 'Release Notes', link: 'maui/scheduler/release-notes' }
-                ]
-              },
-              {
-                label: 'Mermaid Diagrams',
-                items:[
-                  { label: 'Getting Started', link: 'maui/mermaid-diagrams/' },
-                  { label: 'Control Properties', link: 'maui/mermaid-diagrams/control' },
-                  { label: 'Theming', link: 'maui/mermaid-diagrams/theming' },
-                  { label: 'Release Notes', link: 'maui/mermaid-diagrams/release-notes' }
                 ]
               },
               {
@@ -438,6 +407,47 @@ export default defineConfig({
                   { label: 'Release Notes', link: 'maui/templates/release-notes' }
                 ]
               }
+            ]
+          },
+          {
+            label: 'MAUI Controls',
+            link: '/maui/controls/',
+            icon: 'seti:html',
+            items:[
+              { label: 'Getting Started', link: 'maui/controls/' },
+              {
+                label: 'TableView',
+                items:[
+                  { label: 'Getting Started', link: 'maui/tableview/' },
+                  { label: 'Cell Types', link: 'maui/tableview/cells' },
+                  { label: 'Sections & Dynamic Content', link: 'maui/tableview/sections' },
+                  { label: 'Styling', link: 'maui/tableview/styling' },
+                  { label: 'Advanced Features', link: 'maui/tableview/advanced' },
+                ]
+              },
+              {
+                label: 'Scheduler',
+                items:[
+                  { label: 'Getting Started', link: 'maui/scheduler/' },
+                  { label: 'Calendar View', link: 'maui/scheduler/calendar' },
+                  { label: 'Agenda View', link: 'maui/scheduler/agenda' },
+                  { label: 'Event List', link: 'maui/scheduler/event-list' },
+                  { label: 'Custom Templates', link: 'maui/scheduler/templates' },
+                ]
+              },
+              { label: 'BottomSheet', link: 'maui/bottomsheet/' },
+              { label: 'PillView', link: 'maui/pillview/' },
+              { label: 'ImageViewer', link: 'maui/imageviewer/' },
+              { label: 'Markdown', link: 'maui/markdown/' },
+              {
+                label: 'Mermaid Diagrams',
+                items:[
+                  { label: 'Getting Started', link: 'maui/mermaid-diagrams/' },
+                  { label: 'Control Properties', link: 'maui/mermaid-diagrams/control' },
+                  { label: 'Theming', link: 'maui/mermaid-diagrams/theming' },
+                ]
+              },
+              { label: 'Release Notes', link: 'maui/controls/release-notes' }
             ]
           },
           {
@@ -564,6 +574,9 @@ export default defineConfig({
             '/client/hosting/uno',
             '/client/other/androidforeground',
             '/mediator/extensions',
+            '/maui/tableview/release-notes',
+            '/maui/scheduler/release-notes',
+            '/maui/mermaid-diagrams/release-notes',
           ],
           topics: {
             client: ['/'],

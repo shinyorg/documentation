@@ -100,13 +100,9 @@ const MauiProgram = (props: Props) => {
           .Add<AnotherPage, AnotherViewModel>("another")
       );`;
   }
-  if (has('tableview')) {
+  if (has('tableview') || has('scheduler') || has('bottomsheet') || has('pillview') || has('imageviewer') || has('markdown') || has('mermaiddiagrams')) {
     src += `
-      builder.UseShinyTableView();`;
-  }
-  if (has('scheduler')) {
-    src += `
-      builder.UseShinyScheduler();`;
+      builder.UseShinyControls();`;
   }
   if (has('stores')) {
     src += `
