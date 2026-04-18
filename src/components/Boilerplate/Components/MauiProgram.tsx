@@ -100,7 +100,7 @@ const MauiProgram = (props: Props) => {
           .Add<AnotherPage, AnotherViewModel>("another")
       );`;
   }
-  if (has('tableview') || has('scheduler') || has('bottomsheet') || has('pillview') || has('imageviewer') || has('markdown') || has('mermaiddiagrams')) {
+  if (has('tableview') || has('scheduler') || has('sheetview') || has('pillview') || has('imageviewer') || has('markdown') || has('mermaiddiagrams')) {
     src += `
       builder.UseShinyControls();`;
   }

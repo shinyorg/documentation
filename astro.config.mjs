@@ -74,7 +74,8 @@ export default defineConfig({
       '/maui/scheduler/event-list': '/controls/scheduler/event-list',
       '/maui/scheduler/templates': '/controls/scheduler/templates',
       '/maui/scheduler/release-notes': '/controls/scheduler/release-notes',
-      '/maui/bottomsheet/': '/controls/bottomsheet/',
+      '/maui/bottomsheet/': '/controls/sheetview/',
+      '/controls/bottomsheet/': '/controls/sheetview/',
       '/maui/fab/': '/controls/fab/',
       '/maui/pillview/': '/controls/pillview/',
       '/maui/securitypin/': '/controls/securitypin/',
@@ -475,7 +476,7 @@ export default defineConfig({
                   { label: 'Custom Templates', link: 'controls/scheduler/templates' },
                 ]
               },
-              { label: 'BottomSheet', link: 'controls/bottomsheet/' },
+              { label: 'SheetView', link: 'controls/sheetview/' },
               { label: 'Fab & FabMenu', link: 'controls/fab/' },
               { label: 'PillView', link: 'controls/pillview/' },
               { label: 'SecurityPin', link: 'controls/securitypin/' },
