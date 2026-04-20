@@ -43,7 +43,9 @@ await gpsManager.StartListener(new AndroidGpsRequest(
     DistanceFilterMeters: 10,
     WaitForAccurateLocation: true,
     StopForegroundServiceWithTask: false,
-    RequestPreciseAccuracy: true
+    RequestPreciseAccuracy: true,
+    StationaryMetersThreshold: 10,
+    StationarySecondsThreshold: 30
 ));
 ```
 
@@ -58,6 +60,8 @@ await gpsManager.StartListener(new AndroidGpsRequest(
 | `WaitForAccurateLocation` | `bool` | `false` | Wait for an accurate fix before first update |
 | `StopForegroundServiceWithTask` | `bool` | `false` | Shut down foreground service when app is swiped away |
 | `RequestPreciseAccuracy` | `bool` | `false` | Request precise GPS accuracy |
+| `StationaryMetersThreshold` | `int` | `10` | Distance in meters below which the user is considered not moving |
+| `StationarySecondsThreshold` | `int` | `30` | Seconds the user must remain within the distance threshold to be marked stationary |
 
 ### GpsPriority
 
@@ -82,7 +86,9 @@ await gpsManager.StartListener(new AppleGpsRequest(
     DistanceFilterMeters: 50,
     ShowsBackgroundLocationIndicator: true,
     PausesLocationUpdatesAutomatically: false,
-    ActivityType: CLActivityType.Fitness
+    ActivityType: CLActivityType.Fitness,
+    StationaryMetersThreshold: 10,
+    StationarySecondsThreshold: 30
 ));
 ```
 
@@ -96,6 +102,8 @@ await gpsManager.StartListener(new AppleGpsRequest(
 | `PausesLocationUpdatesAutomatically` | `bool` | `false` | Let iOS pause updates when location isn't changing significantly |
 | `UseSignificantLocationChanges` | `bool` | `false` | Use significant location change monitoring (lower power, less frequent) |
 | `ActivityType` | `CLActivityType` | `Other` | Hint to iOS about the type of activity for optimization |
+| `StationaryMetersThreshold` | `int` | `10` | Distance in meters below which the user is considered not moving (legacy iOS only — iOS 18+ uses native detection) |
+| `StationarySecondsThreshold` | `int` | `30` | Seconds the user must remain within the distance threshold to be marked stationary (legacy iOS only) |
 
 ### CLActivityType
 
@@ -121,12 +129,16 @@ On non-matching platforms, platform-specific requests are automatically converte
 var request = new AndroidGpsRequest(
     BackgroundMode: GpsBackgroundMode.Realtime,
     GpsPriority: GpsPriority.HighAccuracy,
-    IntervalMillis: 2000
+    IntervalMillis: 2000,
+    StationaryMetersThreshold: 15,
+    StationarySecondsThreshold: 60
 );
 #elif IOS
 var request = new AppleGpsRequest(
     BackgroundMode: GpsBackgroundMode.Realtime,
-    ActivityType: CLActivityType.Fitness
+    ActivityType: CLActivityType.Fitness,
+    StationaryMetersThreshold: 15,
+    StationarySecondsThreshold: 60
 );
 #else
 var request = GpsRequest.Foreground;
