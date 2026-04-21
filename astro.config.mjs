@@ -80,6 +80,8 @@ export default defineConfig({
       '/maui/pillview/': '/controls/pillview/',
       '/maui/securitypin/': '/controls/securitypin/',
       '/maui/imageviewer/': '/controls/imageviewer/',
+      '/maui/imageeditor/': '/controls/imageeditor/',
+      '/maui/chatview/': '/controls/chatview/',
       '/maui/markdown/': '/controls/markdown/',
       '/maui/mermaid-diagrams/': '/controls/mermaid-diagrams/',
       '/maui/mermaid-diagrams/control': '/controls/mermaid-diagrams/control',
@@ -481,6 +483,8 @@ export default defineConfig({
               { label: 'PillView', link: 'controls/pillview/' },
               { label: 'SecurityPin', link: 'controls/securitypin/' },
               { label: 'ImageViewer', link: 'controls/imageviewer/' },
+              { label: 'ImageEditor', link: 'controls/imageeditor/' },
+              { label: 'ChatView', link: 'controls/chatview/' },
               { label: 'Markdown', link: 'controls/markdown/' },
               {
                 label: 'Mermaid Diagrams',
