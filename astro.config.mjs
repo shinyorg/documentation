@@ -298,12 +298,30 @@ export default defineConfig({
       plugins:[
         //https://frostybee.github.io/starlight-announcement/
         starlightAnnouncement({
+          displayMode: 'rotate', // stack
+          rotateInterval: 5000,
+          showRotateIndicator: true,
           announcements: [
             {
-              id: 'welcome',
-              content: 'Welcome to our documentation!',
+              id: 'mobilev4',
+              content: 'Shiny .NET v4 is here with BLE Windows Support, Improved GPS, & More!',
               variant: 'tip',
-              dismissable: true
+              link: { text: 'Check It Out', href: '/ble' },
+              dismissable: false
+            },
+            {
+              id: 'controls1',
+              content : 'Introducing Shiny .NET Controls: TableView, Scheduler, ChatView, ImageEditor, and more!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/controls/' },
+              dismissable: false
+            },
+            {
+              id: 'health1beta',
+              content: 'Shiny .NET Health Beta is now available!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/health/' },
+              dismissable: false
             }
           ]
         }),
