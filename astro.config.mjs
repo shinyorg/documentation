@@ -438,8 +438,7 @@ export default defineConfig({
                   { label: '3rd Party Libraries', link: 'templates/third-party' },
                   { label: 'Release Notes', link: 'templates/release-notes' }
                 ]
-              },
-              { label: 'Core Release Notes', link: 'release-notes' }
+              }
             ],
           },
           {
