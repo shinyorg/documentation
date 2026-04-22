@@ -466,6 +466,7 @@ export default defineConfig({
                   { label: 'Sections & Dynamic Content', link: 'controls/tableview/sections' },
                   { label: 'Styling', link: 'controls/tableview/styling' },
                   { label: 'Advanced Features', link: 'controls/tableview/advanced' },
+                  { label: 'Blazor Usage', link: 'controls/tableview/blazor' },
                 ]
               },
               {
@@ -476,22 +477,60 @@ export default defineConfig({
                   { label: 'Agenda View', link: 'controls/scheduler/agenda' },
                   { label: 'Event List', link: 'controls/scheduler/event-list' },
                   { label: 'Custom Templates', link: 'controls/scheduler/templates' },
+                  { label: 'Blazor Usage', link: 'controls/scheduler/blazor' },
                 ]
               },
-              { label: 'SheetView', link: 'controls/sheetview/' },
-              { label: 'Fab & FabMenu', link: 'controls/fab/' },
-              { label: 'PillView', link: 'controls/pillview/' },
-              { label: 'SecurityPin', link: 'controls/securitypin/' },
-              { label: 'ImageViewer', link: 'controls/imageviewer/' },
-              { label: 'ImageEditor', link: 'controls/imageeditor/' },
-              { label: 'ChatView', link: 'controls/chatview/' },
-              { label: 'Markdown', link: 'controls/markdown/' },
+              {
+                label: 'ChatView',
+                items:[
+                  { label: 'Getting Started', link: 'controls/chatview/' },
+                  { label: 'Data Models', link: 'controls/chatview/data-models' },
+                  { label: 'Properties & Commands', link: 'controls/chatview/configuration' },
+                ]
+              },
+              {
+                label: 'ImageEditor',
+                items:[
+                  { label: 'Getting Started', link: 'controls/imageeditor/' },
+                  { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
+                  { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
+                ]
+              },
+              {
+                label: 'SheetView',
+                items:[
+                  { label: 'Getting Started', link: 'controls/sheetview/' },
+                  { label: 'Properties & Events', link: 'controls/sheetview/properties' },
+                  { label: 'Examples', link: 'controls/sheetview/examples' },
+                  { label: 'Blazor Usage', link: 'controls/sheetview/blazor' },
+                ]
+              },
+              {
+                label: 'Fab & FabMenu',
+                items:[
+                  { label: 'Getting Started', link: 'controls/fab/' },
+                  { label: 'Fab', link: 'controls/fab/fab' },
+                  { label: 'FabMenu', link: 'controls/fab/fabmenu' },
+                  { label: 'Blazor Usage', link: 'controls/fab/blazor' },
+                ]
+              },
               {
                 label: 'Mermaid Diagrams',
                 items:[
                   { label: 'Getting Started', link: 'controls/mermaid-diagrams/' },
                   { label: 'Control Properties', link: 'controls/mermaid-diagrams/control' },
                   { label: 'Theming', link: 'controls/mermaid-diagrams/theming' },
+                  { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor' },
+                ]
+              },
+              {
+                label: 'Other Controls',
+                items:[
+                  { label: 'ColorPicker', link: 'controls/colorpicker/' },
+                  { label: 'ImageViewer', link: 'controls/imageviewer/' },
+                  { label: 'Markdown', link: 'controls/markdown/' },
+                  { label: 'PillView', link: 'controls/pillview/' },
+                  { label: 'SecurityPin', link: 'controls/securitypin/' },
                 ]
               },
               { label: 'Release Notes', link: 'controls/release-notes' }
