@@ -67,6 +67,26 @@ const AndroidManifest = (props: Props) => {
     src += addP('WRITE_CONTACTS');
   }
 
+  if (has('health')) {
+    src += addP('ACTIVITY_RECOGNITION');
+    src += `
+      <uses-permission android:name="android.permission.health.READ_STEPS" />
+      <uses-permission android:name="android.permission.health.READ_HEART_RATE" />
+      <uses-permission android:name="android.permission.health.READ_TOTAL_ENERGY_BURNED" />
+      <uses-permission android:name="android.permission.health.READ_DISTANCE" />
+      <uses-permission android:name="android.permission.health.READ_WEIGHT" />
+      <uses-permission android:name="android.permission.health.READ_HEIGHT" />
+      <uses-permission android:name="android.permission.health.READ_BODY_FAT" />
+      <uses-permission android:name="android.permission.health.READ_RESTING_HEART_RATE" />
+      <uses-permission android:name="android.permission.health.READ_BLOOD_PRESSURE" />
+      <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
+      <uses-permission android:name="android.permission.health.READ_SLEEP" />
+      <uses-permission android:name="android.permission.health.READ_HYDRATION" />
+      <queries>
+          <package android:name="com.google.android.apps.healthdata" />
+      </queries>`;
+  }
+
   if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
   }

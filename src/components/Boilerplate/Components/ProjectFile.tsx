@@ -66,6 +66,14 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasHealth = nugets.find(x => x.nuget === "Shiny.Health") !== undefined;
+    if (isMaui && hasHealth) {
+        pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.developer.healthkit\" Type=\"Boolean\" Value=\"true\" Visible=\"false\" />\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.developer.healthkit.background-delivery\" Type=\"Boolean\" Value=\"true\" Visible=\"false\" />\r\n";
+        pr += "</ItemGroup>\r\n";
+    }
+
     if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {

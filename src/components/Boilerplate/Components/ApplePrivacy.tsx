@@ -26,6 +26,13 @@ const ApplePrivacy = (props: Props) => {
     return Data.hasComponent(feature, props.components);
   };
 
+  let health = '';
+  if (has('health')) {
+      health += "\n<!--health-->\n";
+      health += genPrivDataType('NSPrivacyCollectedDataTypeHealth', true, false);
+      health += genPrivDataType('NSPrivacyCollectedDataTypeFitness', true, false);
+  }
+
   let location = '';
   if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
       location += "\n<!--location-->\n";
@@ -139,6 +146,7 @@ const ApplePrivacy = (props: Props) => {
               </array>
           </dict>  
           ${location}
+          ${health}
       </array>
   </dict>
   </plist>

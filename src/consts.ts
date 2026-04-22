@@ -225,6 +225,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "1.3.1"
     },
     {
+        "id": "health",
+        "nuget": "Shiny.Health",
+        "description": "Health Data",
+        "category": "maui",
+        "version": "1.0.0"
+    },
+    {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",

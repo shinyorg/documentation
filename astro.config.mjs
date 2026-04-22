@@ -322,7 +322,13 @@ export default defineConfig({
                   { label: 'Copying Tracks', link: 'client/music/copying' },
                   { label: 'Release Notes', link: 'client/music/release-notes' }
                 ]
-              },              
+              },
+              {
+                label: 'Health',
+                items: [
+                  { label: 'Getting Started', link: 'client/health/' },
+                ]
+              },
               {
                 label: 'Configuration',
                 items: [

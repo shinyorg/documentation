@@ -50,6 +50,16 @@ const AppleInfoPlist = (props: Props) => {
   if (has('contactstore')) {
     addKey('NSContactsUsageDescription');
   }
+  if (has('health')) {
+    addKey('NSHealthShareUsageDescription');
+    addKey('NSHealthUpdateUsageDescription');
+    src += `
+        <key>UIRequiredDeviceCapabilities</key>
+        <array>
+            <string>healthkit</string>
+        </array>
+        `;
+  }
   if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
     addKey('NSLocationAlwaysUsageDescription');
     addKey('NSLocationAlwaysAndWhenInUseUsageDescription');

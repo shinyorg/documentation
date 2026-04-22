@@ -130,6 +130,10 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddContactStore();`;
   }
+  if (has('health')) {
+    src += `
+      builder.Services.AddHealthIntegration();`;
+  }
   if (has('di')) {
     src += `
       builder.Services.AddShinyServiceRegistry();`;
