@@ -1,0 +1,183 @@
+---
+title: Geofencing
+---
+import LibBuilder from '../../../components/Boilerplate/LibBuilder';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+- <GitHubStars org="shinyorg" repo="shiny" />
+- <NugetDownloads name="Shiny.Locations" />
+
+<PlatformSupport os={["android", "ios", "windows"]} />
+
+:::caution[Not available on Blazor / Web]
+Browsers do not expose a geofencing API, so geofencing is **not** available in
+`Shiny.Locations.Blazor`. If you need region-entry behavior on the web, do the
+work server-side: have the client report GPS while it is in the foreground and
+evaluate regions on your backend, then notify the user via Web Push
+(`Shiny.Push.Blazor`).
+:::
+
+Geofencing lets your app react when a user enters or exits a geographic area — even when the app is not running. Unlike GPS tracking, geofencing is managed by the operating system and is highly battery efficient, making it ideal for location-triggered background tasks.
+
+## Platform Notes
+
+| Feature | Android | iOS | Windows |
+|---------|---------|-----|---------|
+| Max Regions | 60 | 20 | Unlimited |
+| Background Support | Yes | Yes | Yes |
+| Google Play Fallback | GPS-direct when unavailable | N/A | N/A |
+
+:::note[Region Limits]
+Each platform enforces a maximum number of simultaneously monitored geofence regions. Android supports up to 60, iOS supports up to 20, and Windows has no limit. If you need to monitor more regions than the platform allows, consider using [Spatial Geofencing](/spatial/geofencing) which has no region limits.
+:::
+
+:::caution[Android Emulator Testing]
+Testing geofences on the Android emulator can be unreliable. When Google Play Services is available, Shiny uses the native geofencing API which has known issues with emulated locations. You may need to run Google Maps in the background for the emulated position tool to work properly. For reliable testing, use a physical device.
+:::
+
+## Setup
+
+<LibBuilder componentName="geofencing" client:load />
+
+## Creating Your Delegate
+
+Implement `IGeofenceDelegate` to handle geofence enter/exit events. This delegate fires in the background when a boundary is crossed.
+
+```csharp
+public class MyGeofenceDelegate : IGeofenceDelegate
+{
+    readonly ILogger<MyGeofenceDelegate> logger;
+
+    // Full dependency injection support - treat as a singleton
+    public MyGeofenceDelegate(ILogger<MyGeofenceDelegate> logger)
+    {
+        this.logger = logger;
+    }
+
+    public async Task OnStatusChanged(GeofenceState newStatus, GeofenceRegion region)
+    {
+        if (newStatus == GeofenceState.Entered)
+        {
+            this.logger.LogInformation("Entered region: {Region}", region.Identifier);
+            // send a notification, sync data, trigger an action, etc.
+        }
+        else if (newStatus == GeofenceState.Exited)
+        {
+            this.logger.LogInformation("Exited region: {Region}", region.Identifier);
+        }
+    }
+}
+```
+
+:::caution[iOS Background Time]
+On iOS, your delegate has approximately 4 seconds of execution time (including DI initialization). Keep your processing fast or offload heavy work to a [Job](/jobs).
+:::
+
+## Using the Geofence Manager
+
+Inject `IGeofenceManager` to manage geofence regions at runtime.
+
+### Requesting Permission
+
+Always request access before starting monitoring:
+
+```csharp
+IGeofenceManager geofenceManager; // injected
+
+var access = await geofenceManager.RequestAccess();
+if (access != AccessState.Available)
+{
+    // Handle denied/restricted - show user messaging
+    return;
+}
+```
+
+### Starting & Stopping Monitoring
+
+```csharp
+// Start monitoring a region
+await geofenceManager.StartMonitoring(new GeofenceRegion(
+    "work",
+    new Position(43.6532, -79.3832),  // latitude, longitude
+    Distance.FromMeters(200)           // radius
+));
+
+// Stop monitoring a specific region
+await geofenceManager.StopMonitoring("work");
+
+// Stop monitoring all regions
+await geofenceManager.StopAllMonitoring();
+```
+
+### GeofenceRegion Options
+
+```csharp
+var region = new GeofenceRegion(
+    Identifier: "coffee-shop",
+    Center: new Position(43.6532, -79.3832),
+    Radius: Distance.FromMeters(100),
+    SingleUse: false,       // true = auto-remove after first trigger
+    NotifyOnEntry: true,    // fire delegate on enter
+    NotifyOnExit: true      // fire delegate on exit
+);
+```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `Identifier` | `string` | required | Unique ID for the region |
+| `Center` | `Position` | required | Latitude/longitude of the circle center |
+| `Radius` | `Distance` | required | Radius of the circular geofence |
+| `SingleUse` | `bool` | `false` | Automatically stop monitoring after first trigger |
+| `NotifyOnEntry` | `bool` | `true` | Fire delegate when entering the region |
+| `NotifyOnExit` | `bool` | `true` | Fire delegate when exiting the region |
+
+### Querying State
+
+```csharp
+// Get all currently monitored regions
+var regions = geofenceManager.GetMonitorRegions();
+
+// Request the current state of a region (inside or outside)
+var state = await geofenceManager.RequestState(region);
+// GeofenceState.Entered, GeofenceState.Exited, or GeofenceState.Unknown
+
+// Check current permission status without prompting
+var status = geofenceManager.CurrentStatus;
+```
+
+## GPS-Direct Geofencing
+
+By default, `AddGeofencing` uses the native OS geofencing APIs. On Android, if Google Play Services is unavailable, Shiny automatically falls back to GPS-direct geofencing.
+
+You can also explicitly opt into GPS-direct mode:
+
+```csharp
+services.AddGpsDirectGeofencing<MyGeofenceDelegate>();
+```
+
+:::caution[Battery Impact]
+GPS-direct geofencing runs the GPS in **realtime background mode** which is significantly more battery intensive than native OS geofencing. Only use this when native geofencing is unavailable or when your app already requires continuous GPS tracking.
+:::
+
+## How It Works
+
+Shiny handles all the platform complexity behind a single API:
+
+- **Android**: Uses Google Play Services geofencing when available, falls back to GPS-direct otherwise
+- **iOS 18+**: Uses the modern `CLMonitor` API
+- **iOS < 18**: Uses the legacy `CLLocationManager` region monitoring API
+- **Windows**: Uses `Windows.Devices.Geolocation.Geofencing`
+
+Monitored regions are automatically persisted and restored on app restart — you don't need to re-register them.
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-locations" />
+
+## Samples
+* [Main Samples](https://github.com/shinyorg/shiny/tree/master/samples/Sample.Maui/Geofencing)

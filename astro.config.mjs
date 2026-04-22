@@ -36,22 +36,22 @@ export default defineConfig({
       '/client/mediator/': '/mediator/',
       '/client/mediator/middleware/': '/mediator/middleware/',
       '/client/mediator/extensions/': '/mediator/extensions/',
-      '/release-notes/client/v30/' : '/client/release-notes/',
-      '/extensions/sqlite-document-db/': '/data/documentdb/',
-      '/release-notes/client/': '/client/release-notes/',
+      '/release-notes/client/v30/' : '/release-notes/',
+      '/extensions/sqlite-document-db/': '/documentdb/',
+      '/release-notes/client/': '/release-notes/',
       '/release-notes/mediator/': '/mediator/release-notes/',
-      '/release-notes/spatial/': '/data/spatial/release-notes/',
-      '/release-notes/sqlite-documentdb/': '/data/documentdb/release-notes/',
+      '/release-notes/spatial/': '/spatial/release-notes/',
+      '/release-notes/sqlite-documentdb/': '/documentdb/release-notes/',
       '/maui/controls/': '/controls/',
       '/maui/controls/release-notes/': '/controls/release-notes/',
       '/release-notes/tableview/': '/controls/tableview/release-notes/',
-      '/release-notes/templates/': '/maui/templates/release-notes/',
-      '/release-notes/extensions/': '/extensions/di/release-notes/',
-      '/extensions/release-notes/': '/extensions/di/release-notes/',
+      '/release-notes/templates/': '/templates/release-notes/',
+      '/release-notes/extensions/': '/di/release-notes/',
+      '/extensions/release-notes/': '/di/release-notes/',
       '/release-notes/aspire/': '/aspire/orleans/release-notes/',
       '/aspire/release-notes/': '/aspire/orleans/release-notes/',
 
-      // Foundation redirects (moved from Client, App Builder, AI Skills)
+      // Foundation redirects
       '/client/architecture/': '/foundation/architecture/',
       '/client/hosting/maui/': '/foundation/hosting/maui/',
       '/client/hosting/native/': '/foundation/hosting/native/',
@@ -59,10 +59,137 @@ export default defineConfig({
       '/appbuilder/': '/foundation/appbuilder/',
       '/ai-skills/': '/foundation/ai-skills/',
 
-      '/client/maui/': '/maui/shell/',
-      '/client/maui/navigation': '/maui/shell/navigation',
-      '/client/maui/lifecycle': '/maui/shell/lifecycle',
-      '/client/maui/sourcegen': '/maui/shell/sourcegen',
+      // Shell redirects
+      '/client/maui/': '/mauishell/',
+      '/client/maui/navigation': '/mauishell/navigation',
+      '/client/maui/lifecycle': '/mauishell/lifecycle',
+      '/client/maui/sourcegen': '/mauishell/sourcegen',
+      '/maui/shell/': '/mauishell/',
+      '/maui/shell/navigation': '/mauishell/navigation',
+      '/maui/shell/dialogs': '/mauishell/dialogs',
+      '/maui/shell/lifecycle': '/mauishell/lifecycle',
+      '/maui/shell/sourcegen': '/mauishell/sourcegen',
+      '/maui/shell/release-notes': '/mauishell/release-notes',
+
+      // Client → flat redirects
+      '/client/ble/': '/ble/',
+      '/client/ble/manager': '/ble/manager',
+      '/client/ble/peripheral': '/ble/peripheral',
+      '/client/ble/gatt': '/ble/gatt',
+      '/client/ble/background': '/ble/background',
+      '/client/ble/best-practices': '/ble/best-practices',
+      '/client/ble/release-notes': '/ble/release-notes',
+      '/client/blehosting/': '/blehosting/',
+      '/client/blehosting/gatt': '/blehosting/gatt',
+      '/client/blehosting/release-notes': '/blehosting/release-notes',
+      '/client/obd/': '/obd/',
+      '/client/obd/commands': '/obd/commands',
+      '/client/obd/connection': '/obd/connection',
+      '/client/obd/ble': '/obd/ble',
+      '/client/obd/transports': '/obd/transports',
+      '/client/obd/release-notes': '/obd/release-notes',
+      '/client/jobs/': '/jobs/',
+      '/client/jobs/create': '/jobs/create',
+      '/client/jobs/managing': '/jobs/managing',
+      '/client/jobs/faq': '/jobs/faq',
+      '/client/jobs/release-notes': '/jobs/release-notes',
+      '/client/httptransfers/': '/httptransfers/',
+      '/client/httptransfers/transfers': '/httptransfers/transfers',
+      '/client/httptransfers/azure': '/httptransfers/azure',
+      '/client/httptransfers/delegate': '/httptransfers/delegate',
+      '/client/httptransfers/monitoring': '/httptransfers/monitoring',
+      '/client/httptransfers/release-notes': '/httptransfers/release-notes',
+      '/client/notifications/': '/notifications/',
+      '/client/notifications/sending': '/notifications/sending',
+      '/client/notifications/channels': '/notifications/channels',
+      '/client/notifications/platform': '/notifications/platform',
+      '/client/notifications/scheduling': '/notifications/scheduling',
+      '/client/notifications/release-notes': '/notifications/release-notes',
+      '/client/push/': '/push/',
+      '/client/push/native': '/push/native',
+      '/client/push/platform': '/push/platform',
+      '/client/push/azure': '/push/azure',
+      '/client/push/firebase-ios': '/push/firebase-ios',
+      '/client/push/faq': '/push/faq',
+      '/client/push/release-notes': '/push/release-notes',
+      '/client/locations/gps': '/locations/gps',
+      '/client/locations/platform-requests': '/locations/platform-requests',
+      '/client/locations/geofencing': '/locations/geofencing',
+      '/client/locations/release-notes': '/locations/release-notes',
+      '/client/music/': '/music/',
+      '/client/music/permissions': '/music/permissions',
+      '/client/music/querying': '/music/querying',
+      '/client/music/playback': '/music/playback',
+      '/client/music/copying': '/music/copying',
+      '/client/music/release-notes': '/music/release-notes',
+      '/client/health/': '/health/',
+      '/client/configuration/': '/configuration/',
+      '/client/configuration/json': '/configuration/json',
+      '/client/configuration/preferences': '/configuration/preferences',
+      '/client/configuration/remote': '/configuration/remote',
+      '/client/configuration/release-notes': '/configuration/release-notes',
+      '/client/permissions/': '/permissions/',
+      '/client/permissions/android': '/permissions/android',
+      '/client/permissions/ios': '/permissions/ios',
+      '/client/other/statefulservices': '/other/statefulservices',
+      '/client/other/startupservices': '/other/startupservices',
+      '/client/other/lifecyclehooks': '/other/lifecyclehooks',
+      '/client/other/androidforeground': '/other/androidforeground',
+      '/client/release-notes/': '/release-notes/',
+
+      // MAUI → flat redirects
+      '/maui/contactstore/': '/contactstore/',
+      '/maui/contactstore/permissions': '/contactstore/permissions',
+      '/maui/contactstore/querying': '/contactstore/querying',
+      '/maui/contactstore/release-notes': '/contactstore/release-notes',
+      '/maui/templates/': '/templates/',
+      '/maui/templates/shiny-libraries': '/templates/shiny-libraries',
+      '/maui/templates/third-party': '/templates/third-party',
+      '/maui/templates/release-notes': '/templates/release-notes',
+
+      // Extensions → flat redirects
+      '/extensions/reflector/': '/reflector/',
+      '/extensions/reflector/json': '/reflector/json',
+      '/extensions/reflector/assembly-info': '/reflector/assembly-info',
+      '/extensions/reflector/configuration': '/reflector/configuration',
+      '/extensions/reflector/release-notes': '/reflector/release-notes',
+      '/extensions/di/': '/di/',
+      '/extensions/di/advanced': '/di/advanced',
+      '/extensions/di/categories': '/di/categories',
+      '/extensions/di/configuration': '/di/configuration',
+      '/extensions/di/release-notes': '/di/release-notes',
+      '/extensions/stores/': '/stores/',
+      '/extensions/stores/persistent-services': '/stores/persistent-services',
+      '/extensions/stores/release-notes': '/stores/release-notes',
+      '/extensions/localizegen/': '/localizegen/',
+      '/extensions/localizegen/usage': '/localizegen/usage',
+      '/extensions/localizegen/release-notes': '/localizegen/release-notes',
+      '/extensions/webhost/': '/webhost/',
+      '/extensions/webhost/release-notes': '/webhost/release-notes',
+      '/extensions/mauihost/': '/mauihost/',
+      '/extensions/mauihost/release-notes': '/mauihost/release-notes',
+
+      // Data → flat redirects
+      '/data/documentdb/': '/documentdb/',
+      '/data/documentdb/aot': '/documentdb/aot',
+      '/data/documentdb/crud': '/documentdb/crud',
+      '/data/documentdb/querying': '/documentdb/querying',
+      '/data/documentdb/projections': '/documentdb/projections',
+      '/data/documentdb/aggregates': '/documentdb/aggregates',
+      '/data/documentdb/indexes': '/documentdb/indexes',
+      '/data/documentdb/sqlcipher': '/documentdb/sqlcipher',
+      '/data/documentdb/release-notes': '/documentdb/release-notes',
+      '/data/spatial/': '/spatial/',
+      '/data/spatial/geometry': '/spatial/geometry',
+      '/data/spatial/database': '/spatial/database',
+      '/data/spatial/queries': '/spatial/queries',
+      '/data/spatial/algorithms': '/spatial/algorithms',
+      '/data/spatial/prebuilt': '/spatial/prebuilt',
+      '/data/spatial/geofencing': '/spatial/geofencing',
+      '/data/spatial/release-notes': '/spatial/release-notes',
+
+
+      // Legacy redirects (pre-flat paths)
       '/tableview/': '/controls/tableview/',
       '/tableview/cells': '/controls/tableview/cells',
       '/tableview/sections': '/controls/tableview/sections',
@@ -95,33 +222,25 @@ export default defineConfig({
       '/maui/mermaid-diagrams/control': '/controls/mermaid-diagrams/control',
       '/maui/mermaid-diagrams/theming': '/controls/mermaid-diagrams/theming',
       '/maui/mermaid-diagrams/release-notes': '/controls/mermaid-diagrams/release-notes',
-
-      '/sqlite-docdb/': '/data/documentdb/',
-      '/sqlite-docdb/aot': '/data/documentdb/aot',
-      '/sqlite-docdb/crud': '/data/documentdb/crud',
-      '/sqlite-docdb/querying': '/data/documentdb/querying',
-      '/sqlite-docdb/projections': '/data/documentdb/projections',
-      '/sqlite-docdb/aggregates': '/data/documentdb/aggregates',
-      '/sqlite-docdb/indexes': '/data/documentdb/indexes',
-      '/sqlite-docdb/release-notes': '/data/documentdb/release-notes',
-      '/data/sqlite-docdb/': '/data/documentdb/',
-      '/data/sqlite-docdb/aot': '/data/documentdb/aot',
-      '/data/sqlite-docdb/crud': '/data/documentdb/crud',
-      '/data/sqlite-docdb/querying': '/data/documentdb/querying',
-      '/data/sqlite-docdb/projections': '/data/documentdb/projections',
-      '/data/sqlite-docdb/aggregates': '/data/documentdb/aggregates',
-      '/data/sqlite-docdb/indexes': '/data/documentdb/indexes',
-      '/data/sqlite-docdb/release-notes': '/data/documentdb/release-notes',
-      '/spatial/': '/data/spatial/',
-      '/spatial/geometry': '/data/spatial/geometry',
-      '/spatial/database': '/data/spatial/database',
-      '/spatial/queries': '/data/spatial/queries',
-      '/spatial/algorithms': '/data/spatial/algorithms',
-      '/spatial/prebuilt': '/data/spatial/prebuilt',
-      '/spatial/release-notes': '/data/spatial/release-notes',
+      '/sqlite-docdb/': '/documentdb/',
+      '/sqlite-docdb/aot': '/documentdb/aot',
+      '/sqlite-docdb/crud': '/documentdb/crud',
+      '/sqlite-docdb/querying': '/documentdb/querying',
+      '/sqlite-docdb/projections': '/documentdb/projections',
+      '/sqlite-docdb/aggregates': '/documentdb/aggregates',
+      '/sqlite-docdb/indexes': '/documentdb/indexes',
+      '/sqlite-docdb/release-notes': '/documentdb/release-notes',
+      '/data/sqlite-docdb/': '/documentdb/',
+      '/data/sqlite-docdb/aot': '/documentdb/aot',
+      '/data/sqlite-docdb/crud': '/documentdb/crud',
+      '/data/sqlite-docdb/querying': '/documentdb/querying',
+      '/data/sqlite-docdb/projections': '/documentdb/projections',
+      '/data/sqlite-docdb/aggregates': '/documentdb/aggregates',
+      '/data/sqlite-docdb/indexes': '/documentdb/indexes',
+      '/data/sqlite-docdb/release-notes': '/documentdb/release-notes',
       '/mediator/extensions/http': '/mediator/http/',
-      '/client/appbuilder': '/appbuilder/',
-      '/client/other/configuration': '/client/configuration/',
+      '/client/appbuilder': '/foundation/appbuilder/',
+      '/client/other/configuration': '/configuration/',
   },
   integrations: [
     react(),
@@ -226,179 +345,180 @@ export default defineConfig({
           {
             id: 'client',
             label: 'Mobile Essentials',
-            link: '/maui/shell/',
+            link: '/mauishell/',
             icon: 'rocket',
             items: [
               {
                 label: 'MAUI Shell',
                 items:[
-                  { label: 'Getting Started', link: 'maui/shell/' },
-                  { label: 'Navigation', link: 'maui/shell/navigation' },
-                  { label: 'Dialogs', link: 'maui/shell/dialogs' },
-                  { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
-                  { label: 'Source Generation', link: 'maui/shell/sourcegen' },
-                  { label: 'Release Notes', link: 'maui/shell/release-notes' }
+                  { label: 'Getting Started', link: 'mauishell/' },
+                  { label: 'Navigation', link: 'mauishell/navigation' },
+                  { label: 'Dialogs', link: 'mauishell/dialogs' },
+                  { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
+                  { label: 'Source Generation', link: 'mauishell/sourcegen' },
+                  { label: 'Release Notes', link: 'mauishell/release-notes' }
                 ]
               },
               {
                 label: 'Jobs',
                 items:[
-                  { label: 'Getting Started', link: 'client/jobs/' },
-                  { label: 'Create a Job', link: 'client/jobs/create' },
-                  { label: 'Managing Jobs', link: 'client/jobs/managing' },
-                  { label: 'FAQ', link: 'client/jobs/faq' },
-                  { label: 'Release Notes', link: 'client/jobs/release-notes' }
+                  { label: 'Getting Started', link: 'jobs/' },
+                  { label: 'Create a Job', link: 'jobs/create' },
+                  { label: 'Managing Jobs', link: 'jobs/managing' },
+                  { label: 'FAQ', link: 'jobs/faq' },
+                  { label: 'Release Notes', link: 'jobs/release-notes' }
                 ]
               },
               {
                 label: 'HTTP Transfers',
                 items: [
-                  { label: 'Getting Started', link: 'client/httptransfers/' },
-                  { label: 'Transfers', link: 'client/httptransfers/transfers' },
-                  { label: 'Azure Blob Storage', link: 'client/httptransfers/azure' },
-                  { label: 'Transfer Delegate', link: 'client/httptransfers/delegate' },
-                  { label: 'Monitoring', link: 'client/httptransfers/monitoring' },
-                  { label: 'Release Notes', link: 'client/httptransfers/release-notes' }
+                  { label: 'Getting Started', link: 'httptransfers/' },
+                  { label: 'Transfers', link: 'httptransfers/transfers' },
+                  { label: 'Azure Blob Storage', link: 'httptransfers/azure' },
+                  { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
+                  { label: 'Monitoring', link: 'httptransfers/monitoring' },
+                  { label: 'Release Notes', link: 'httptransfers/release-notes' }
                 ]
               },
               {
                 label: 'Local Notifications',
                 items:[
-                  { label: 'Getting Started', link: 'client/notifications/' },
-                  { label: 'Sending Notifications', link: 'client/notifications/sending' },
-                  { label: 'Channels', link: 'client/notifications/channels' },
-                  { label: 'Platform Specific', link: 'client/notifications/platform' },
-                  { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' },
-                  { label: 'Release Notes', link: 'client/notifications/release-notes' }
+                  { label: 'Getting Started', link: 'notifications/' },
+                  { label: 'Sending Notifications', link: 'notifications/sending' },
+                  { label: 'Channels', link: 'notifications/channels' },
+                  { label: 'Platform Specific', link: 'notifications/platform' },
+                  { label: 'Scheduling & Triggers', link: 'notifications/scheduling' },
+                  { label: 'Release Notes', link: 'notifications/release-notes' }
                 ]
               },
               {
                 label: 'Push Notifications',
                 items:[
-                  { label: 'Getting Started', link: 'client/push/' },
-                  { label: 'Native', link: 'client/push/native' },
-                  { label: 'Platform Specific', link: 'client/push/platform' },
-                  { label: 'Azure Push Notifications', link: 'client/push/azure' },
-                  { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
-                  { label: 'FAQ', link: 'client/push/faq' },
-                  { label: 'Release Notes', link: 'client/push/release-notes' }
+                  { label: 'Getting Started', link: 'push/' },
+                  { label: 'Native', link: 'push/native' },
+                  { label: 'Platform Specific', link: 'push/platform' },
+                  { label: 'Azure Push Notifications', link: 'push/azure' },
+                  { label: 'Firebase (iOS)', link: 'push/firebase-ios' },
+                  { label: 'FAQ', link: 'push/faq' },
+                  { label: 'Release Notes', link: 'push/release-notes' }
                 ]
               },
               {
                 label: 'Configuration',
                 items: [
-                  { label: 'Getting Started', link: 'client/configuration/' },
-                  { label: 'JSON Platform Bundle', link: 'client/configuration/json' },
-                  { label: 'Platform Preferences', link: 'client/configuration/preferences' },
-                  { label: 'Remote Configuration', link: 'client/configuration/remote' },
-                  { label: 'Release Notes', link: 'client/configuration/release-notes' }
+                  { label: 'Getting Started', link: 'configuration/' },
+                  { label: 'JSON Platform Bundle', link: 'configuration/json' },
+                  { label: 'Platform Preferences', link: 'configuration/preferences' },
+                  { label: 'Remote Configuration', link: 'configuration/remote' },
+                  { label: 'Release Notes', link: 'configuration/release-notes' }
                 ]
               },
               {
                 label: 'MSBuild Permissions',
                 items: [
-                  { label: 'Getting Started', link: 'client/permissions/' },
-                  { label: 'Android', link: 'client/permissions/android' },
-                  { label: 'iOS', link: 'client/permissions/ios' }
+                  { label: 'Getting Started', link: 'permissions/' },
+                  { label: 'Android', link: 'permissions/android' },
+                  { label: 'iOS', link: 'permissions/ios' }
                 ]
               },
               {
                 label: 'Other',
                 items: [
-                  { label: 'Stateful Services', link: 'client/other/statefulservices' },
-                  { label: 'Startup Services', link: 'client/other/startupservices' },
-                  { label: 'Lifecycle Hooks', link: 'client/other/lifecyclehooks' },
-                  { label: 'Android Foreground Service', link: 'client/other/androidforeground' },
+                  { label: 'Stateful Services', link: 'other/statefulservices' },
+                  { label: 'Startup Services', link: 'other/startupservices' },
+                  { label: 'Lifecycle Hooks', link: 'other/lifecyclehooks' },
+                  { label: 'Android Foreground Service', link: 'other/androidforeground' },
                 ]
               },
               {
                 label: 'Templates',
                 items:[
-                  { label: 'Getting Started', link: 'maui/templates/' },
-                  { label: 'Shiny Libraries', link: 'maui/templates/shiny-libraries' },
-                  { label: '3rd Party Libraries', link: 'maui/templates/third-party' },
-                  { label: 'Release Notes', link: 'maui/templates/release-notes' }
+                  { label: 'Getting Started', link: 'templates/' },
+                  { label: 'Shiny Libraries', link: 'templates/shiny-libraries' },
+                  { label: '3rd Party Libraries', link: 'templates/third-party' },
+                  { label: 'Release Notes', link: 'templates/release-notes' }
                 ]
               },
-              { label: 'Core Release Notes', link: 'client/release-notes' }
+              { label: 'Core Release Notes', link: 'release-notes' }
             ],
           },
           {
             label: 'Device & Sensors',
-            link: '/client/ble/',
+            link: '/ble/',
             icon: 'seti:smarty',
             items: [
               {
                 label: 'BluetoothLE',
                 items:[
-                  { label: 'Getting Started', link: 'client/ble' },
-                  { label: 'BLE Manager', link: 'client/ble/manager' },
-                  { label: 'Peripheral', link: 'client/ble/peripheral' },
-                  { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
-                  { label: 'Background Operations', link: 'client/ble/background' },
-                  { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' },
-                  { label: 'Release Notes', link: 'client/ble/release-notes' }
+                  { label: 'Getting Started', link: 'ble/' },
+                  { label: 'BLE Manager', link: 'ble/manager' },
+                  { label: 'Peripheral', link: 'ble/peripheral' },
+                  { label: 'Services/Characteristics/Descriptors', link: 'ble/gatt' },
+                  { label: 'Background Operations', link: 'ble/background' },
+                  { label: 'Best Practice/FAQ', link: 'ble/best-practices' },
+                  { label: 'Release Notes', link: 'ble/release-notes' }
                 ]
               },
               {
                 label: 'BluetoothLE Hosting',
                 items: [
-                  { label: 'Getting Started', link: 'client/blehosting' },
-                  { label: 'GATT Service', link: 'client/blehosting/gatt' },
-                  { label: 'Release Notes', link: 'client/blehosting/release-notes' }
+                  { label: 'Getting Started', link: 'blehosting/' },
+                  { label: 'GATT Service', link: 'blehosting/gatt' },
+                  { label: 'Release Notes', link: 'blehosting/release-notes' }
                 ]
               },
               {
                 label: 'OBD',
                 items: [
-                  { label: 'Getting Started', link: 'client/obd' },
-                  { label: 'Commands', link: 'client/obd/commands' },
-                  { label: 'Connection & Adapters', link: 'client/obd/connection' },
-                  { label: 'BLE Transport', link: 'client/obd/ble' },
-                  { label: 'Custom Transports', link: 'client/obd/transports' },
-                  { label: 'Release Notes', link: 'client/obd/release-notes' }
+                  { label: 'Getting Started', link: 'obd/' },
+                  { label: 'Commands', link: 'obd/commands' },
+                  { label: 'Connection & Adapters', link: 'obd/connection' },
+                  { label: 'BLE Transport', link: 'obd/ble' },
+                  { label: 'Custom Transports', link: 'obd/transports' },
+                  { label: 'Release Notes', link: 'obd/release-notes' }
                 ]
               },
               {
                 label: 'Locations',
                 items:[
-                  { label: 'GPS', link: 'client/locations/gps' },
-                  { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
-                  { label: 'Geofencing', link: 'client/locations/geofencing' },
-                  { label: 'Release Notes', link: 'client/locations/release-notes' }
+                  { label: 'GPS', link: 'locations/gps' },
+                  { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
+                  { label: 'Geofencing', link: 'locations/geofencing' },
+                  { label: 'Release Notes', link: 'locations/release-notes' }
                 ]
               },
             ]
           },
           {
             label: 'Platform Data',
-            link: '/client/music/',
+            link: '/music/',
             icon: 'seti:db',
             items: [
               {
                 label: 'Music',
                 items: [
-                  { label: 'Getting Started', link: 'client/music/' },
-                  { label: 'Permissions', link: 'client/music/permissions' },
-                  { label: 'Querying Music', link: 'client/music/querying' },
-                  { label: 'Playback', link: 'client/music/playback' },
-                  { label: 'Copying Tracks', link: 'client/music/copying' },
-                  { label: 'Release Notes', link: 'client/music/release-notes' }
+                  { label: 'Getting Started', link: 'music/' },
+                  { label: 'Permissions', link: 'music/permissions' },
+                  { label: 'Querying Music', link: 'music/querying' },
+                  { label: 'Playback', link: 'music/playback' },
+                  { label: 'Copying Tracks', link: 'music/copying' },
+                  { label: 'Release Notes', link: 'music/release-notes' }
                 ]
               },
               {
                 label: 'Health',
                 items: [
-                  { label: 'Getting Started', link: 'client/health/' },
+                  { label: 'Getting Started', link: 'health/' },
+                  { label: 'Release Notes', link: 'health/release-notes' }
                 ]
               },
               {
                 label: 'Contact Store',
                 items:[
-                  { label: 'Getting Started', link: 'maui/contactstore/' },
-                  { label: 'Permissions', link: 'maui/contactstore/permissions' },
-                  { label: 'Querying', link: 'maui/contactstore/querying' },
-                  { label: 'Release Notes', link: 'maui/contactstore/release-notes' }
+                  { label: 'Getting Started', link: 'contactstore/' },
+                  { label: 'Permissions', link: 'contactstore/permissions' },
+                  { label: 'Querying', link: 'contactstore/querying' },
+                  { label: 'Release Notes', link: 'contactstore/release-notes' }
                 ]
               },
             ]
@@ -489,34 +609,34 @@ export default defineConfig({
           },
           {
             label: 'Database',
-            link: '/data/documentdb/',
+            link: '/documentdb/',
             icon: 'document',
             items:[
               {
                 label: 'Document DB',
                 items:[
-                  { label: 'Getting Started', link: 'data/documentdb/' },
-                  { label: 'AOT Setup', link: 'data/documentdb/aot' },
-                  { label: 'CRUD Operations', link: 'data/documentdb/crud' },
-                  { label: 'Querying', link: 'data/documentdb/querying' },
-                  { label: 'Projections & Streaming', link: 'data/documentdb/projections' },
-                  { label: 'Aggregates', link: 'data/documentdb/aggregates' },
-                  { label: 'Indexes & Transactions', link: 'data/documentdb/indexes' },
-                  { label: 'SQLCipher (Encrypted)', link: 'data/documentdb/sqlcipher' },
-                  { label: 'Release Notes', link: 'data/documentdb/release-notes' }
+                  { label: 'Getting Started', link: 'documentdb/' },
+                  { label: 'AOT Setup', link: 'documentdb/aot' },
+                  { label: 'CRUD Operations', link: 'documentdb/crud' },
+                  { label: 'Querying', link: 'documentdb/querying' },
+                  { label: 'Projections & Streaming', link: 'documentdb/projections' },
+                  { label: 'Aggregates', link: 'documentdb/aggregates' },
+                  { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
+                  { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
+                  { label: 'Release Notes', link: 'documentdb/release-notes' }
                 ]
               },
               {
                 label: 'Spatial',
                 items:[
-                  { label: 'Getting Started', link: 'data/spatial/' },
-                  { label: 'Geometry Types', link: 'data/spatial/geometry' },
-                  { label: 'Database Operations', link: 'data/spatial/database' },
-                  { label: 'Querying', link: 'data/spatial/queries' },
-                  { label: 'Algorithms & Serialization', link: 'data/spatial/algorithms' },
-                  { label: 'Pre-built Databases', link: 'data/spatial/prebuilt' },
-                  { label: 'Geofencing', link: 'data/spatial/geofencing' },
-                  { label: 'Release Notes', link: 'data/spatial/release-notes' }
+                  { label: 'Getting Started', link: 'spatial/' },
+                  { label: 'Geometry Types', link: 'spatial/geometry' },
+                  { label: 'Database Operations', link: 'spatial/database' },
+                  { label: 'Querying', link: 'spatial/queries' },
+                  { label: 'Algorithms & Serialization', link: 'spatial/algorithms' },
+                  { label: 'Pre-built Databases', link: 'spatial/prebuilt' },
+                  { label: 'Geofencing', link: 'spatial/geofencing' },
+                  { label: 'Release Notes', link: 'spatial/release-notes' }
                 ]
               }
             ]
@@ -594,51 +714,51 @@ export default defineConfig({
               {
                 label: 'Reflector',
                 items:[
-                  { label: 'Getting Started', link: 'extensions/reflector/' },
-                  { label: 'JSON Serialization', link: 'extensions/reflector/json' },
-                  { label: 'Assembly Info', link: 'extensions/reflector/assembly-info' },
-                  { label: 'Configuration', link: 'extensions/reflector/configuration' },
-                  { label: 'Release Notes', link: 'extensions/reflector/release-notes' }
+                  { label: 'Getting Started', link: 'reflector/' },
+                  { label: 'JSON Serialization', link: 'reflector/json' },
+                  { label: 'Assembly Info', link: 'reflector/assembly-info' },
+                  { label: 'Configuration', link: 'reflector/configuration' },
+                  { label: 'Release Notes', link: 'reflector/release-notes' }
                 ]
               },
               {
                 label: 'Dependency Injection',
                 items:[
-                  { label: 'Getting Started', link: 'extensions/di/' },
-                  { label: 'Advanced Registration', link: 'extensions/di/advanced' },
-                  { label: 'Categories', link: 'extensions/di/categories' },
-                  { label: 'Configuration', link: 'extensions/di/configuration' },
-                  { label: 'Release Notes', link: 'extensions/di/release-notes' }
+                  { label: 'Getting Started', link: 'di/' },
+                  { label: 'Advanced Registration', link: 'di/advanced' },
+                  { label: 'Categories', link: 'di/categories' },
+                  { label: 'Configuration', link: 'di/configuration' },
+                  { label: 'Release Notes', link: 'di/release-notes' }
                 ]
               },
               {
                 label: 'Stores',
                 items:[
-                  { label: 'Getting Started', link: 'extensions/stores/' },
-                  { label: 'Persistent Services', link: 'extensions/stores/persistent-services' },
-                  { label: 'Release Notes', link: 'extensions/stores/release-notes' }
+                  { label: 'Getting Started', link: 'stores/' },
+                  { label: 'Persistent Services', link: 'stores/persistent-services' },
+                  { label: 'Release Notes', link: 'stores/release-notes' }
                 ]
               },
               {
                 label: 'Localization Generator',
                 items:[
-                  { label: 'Getting Started', link: 'extensions/localizegen/' },
-                  { label: 'Usage Examples', link: 'extensions/localizegen/usage' },
-                  { label: 'Release Notes', link: 'extensions/localizegen/release-notes' }
+                  { label: 'Getting Started', link: 'localizegen/' },
+                  { label: 'Usage Examples', link: 'localizegen/usage' },
+                  { label: 'Release Notes', link: 'localizegen/release-notes' }
                 ]
               },
               {
                 label: 'Web Hosting',
                 items:[
-                  { label: 'Getting Started', link: 'extensions/webhost/' },
-                  { label: 'Release Notes', link: 'extensions/webhost/release-notes' }
+                  { label: 'Getting Started', link: 'webhost/' },
+                  { label: 'Release Notes', link: 'webhost/release-notes' }
                 ]
               },
               {
                 label: 'MAUI Hosting',
                 items:[
-                  { label: 'Getting Started', link: 'extensions/mauihost/' },
-                  { label: 'Release Notes', link: 'extensions/mauihost/release-notes' }
+                  { label: 'Getting Started', link: 'mauihost/' },
+                  { label: 'Release Notes', link: 'mauihost/release-notes' }
                 ]
               }
             ]
@@ -673,9 +793,8 @@ export default defineConfig({
           exclude: [
             '/blog',
             '/blog/**/*',
-            '/client/hosting/uno',
             '/foundation/hosting/uno',
-            '/client/other/androidforeground',
+            '/other/androidforeground',
             '/mediator/extensions',
             '/controls/tableview/release-notes',
             '/controls/scheduler/release-notes',
