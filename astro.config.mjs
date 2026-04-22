@@ -51,6 +51,14 @@ export default defineConfig({
       '/release-notes/aspire/': '/aspire/orleans/release-notes/',
       '/aspire/release-notes/': '/aspire/orleans/release-notes/',
 
+      // Foundation redirects (moved from Client, App Builder, AI Skills)
+      '/client/architecture/': '/foundation/architecture/',
+      '/client/hosting/maui/': '/foundation/hosting/maui/',
+      '/client/hosting/native/': '/foundation/hosting/native/',
+      '/client/hosting/manual/': '/foundation/hosting/manual/',
+      '/appbuilder/': '/foundation/appbuilder/',
+      '/ai-skills/': '/foundation/ai-skills/',
+
       '/client/maui/': '/maui/shell/',
       '/client/maui/navigation': '/maui/shell/navigation',
       '/client/maui/lifecycle': '/maui/shell/lifecycle',
@@ -197,54 +205,39 @@ export default defineConfig({
         }),
         starlightSidebarTopics([
           {
-            label: 'App Builder',
-            link: '/appbuilder/',
-            icon: 'star',
+            label: 'Foundation',
+            link: '/foundation/appbuilder/',
+            icon: 'open-book',
             items: [
-              { label: 'App Builder', link: 'appbuilder/' }
-            ],
-          },
-          {
-            label: 'AI Skills',
-            link: '/ai-skills/',
-            icon: 'puzzle',
-            items: [
-              { label: 'AI Skills', link: 'ai-skills/' }
+              { label: 'App Builder', link: 'foundation/appbuilder' },
+              { label: 'Architecture', link: 'foundation/architecture' },
+              {
+                label: 'Hosting Models',
+                items:[
+                  { label: 'Getting Started', link: 'foundation/hosting/' },
+                  { label: 'MAUI', link: 'foundation/hosting/maui' },
+                  { label: 'Native', link: 'foundation/hosting/native' },
+                  { label: 'Manual', link: 'foundation/hosting/manual' }
+                ]
+              },
+              { label: 'AI Skills', link: 'foundation/ai-skills' },
             ],
           },
           {
             id: 'client',
-            label: 'Client',
-            link: '/client/architecture/',
+            label: 'Mobile Essentials',
+            link: '/maui/shell/',
             icon: 'rocket',
             items: [
-              { label: 'Architecture', link: 'client/architecture' },
               {
-                label: 'Hosting Models',
+                label: 'MAUI Shell',
                 items:[
-                  { label: 'MAUI', link: 'client/hosting/maui' },
-                  { label: 'Native', link: 'client/hosting/native' },
-                  { label: 'Manual', link: 'client/hosting/manual' }
-                ]
-              },
-              {
-                label: 'BluetoothLE',
-                items:[
-                  { label: 'Getting Started', link: 'client/ble' },
-                  { label: 'BLE Manager', link: 'client/ble/manager' },
-                  { label: 'Peripheral', link: 'client/ble/peripheral' },
-                  { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
-                  { label: 'Background Operations', link: 'client/ble/background' },
-                  { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' },
-                  { label: 'Release Notes', link: 'client/ble/release-notes' }
-                ]
-              },
-              {
-                label: 'BluetoothLE Hosting',
-                items: [
-                  { label: 'Getting Started', link: 'client/blehosting' },
-                  { label: 'GATT Service', link: 'client/blehosting/gatt' },
-                  { label: 'Release Notes', link: 'client/blehosting/release-notes' }
+                  { label: 'Getting Started', link: 'maui/shell/' },
+                  { label: 'Navigation', link: 'maui/shell/navigation' },
+                  { label: 'Dialogs', link: 'maui/shell/dialogs' },
+                  { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
+                  { label: 'Source Generation', link: 'maui/shell/sourcegen' },
+                  { label: 'Release Notes', link: 'maui/shell/release-notes' }
                 ]
               },
               {
@@ -255,15 +248,6 @@ export default defineConfig({
                   { label: 'Managing Jobs', link: 'client/jobs/managing' },
                   { label: 'FAQ', link: 'client/jobs/faq' },
                   { label: 'Release Notes', link: 'client/jobs/release-notes' }
-                ]
-              },
-              {
-                label: 'Locations',
-                items:[
-                  { label: 'GPS', link: 'client/locations/gps' },
-                  { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
-                  { label: 'Geofencing', link: 'client/locations/geofencing' },
-                  { label: 'Release Notes', link: 'client/locations/release-notes' }
                 ]
               },
               {
@@ -291,42 +275,13 @@ export default defineConfig({
               {
                 label: 'Push Notifications',
                 items:[
-                    { label: 'Getting Started', link: 'client/push/' },
-                    { label: 'Native', link: 'client/push/native' },
-                    { label: 'Platform Specific', link: 'client/push/platform' },
-                    { label: 'Azure Push Notifications', link: 'client/push/azure' },
-                    { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
-                    { label: 'FAQ', link: 'client/push/faq' },
-                    { label: 'Release Notes', link: 'client/push/release-notes' }
-                ]
-              },
- {
-                label: 'OBD',
-                items: [
-                  { label: 'Getting Started', link: 'client/obd' },
-                  { label: 'Commands', link: 'client/obd/commands' },
-                  { label: 'Connection & Adapters', link: 'client/obd/connection' },
-                  { label: 'BLE Transport', link: 'client/obd/ble' },
-                  { label: 'Custom Transports', link: 'client/obd/transports' },
-                  { label: 'Release Notes', link: 'client/obd/release-notes' }
-                ]
-              },
-
-              {
-                label: 'Music',
-                items: [
-                  { label: 'Getting Started', link: 'client/music/' },
-                  { label: 'Permissions', link: 'client/music/permissions' },
-                  { label: 'Querying Music', link: 'client/music/querying' },
-                  { label: 'Playback', link: 'client/music/playback' },
-                  { label: 'Copying Tracks', link: 'client/music/copying' },
-                  { label: 'Release Notes', link: 'client/music/release-notes' }
-                ]
-              },
-              {
-                label: 'Health',
-                items: [
-                  { label: 'Getting Started', link: 'client/health/' },
+                  { label: 'Getting Started', link: 'client/push/' },
+                  { label: 'Native', link: 'client/push/native' },
+                  { label: 'Platform Specific', link: 'client/push/platform' },
+                  { label: 'Azure Push Notifications', link: 'client/push/azure' },
+                  { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
+                  { label: 'FAQ', link: 'client/push/faq' },
+                  { label: 'Release Notes', link: 'client/push/release-notes' }
                 ]
               },
               {
@@ -356,86 +311,85 @@ export default defineConfig({
                   { label: 'Android Foreground Service', link: 'client/other/androidforeground' },
                 ]
               },
+              {
+                label: 'Templates',
+                items:[
+                  { label: 'Getting Started', link: 'maui/templates/' },
+                  { label: 'Shiny Libraries', link: 'maui/templates/shiny-libraries' },
+                  { label: '3rd Party Libraries', link: 'maui/templates/third-party' },
+                  { label: 'Release Notes', link: 'maui/templates/release-notes' }
+                ]
+              },
               { label: 'Core Release Notes', link: 'client/release-notes' }
             ],
           },
           {
-            label: 'Mediator',
-            link: '/mediator/',
-            icon: 'puzzle',
-            items:[
+            label: 'Device & Sensors',
+            link: '/client/ble/',
+            icon: 'seti:smarty',
+            items: [
               {
-                  label: 'General',
-                  items:[
-                    { label: 'Introduction', link: 'mediator/' },
-                    { label: 'Getting Started', link: 'mediator/getting-started' },
-                    { label: 'Requests', link: 'mediator/requests' },
-                    { label: 'Commands', link: 'mediator/commands' },
-                    { label: 'Streams', link: 'mediator/streams' },
-                    { label: 'Events', link: 'mediator/events' },
-                    { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
-                    { label: 'Contract Keys', link: 'mediator/contractkeys' },
-                    { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration' },
-                    { label: 'Execution Contexts', link: 'mediator/context' },
-                    { label: 'Advanced', link: 'mediator/advanced' },
-                  ]
+                label: 'BluetoothLE',
+                items:[
+                  { label: 'Getting Started', link: 'client/ble' },
+                  { label: 'BLE Manager', link: 'client/ble/manager' },
+                  { label: 'Peripheral', link: 'client/ble/peripheral' },
+                  { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
+                  { label: 'Background Operations', link: 'client/ble/background' },
+                  { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' },
+                  { label: 'Release Notes', link: 'client/ble/release-notes' }
+                ]
               },
               {
-                  label: 'Middleware',
-                  items:[
-                    { label: 'Introduction', link: 'mediator/middleware/' },
-                    { label: 'Validation', link: 'mediator/middleware/validation' },
-                    { label: 'Caching', link: 'mediator/middleware/caching' },
-                    { label: 'Resiliency', link: 'mediator/middleware/resilience' },
-                    { label: 'Offline', link: 'mediator/middleware/offline' },
-                    { label: 'Performance Logging', link: 'mediator/middleware/performancelogging' },
-                    { label: 'Main Thread', link: 'mediator/middleware/mainthread' },
-                    { label: 'Replay', link: 'mediator/middleware/replay' },
-                    { label: 'Refresh Timer', link: 'mediator/middleware/refresh' },
-                    { label: 'Event Sample', link: 'mediator/middleware/sample' },
-                    { label: 'Event Throttle', link: 'mediator/middleware/throttle' },
-                    { label: 'Command Scheduling', link: 'mediator/middleware/scheduling' },
-                    { label: 'Middleware Ordering', link: 'mediator/middleware/ordering' }
-                  ]
+                label: 'BluetoothLE Hosting',
+                items: [
+                  { label: 'Getting Started', link: 'client/blehosting' },
+                  { label: 'GATT Service', link: 'client/blehosting/gatt' },
+                  { label: 'Release Notes', link: 'client/blehosting/release-notes' }
+                ]
               },
               {
-                  label: 'HTTP',
-                  items:[
-                    { label: 'Getting Started', link: 'mediator/http/' },
-                    { label: 'Request Contracts', link: 'mediator/http/contracts' },
-                    { label: 'Decorators', link: 'mediator/http/decorators' },
-                    { label: 'OpenAPI Generation', link: 'mediator/http/openapi' },
-                    { label: 'Configuration & AOT', link: 'mediator/http/configuration' },
-                  ]
+                label: 'OBD',
+                items: [
+                  { label: 'Getting Started', link: 'client/obd' },
+                  { label: 'Commands', link: 'client/obd/commands' },
+                  { label: 'Connection & Adapters', link: 'client/obd/connection' },
+                  { label: 'BLE Transport', link: 'client/obd/ble' },
+                  { label: 'Custom Transports', link: 'client/obd/transports' },
+                  { label: 'Release Notes', link: 'client/obd/release-notes' }
+                ]
               },
               {
-                  label: 'Extensions',
-                  items:[
-                    { label: 'MAUI', link: 'mediator/extensions/maui' },
-                    { label: 'Blazor', link: 'mediator/extensions/blazor' },
-                    { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },
-                    { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' },
-                    { label: 'Prism', link: 'mediator/extensions/prism' },
-                    { label: 'Dapper', link: 'mediator/extensions/dapper' }
-                  ]
+                label: 'Locations',
+                items:[
+                  { label: 'GPS', link: 'client/locations/gps' },
+                  { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
+                  { label: 'Geofencing', link: 'client/locations/geofencing' },
+                  { label: 'Release Notes', link: 'client/locations/release-notes' }
+                ]
               },
-              { label: 'Release Notes', link: 'mediator/release-notes' }
             ]
           },
           {
-            label: 'MAUI',
-            link: '/maui/shell/',
-            icon: 'laptop',
-            items:[
+            label: 'Platform Data',
+            link: '/client/music/',
+            icon: 'seti:db',
+            items: [
               {
-                label: 'Shell',
-                items:[
-                  { label: 'Getting Started', link: 'maui/shell/' },
-                  { label: 'Navigation', link: 'maui/shell/navigation' },
-                  { label: 'Dialogs', link: 'maui/shell/dialogs' },
-                  { label: 'ViewModel Lifecycle', link: 'maui/shell/lifecycle' },
-                  { label: 'Source Generation', link: 'maui/shell/sourcegen' },
-                  { label: 'Release Notes', link: 'maui/shell/release-notes' }
+                label: 'Music',
+                items: [
+                  { label: 'Getting Started', link: 'client/music/' },
+                  { label: 'Permissions', link: 'client/music/permissions' },
+                  { label: 'Querying Music', link: 'client/music/querying' },
+                  { label: 'Playback', link: 'client/music/playback' },
+                  { label: 'Copying Tracks', link: 'client/music/copying' },
+                  { label: 'Release Notes', link: 'client/music/release-notes' }
+                ]
+              },
+              {
+                label: 'Health',
+                items: [
+                  { label: 'Getting Started', link: 'client/health/' },
                 ]
               },
               {
@@ -447,15 +401,6 @@ export default defineConfig({
                   { label: 'Release Notes', link: 'maui/contactstore/release-notes' }
                 ]
               },
-              {
-                label: 'Templates',
-                items:[
-                  { label: 'Getting Started', link: 'maui/templates/' },
-                  { label: 'Shiny Libraries', link: 'maui/templates/shiny-libraries' },
-                  { label: '3rd Party Libraries', link: 'maui/templates/third-party' },
-                  { label: 'Release Notes', link: 'maui/templates/release-notes' }
-                ]
-              }
             ]
           },
           {
@@ -543,7 +488,7 @@ export default defineConfig({
             ]
           },
           {
-            label: 'Data',
+            label: 'Database',
             link: '/data/documentdb/',
             icon: 'document',
             items:[
@@ -577,10 +522,75 @@ export default defineConfig({
             ]
           },
           {
-            label: 'Extensions',
-            link: '/extensions/reflector/',
+            label: 'Core & Infrastructure',
+            link: '/mediator/',
             icon: 'setting',
             items:[
+              {
+                label: 'Mediator',
+                items:[
+                  {
+                      label: 'General',
+                      collapsed: true,
+                      items:[
+                        { label: 'Introduction', link: 'mediator/' },
+                        { label: 'Getting Started', link: 'mediator/getting-started' },
+                        { label: 'Requests', link: 'mediator/requests' },
+                        { label: 'Commands', link: 'mediator/commands' },
+                        { label: 'Streams', link: 'mediator/streams' },
+                        { label: 'Events', link: 'mediator/events' },
+                        { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
+                        { label: 'Contract Keys', link: 'mediator/contractkeys' },
+                        { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration' },
+                        { label: 'Execution Contexts', link: 'mediator/context' },
+                        { label: 'Advanced', link: 'mediator/advanced' },
+                      ]
+                  },
+                  {
+                      label: 'Middleware',
+                      collapsed: true,
+                      items:[
+                        { label: 'Introduction', link: 'mediator/middleware/' },
+                        { label: 'Validation', link: 'mediator/middleware/validation' },
+                        { label: 'Caching', link: 'mediator/middleware/caching' },
+                        { label: 'Resiliency', link: 'mediator/middleware/resilience' },
+                        { label: 'Offline', link: 'mediator/middleware/offline' },
+                        { label: 'Performance Logging', link: 'mediator/middleware/performancelogging' },
+                        { label: 'Main Thread', link: 'mediator/middleware/mainthread' },
+                        { label: 'Replay', link: 'mediator/middleware/replay' },
+                        { label: 'Refresh Timer', link: 'mediator/middleware/refresh' },
+                        { label: 'Event Sample', link: 'mediator/middleware/sample' },
+                        { label: 'Event Throttle', link: 'mediator/middleware/throttle' },
+                        { label: 'Command Scheduling', link: 'mediator/middleware/scheduling' },
+                        { label: 'Middleware Ordering', link: 'mediator/middleware/ordering' }
+                      ]
+                  },
+                  {
+                      label: 'HTTP',
+                      collapsed: true,
+                      items:[
+                        { label: 'Getting Started', link: 'mediator/http/' },
+                        { label: 'Request Contracts', link: 'mediator/http/contracts' },
+                        { label: 'Decorators', link: 'mediator/http/decorators' },
+                        { label: 'OpenAPI Generation', link: 'mediator/http/openapi' },
+                        { label: 'Configuration & AOT', link: 'mediator/http/configuration' },
+                      ]
+                  },
+                  {
+                      label: 'Extensions',
+                      collapsed: true,
+                      items:[
+                        { label: 'MAUI', link: 'mediator/extensions/maui' },
+                        { label: 'Blazor', link: 'mediator/extensions/blazor' },
+                        { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },
+                        { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' },
+                        { label: 'Prism', link: 'mediator/extensions/prism' },
+                        { label: 'Dapper', link: 'mediator/extensions/dapper' }
+                      ]
+                  },
+                  { label: 'Release Notes', link: 'mediator/release-notes' }
+                ]
+              },
               {
                 label: 'Reflector',
                 items:[
@@ -664,6 +674,7 @@ export default defineConfig({
             '/blog',
             '/blog/**/*',
             '/client/hosting/uno',
+            '/foundation/hosting/uno',
             '/client/other/androidforeground',
             '/mediator/extensions',
             '/controls/tableview/release-notes',

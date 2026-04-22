@@ -1,0 +1,262 @@
+---
+title: Manual Hosting
+description: Wire Shiny lifecycle hooks into existing platform boilerplate
+---
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+import NugetBadge from '../../../../components/NugetBadge';
+
+Manual hosting gives you full control when you can't inherit from Shiny's base classes — for example, when your app already has custom `Application`, `AppDelegate`, or `Activity` classes that you can't change.
+
+You call `Host.Lifecycle` methods directly from your existing platform code to hook Shiny into the native lifecycle.
+
+:::caution
+This is the most complex hosting model. Prefer [MAUI](/foundation/hosting/maui) or [Native](/foundation/hosting/native) hosting if possible.
+:::
+
+## Setup
+
+<Steps>
+1. **Install the NuGet package**
+
+   <NugetBadge name="Shiny.Core" />
+
+2. **Build the host at app startup**
+
+   Create and run the Shiny host as early as possible in your app's lifecycle.
+
+   <Tabs>
+     <TabItem label="iOS / Mac Catalyst">
+       ```csharp
+       using Foundation;
+       using UIKit;
+       using Shiny.Hosting;
+
+       namespace YourNamespace;
+
+       public class AppDelegate : UIApplicationDelegate
+       {
+           public override bool FinishedLaunching(
+               UIApplication application,
+               NSDictionary launchOptions)
+           {
+               var host = HostBuilder.Create();
+               // Register your Shiny modules and services here
+               host.Build().Run();
+
+               return base.FinishedLaunching(application, launchOptions);
+           }
+       }
+       ```
+     </TabItem>
+     <TabItem label="Android">
+       ```csharp
+       using System;
+       using Android.App;
+       using Android.Runtime;
+       using Shiny.Hosting;
+
+       namespace YourNamespace;
+
+       [Application]
+       public class MainApplication : Application
+       {
+           public MainApplication(
+               IntPtr javaReference,
+               JniHandleOwnership transfer)
+               : base(javaReference, transfer) {}
+
+           public override void OnCreate()
+           {
+               base.OnCreate();
+               var host = HostBuilder.Create();
+               // Register your Shiny modules and services here
+               host.Build().Run();
+           }
+       }
+       ```
+     </TabItem>
+   </Tabs>
+
+3. **Wire up lifecycle callbacks**
+
+   Forward platform events to `Host.Lifecycle` from your existing classes.
+
+   <Tabs>
+     <TabItem label="iOS / Mac Catalyst">
+       Add these to your `AppDelegate`:
+
+       ```csharp
+       // Required for HTTP Transfers
+       public override void HandleEventsForBackgroundUrl(
+           UIApplication application,
+           string sessionIdentifier,
+           Action completionHandler)
+       {
+           Host.Lifecycle.OnHandleEventsForBackgroundUrl(
+               sessionIdentifier, completionHandler);
+       }
+
+       // Required for Push Notifications
+       public override void RegisteredForRemoteNotifications(
+           UIApplication application, NSData deviceToken)
+       {
+           Host.Lifecycle.OnRegisteredForRemoteNotifications(deviceToken);
+       }
+
+       public override void FailedToRegisterForRemoteNotifications(
+           UIApplication application, NSError error)
+       {
+           Host.Lifecycle.OnFailedToRegisterForRemoteNotifications(error);
+       }
+
+       public override void DidReceiveRemoteNotification(
+           UIApplication application,
+           NSDictionary userInfo,
+           Action<UIBackgroundFetchResult> completionHandler)
+       {
+           Host.Lifecycle.OnDidReceiveRemoteNotification(
+               userInfo, completionHandler);
+       }
+
+       // Required for deep links / universal links
+       public override bool ContinueUserActivity(
+           UIApplication application,
+           NSUserActivity userActivity,
+           UIApplicationRestorationHandler completionHandler)
+       {
+           Host.Lifecycle.OnContinueUserActivity(
+               userActivity, completionHandler);
+           return true;
+       }
+       ```
+
+       :::tip
+       You only need to wire up the callbacks for the Shiny modules you use. For example, skip the push notification methods if you're not using `Shiny.Push`.
+       :::
+     </TabItem>
+     <TabItem label="Android">
+       Add these to your main **Activity**:
+
+       ```csharp
+       using Android.App;
+       using Android.Content;
+       using Android.Content.PM;
+       using Android.Runtime;
+       using AndroidX.AppCompat.App;
+       using Shiny.Hosting;
+
+       namespace YourNamespace;
+
+       [IntentFilter(new[] {
+           // Include if using Local Notifications
+           Shiny.ShinyNotificationIntents.NotificationClickAction,
+           // Include if using Push Notifications
+           Shiny.ShinyPushIntents.NotificationClickAction
+       })]
+       public class MainActivity : AppCompatActivity
+       {
+           protected override void OnCreate(Bundle? savedInstanceState)
+           {
+               base.OnCreate(savedInstanceState);
+               Host.Lifecycle.OnActivityOnCreate(this, savedInstanceState);
+           }
+
+           protected override void OnNewIntent(Intent? intent)
+           {
+               base.OnNewIntent(intent);
+               Host.Lifecycle.OnNewIntent(this, intent);
+           }
+
+           protected override void OnActivityResult(
+               int requestCode,
+               [GeneratedEnum] Result resultCode,
+               Intent? data)
+           {
+               base.OnActivityResult(requestCode, resultCode, data);
+               Host.Lifecycle.OnActivityResult(
+                   this, requestCode, resultCode, data);
+           }
+
+           // Required by all Shiny modules
+           public override void OnRequestPermissionsResult(
+               int requestCode,
+               string[] permissions,
+               [GeneratedEnum] Permission[] grantResults)
+           {
+               base.OnRequestPermissionsResult(
+                   requestCode, permissions, grantResults);
+               Host.Lifecycle.OnRequestPermissionsResult(
+                   this, requestCode, permissions, grantResults);
+           }
+       }
+       ```
+
+       :::caution
+       `OnRequestPermissionsResult` is used by every Shiny module. Always wire this up.
+       :::
+
+       :::note
+       For Classic Xamarin, add a framework reference to `Mono.Android.Export`:
+       ```xml
+       <ItemGroup>
+           <Reference Include="Mono.Android.Export" />
+       </ItemGroup>
+       ```
+       :::
+     </TabItem>
+   </Tabs>
+</Steps>
+
+## Other Platforms
+
+### macOS
+
+**Mac Catalyst** apps use the iOS tab above directly — the same `UIApplicationDelegate` callbacks apply.
+
+**Native macOS (AppKit)** follows the same forwarding pattern but against `NSApplicationDelegate`. If you're using Shiny.Push, wire these methods to `Host.Lifecycle`:
+
+```csharp
+using AppKit;
+using Foundation;
+using ObjCRuntime;
+using Shiny.Hosting;
+
+public class AppDelegate : NSApplicationDelegate
+{
+    [Export("application:didRegisterForRemoteNotificationsWithDeviceToken:")]
+    public void DidRegisterForRemoteNotifications(NSApplication app, NSData deviceToken)
+        => Host.Lifecycle.OnRegisteredForRemoteNotifications(deviceToken);
+
+    [Export("application:didFailToRegisterForRemoteNotificationsWithError:")]
+    public void DidFailToRegisterForRemoteNotifications(NSApplication app, NSError error)
+        => Host.Lifecycle.OnFailedToRegisterForRemoteNotifications(error);
+
+    [Export("application:didReceiveRemoteNotification:")]
+    public void DidReceiveRemoteNotification(NSApplication app, NSDictionary userInfo)
+        => Host.Lifecycle.OnDidReceiveRemoteNotification(userInfo);
+}
+```
+
+Shiny modules with native macOS support: BLE, BLE Hosting, Notifications, Push, Battery, Connectivity.
+
+### Linux
+
+Nothing to forward on Linux — there's no platform lifecycle. Register Shiny services directly on your service collection and you're done.
+
+### Blazor WebAssembly
+
+Nothing extra is needed. Blazor has no native lifecycle callbacks to forward — register Shiny services directly on `WebAssemblyHostBuilder.Services` in your Blazor `Program.cs`.
+
+## Lifecycle Methods Reference
+
+| Method | Platform | Used By |
+|--------|----------|---------|
+| `OnActivityOnCreate` | Android | All modules |
+| `OnNewIntent` | Android | Notifications, Push |
+| `OnActivityResult` | Android | Various |
+| `OnRequestPermissionsResult` | Android | All modules |
+| `OnHandleEventsForBackgroundUrl` | iOS | HTTP Transfers |
+| `OnRegisteredForRemoteNotifications` | iOS | Push |
+| `OnFailedToRegisterForRemoteNotifications` | iOS | Push |
+| `OnDidReceiveRemoteNotification` | iOS | Push |
+| `OnContinueUserActivity` | iOS | Deep links |

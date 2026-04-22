@@ -37,13 +37,10 @@ export type ShinyComponent = {
 
 export type ShinyCategoryId =
     | 'core'
-    | 'maui'
+    | 'essentials'
+    | 'devices'
     | 'controls'
-    | 'notifications'
-    | 'location'
-    | 'storage'
-    | 'bluetooth'
-    | 'background';
+    | 'storage';
 
 export type ShinyCategory = {
     id: ShinyCategoryId;
@@ -60,20 +57,16 @@ export type ShinyCategory = {
 
 /** Ordered so the grid naturally forms balanced rows (12-col).
  *  Row 1: core (12)
- *  Row 2: maui (4) + controls (8)
- *  Row 3: notifications (6) + location (6)
- *  Row 4: storage (8) + bluetooth (4)
- *  Row 5: background (12)
+ *  Row 2: essentials (8) + storage (4)
+ *  Row 3: devices (12)
+ *  Row 4: controls (12)
  */
 export const ShinyCategories: ShinyCategory[] = [
     { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
-    { id: 'maui',          title: 'MAUI',                        span: 4,  color: '#14B8A6', tint: '#E0FBF6', tintDark: '#103F3A' },
-    { id: 'controls',      title: 'Controls',                    span: 8,  color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
-    { id: 'notifications', title: 'Notifications & Push',        span: 6,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
-    { id: 'location',      title: 'Location & Spatial',          span: 6,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
-    { id: 'storage',       title: 'Data & Storage',              span: 8,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
-    { id: 'bluetooth',     title: 'Bluetooth & Connectivity',    span: 4,  color: '#3B82F6', tint: '#DEEAFE', tintDark: '#14254A' },
-    { id: 'background',    title: 'Background & Tasks',          span: 12, color: '#F97316', tint: '#FFE8D4', tintDark: '#3A2110' },
+    { id: 'essentials',    title: 'Mobile Essentials',            span: 8,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
+    { id: 'storage',       title: 'Data & Storage',              span: 4,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
+    { id: 'devices',       title: 'Device & Sensors',            span: 12, color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
+    { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
 export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'sheetview', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams'];
@@ -128,7 +121,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE",
-        "category": "bluetooth",
+        "category": "devices",
         "version": DEFAULT_VERSION
     },
     {
@@ -137,14 +130,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Hosting.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE Hosting",
-        "category": "bluetooth",
+        "category": "devices",
         "version": DEFAULT_VERSION
     },
     {
         "id": "obd",
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
-        "category": "bluetooth",
+        "category": "devices",
         "version": "1.0.0",
         "additionalNugets": [
             { "nuget": "Shiny.Obd", "version": "1.0.0" }
@@ -154,7 +147,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "jobs",
         "nuget": "Shiny.Jobs",
         "description": "Periodic Jobs",
-        "category": "background",
+        "category": "essentials",
         "version": DEFAULT_VERSION
     },
     {
@@ -162,7 +155,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Locations",
         "blazorNuget": "Shiny.Locations.Blazor",
         "description": "GPS",
-        "category": "location",
+        "category": "devices",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -170,14 +163,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "geofencing",
         "nuget": "Shiny.Locations",
         "description": "Geofencing",
-        "category": "location",
+        "category": "devices",
         "version": DEFAULT_VERSION
     },
     {
         "id": "httptransfers",
         "nuget": "Shiny.Net.Http",
         "description": "HTTP file uploads and downloads",
-        "category": "background",
+        "category": "essentials",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -187,7 +180,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Notifications.Linux",
         "macOsSupported": true,
         "description": "Local Notifications",
-        "category": "notifications",
+        "category": "essentials",
         "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -197,7 +190,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Push.Blazor",
         "macOsSupported": true,
         "description": "Push Notifications (Native)",
-        "category": "notifications",
+        "category": "essentials",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -205,7 +198,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushfirebase",
         "nuget": "Shiny.Push.FirebaseMessaging",
         "description": "Push Notifications - Firebase (iOS)",
-        "category": "notifications",
+        "category": "essentials",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -213,7 +206,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushazure",
         "nuget": "Shiny.Push.AzureNotificationHubs",
         "description": "Push Notifications - Azure Notification Hubs",
-        "category": "notifications",
+        "category": "essentials",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -221,14 +214,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
-        "category": "maui",
+        "category": "devices",
         "version": "1.3.1"
     },
     {
         "id": "health",
         "nuget": "Shiny.Health",
         "description": "Health Data",
-        "category": "maui",
+        "category": "devices",
         "version": "1.0.0"
     },
     {
@@ -242,8 +235,8 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "shell",
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
-        "category": "maui",
-        "version": "3.2.0"
+        "category": "essentials",
+        "version": "5.0.0"
     },
     {
         "id": "tableview",
@@ -322,7 +315,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
         "category": "core",
-        "version": "2.0.3"
+        "version": "2.0.4"
     },
     {
         "id": "localization",
@@ -396,20 +389,20 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
         "category": "core",
-        "version": "2.0.3"
+        "version": "2.0.4"
     },
     {
         "id": "spatial",
         "nuget": "Shiny.Spatial",
         "description": "Spatial Database",
-        "category": "location",
+        "category": "storage",
         "version": "1.1.0"
     },
     {
         "id": "spatial-geofencing",
         "nuget": "Shiny.Spatial.Geofencing",
         "description": "Spatial Geofencing",
-        "category": "location",
+        "category": "devices",
         "foregroundService": true,
         "version": "1.1.0"
     },
@@ -417,7 +410,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "contactstore",
         "nuget": "Shiny.Maui.ContactStore",
         "description": "Contact Store",
-        "category": "maui",
+        "category": "devices",
         "version": "1.0.1"
     },
     {
@@ -425,14 +418,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
         "category": "core",
-        "version": "2.0.3"
+        "version": "2.0.4"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
         "category": "core",
-        "version": "2.0.3"
+        "version": "2.0.4"
     }
 ];
 
@@ -472,7 +465,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health'];
         return compos.some(x => ids.includes(x.id));
     }
 };
