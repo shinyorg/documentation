@@ -58,14 +58,15 @@ export type ShinyCategory = {
 /** Ordered so the grid naturally forms balanced rows (12-col).
  *  Row 1: core (12)
  *  Row 2: essentials (8) + storage (4)
- *  Row 3: devices (12)
+ *  Row 3: devices (8) + platformdata (4)
  *  Row 4: controls (12)
  */
 export const ShinyCategories: ShinyCategory[] = [
     { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
     { id: 'essentials',    title: 'Mobile Essentials',            span: 8,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
     { id: 'storage',       title: 'Data & Storage',              span: 4,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
-    { id: 'devices',       title: 'Device & Sensors',            span: 12, color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
+    { id: 'devices',       title: 'Device & Sensors',            span: 8,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
+    { id: 'platformdata',  title: 'Platform Data',               span: 4,  color: '#8B5CF6', tint: '#EDE9FE', tintDark: '#2E1F5E' },
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
@@ -214,14 +215,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
-        "category": "devices",
-        "version": "1.3.1"
+        "category": "platformdata",
+        "version": "2.0.0"
     },
     {
         "id": "health",
         "nuget": "Shiny.Health",
         "description": "Health Data",
-        "category": "devices",
+        "category": "platformdata",
         "version": "1.0.0"
     },
     {
@@ -410,7 +411,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "contactstore",
         "nuget": "Shiny.Maui.ContactStore",
         "description": "Contact Store",
-        "category": "devices",
+        "category": "platformdata",
         "version": "1.0.1"
     },
     {
