@@ -300,36 +300,37 @@ export default defineConfig({
       plugins:[
         //https://frostybee.github.io/starlight-announcement/
         starlightAnnouncement({
-          displayMode: 'rotate', // stack
+          displayMode: 'rotate', 
           rotateInterval: 5000,
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'mobilev4',
+              id: 'mobilev4-1',
               content: 'Shiny .NET v4 is here with BLE Windows Support, Improved GPS, & More!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
             },
             {
-              id: 'controls1',
+              id: 'controls1-1',
               content : 'Introducing Shiny .NET Controls: TableView, Scheduler, ChatView, ImageEditor, and more!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/controls/' },
               dismissable: false
             },
             {
-              id: 'health1beta',
+              id: 'health1beta-1',
               content: 'Shiny .NET Health Beta is now available!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
             },
             {
-              id: 'music2',
+              id: 'music2-1',
               content: 'Shiny.Music v2 is here with Volume Control, Lyrics, Album Art, and more!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/music' },
+              dismissable: false
             }
           ]
         }),
@@ -536,6 +537,9 @@ export default defineConfig({
                 label: 'Health',
                 items: [
                   { label: 'Getting Started', link: 'health/' },
+                  { label: 'Reading Data', link: 'health/reading' },
+                  { label: 'Writing Data', link: 'health/writing' },
+                  { label: 'Platform Notes', link: 'health/platform-notes' },
                   { label: 'Release Notes', link: 'health/release-notes' }
                 ]
               },
