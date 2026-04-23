@@ -324,6 +324,12 @@ export default defineConfig({
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
+            },
+            {
+              id: 'music2',
+              content: 'Shiny.Music v2 is here with Volume Control, Lyrics, Album Art, and more!',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/music' },
             }
           ]
         }),
