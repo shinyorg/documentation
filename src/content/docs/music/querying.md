@@ -218,7 +218,7 @@ Each track is represented by a `MusicMetadata` record with the following propert
 | `Album` | `string?` | The album name, or `null` if not available. |
 | `Genre` | `string?` | The genre, or `null` if unavailable. |
 | `Duration` | `TimeSpan` | The playback duration. |
-| `AlbumArtUri` | `string?` | URI to album artwork. Available on Android via MediaStore; `null` on iOS where artwork is accessed through `MPMediaItem.Artwork`. |
+| `AlbumArtUri` | `string?` | URI to album artwork. Available on Android via MediaStore; `null` on iOS where artwork is accessed through `MPMediaItem.Artwork`. Use `GetAlbumArtPathAsync` for cross-platform album art retrieval. |
 | `IsExplicit` | `bool?` | Whether the track is marked as explicit content. iOS only via `MPMediaItem.IsExplicitItem`; always `null` on Android. |
 | `ContentUri` | `string` | URI used for playback and file operations. On Android, this is a `content://` URI. On iOS, this is an `ipod-library://` asset URL. **Empty for DRM-protected Apple Music subscription tracks.** |
 | `StoreId` | `string?` | Apple Music catalog ID (from `PlayParams.Id`). Enables streaming playback via `MPMusicPlayerController` on iOS. Always `null` on Android. |

@@ -121,6 +121,8 @@ export default defineConfig({
       '/client/music/querying': '/music/querying',
       '/client/music/playback': '/music/playback',
       '/client/music/copying': '/music/copying',
+      '/client/music/lyrics': '/music/lyrics',
+      '/client/music/album-art': '/music/album-art',
       '/client/music/release-notes': '/music/release-notes',
       '/client/health/': '/health/',
       '/client/configuration/': '/configuration/',
@@ -518,6 +520,8 @@ export default defineConfig({
                   { label: 'Permissions', link: 'music/permissions' },
                   { label: 'Querying Music', link: 'music/querying' },
                   { label: 'Playback', link: 'music/playback' },
+                  { label: 'Lyrics', link: 'music/lyrics' },
+                  { label: 'Album Art', link: 'music/album-art' },
                   { label: 'Copying Tracks', link: 'music/copying' },
                   { label: 'Release Notes', link: 'music/release-notes' }
                 ]

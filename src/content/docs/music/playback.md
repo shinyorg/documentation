@@ -45,6 +45,26 @@ _player.Stop();
 _player.Seek(TimeSpan.FromMinutes(1.5));
 ```
 
+## Volume Control
+
+Control the playback volume programmatically. The value ranges from 0.0 (silent) to 1.0 (full volume) and defaults to 1.0:
+
+```csharp
+// Set volume to 75%
+_player.Volume = 0.75f;
+
+// Mute
+_player.Volume = 0f;
+
+// Full volume
+_player.Volume = 1f;
+
+// Read current volume
+float currentVolume = _player.Volume;
+```
+
+The value is automatically clamped to the 0.0–1.0 range.
+
 ## Reading Playback State
 
 ```csharp
