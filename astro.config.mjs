@@ -322,7 +322,7 @@ export default defineConfig({
             },
             {
               id: 'health1beta-1',
-              content: 'Shiny .NET Health Beta is now available!',
+              content: 'Shiny .NET Health Beta v1 - Cross-platform health monitoring and fitness tracking for mobile apps!  Read & Write support for steps, heart rate, sleep, and more.',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
