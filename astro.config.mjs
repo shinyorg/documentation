@@ -116,6 +116,7 @@ export default defineConfig({
       '/client/locations/gps': '/locations/gps',
       '/client/locations/platform-requests': '/locations/platform-requests',
       '/client/locations/geofencing': '/locations/geofencing',
+      '/client/locations/motionactivity': '/locations/motionactivity',
       '/client/locations/release-notes': '/locations/release-notes',
       '/client/music/': '/music/',
       '/client/music/permissions': '/music/permissions',

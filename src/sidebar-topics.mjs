@@ -178,6 +178,7 @@ export const sidebarTopics = [
           { label: 'GPS', link: 'locations/gps' },
           { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
           { label: 'Geofencing', link: 'locations/geofencing' },
+          { label: 'Motion Activity', link: 'locations/motionactivity' },
           { label: 'Release Notes', link: 'locations/release-notes' }
         ]
       },
