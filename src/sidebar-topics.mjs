@@ -61,6 +61,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'httptransfers/' },
           { label: 'Transfers', link: 'httptransfers/transfers' },
           { label: 'Azure Blob Storage', link: 'httptransfers/azure' },
+          { label: 'AWS S3', link: 'httptransfers/aws-s3' },
           { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
           { label: 'Monitoring', link: 'httptransfers/monitoring' },
           { label: 'Release Notes', link: 'httptransfers/release-notes' }
