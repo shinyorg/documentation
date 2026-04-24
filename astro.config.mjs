@@ -308,7 +308,7 @@ export default defineConfig({
           announcements: [
             {
               id: 'mobilev4-1',
-              content: 'Shiny .NET v4 is here with BLE Windows Support, Improved GPS, & More!',
+              content: 'Shiny .NET v4.1 BETA - Linux, MacOS, & Blazor Support!  TONS of new features and improvements across the board.',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
