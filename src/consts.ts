@@ -70,7 +70,7 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'sheetview', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'webhost'];
@@ -256,10 +256,17 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "1.0.0"
     },
     {
-        "id": "sheetview",
+        "id": "floatingpanel",
         "nuget": "Shiny.Maui.Controls",
         "blazorNuget": "Shiny.Blazor.Controls",
-        "description": "SheetView",
+        "description": "FloatingPanel",
+        "category": "controls",
+        "version": "1.0.0"
+    },
+    {
+        "id": "fontpicker",
+        "nuget": "Shiny.Maui.Controls",
+        "description": "FontPicker",
         "category": "controls",
         "version": "1.0.0"
     },

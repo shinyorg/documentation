@@ -276,13 +276,13 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'SheetView',
+        label: 'FloatingPanel',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/sheetview/' },
-          { label: 'Properties & Events', link: 'controls/sheetview/properties' },
-          { label: 'Examples', link: 'controls/sheetview/examples' },
-          { label: 'Blazor Usage', link: 'controls/sheetview/blazor' },
+          { label: 'Getting Started', link: 'controls/floatingpanel/' },
+          { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
+          { label: 'Examples', link: 'controls/floatingpanel/examples' },
+          { label: 'Blazor Usage', link: 'controls/floatingpanel/blazor' },
         ]
       },
       {
@@ -317,6 +317,7 @@ export const sidebarTopics = [
         label: 'Other Controls',
         items:[
           { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
+          { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
