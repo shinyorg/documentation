@@ -1,0 +1,236 @@
+---
+title: Shell | AI Integration
+description: Use source generation to produce AI-compatible route metadata and navigation tools for Microsoft.Extensions.AI
+---
+
+Shiny Shell's source generation can produce metadata and navigation methods designed for AI tool calling via [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI). An AI chat client can discover your app's routes, understand their purpose, extract parameters from natural language, and navigate to the correct page — all with generated `AITool` instances.
+
+:::caution
+AI extensions are **disabled by default**. You must explicitly opt in via MSBuild and install the `Microsoft.Extensions.AI` NuGet package. If AI extensions are enabled without the package, the source generator emits a **SHINY003** compiler error.
+:::
+
+## Prerequisites
+
+1. Install the `Microsoft.Extensions.AI` NuGet package:
+```bash
+dotnet add package Microsoft.Extensions.AI
+```
+
+2. Enable AI extensions in your `.csproj`:
+```xml
+<PropertyGroup>
+    <ShinyMauiShell_GenerateAiExtensions>true</ShinyMauiShell_GenerateAiExtensions>
+</PropertyGroup>
+```
+
+## How It Works
+
+The AI integration builds on the same `[ShellMap]` and `[ShellProperty]` attributes you already use. Add `description` parameters that explain **user intent** rather than just naming the page, and the source generator produces everything the AI needs.
+
+The flow:
+
+1. AI calls `GetAiToolApplicableGeneratedRoutes()` to discover what pages exist and what they do
+2. AI matches user intent to the right route based on descriptions
+3. AI extracts parameter values from natural language
+4. AI calls `NavigateToRoute()` with the route and parameters
+5. The app navigates and the form is pre-populated
+
+## Describing Routes for AI
+
+The `description` parameter on `[ShellMap]` tells the AI **when** to use this route. Write it as intent signals, not page names:
+
+```csharp
+// Good — describes user intent
+[ShellMap<WorkOrderPage>(description: "Use when the user reports something broken, malfunctioning, needing repair, or any physical problem that needs to be fixed")]
+
+// Bad — just names the page
+[ShellMap<WorkOrderPage>(description: "Work order page")]
+```
+
+## Describing Parameters for AI
+
+The `description` parameter on `[ShellProperty]` tells the AI **how to infer** the value from what the user said:
+
+```csharp
+// Good — tells AI to extract and infer
+[ShellProperty("Summarize what is broken based on what the user said", required: true)]
+public string Description { get; set; } = string.Empty;
+
+[ShellProperty("Infer urgency from the user's tone. Must be: Low, Medium, High, or Urgent", required: true)]
+public string Priority { get; set; } = "Medium";
+
+// Bad — just names the field
+[ShellProperty("The description")]
+public string Description { get; set; } = string.Empty;
+```
+
+## Complete AI-Compatible ViewModel
+
+```csharp
+[ShellMap<WorkOrderPage>(description: "Use when the user reports something broken, malfunctioning, needing repair, maintenance, or service")]
+public partial class WorkOrderViewModel(INavigator navigator) : ObservableObject, IQueryAttributable
+{
+    [ShellProperty("Summarize what is broken based on what the user said", required: true)]
+    public string Description { get; set; } = string.Empty;
+
+    [ShellProperty("Infer urgency from the user's tone. Must be: Low, Medium, High, or Urgent", required: true)]
+    public string Priority { get; set; } = "Medium";
+
+    [ShellProperty("The physical location if the user mentioned one, otherwise leave empty", required: false)]
+    public string Location { get; set; } = string.Empty;
+
+    public void ApplyQueryAttributes(IDictionary<string, object> query)
+    {
+        if (query.TryGetValue("Description", out var desc))
+            Description = desc?.ToString() ?? string.Empty;
+        if (query.TryGetValue("Priority", out var p))
+            Priority = p?.ToString() ?? "Medium";
+        if (query.TryGetValue("Location", out var loc))
+            Location = loc?.ToString() ?? string.Empty;
+
+        OnPropertyChanged(nameof(Description));
+        OnPropertyChanged(nameof(Priority));
+        OnPropertyChanged(nameof(Location));
+    }
+}
+```
+
+## Generated AI Extensions
+
+When AI extensions are enabled, the source generator produces the following members in `AiExtensions.g.cs`:
+
+### GetAiToolApplicableGeneratedRoutes
+
+Returns only routes that have a `description` on `[ShellMap]` **and** at least one `[ShellProperty]`. These are routes an AI can meaningfully discover and navigate to.
+
+```csharp
+[Description("This provides a list of AI tool applicable routes")]
+public static GeneratedRouteInfo[] GetAiToolApplicableGeneratedRoutes(this INavigator navigator);
+```
+
+### AiRoutePrompt
+
+A pre-formatted string describing all AI-applicable routes, their descriptions, and parameters. Designed to be included in an AI system message so the model knows which routes are available without calling a discovery tool first.
+
+```csharp
+public static string AiRoutePrompt { get; }
+```
+
+### NavigateToRoute
+
+AI-friendly navigation that accepts `Dictionary<string, string>` and dispatches to `NavigateTo<TViewModel>` with direct property setters. Returns a confirmation message string.
+
+```csharp
+[Description("Navigate to a route in the application, passing parameters as key-value pairs. Returns a confirmation message.")]
+public static Task<string> NavigateToRoute(
+    this INavigator navigator,
+    [Description("The route name to navigate to")] string route,
+    [Description("Route parameters as key-value pairs")] Dictionary<string, string>? args = null);
+```
+
+### GetAiTools
+
+Returns ready-to-use `AITool` instances for route discovery and navigation. This is the recommended way to wire up AI tools — no manual `AIFunctionFactory.Create` calls needed.
+
+```csharp
+public static IList<AITool> GetAiTools(this INavigator navigator);
+```
+
+## GeneratedRouteInfo Types
+
+```csharp
+namespace Shiny.Infrastructure;
+
+public record GeneratedRouteInfo(
+    string Route,                        // Route name from [ShellMap]
+    string Description,                  // Description from [ShellMap] (empty if not provided)
+    GeneratedRouteParameter[] Parameters // All [ShellProperty] properties
+);
+
+public record GeneratedRouteParameter(
+    string ParameterName,                // Property name — used as key in NavigateToRoute args
+    string Description,                  // From [ShellProperty("...")] — empty if not provided
+    string TypeName,                     // CLR type: "string", "int", "bool", etc.
+    bool IsRequired                      // From [ShellProperty(required: ...)]
+);
+```
+
+:::note
+All `[ShellProperty]` properties are included in `GeneratedRouteInfo.Parameters`, even those without descriptions. The `Description` field is an empty string when no description is provided.
+:::
+
+## Wiring Up AI Tools
+
+Use the generated `GetAiTools()` method — it returns ready-to-use `AITool` instances:
+
+```csharp
+using Microsoft.Extensions.AI;
+
+var tools = navigator.GetAiTools();
+var options = new ChatOptions { Tools = [.. tools] };
+var response = await chatClient.GetResponseAsync(history, options);
+```
+
+You can also seed the AI with route info upfront via `AiRoutePrompt`, so the model knows what routes are available without making a discovery call first:
+
+```csharp
+history.Add(new ChatMessage(ChatRole.System,
+    $"You are a helpful assistant. {AiExtensions.AiRoutePrompt}"));
+```
+
+## Why Two Tools?
+
+The two-tool design (discover + navigate) scales to any number of routes without registering a separate tool per page. The AI:
+
+1. Calls `GetRoutes` (backed by `GetAiToolApplicableGeneratedRoutes`) to see all available pages, their descriptions, and parameter schemas
+2. Matches the user's intent to the right route based on descriptions
+3. Calls `NavigateToRoute` with the extracted route name and parameters
+
+This avoids registering a generated `NavigateToWorkOrder(...)` tool for every page — which doesn't scale and pollutes the tool list.
+
+## What Makes a Route "AI Applicable"?
+
+`GetAiToolApplicableGeneratedRoutes` filters to routes that meet **both** criteria:
+
+- The `[ShellMap]` has a non-null `description`
+- The ViewModel has at least one `[ShellProperty]`
+
+Routes like your home page or settings page that don't need AI parameter filling are excluded automatically. This keeps the AI's tool response focused on pages it can actually act on.
+
+## Configuring AI Extensions
+
+AI extensions are **disabled by default** and can be enabled or customized via MSBuild properties in your `.csproj`:
+
+```xml
+<PropertyGroup>
+    <!-- Enable AI extensions (disabled by default, requires Microsoft.Extensions.AI) -->
+    <ShinyMauiShell_GenerateAiExtensions>true</ShinyMauiShell_GenerateAiExtensions>
+
+    <!-- Customize the generated class name (default: AiExtensions) -->
+    <ShinyMauiShell_AiExtensionsClassName>MyAppRouteExtensions</ShinyMauiShell_AiExtensionsClassName>
+
+    <!-- Customize the AI navigate method name (default: NavigateToRoute) -->
+    <ShinyMauiShell_AiNavigateMethodName>GoToPage</ShinyMauiShell_AiNavigateMethodName>
+</PropertyGroup>
+```
+
+| Property | Default | Controls |
+|---|---|---|
+| `ShinyMauiShell_GenerateAiExtensions` | `false` | `GetAiToolApplicableGeneratedRoutes`, `NavigateToRoute`, `GetAiTools()`, and `AiRoutePrompt`. Requires `Microsoft.Extensions.AI` (**SHINY003** error if missing) |
+| `ShinyMauiShell_AiExtensionsClassName` | `AiExtensions` | Class name for the route info/AI extensions class |
+| `ShinyMauiShell_AiNavigateMethodName` | `NavigateToRoute` | Method name for the AI-friendly navigate method |
+
+:::note
+When AI extensions are disabled, `GetGeneratedRouteInfo` is still generated — only the AI-specific methods are omitted. See [Source Generation](/mauishell/sourcegen/#configuring-source-generation) for all available MSBuild properties.
+:::
+
+## Tips for Better AI Descriptions
+
+| Do | Don't |
+|:---|:------|
+| Describe **user intent signals** | Name the page |
+| "Use when the user reports something broken" | "Work order form" |
+| Tell AI to **infer** from context | Expect exact field values |
+| "Infer urgency from tone" | "The priority level" |
+| Make optional fields truly optional | Require everything |
+| "Leave empty if not mentioned" | Require the user to state everything |

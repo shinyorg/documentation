@@ -311,8 +311,15 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
+              id: 'mauishell-60',
+              content: 'Shiny.Maui.Shell v6 support for AI routing tools',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/mauishell/ai/' },
+              dismissable: false
+            },
+            {
               id: 'mobilev4-1',
-              content: 'Shiny .NET v4.1 BETA - Linux, MacOS, & Blazor Support!  TONS of new features and improvements across the board.',
+              content: 'Shiny .NET v4.1 BETA - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
@@ -326,7 +333,7 @@ export default defineConfig({
             },
             {
               id: 'health1beta-1',
-              content: 'Shiny .NET Health Beta v1 - Cross-platform health monitoring and fitness tracking for mobile apps!  Read & Write support for steps, heart rate, sleep, and more.',
+              content: 'Shiny .NET Health Beta v1 - Cross-platform /w Read & Write support for steps, heart rate, sleep, and more.',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false

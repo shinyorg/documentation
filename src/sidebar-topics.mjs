@@ -40,6 +40,7 @@ export const sidebarTopics = [
           { label: 'Dialogs', link: 'mauishell/dialogs' },
           { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
           { label: 'Source Generation', link: 'mauishell/sourcegen' },
+          { label: 'AI Integration', link: 'mauishell/ai' },
           { label: 'Release Notes', link: 'mauishell/release-notes' }
         ]
       },

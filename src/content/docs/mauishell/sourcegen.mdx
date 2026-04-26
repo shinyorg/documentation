@@ -20,6 +20,7 @@ public class DetailViewModel
 |---|---|---|
 | `route` | `string` | The Shell route name for this page. Also used as the generated constant and method name. Must be a valid C# identifier. |
 | `registerRoute` | `bool` | Whether to register the route with Shell (default: `true`). Set to `false` for pages already defined in `AppShell.xaml` |
+| `description` | `string` | Optional description used by the source generator to produce XML doc comments, `[Description]` attributes, and `GeneratedRouteInfo` metadata. Enables AI tooling integration. |
 
 ```csharp
 // Root page defined in AppShell.xaml — don't re-register the route
@@ -56,19 +57,24 @@ When no `route` is specified, the page type name without the `Page` suffix is us
 
 Mark ViewModel properties with `[ShellProperty]` to include them in the generated navigation extension methods.
 
+| Parameter | Type | Description |
+|---|---|---|
+| `description` | `string` | Optional description used by the source generator to produce XML doc comments, `[Description]` attributes on parameters, and `GeneratedRouteParameter` metadata |
+| `required` | `bool` | Whether this parameter is required for navigation (default: `true`). Optional parameters get default values in the generated method signature |
+
 ```csharp
-[ShellMap<DetailPage>("Detail")]
+[ShellMap<DetailPage>("Detail", description: "Navigate to the detail page")]
 public class DetailViewModel
 {
-    [ShellProperty]
+    [ShellProperty("The item identifier")]
     public int Id { get; set; }
 
-    [ShellProperty]
+    [ShellProperty("The display name")]
     public string Name { get; set; }
 }
 ```
 
-The generator creates a strongly-typed extension method with parameters matching each `[ShellProperty]`:
+The generator creates a strongly-typed extension method with parameters matching each `[ShellProperty]`, including XML docs and `[Description]` attributes when descriptions are provided:
 
 ```csharp
 // Generated — you call this instead of manual NavigateTo
@@ -77,7 +83,7 @@ await navigator.NavigateToDetail(id: 42, name: "Allan");
 
 ## What Gets Generated
 
-The source generators produce up to three files (each can be individually disabled):
+The source generators produce up to five files (nav extensions can be individually disabled):
 
 ### Routes.g.cs
 
@@ -94,21 +100,35 @@ public static class Routes
 
 ### NavigationExtensions.g.cs
 
-Strongly-typed extension methods on `INavigator` for each ViewModel with `[ShellProperty]` attributes.
+Strongly-typed extension methods on `INavigator` for each ViewModel with `[ShellProperty]` attributes. When `description` is set on `[ShellMap]` and `[ShellProperty]`, the generated methods include XML doc comments and `[Description]` attributes for AI tooling integration.
 
 ```csharp
 public static class NavigationExtensions
 {
-    public static Task NavigateToDetail(this INavigator navigator, int id, string name)
+    /// <summary>
+    /// Navigate to the detail page
+    /// </summary>
+    /// <param name="id">The item identifier</param>
+    /// <param name="name">The display name</param>
+    /// <param name="relativeNavigation">If true, it will navigate/stack from where the application currently is otherwise, it will reset the stack to this new route</param>
+    [Description("Navigate to the detail page")]
+    public static Task NavigateToDetail(this INavigator navigator,
+        [Description("The item identifier")] int id,
+        [Description("The display name")] string name,
+        [Description("...")] bool relativeNavigation = true)
     {
         return navigator.NavigateTo<DetailViewModel>(x =>
         {
             x.Id = id;
             x.Name = name;
-        });
+        }, relativeNavigation);
     }
 }
 ```
+
+:::note
+XML doc comments, `[Description]` attributes, and `relativeNavigation` parameter descriptions are only generated when the `[ShellMap]` `description` parameter is set. Without a description, the methods are generated without any documentation attributes.
+:::
 
 ### NavigationBuilderExtensions.g.cs
 
@@ -155,6 +175,39 @@ await navigator
     .Navigate();
 ```
 
+### AiExtensions.g.cs
+
+A `GetGeneratedRouteInfo()` extension method on `INavigator` that returns structured metadata about all registered routes and their parameters. Designed for AI agents and tooling to discover available navigation routes at runtime.
+
+```csharp
+public static class AiExtensions
+{
+    [Description("This provides a list of routes throughout the application")]
+    public static GeneratedRouteInfo[] GetGeneratedRouteInfo(this INavigator navigator) =>
+    [
+        new("Detail", "Navigate to the detail page",
+            [new("Id", "The item identifier", "int", true), new("Name", "The display name", "string", true)]),
+        new("MainPage", "", []),
+        new("Modal", "", [])
+    ];
+}
+```
+
+The `GeneratedRouteInfo` record contains:
+- `Route` — the Shell route name
+- `Description` — the description from `[ShellMap]` (empty string if not set)
+- `Parameters` — array of `GeneratedRouteParameter` records for all `[ShellProperty]` properties
+
+Each `GeneratedRouteParameter` contains:
+- `ParameterName` — the property name
+- `Description` — from `[ShellProperty("...")]` (empty string if not set)
+- `TypeName` — the CLR type name (e.g., `"string"`, `"int"`)
+- `IsRequired` — from `[ShellProperty(required: ...)]`
+
+All `[ShellProperty]` properties are included in the parameters array, even those without descriptions.
+
+When AI extensions are enabled (`ShinyMauiShell_GenerateAiExtensions=true`), the generator also produces `GetAiToolApplicableGeneratedRoutes()`, `NavigateToRoute()`, `GetAiTools()`, and `AiRoutePrompt` for AI integration. See [AI Integration](/mauishell/ai/) for details.
+
 ## Configuring Source Generation
 
 You can disable individual generated files via MSBuild properties in your `.csproj`:
@@ -166,15 +219,27 @@ You can disable individual generated files via MSBuild properties in your `.cspr
 
     <!-- Disable navigation extensions (NavigationExtensions.g.cs, NavigationBuilderNavExtensions.g.cs, and AddGeneratedMaps) -->
     <ShinyMauiShell_GenerateNavExtensions>false</ShinyMauiShell_GenerateNavExtensions>
+
+    <!-- Enable AI extensions (disabled by default, requires Microsoft.Extensions.AI) -->
+    <ShinyMauiShell_GenerateAiExtensions>true</ShinyMauiShell_GenerateAiExtensions>
+
+    <!-- Customize the generated class name (default: AiExtensions) -->
+    <ShinyMauiShell_AiExtensionsClassName>MyAppRouteExtensions</ShinyMauiShell_AiExtensionsClassName>
+
+    <!-- Customize the AI navigate method name (default: NavigateToRoute) -->
+    <ShinyMauiShell_AiNavigateMethodName>GoToPage</ShinyMauiShell_AiNavigateMethodName>
 </PropertyGroup>
 ```
 
 | Property | Default | Controls |
 |---|---|---|
 | `ShinyMauiShell_GenerateRouteConstants` | `true` | `Routes.g.cs` |
-| `ShinyMauiShell_GenerateNavExtensions` | `true` | `NavigationExtensions.g.cs`, `NavigationBuilderNavExtensions.g.cs`, and `NavigationBuilderExtensions.g.cs` (`AddGeneratedMaps`) |
+| `ShinyMauiShell_GenerateNavExtensions` | `true` | `NavigationExtensions.g.cs`, `NavigationBuilderNavExtensions.g.cs`, `AiExtensions.g.cs`, and `NavigationBuilderExtensions.g.cs` (`AddGeneratedMaps`) |
+| `ShinyMauiShell_GenerateAiExtensions` | `false` | `GetAiToolApplicableGeneratedRoutes`, `NavigateToRoute`, `GetAiTools()`, and `AiRoutePrompt`. Requires `Microsoft.Extensions.AI` (**SHINY003** error if missing) |
+| `ShinyMauiShell_AiExtensionsClassName` | `AiExtensions` | Class name for the route info/AI extensions class |
+| `ShinyMauiShell_AiNavigateMethodName` | `NavigateToRoute` | Method name for the AI-friendly navigate method |
 
-`NavigationBuilderExtensions.g.cs` (`AddGeneratedMaps()`) is only generated when at least one `[ShellMap]` attribute is detected and `ShinyMauiShell_GenerateNavExtensions` is enabled. If maps are detected but nav extensions are disabled, the generator emits a **SHINY002** warning.
+`NavigationBuilderExtensions.g.cs` (`AddGeneratedMaps()`) and `AiExtensions.g.cs` are only generated when at least one `[ShellMap]` attribute is detected and `ShinyMauiShell_GenerateNavExtensions` is enabled. If maps are detected but nav extensions are disabled, the generator emits a **SHINY002** warning.
 
 ## Before & After
 
