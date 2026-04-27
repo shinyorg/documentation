@@ -473,7 +473,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health', 'music'];
         return compos.some(x => ids.includes(x.id));
     }
 };

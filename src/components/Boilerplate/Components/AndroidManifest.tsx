@@ -102,6 +102,15 @@ const AndroidManifest = (props: Props) => {
       </queries>`;
   }
 
+  if (has('music')) {
+    src += `
+      <!-- Android 13+ (API 33+) -->`;
+    src += addP('READ_MEDIA_AUDIO');
+    src += `
+      <!-- Android 12 and below (API < 33) -->`;
+    src += addP('READ_EXTERNAL_STORAGE', 32);
+  }
+
   if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
   }
