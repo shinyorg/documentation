@@ -323,7 +323,7 @@ export default defineConfig({
               id: 'mediator63-1',
               content: 'Mediator 6.3 Beta with AI Tool Generation!',
               variant: 'tip',
-              link: { text: 'Check It Out', href: '/mediator/ai/' },
+              link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
               dismissable: false
             },
             {
