@@ -213,6 +213,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'health/' },
           { label: 'Reading Data', link: 'health/reading' },
           { label: 'Writing Data', link: 'health/writing' },
+          { label: 'Observing Data', link: 'health/observing' },
           { label: 'Platform Notes', link: 'health/platform-notes' },
           { label: 'Release Notes', link: 'health/release-notes' }
         ]
