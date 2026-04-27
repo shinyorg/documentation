@@ -320,15 +320,22 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'mediator63-1',
+              content: 'Mediator 6.3 Beta with AI Tool Generation!',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/mediator/ai/' },
+              dismissable: false
+            },
+            {
               id: 'mobilev4-1',
-              content: 'Shiny .NET v4.1 BETA - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
+              content: 'Shiny v4.1 BETA - BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
             },
             {
               id: 'controls1-1',
-              content : 'Introducing Shiny .NET Controls: TableView, Scheduler, ChatView, ImageEditor, and more!',
+              content : 'Shiny .NET Controls: TableView, Scheduler, ChatView, ImageEditor, and more!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/controls/' },
               dismissable: false
@@ -342,7 +349,7 @@ export default defineConfig({
             },
             {
               id: 'music2-1',
-              content: 'Shiny.Music v2 is here with Volume Control, Lyrics, Album Art, and more!',
+              content: 'Shiny.Music v2 Volume, Lyrics, Album Art, Custom Playlists, and more!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/music' },
               dismissable: false
