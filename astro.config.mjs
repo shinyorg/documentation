@@ -334,7 +334,7 @@ export default defineConfig({
             },
             {
               id: 'health1beta-1',
-              content: 'Shiny .NET Health Beta v1 - Cross-platform /w Read & Write support for steps, heart rate, sleep, and more.',
+              content: 'Shiny .NET Health Beta v1 - Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
