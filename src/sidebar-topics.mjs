@@ -428,6 +428,7 @@ export const sidebarTopics = [
               label: 'Extensions',
               collapsed: true,
               items:[
+                { label: 'AI Tools', link: 'mediator/extensions/ai' },
                 { label: 'MAUI', link: 'mediator/extensions/maui' },
                 { label: 'Blazor', link: 'mediator/extensions/blazor' },
                 { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },

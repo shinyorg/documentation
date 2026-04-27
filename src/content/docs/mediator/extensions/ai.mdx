@@ -1,0 +1,180 @@
+---
+title: AI Tools
+description: Expose mediator contracts as AI-callable tools via Microsoft.Extensions.AI
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+Shiny Mediator can expose your request and command contracts as AI-callable tools via [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI). The source generator discovers contracts annotated with `[Description]` and generates `AIFunction` wrappers with JSON schemas automatically.
+
+:::caution
+AI tool generation is **disabled by default**. You must explicitly opt in via MSBuild and install the `Microsoft.Extensions.AI` NuGet package. If AI tools are enabled without the package, the source generator emits a **SHINYMED100** compiler error.
+:::
+
+## Prerequisites
+
+1. Install the `Microsoft.Extensions.AI` NuGet package:
+```bash
+dotnet add package Microsoft.Extensions.AI
+```
+
+2. Enable AI tool generation in your `.csproj`:
+```xml
+<PropertyGroup>
+    <ShinyMediatorGenerateAITools>true</ShinyMediatorGenerateAITools>
+</PropertyGroup>
+```
+
+## Annotating Contracts
+
+Add `[Description]` (from `System.ComponentModel`) to your contracts and their properties. Only contracts that implement `IRequest<T>` or `ICommand` and have a `[Description]` attribute will be picked up.
+
+```csharp
+using System.ComponentModel;
+
+[Description("Gets the weather forecast for a given city")]
+public record GetWeatherRequest(
+    [property: Description("The city name to get weather for")]
+    string City
+) : IRequest<WeatherResult>;
+
+[Description("Performs a mathematical calculation")]
+public record CalculateRequest(
+    [property: Description("First operand")]
+    double A,
+    [property: Description("Math operator: +, -, *, /")]
+    string Operator,
+    [property: Description("Second operand")]
+    double B
+) : IRequest<double>;
+
+[Description("Sends a notification to a user")]
+public record SendNotificationCommand(
+    [property: Description("The user ID to notify")]
+    int UserId,
+    [property: Description("The notification message")]
+    string Message
+) : ICommand;
+```
+
+## Registration
+
+Register the generated AI tools with the mediator builder:
+
+```csharp
+builder.Services.AddShinyMediator(cfg =>
+{
+    cfg.AddMediatorRegistry();
+    cfg.AddGeneratedAITools();
+});
+```
+
+This registers each annotated contract as an `AITool` singleton in the DI container.
+
+## Using with a Chat Client
+
+Retrieve the tools from DI and pass them to any `IChatClient`:
+
+```csharp
+using Microsoft.Extensions.AI;
+
+var tools = host.Services.GetServices<AITool>().ToList();
+var options = new ChatOptions { Tools = tools };
+var response = await chatClient.GetResponseAsync(history, options);
+```
+
+For automatic tool invocation (the AI calls your tools and the client handles the round-trip), use `UseFunctionInvocation()`:
+
+```csharp
+IChatClient chatClient = openAiClient
+    .GetChatClient("gpt-4.1")
+    .AsIChatClient()
+    .AsBuilder()
+    .UseFunctionInvocation()
+    .Build();
+```
+
+## What Gets Generated
+
+For each contract with `[Description]` that implements `IRequest<T>` or `ICommand`, the source generator produces:
+
+1. **An `AIFunction` class** that wraps the mediator call with a JSON schema built from the contract's properties
+2. **`AddGeneratedAITools()`** extension method on `ShinyMediatorBuilder` that registers all generated tools as `AITool` singletons
+
+The generated JSON schema includes property types, descriptions, required/optional fields, enum values, and default values.
+
+### Request vs Command
+
+- **`IRequest<T>`** contracts return the result to the AI
+- **`ICommand`** contracts return `"Command executed successfully"` to the AI
+
+## Supported Property Types
+
+| Type | JSON Schema Type |
+|:-----|:----------------|
+| `string`, `Guid`, `Uri`, `DateTime`, `DateTimeOffset`, `DateOnly` | `string` |
+| `bool` | `boolean` |
+| `int`, `long`, `short`, `byte` | `integer` |
+| `float`, `double`, `decimal` | `number` |
+| Enums | `string` with `enum` values |
+| Arrays / `IEnumerable<T>` | `array` |
+| Complex types | `object` |
+
+Nullable properties and properties with default values are marked as optional in the schema. Non-nullable properties without defaults are required.
+
+## Complete Example
+
+Here is a complete example using GitHub Copilot as the AI backend:
+
+```csharp
+using System.ComponentModel;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+
+// Build host with mediator + AI tools
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddShinyMediator(cfg =>
+{
+    cfg.AddMediatorRegistry();
+    cfg.AddGeneratedAITools();
+});
+var host = builder.Build();
+
+// Get AI tools from DI
+var tools = host.Services.GetServices<AITool>().ToList();
+
+// Use with any IChatClient
+var options = new ChatOptions { Tools = tools };
+var history = new List<ChatMessage>();
+
+history.Add(new ChatMessage(ChatRole.User, "What's the weather in Seattle?"));
+var response = await chatClient.GetResponseAsync(history, options);
+```
+
+### Contracts
+
+```csharp
+[Description("Gets the current weather forecast for a city")]
+public record GetWeatherRequest(
+    [property: Description("The city to get weather for")]
+    string City
+) : IRequest<string>;
+```
+
+### Handler
+
+```csharp
+[MediatorSingleton]
+public class GetWeatherHandler : IRequestHandler<GetWeatherRequest, string>
+{
+    public Task<string> Handle(
+        GetWeatherRequest request,
+        IMediatorContext context,
+        CancellationToken ct)
+    {
+        return Task.FromResult($"Weather in {request.City}: 72F and sunny");
+    }
+}
+```
+
+When the AI receives "What's the weather in Seattle?", it will call the `GetWeatherRequest` tool with `City: "Seattle"`, the mediator routes it to the handler, and the result is returned to the AI.
