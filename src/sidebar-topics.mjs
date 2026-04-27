@@ -203,6 +203,7 @@ export const sidebarTopics = [
           { label: 'Album Art', link: 'music/album-art' },
           { label: 'Copying Tracks', link: 'music/copying' },
           { label: 'Song Identification', link: 'music/identification' },
+          { label: 'Music Management', link: 'music/management' },
           { label: 'Release Notes', link: 'music/release-notes' }
         ]
       },
@@ -325,6 +326,7 @@ export const sidebarTopics = [
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
+          { label: 'TextToSpeechButton', link: 'controls/texttospeech/', jumpTo: true },
         ]
       },
       { label: 'Release Notes', link: 'controls/release-notes' }
