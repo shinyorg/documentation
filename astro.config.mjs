@@ -126,6 +126,7 @@ export default defineConfig({
       '/client/music/lyrics': '/music/lyrics',
       '/client/music/album-art': '/music/album-art',
       '/client/music/identification': '/music/identification',
+      '/client/music/management': '/music/management',
       '/client/music/release-notes': '/music/release-notes',
       '/client/health/': '/health/',
       '/client/configuration/': '/configuration/',
