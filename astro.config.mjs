@@ -328,21 +328,21 @@ export default defineConfig({
             },
             {
               id: 'mobilev4-1',
-              content: 'Shiny v4.1 BETA - BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
+              content: 'Client v4.1 - BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
             },
             {
               id: 'controls1-1',
-              content : 'Shiny .NET Controls: TableView, Scheduler, ChatView, ImageEditor, and more!',
+              content : 'Controls: TableView, Scheduler, ChatView, ImageEditor, and more for MAUI & Blazor!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/controls/' },
               dismissable: false
             },
             {
               id: 'health1beta-1',
-              content: 'Shiny .NET Health Beta v1 - Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
+              content: 'Shiny.Health v1 BETA - Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
