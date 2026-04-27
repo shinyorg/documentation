@@ -1,0 +1,133 @@
+---
+title: Observing Data
+---
+
+You can observe health data changes in real time using the `Observe` method on `IHealthService`. It returns an `IAsyncEnumerable<HealthResult>` that yields new samples as they are recorded.
+
+## How It Works
+
+- **iOS**: Push-based using `HKAnchoredObjectQuery` — HealthKit notifies your app immediately when new samples are added
+- **Android**: Polling-based using Health Connect change tokens — polls for new records at a configurable interval (default: 5 seconds)
+- **Forward-only**: Only yields samples added after observation starts, not historical data
+
+## Basic Usage
+
+```csharp
+IHealthService health; // inject via DI
+
+// Request permissions first
+await health.RequestPermissions(DataType.HeartRate);
+
+// Observe heart rate changes
+using var cts = new CancellationTokenSource();
+
+await foreach (var result in health.Observe(DataType.HeartRate, cancelToken: cts.Token))
+{
+    if (result is NumericHealthResult numeric)
+        Console.WriteLine($"Heart rate: {numeric.Value} bpm at {numeric.Start:T}");
+}
+```
+
+## Observing Blood Pressure
+
+Blood pressure observations yield `BloodPressureResult` — use pattern matching:
+
+```csharp
+await foreach (var result in health.Observe(DataType.BloodPressure, cancelToken: cts.Token))
+{
+    if (result is BloodPressureResult bp)
+        Console.WriteLine($"BP: {bp.Systolic}/{bp.Diastolic} mmHg");
+}
+```
+
+## Custom Polling Interval (Android)
+
+On Android, observation uses polling. You can control the interval:
+
+```csharp
+// Poll every 10 seconds instead of the default 5
+await foreach (var result in health.Observe(
+    DataType.StepCount,
+    pollingInterval: TimeSpan.FromSeconds(10),
+    cancelToken: cts.Token))
+{
+    // ...
+}
+```
+
+On iOS, the `pollingInterval` parameter is ignored — observation is push-based.
+
+## ViewModel Pattern
+
+```csharp
+public partial class HeartRateMonitorViewModel(IHealthService health) : ObservableObject
+{
+    CancellationTokenSource? cts;
+
+    [ObservableProperty]
+    double currentHeartRate;
+
+    [ObservableProperty]
+    bool isObserving;
+
+    [RelayCommand]
+    async Task StartObservingAsync()
+    {
+        await health.RequestPermissions(DataType.HeartRate);
+
+        cts = new CancellationTokenSource();
+        IsObserving = true;
+
+        try
+        {
+            await foreach (var result in health.Observe(DataType.HeartRate, cancelToken: cts.Token))
+            {
+                if (result is NumericHealthResult numeric)
+                    CurrentHeartRate = numeric.Value;
+            }
+        }
+        catch (OperationCanceledException) { }
+        finally
+        {
+            IsObserving = false;
+        }
+    }
+
+    [RelayCommand]
+    void StopObserving()
+    {
+        cts?.Cancel();
+        cts?.Dispose();
+        cts = null;
+    }
+}
+```
+
+## Cancellation
+
+Stop observing by cancelling the `CancellationToken`. This cleanly stops the underlying platform query (iOS) or polling loop (Android) and completes the async enumerable.
+
+```csharp
+var cts = new CancellationTokenSource();
+
+// Start observing in a background task
+var observeTask = Task.Run(async () =>
+{
+    await foreach (var result in health.Observe(DataType.StepCount, cancelToken: cts.Token))
+    {
+        // process result
+    }
+});
+
+// Later, stop observing
+cts.Cancel();
+await observeTask;
+```
+
+## Best Practices
+
+1. **Always request permissions first** — Call `RequestPermissions` before `Observe`
+2. **Cancel when done** — Always cancel the token when you no longer need updates to free platform resources
+3. **Pattern match results** — `Observe` returns the base `HealthResult` type; cast to `NumericHealthResult` or `BloodPressureResult` as needed
+4. **Handle OperationCanceledException** — This is expected when the token is cancelled
+5. **UI thread** — Results arrive on background threads; dispatch to the main thread for UI updates

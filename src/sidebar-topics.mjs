@@ -202,6 +202,7 @@ export const sidebarTopics = [
           { label: 'Lyrics', link: 'music/lyrics' },
           { label: 'Album Art', link: 'music/album-art' },
           { label: 'Copying Tracks', link: 'music/copying' },
+          { label: 'Song Identification', link: 'music/identification' },
           { label: 'Release Notes', link: 'music/release-notes' }
         ]
       },
