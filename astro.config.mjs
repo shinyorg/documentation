@@ -320,15 +320,15 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'mediator63-1',
-              content: 'Mediator 6.3 Beta with AI Tool Generation!',
+              id: 'mediator63-2',
+              content: 'Mediator 6.3: AI Tool Generation!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
               dismissable: false
             },
             {
               id: 'mobilev4-1',
-              content: 'Client v4.1 - BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
+              content: 'Client v4.1 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
@@ -342,14 +342,14 @@ export default defineConfig({
             },
             {
               id: 'health1beta-1',
-              content: 'Shiny.Health v1 BETA - Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
+              content: 'Shiny.Health v1 BETA: Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
             },
             {
               id: 'music2-1',
-              content: 'Shiny.Music v2 Volume, Lyrics, Album Art, Custom Playlists, and more!',
+              content: 'Shiny.Music v3: Lyrics, Album Art, Playlists, and more!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/music' },
               dismissable: false
