@@ -113,7 +113,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "aspnetNuget": "Shiny.Mediator.AspNet",
         "description": "Mediator",
         "category": "core",
-        "version" : "6.2.1"
+        "version" : "6.3.0"
     },
     {
         "id": "ble",
@@ -139,9 +139,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
         "category": "devices",
-        "version": "1.0.0",
+        "version": "1.0.0-beta-0009",
         "additionalNugets": [
-            { "nuget": "Shiny.Obd", "version": "1.0.0" }
+            { "nuget": "Shiny.Obd", "version": "1.0.0-beta-0009" }
         ]
     },
     {
@@ -223,7 +223,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Health",
         "description": "Health Data",
         "category": "platformdata",
-        "version": "1.0.0"
+        "version": "1.0.0-beta-0030"
     },
     {
         "id": "config",
@@ -237,7 +237,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
         "category": "essentials",
-        "version": "5.0.0"
+        "version": "6.0.3"
     },
     {
         "id": "tableview",
@@ -245,7 +245,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TableView",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "scheduler",
@@ -253,7 +253,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Scheduler",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "floatingpanel",
@@ -261,14 +261,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "FloatingPanel",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "fontpicker",
         "nuget": "Shiny.Maui.Controls",
         "description": "FontPicker",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "pillview",
@@ -276,7 +276,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "PillView",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "imageviewer",
@@ -284,7 +284,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageViewer",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "imageeditor",
@@ -292,7 +292,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageEditor",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "chatview",
@@ -300,7 +300,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ChatView",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "markdown",
@@ -308,7 +308,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Markdown",
         "description": "Markdown",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "mermaiddiagrams",
@@ -316,7 +316,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.MermaidDiagrams",
         "description": "Mermaid Diagrams",
         "category": "controls",
-        "version": "1.0.0"
+        "version": "1.0.1-beta-0045"
     },
     {
         "id": "stores",
