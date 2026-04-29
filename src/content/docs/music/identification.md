@@ -36,7 +36,19 @@ Add the microphone usage description to your `Info.plist`:
 <string>Used to identify songs playing nearby.</string>
 ```
 
-No special entitlements are required. The library requests microphone permission automatically before listening.
+#### ShazamKit Entitlement
+
+Song identification requires the ShazamKit entitlement. Add it to your project file:
+
+```xml
+<ItemGroup Condition="$(TargetFramework.Contains('-ios'))">
+    <CustomEntitlements Include="com.apple.developer.shazamkit" Type="Boolean" Value="true" Visible="false" />
+</ItemGroup>
+```
+
+You must also enable the **ShazamKit** capability in the Apple Developer Portal for your App ID.
+
+The library requests microphone permission automatically before listening.
 
 ## Identifying a Song
 
@@ -140,7 +152,7 @@ The iOS implementation uses `SHSession` from the ShazamKit framework with `AVAud
 - Matches against the Shazam catalog via `SHSession.Match`
 - Microphone permission is requested automatically via `AVAudioApplication.RequestRecordPermissionAsync`
 - The audio session is configured for recording and deactivated after the match completes
-- No API key or entitlements are required
+- Requires `com.apple.developer.shazamkit` entitlement (see iOS Configuration above)
 
 ### Android
 

@@ -125,10 +125,6 @@ The default `ILyricsProvider` implementation uses the [LRCLIB](https://lrclib.ne
 - Returns both plain and synced lyrics when available
 - AOT-compatible with source-generated JSON serialization
 
-### iOS — MPMediaItem.Lyrics
+### iOS
 
-On iOS, the `IMediaLibrary` implementation also implements `ILyricsProvider`. It reads lyrics directly from `MPMediaItem.Lyrics` for tracks in the local music library. These are typically plain text lyrics embedded in the track's metadata (e.g., from iTunes).
-
-:::note
-The default DI registration uses the LRCLIB provider for both platforms. If you prefer to use the iOS-native lyrics on iOS, you can resolve `IMediaLibrary` and cast to `ILyricsProvider`, or register it explicitly.
-:::
+The LRCLIB provider is used on iOS as well. MusicKit does not directly expose embedded lyrics from tracks.

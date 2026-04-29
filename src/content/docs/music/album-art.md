@@ -47,16 +47,6 @@ Returns the content URI for the album art from MediaStore (`content://media/exte
 
 ### iOS
 
-iOS does not expose album art as a URI. Instead, `GetAlbumArtPathAsync`:
+On iOS, `GetAlbumArtPathAsync` returns the MusicKit `Artwork.Url()` for the track at 300x300 pixels. This is a URL string that can be used directly as an image source.
 
-1. Retrieves the `MPMediaItem.Artwork` image object
-2. Renders it at 600x600 pixels
-3. Encodes it as JPEG (85% quality)
-4. Saves it to the app's caches directory (`Library/Caches/albumart/{trackId}.jpg`)
-5. Returns the cached file path
-
-Subsequent calls for the same track return the cached file without re-rendering.
-
-:::note
-The artwork is cached in the system caches directory, which iOS may purge when storage is low. This is the correct behavior — artwork can always be re-generated from the media library.
-:::
+The `AlbumArtUri` property on `MusicMetadata` is also populated with the artwork URL on iOS, unlike the previous implementation where it was `null`.

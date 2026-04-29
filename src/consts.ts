@@ -216,7 +216,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Music",
         "description": "Music Library",
         "category": "platformdata",
-        "version": "2.0.0"
+        "version": "3.0.0"
     },
     {
         "id": "health",

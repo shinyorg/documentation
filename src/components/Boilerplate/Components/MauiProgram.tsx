@@ -126,6 +126,10 @@ const MauiProgram = (props: Props) => {
           opts.DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey");
       });`;
   }
+  if (has('music')) {
+    src += `
+      builder.Services.AddShinyMusic();`;
+  }
   if (has('contactstore')) {
     src += `
       builder.Services.AddContactStore();`;

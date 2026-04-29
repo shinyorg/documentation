@@ -69,11 +69,11 @@ This key is **mandatory**. Your app will crash on launch if you attempt to acces
 :::
 
 ### How It Works
-- Permission is requested via `MPMediaLibrary.RequestAuthorization` from the `MediaPlayer` framework.
+- Permission is requested via MusicKit `MusicAuthorization.Request()`.
 - iOS may return `Restricted` if access is blocked by device management or parental controls — this is distinct from the user denying access.
 
 ### Entitlements
-No special entitlements are required. The `MediaPlayer` and `AVFoundation` frameworks are standard iOS frameworks included with the platform.
+No special entitlements are required beyond the Info.plist usage description.
 
 ## Best Practices
 

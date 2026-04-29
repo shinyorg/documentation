@@ -1,69 +1,33 @@
 ---
-title: Music Management
+title: Playlist Management
 ---
 
-The `IMusicManager` interface provides custom playlist management and play count tracking, independent of the device's native music library. Data is persisted locally using SQLite via `Shiny.DocumentDb`.
+The `IMediaLibrary` interface provides methods to create, remove, and manage playlists and their tracks.
 
-:::note
-`IMusicManager` playlists are **app-managed** and stored in SQLite. They are separate from the device playlists returned by `IMediaLibrary.GetPlaylistsAsync()`. Use this when you need full control over playlist creation, editing, and deletion — capabilities not exposed by Android or iOS for third-party apps.
-:::
+- **iOS**: Playlist operations use MusicKit's `MusicLibrary.Shared` to create and modify real Apple Music playlists that sync across the user's devices.
+- **Android**: Playlist operations manage locally-stored custom playlists persisted as JSON. These are merged with platform MediaStore playlists when calling `GetPlaylistsAsync()`.
 
-## Setup
-
-Install the `Shiny.Music.Sqlite` NuGet package and register the service:
+## Create a Playlist
 
 ```csharp
-builder.Services.AddShinyMusic();
-builder.Services.AddMusicManagementSqlite(); // Registers IMusicManager
+var playlist = await _library.CreatePlaylistAsync("Road Trip");
+Console.WriteLine($"Created: {playlist.Name} (ID: {playlist.Id})");
 ```
 
-## Play Counts
+Returns a `PlaylistInfo` with the new playlist's ID, name, and song count (initially 0).
 
-Track how many times each song has been played:
-
-```csharp
-// Increment after playback starts
-await _manager.AddPlayCount(track.Id);
-
-// Read the current count
-var count = await _manager.GetPlayCount(track.Id);
-Console.WriteLine($"Played {count} times");
-```
-
-### Get All Play Counts
+## Add Tracks
 
 ```csharp
-var counts = await _manager.GetAllPlayCounts();
-
-foreach (var pc in counts)
-{
-    Console.WriteLine($"Track {pc.TrackId}: {pc.Count} plays");
-}
-```
-
-## Custom Playlists
-
-### Create a Playlist
-
-```csharp
-var playlistId = Guid.NewGuid().ToString();
-await _manager.CreatePlaylist(playlistId, "Road Trip");
-```
-
-If a playlist with the same ID already exists, its name is updated.
-
-### Add Tracks
-
-```csharp
-await _manager.AddTrackToPlaylist(playlistId, track);
+await _library.AddTrackToPlaylistAsync(playlist.Id, track);
 ```
 
 Adding a track that already exists in the playlist is a no-op.
 
-### Browse Playlists
+## Browse Playlists
 
 ```csharp
-var playlists = await _manager.GetAllPlaylists();
+var playlists = await _library.GetPlaylistsAsync();
 
 foreach (var p in playlists)
 {
@@ -71,12 +35,12 @@ foreach (var p in playlists)
 }
 ```
 
-Returns `PlaylistInfo` records — the same type used by `IMediaLibrary.GetPlaylistsAsync()`.
+On Android, this returns both platform MediaStore playlists and custom playlists, sorted alphabetically. On iOS, this returns all playlists from the user's Apple Music library.
 
-### Get Playlist Tracks
+## Get Playlist Tracks
 
 ```csharp
-var tracks = await _manager.GetPlaylistTracks(playlistId);
+var tracks = await _library.GetPlaylistTracksAsync(playlist.Id);
 
 foreach (var track in tracks)
 {
@@ -84,34 +48,56 @@ foreach (var track in tracks)
 }
 ```
 
-### Remove a Playlist
+## Remove a Track from a Playlist
 
 ```csharp
-await _manager.RemovePlaylist(playlistId);
+await _library.RemoveTrackFromPlaylistAsync(playlist.Id, track.Id);
 ```
 
-This removes the playlist and all of its track associations.
+## Remove a Playlist
 
-## IMusicManager API
+```csharp
+await _library.RemovePlaylistAsync(playlist.Id);
+```
+
+On iOS, this deletes the playlist from the user's Apple Music library. On Android, this removes it from the local JSON store.
+
+## Playlist CRUD API
 
 | Method | Description |
 |---|---|
-| `AddPlayCount(trackId)` | Increments the play count for the specified track by one |
-| `GetPlayCount(trackId)` | Gets the current play count, or 0 if never played |
-| `GetAllPlayCounts()` | Returns all recorded play counts |
-| `GetAllPlaylists()` | Returns all custom playlists with track counts |
-| `CreatePlaylist(playlistId, name)` | Creates a new playlist or updates an existing one's name |
-| `RemovePlaylist(playlistId)` | Removes a playlist and all associated tracks |
-| `AddTrackToPlaylist(playlistId, metadata)` | Adds a track to a playlist (no-op if already present) |
-| `GetPlaylistTracks(playlistId)` | Gets all tracks in the specified playlist |
+| `CreatePlaylistAsync(name)` | Creates a new playlist and returns its `PlaylistInfo` |
+| `RemovePlaylistAsync(playlistId)` | Removes a playlist |
+| `AddTrackToPlaylistAsync(playlistId, track)` | Adds a track to a playlist (no-op if already present) |
+| `RemoveTrackFromPlaylistAsync(playlistId, trackId)` | Removes a track from a playlist |
+| `GetPlaylistsAsync()` | Returns all playlists (including custom playlists on Android) |
+| `GetPlaylistTracksAsync(playlistId)` | Returns all tracks in a playlist |
 
-## PlayCount
+## PlaylistInfo
 
 ```csharp
-public record PlayCount(string TrackId, int Count);
+public record PlaylistInfo(string Id, string Name, int SongCount);
 ```
 
 | Property | Type | Description |
 |---|---|---|
-| `TrackId` | `string` | The platform-specific unique identifier for the track |
-| `Count` | `int` | The total number of times the track has been played |
+| `Id` | `string` | Platform-specific unique identifier. On Android, MediaStore row ID or `custom:` prefixed ID for custom playlists. On iOS, MusicKit playlist ID. |
+| `Name` | `string` | The display name of the playlist. |
+| `SongCount` | `int` | The number of tracks in the playlist. |
+
+## Play Counts
+
+Play counts are tracked automatically and available on `MusicMetadata.PlayCount`:
+
+- **iOS**: MusicKit reports plays to Apple Music automatically when using `ApplicationMusicPlayer`. The `PlayCount` on `MusicMetadata` comes from `Song.PlayCount`.
+- **Android**: Play counts are incremented internally when `IMusicPlayer.PlayAsync` is called, stored in a local JSON file. The `PlayCount` is merged into `MusicMetadata` when querying tracks.
+
+```csharp
+var tracks = await _library.GetAllTracksAsync();
+foreach (var track in tracks)
+{
+    Console.WriteLine($"{track.Title}: played {track.PlayCount} times");
+}
+```
+
+There is no public API to manually increment play counts — they are managed internally by the player.

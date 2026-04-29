@@ -349,7 +349,7 @@ export default defineConfig({
             },
             {
               id: 'music2-1',
-              content: 'Shiny.Music v2 Volume, Lyrics, Album Art, Custom Playlists, and more!',
+              content: 'Shiny.Music v3 BETA - Lyrics, Album Art, Playlists, and more!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/music' },
               dismissable: false

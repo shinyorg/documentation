@@ -45,7 +45,7 @@ foreach (var genre in genres)
 }
 ```
 
-Tracks with no genre are excluded from the results. On Android, genres are queried from `MediaStore.Audio.Genres`. On iOS, genres are enumerated via `MPMediaQuery.GenresQuery`.
+Tracks with no genre are excluded from the results. On Android, genres are queried from `MediaStore.Audio.Genres`. On iOS, genres are derived from MusicKit `Song.GenreNames`.
 
 You can optionally pass a `MusicFilter` to narrow results — for example, genres within a specific decade:
 
@@ -178,7 +178,7 @@ foreach (var playlist in playlists)
 }
 ```
 
-On Android, playlists are queried from `MediaStore.Audio.Playlists`. On iOS, playlists are queried via `MPMediaQuery.PlaylistsQuery`.
+On Android, playlists are queried from `MediaStore.Audio.Playlists` (merged with locally-stored custom playlists). On iOS, playlists are queried via MusicKit `MusicLibraryRequest<Playlist>`.
 
 ### Get Playlist Tracks
 
@@ -202,7 +202,7 @@ Each playlist is represented by a `PlaylistInfo` record:
 
 | Property | Type | Description |
 |---|---|---|
-| `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore playlist row ID. On iOS, it is the persistent ID. |
+| `Id` | `string` | Platform-specific unique identifier. On Android, MediaStore playlist row ID or `custom:` prefixed ID for custom playlists. On iOS, MusicKit playlist ID. |
 | `Name` | `string` | The display name of the playlist. |
 | `SongCount` | `int` | The number of tracks in the playlist. |
 
@@ -212,48 +212,44 @@ Each track is represented by a `MusicMetadata` record with the following propert
 
 | Property | Type | Description |
 |---|---|---|
-| `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore row ID. On iOS, it is the `MPMediaItem` persistent ID. |
+| `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore row ID. On iOS, it is the MusicKit Song ID. |
 | `Title` | `string?` | The track title, or `null` if not available. |
 | `Artist` | `string?` | The artist or performer, or `null` if not available. |
 | `Album` | `string?` | The album name, or `null` if not available. |
 | `Genre` | `string?` | The genre, or `null` if unavailable. |
 | `Duration` | `TimeSpan` | The playback duration. |
-| `AlbumArtUri` | `string?` | URI to album artwork. Available on Android via MediaStore; `null` on iOS where artwork is accessed through `MPMediaItem.Artwork`. Use `GetAlbumArtPathAsync` for cross-platform album art retrieval. |
-| `IsExplicit` | `bool?` | Whether the track is marked as explicit content. iOS only via `MPMediaItem.IsExplicitItem`; always `null` on Android. |
-| `ContentUri` | `string` | URI used for playback and file operations. On Android, this is a `content://` URI. On iOS, this is an `ipod-library://` asset URL. **Empty for DRM-protected Apple Music subscription tracks.** |
-| `StoreId` | `string?` | Apple Music catalog ID (from `PlayParams.Id`). Enables streaming playback via `MPMusicPlayerController` on iOS. Always `null` on Android. |
-| `Year` | `int?` | The release year of the track. On Android from `MediaStore.Audio.Media.YEAR`; on iOS from `MPMediaItem.ReleaseDate`. `null` if unavailable. |
+| `AlbumArtUri` | `string?` | URI to album artwork. On Android, a MediaStore content URI. On iOS, the MusicKit `Artwork.Url()`. Use `GetAlbumArtPathAsync` for cross-platform album art retrieval. |
+| `IsExplicit` | `bool?` | Whether the track is marked as explicit content. iOS only via MusicKit `Song.ContentRating`; always `null` on Android. |
+| `ContentUri` | `string` | URI used for playback and file operations. On Android, this is a `content://` URI. On iOS, this is always `string.Empty` — MusicKit handles playback internally. |
+| `StoreId` | `string?` | Apple Music catalog ID (from `PlayParams`). On iOS, non-null when the track has play parameters. Always `null` on Android. |
+| `Year` | `int?` | The release year of the track. On Android from `MediaStore.Audio.Media.YEAR`; on iOS from `Song.ReleaseDate`. `null` if unavailable. |
+| `PlayCount` | `int` | Number of times played. On iOS from MusicKit `Song.PlayCount`. On Android from locally stored play counts. Default 0. |
 
 ## ContentUri, StoreId, and DRM
 
-The `ContentUri` and `StoreId` properties determine what operations are available for a track:
+On iOS with MusicKit, `ContentUri` is always `string.Empty` — MusicKit handles playback internally via `ApplicationMusicPlayer`. All tracks in the user's library can be played regardless of DRM status. However, `CopyTrackAsync` still requires raw file access and returns `false` for DRM-protected tracks.
+
+On Android, `ContentUri` is always populated for all music files, and `StoreId` is always `null`.
 
 ```csharp
 var tracks = await _library.GetAllTracksAsync();
 
 foreach (var track in tracks)
 {
+    Console.WriteLine($"{track.Title} - Play count: {track.PlayCount}");
+    
     if (!string.IsNullOrEmpty(track.ContentUri))
     {
-        // Locally synced or purchased track — full access
-        Console.WriteLine($"✅ {track.Title} - available for local playback and copy");
-    }
-    else if (!string.IsNullOrEmpty(track.StoreId))
-    {
-        // Apple Music subscription track with catalog ID — streaming playback only
-        Console.WriteLine($"🎧 {track.Title} - available for streaming playback (no copy)");
+        // Android track — available for local playback and copy
+        Console.WriteLine($"  Available for playback and copy");
     }
     else
     {
-        // No playback or copy available
-        Console.WriteLine($"⚠️ {track.Title} - not playable or copyable");
+        // iOS track — playback via MusicKit, copy may be restricted
+        Console.WriteLine($"  Playback via MusicKit");
     }
 }
 ```
-
-:::note
-On Android, `ContentUri` is always populated for all music files. `StoreId` is always `null` on Android. The DRM and streaming distinction only applies to iOS Apple Music subscription tracks.
-:::
 
 ## Platform Details
 
@@ -263,5 +259,6 @@ On Android, `ContentUri` is always populated for all music files. `StoreId` is a
 - Results are sorted alphabetically by title.
 
 ### iOS
-- Tracks are queried using `MPMediaQuery` from the `MediaPlayer` framework.
-- Only items with `MPMediaType.Music` are returned — podcasts, audiobooks, and movies are excluded.
+- Tracks are queried using MusicKit `MusicLibraryRequest<Song>`.
+- Only music items are returned — podcasts, audiobooks, and movies are excluded.
+- Play counts come from `Song.PlayCount` and are included in the `MusicMetadata.PlayCount` property.

@@ -4,9 +4,8 @@ title: Playback
 
 The `IMusicPlayer` interface provides full playback control for music tracks from the device library.
 
-On iOS, the player supports two modes that are automatically selected based on the track's properties:
-- **Local playback** via `AVAudioPlayer` when `ContentUri` is available (purchased/synced tracks)
-- **Streaming playback** via `MPMusicPlayerController.SystemMusicPlayer` when `StoreId` is available (Apple Music subscription tracks)
+- **Android**: Uses `Android.Media.MediaPlayer` with content URIs from MediaStore.
+- **iOS**: Uses `MPMusicPlayerController.ApplicationMusicPlayer` for all playback. Looks up the `MPMediaItem` by persistent ID via `MPMediaQuery` and sets the player queue.
 
 ## Playing a Track
 
@@ -15,10 +14,10 @@ var tracks = await _library.GetAllTracksAsync();
 await _player.PlayAsync(tracks[0]);
 ```
 
-Calling `PlayAsync` stops any currently playing track, loads the new one, and begins playback immediately. The player automatically selects the appropriate playback engine based on whether `StoreId` or `ContentUri` is available.
+Calling `PlayAsync` stops any currently playing track, loads the new one, and begins playback immediately. On Android, the play count is automatically incremented in the local store.
 
 :::caution
-`PlayAsync` will throw an `InvalidOperationException` if both `ContentUri` and `StoreId` are empty, or if the platform player fails to initialize.
+`PlayAsync` will throw an `InvalidOperationException` if the track is not found in the music library or the platform player fails to initialize.
 :::
 
 ## Pause, Resume, and Stop
@@ -44,26 +43,6 @@ _player.Stop();
 // Seek to 1 minute 30 seconds
 _player.Seek(TimeSpan.FromMinutes(1.5));
 ```
-
-## Volume Control
-
-Control the playback volume programmatically. The value ranges from 0.0 (silent) to 1.0 (full volume) and defaults to 1.0:
-
-```csharp
-// Set volume to 75%
-_player.Volume = 0.75f;
-
-// Mute
-_player.Volume = 0f;
-
-// Full volume
-_player.Volume = 1f;
-
-// Read current volume
-float currentVolume = _player.Volume;
-```
-
-The value is automatically clamped to the 0.0–1.0 range.
 
 ## Reading Playback State
 
@@ -120,10 +99,12 @@ If you register the player as a singleton in DI, it will be disposed when the ap
 - Playback uses `Android.Media.MediaPlayer` with content URIs from MediaStore.
 - Audio attributes are set to `ContentType.Music` with `Usage.Media`.
 - Seeking uses millisecond precision.
+- Play counts are incremented automatically in a local JSON store.
 
 ### iOS
-- **Local tracks** (with `ContentUri`): Playback uses `AVAudioPlayer` with the track's `ipod-library://` asset URL. The `AVAudioSession` category is set to `Playback` to support background audio (if configured). Seeking uses second precision.
-- **Streaming tracks** (with `StoreId`): Playback uses `MPMusicPlayerController.SystemMusicPlayer` with the Apple Music catalog ID. This enables playback of DRM-protected Apple Music subscription content. The system player manages its own audio session.
+- Playback uses `MPMusicPlayerController.ApplicationMusicPlayer` for all tracks (both purchased and subscription content).
+- The `MPMediaItem` is looked up by persistent ID via `MPMediaQuery` and set as the player queue.
+- State is monitored via NSTimer polling (0.5s interval).
 
 :::note
 Music library access requires a **physical device**. Simulators and emulators typically have no music content and cannot test playback.

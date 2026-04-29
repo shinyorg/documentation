@@ -74,6 +74,14 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasMusic = nugets.find(x => x.nuget === "Shiny.Music") !== undefined;
+    if (isMaui && hasMusic) {
+        pr += "\r\n<!-- Only needed if using IMusicIdentifier for song recognition via ShazamKit -->\r\n";
+        pr += "<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.developer.shazamkit\" Type=\"Boolean\" Value=\"true\" Visible=\"false\" />\r\n";
+        pr += "</ItemGroup>\r\n";
+    }
+
     if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {

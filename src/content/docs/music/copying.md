@@ -43,19 +43,19 @@ var success = await _library.CopyTrackAsync(track, destinationPath);
 
 ### iOS
 
-- Copies are performed using `AVAssetExportSession` with the `AppleM4A` preset.
+- Copies are performed using `AVAssetExportSession` with the `AppleM4A` preset (accessed via `MPMediaQuery` for the raw asset).
 - The exported file is always in **M4A format** regardless of the original encoding.
 - **DRM restrictions apply**:
 
 | Track Source | Can Copy? | Notes |
 |---|---|---|
-| iTunes purchases (DRM-free) | ✅ | Full access via `AssetURL` |
-| Locally synced from computer | ✅ | Full access via `AssetURL` |
-| Apple Music subscription | ❌ | `AssetURL` is `null`; track is DRM-protected |
+| iTunes purchases (DRM-free) | ✅ | Full access |
+| Locally synced from computer | ✅ | Full access |
+| Apple Music subscription | ❌ | DRM-protected |
 | iTunes Match (cloud) | ⚠️ | Only if downloaded to device |
 
 :::caution
-Apple Music subscription tracks are DRM-protected and expose no `AssetURL`. The `ContentUri` in `MusicMetadata` will be empty for these tracks, and `CopyTrackAsync` will return `false`. This is an iOS platform limitation that cannot be worked around.
+Apple Music subscription tracks are DRM-protected. `CopyTrackAsync` will return `false` for these tracks. This is an iOS platform limitation that cannot be worked around.
 :::
 
 ## Error Handling
