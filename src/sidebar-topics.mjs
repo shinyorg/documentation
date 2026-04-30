@@ -326,6 +326,7 @@ export const sidebarTopics = [
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
+          { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
           { label: 'TextToSpeechButton', link: 'controls/texttospeech/', jumpTo: true },
         ]
       },
