@@ -327,6 +327,13 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'extensions-30',
+              content: 'Shiny.Extensions.DependencyInjection v3: Turn any DI service into an AI Tool',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/extensions/di/' },
+              dismissable: false
+            },            
+            {
               id: 'mobilev4-1',
               content: 'Client v4.1 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
               variant: 'tip',

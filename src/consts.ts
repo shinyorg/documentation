@@ -323,7 +323,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
         "category": "core",
-        "version": "2.0.4"
+        "version": "3.0.0"
     },
     {
         "id": "localization",
@@ -397,7 +397,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
         "category": "core",
-        "version": "2.0.4"
+        "version": "3.0.0"
     },
     {
         "id": "spatial",
@@ -426,14 +426,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
         "category": "core",
-        "version": "2.0.4"
+        "version": "3.0.0"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
         "category": "core",
-        "version": "2.0.4"
+        "version": "3.0.0"
     }
 ];
 

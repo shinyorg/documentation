@@ -456,6 +456,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'di/' },
+          { label: 'AI Tools', link: 'di/ai-tools' },
           { label: 'Advanced Registration', link: 'di/advanced' },
           { label: 'Categories', link: 'di/categories' },
           { label: 'Configuration', link: 'di/configuration' },
