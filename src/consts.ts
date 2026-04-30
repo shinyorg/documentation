@@ -340,9 +340,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
         "category": "storage",
-        "version": "3.2.0",
+        "version": "4.0.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "4.0.0" }
         ]
     },
     {
@@ -350,9 +350,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
         "description": "Document DB (SqlCipher)",
         "category": "storage",
-        "version": "3.2.0",
+        "version": "4.0.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "4.0.0" }
         ]
     },
     {
@@ -360,9 +360,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.SqlServer",
         "description": "Document DB (SQL Server)",
         "category": "storage",
-        "version": "3.2.0",
+        "version": "4.0.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "4.0.0" }
         ]
     },
     {
@@ -380,9 +380,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.PostgreSql",
         "description": "Document DB (PostgreSQL)",
         "category": "storage",
-        "version": "3.2.0",
+        "version": "4.0.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "3.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "4.0.0" }
         ]
     },
     {
