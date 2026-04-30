@@ -330,7 +330,7 @@ export default defineConfig({
               id: 'extensions-30',
               content: 'Shiny.Extensions.DependencyInjection v3: Turn any DI service into an AI Tool',
               variant: 'tip',
-              link: { text: 'Check It Out', href: '/extensions/di/' },
+              link: { text: 'Check It Out', href: '/extensions/di/ai-tools/' },
               dismissable: false
             },            
             {
