@@ -1,0 +1,251 @@
+---
+title: AI Tools
+---
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+Expose your document store operations as `Microsoft.Extensions.AI` tool functions that LLM agents can call directly. Register the document types you want to expose, control which operations are allowed, and restrict field visibility — all with a fluent builder API.
+
+The AI layer sits on top of `IDocumentStore` and does not modify its behavior. It wraps your registered types with `AIFunction` instances that translate LLM requests into store operations.
+
+## Setup
+
+<Steps>
+1. Install the AI extensions package
+
+   ```bash
+   dotnet add package Shiny.DocumentDb.Extensions.AI
+   ```
+
+2. Create your JSON context (for AOT)
+
+   ```csharp
+   [JsonSerializable(typeof(Customer))]
+   [JsonSerializable(typeof(Order))]
+   public partial class AppJsonContext : JsonSerializerContext;
+   ```
+
+3. Register the document store and AI tools
+
+   ```csharp
+   var jsonContext = new AppJsonContext(new JsonSerializerOptions
+   {
+       PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+   });
+
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
+       opts.JsonSerializerOptions = jsonContext.Options;
+   });
+
+   services.AddDocumentStoreAITools(tools =>
+   {
+       tools.AddType(
+           jsonContext.Customer,
+           capabilities: DocumentAICapabilities.All,
+           configure: b => b
+               .Description("Customer records with contact info")
+               .MaxPageSize(50)
+       );
+
+       tools.AddType(
+           jsonContext.Order,
+           capabilities: DocumentAICapabilities.ReadOnly,
+           configure: b => b
+               .Description("Customer orders")
+               .Property(o => o.Status, "Order status: Pending, Shipped, Delivered, Cancelled")
+               .IgnoreProperties(o => o.InternalNotes)
+       );
+   });
+   ```
+
+4. Pass the tools to your `IChatClient`
+
+   ```csharp
+   var aiTools = serviceProvider.GetRequiredService<DocumentStoreAITools>();
+   var options = new ChatOptions { Tools = aiTools.Tools.ToList() };
+   var response = await chatClient.GetResponseAsync(messages, options);
+   ```
+</Steps>
+
+## Capabilities
+
+Control which operations the LLM can perform on each type using the `DocumentAICapabilities` flags enum:
+
+| Flag | Tool Generated | Description |
+|------|---------------|-------------|
+| `Get` | `{type}_get_by_id` | Fetch a single document by ID |
+| `Query` | `{type}_query` | Query with structured filters, sorting, and paging |
+| `Count` | `{type}_count` | Count documents with optional filter |
+| `Aggregate` | `{type}_aggregate` | Compute sum/min/max/avg/count over documents |
+| `Insert` | `{type}_insert` | Create a new document |
+| `Update` | `{type}_update` | Replace an existing document |
+| `Delete` | `{type}_delete` | Delete a document by ID |
+
+Convenience combinations:
+
+| Combination | Includes |
+|-------------|----------|
+| `ReadOnly` | `Get`, `Query`, `Count`, `Aggregate` |
+| `All` | All seven operations |
+
+```csharp
+// Read-only access (default)
+tools.AddType(jsonContext.Customer, capabilities: DocumentAICapabilities.ReadOnly);
+
+// Full CRUD
+tools.AddType(jsonContext.Order, capabilities: DocumentAICapabilities.All);
+
+// Specific operations
+tools.AddType(jsonContext.AuditLog, capabilities: DocumentAICapabilities.Get | DocumentAICapabilities.Query);
+```
+
+## Per-Type Configuration
+
+The builder callback lets you control descriptions, field visibility, and page size limits:
+
+```csharp
+tools.AddType(jsonContext.Customer, capabilities: DocumentAICapabilities.All, configure: b =>
+{
+    // Type-level description used in tool descriptions and JSON schema
+    b.Description("Customer records with contact information");
+
+    // Override the description for a specific property
+    b.Property(c => c.Age, "Customer's age in years");
+    b.Property(c => c.Status, "Active, Inactive, or Suspended");
+
+    // Restrict which properties the LLM can see/filter on
+    // Option A: Only expose listed properties (allowlist)
+    b.AllowProperties(c => c.Id, c => c.Name, c => c.Email, c => c.Age);
+
+    // Option B: Hide specific properties (blocklist)
+    b.IgnoreProperties(c => c.InternalNotes, c => c.PasswordHash);
+
+    // Cap the maximum page size for query results (default 100)
+    b.MaxPageSize(50);
+});
+```
+
+## Structured Filters
+
+The query, count, and aggregate tools accept a structured `filter` parameter that supports nested boolean logic. The LLM constructs filter objects; the library translates them to LINQ expressions against the document store.
+
+### Leaf comparisons
+
+```json
+{ "field": "age", "op": "gt", "value": 30 }
+```
+
+| Operator | Description |
+|----------|-------------|
+| `eq` | Equals |
+| `ne` | Not equals |
+| `gt` | Greater than |
+| `gte` | Greater than or equal |
+| `lt` | Less than |
+| `lte` | Less than or equal |
+| `contains` | String contains (string fields only) |
+| `startsWith` | String starts with (string fields only) |
+| `in` | Value is in array |
+
+### Boolean combinators
+
+```json
+{
+  "and": [
+    { "field": "age", "op": "gte", "value": 18 },
+    { "field": "status", "op": "eq", "value": "Active" }
+  ]
+}
+```
+
+```json
+{
+  "or": [
+    { "field": "city", "op": "eq", "value": "Portland" },
+    { "field": "city", "op": "eq", "value": "Seattle" }
+  ]
+}
+```
+
+```json
+{
+  "not": { "field": "status", "op": "eq", "value": "Cancelled" }
+}
+```
+
+Combinators can be nested arbitrarily.
+
+## Generated Tools Reference
+
+### Get by ID
+
+Fetches a single document by its identifier. Returns `{ found: true, document: {...} }` or `{ found: false }`.
+
+### Query
+
+Queries documents with optional filter, sorting, and pagination. Parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `filter` | object | Structured filter (optional) |
+| `orderBy` | string | Field name to sort by (optional) |
+| `orderDirection` | string | `"asc"` or `"desc"` (default `"asc"`) |
+| `limit` | integer | Max results to return (default 50, capped at `MaxPageSize`) |
+| `offset` | integer | Number of results to skip (default 0) |
+
+Returns `{ count, offset, limit, documents: [...] }`.
+
+### Count
+
+Counts documents matching an optional filter. Returns `{ count }`.
+
+### Aggregate
+
+Computes a scalar aggregate over documents. Parameters:
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `function` | string | `"count"`, `"sum"`, `"min"`, `"max"`, or `"avg"` |
+| `field` | string | Numeric field to aggregate (required for sum/min/max/avg) |
+| `filter` | object | Structured filter (optional) |
+
+Returns `{ function, field, value }`.
+
+### Insert
+
+Creates a new document. Accepts a `document` object and returns `{ inserted: true, document: {...} }` with the auto-generated ID populated.
+
+### Update
+
+Replaces an existing document. Accepts a `document` object (must include the ID). Returns `{ updated: true }`.
+
+### Delete
+
+Deletes a document by identifier. Returns `{ deleted: true }` or `{ deleted: false }` if not found.
+
+## Using with GitHub Copilot
+
+The `Sample.CopilotConsole` project in the repository demonstrates a complete interactive chat application that authenticates with GitHub Copilot and uses the DocumentDb AI tools to let the LLM query and manage documents through natural language:
+
+```csharp
+// Seed data, authenticate with Copilot, then chat
+var aiTools = host.Services.GetRequiredService<DocumentStoreAITools>();
+var options = new ChatOptions { Tools = aiTools.Tools.ToList() };
+
+while (true)
+{
+    Console.Write("You: ");
+    var input = Console.ReadLine();
+    history.Add(new ChatMessage(ChatRole.User, input));
+    var response = await chatClient.GetResponseAsync(history, options);
+    Console.WriteLine($"Copilot: {response.Text}");
+}
+```
+
+Try prompts like:
+- "How many customers do we have?"
+- "Show me all pending orders"
+- "What's the average customer age?"
+- "Add a new customer named Dave, age 40, email dave@example.com"
+- "Delete customer cust-3"

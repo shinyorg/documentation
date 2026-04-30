@@ -327,6 +327,13 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'docdb-v4',
+              content: 'Document DB v4: Give your LLM Database Powers!',
+              variant: 'tip',
+              link: { text: 'Feed The Machine Here', href: '/documentdb/ai-tools/' },
+              dismissable: false
+            },            
+            {
               id: 'extensions-30',
               content: 'Shiny.Extensions.DependencyInjection v3: Turn any DI service into an AI Tool',
               variant: 'tip',

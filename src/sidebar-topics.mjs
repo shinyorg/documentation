@@ -348,6 +348,7 @@ export const sidebarTopics = [
           { label: 'Projections & Streaming', link: 'documentdb/projections' },
           { label: 'Aggregates', link: 'documentdb/aggregates' },
           { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
+          { label: 'AI Tools', link: 'documentdb/ai-tools' },
           { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
           { label: 'Release Notes', link: 'documentdb/release-notes' }
         ]
