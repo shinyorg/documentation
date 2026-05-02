@@ -27,7 +27,7 @@ export const sidebarTopics = [
   },
   {
     id: 'client',
-    label: 'Mobile Essentials',
+    label: 'App Essentials',
     link: '/mauishell/',
     icon: 'rocket',
     items: [
@@ -123,6 +123,18 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Data Sync',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'datasync/' },
+          { label: 'Entity Registration', link: 'datasync/entity-registration' },
+          { label: 'Removal Strategies', link: 'datasync/removal-strategies' },
+          { label: 'Sync Interceptor', link: 'datasync/sync-interceptor' },
+          { label: 'Server API Contracts', link: 'datasync/server-contracts' },
+          { label: 'Release Notes', link: 'datasync/release-notes' }
+        ]
+      },
+      {
         label: 'Templates',
         jumpTo: true,
         items:[
@@ -182,6 +194,14 @@ export const sidebarTopics = [
           { label: 'Geofencing', link: 'locations/geofencing' },
           { label: 'Motion Activity', link: 'locations/motionactivity' },
           { label: 'Release Notes', link: 'locations/release-notes' }
+        ]
+      },
+      {
+        label: 'Speech',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'speech/' },
+          { label: 'Release Notes', link: 'speech/release-notes' }
         ]
       },
     ]

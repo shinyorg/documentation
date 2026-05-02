@@ -1,0 +1,88 @@
+---
+title: Entity Registration
+---
+
+Each entity type is registered with `AddEntity<T>()` inside the `AddDataSync()` configuration. This page covers all available registration options.
+
+## Full Registration Example
+
+```csharp
+ds.AddEntity<MyEntity>(x => x.Id, e =>
+{
+    // --- Direction ---
+    e.Direction = SyncDirection.Both; // Both | PullOnly | PushOnly
+
+    // --- Pull ---
+    e.PullUri = "/api/items";              // required for Pull/Both
+    e.PullHttpMethod = HttpMethod.Get;     // default: GET
+    e.PullDateVariable = "since";          // appends ?since=<timestamp> to PullUri
+    e.PullMinimumTime = TimeSpan.FromMinutes(5); // throttle pulls
+
+    // --- Push ---
+    e.PushUri = "/api/items";              // required for Push/Both
+    e.PushHttpMethod = HttpMethod.Post;    // default: POST
+    e.PushBufferSize = 50;                 // max entities per batch (default: 50)
+
+    // --- Delete (optional separate endpoint) ---
+    e.DeleteUri = "/api/items/delete";     // if unset, deletes go to PushUri
+    e.DeleteHttpMethod = HttpMethod.Post;  // default: POST
+
+    // --- Version tracking ---
+    e.VersionSelector = x => x.Version;   // extract server version from entity
+
+    // --- Removal Strategies (all optional, any combination) ---
+
+    // 1. Soft-delete: remove locally if server flags entity as deleted
+    e.SoftDeletePredicate = x => x.IsDeleted;
+
+    // 2. Tombstone: fetch deleted IDs from a separate endpoint
+    e.TombstoneUri = "/api/items/tombstones";
+    e.TombstoneHttpMethod = HttpMethod.Get;       // default: GET
+    e.TombstoneDateVariable = "since";            // appends ?since=<timestamp>
+
+    // 3. Reconciliation: fetch all valid IDs, remove anything not in the set
+    e.ReconciliationUri = "/api/items/ids";
+    e.ReconciliationHttpMethod = HttpMethod.Get;   // default: GET
+    e.ReconciliationMinimumTime = TimeSpan.FromMinutes(30); // throttle (expensive)
+
+    // 4. Expiry: remove locally if server-driven state change detected
+    e.ExpiryPredicate = x => x.AssignedTo == null;
+});
+```
+
+## Sync Direction
+
+| Direction | Behavior |
+|-----------|----------|
+| `Both` | Push local changes and pull remote changes (default) |
+| `PullOnly` | Only pull from server — local writes are not tracked. Use for reference data. |
+| `PushOnly` | Only push to server — never pulls. Use for telemetry, feedback, or audit logs. |
+
+## Heterogeneous Push Queue
+
+For a general-purpose "sync up" queue that can push multiple unrelated types to one endpoint:
+
+```csharp
+public class SyncUpEntry
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string EntryType { get; set; } = "";
+    public JsonElement Payload { get; set; }
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+}
+
+ds.AddEntity<SyncUpEntry>(x => x.Id, e =>
+{
+    e.Direction = SyncDirection.PushOnly;
+    e.PushUri = "/api/syncup";
+    e.PushBufferSize = 100;
+});
+
+// Usage:
+var entry = new SyncUpEntry
+{
+    EntryType = "Feedback",
+    Payload = JsonSerializer.SerializeToElement(obj, AppJsonContext.Default.Feedback)
+};
+await syncService.Insert(entry);
+```

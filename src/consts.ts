@@ -63,7 +63,7 @@ export type ShinyCategory = {
  */
 export const ShinyCategories: ShinyCategory[] = [
     { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
-    { id: 'essentials',    title: 'Mobile Essentials',            span: 8,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
+    { id: 'essentials',    title: 'App Essentials',            span: 8,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
     { id: 'storage',       title: 'Data & Storage',              span: 4,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
     { id: 'devices',       title: 'Device & Sensors',            span: 8,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
     { id: 'platformdata',  title: 'Platform Data',               span: 4,  color: '#8B5CF6', tint: '#EDE9FE', tintDark: '#2E1F5E' },
@@ -422,6 +422,24 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "1.0.1"
     },
     {
+        "id": "speech",
+        "nuget": "Shiny.Speech",
+        "description": "Speech (STT/TTS)",
+        "category": "devices",
+        "version": "1.0.0"
+    },
+    {
+        "id": "datasync",
+        "nuget": "Shiny.DataSync",
+        "description": "Data Sync",
+        "category": "essentials",
+        "version": "1.0.0",
+        "additionalNugets": [
+            { "nuget": "Shiny.DocumentDb.Sqlite", "version": "4.0.0" },
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "4.0.0" }
+        ]
+    },
+    {
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
@@ -473,7 +491,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health', 'music'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health', 'music', 'speech'];
         return compos.some(x => ids.includes(x.id));
     }
 };
