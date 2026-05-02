@@ -429,6 +429,20 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "1.0.0"
     },
     {
+        "id": "speechazure",
+        "nuget": "Shiny.Speech.Azure",
+        "description": "Speech - Azure AI Speech",
+        "category": "devices",
+        "version": "1.0.0"
+    },
+    {
+        "id": "speechelevenlabs",
+        "nuget": "Shiny.Speech.ElevenLabs",
+        "description": "Speech - ElevenLabs TTS",
+        "category": "devices",
+        "version": "1.0.0"
+    },
+    {
         "id": "datasync",
         "nuget": "Shiny.DataSync",
         "description": "Data Sync",

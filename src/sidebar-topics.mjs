@@ -201,6 +201,9 @@ export const sidebarTopics = [
         jumpTo: true,
         items: [
           { label: 'Getting Started', link: 'speech/' },
+          { label: 'Azure AI Speech', link: 'speech/azure' },
+          { label: 'ElevenLabs', link: 'speech/elevenlabs' },
+          { label: 'Custom Provider', link: 'speech/custom-provider' },
           { label: 'Release Notes', link: 'speech/release-notes' }
         ]
       },
