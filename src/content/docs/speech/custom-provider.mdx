@@ -1,0 +1,126 @@
+---
+title: Custom Provider
+---
+
+## Overview
+
+Shiny Speech uses a pluggable cloud provider architecture. You can implement your own STT and/or TTS providers by implementing the `ISpeechToTextProvider` and `ITextToSpeechProvider` interfaces from `Shiny.Speech.Cloud`.
+
+Cloud providers replace the platform-native `ISpeechToTextService` / `ITextToSpeechService` registrations while still relying on platform-native audio capture (`IAudioSource`) and playback (`IAudioPlayer`).
+
+## Custom Speech-to-Text Provider
+
+Implement `ISpeechToTextProvider` to receive raw PCM audio (16kHz, 16-bit, mono) and yield recognition results:
+
+```csharp
+using Shiny.Speech;
+using Shiny.Speech.Cloud;
+
+public class MyCloudSttProvider : ISpeechToTextProvider
+{
+    public async IAsyncEnumerable<SpeechRecognitionResult> RecognizeAsync(
+        Stream audioStream,
+        SpeechRecognitionOptions? options = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        // Read PCM audio from audioStream
+        // Send to your cloud API
+        // Yield results as they arrive
+        yield return new SpeechRecognitionResult(
+            "recognized text",
+            IsFinal: true,
+            Confidence: 0.95f
+        );
+    }
+}
+```
+
+Register with DI:
+
+```csharp
+builder.Services.AddAudioSource();   // Platform-native microphone capture (required)
+builder.Services.AddCloudSpeechToText<MyCloudSttProvider>();
+```
+
+## Custom Text-to-Speech Provider
+
+Implement `ITextToSpeechProvider` to synthesize text into an audio stream:
+
+```csharp
+using Shiny.Speech;
+using Shiny.Speech.Cloud;
+
+public class MyCloudTtsProvider : ITextToSpeechProvider
+{
+    public async Task<IReadOnlyList<VoiceInfo>> GetVoicesAsync(
+        CultureInfo? culture = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Return available voices from your cloud provider
+        return new[]
+        {
+            new VoiceInfo("voice-1", "Default Voice", CultureInfo.GetCultureInfo("en-US"))
+        };
+    }
+
+    public async Task<Stream> SynthesizeAsync(
+        string text,
+        TextToSpeechOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        // Send text to your cloud API
+        // Return the audio stream (MP3 format)
+        return audioStream;
+    }
+}
+```
+
+Register with DI:
+
+```csharp
+builder.Services.AddAudioPlayer();   // Platform-native audio playback (required)
+builder.Services.AddCloudTextToSpeech<MyCloudTtsProvider>();
+```
+
+## Provider Interfaces
+
+### ISpeechToTextProvider
+
+```csharp
+public interface ISpeechToTextProvider
+{
+    IAsyncEnumerable<SpeechRecognitionResult> RecognizeAsync(
+        Stream audioStream,
+        SpeechRecognitionOptions? options = null,
+        CancellationToken cancellationToken = default
+    );
+}
+```
+
+### ITextToSpeechProvider
+
+```csharp
+public interface ITextToSpeechProvider
+{
+    Task<IReadOnlyList<VoiceInfo>> GetVoicesAsync(
+        CultureInfo? culture = null,
+        CancellationToken cancellationToken = default
+    );
+
+    Task<Stream> SynthesizeAsync(
+        string text,
+        TextToSpeechOptions? options = null,
+        CancellationToken cancellationToken = default
+    );
+}
+```
+
+## How It Works
+
+When you register a cloud provider, Shiny Speech creates a bridge class (`CloudSpeechToText` or `CloudTextToSpeech`) that:
+
+1. Captures audio from `IAudioSource` (for STT) or receives synthesized audio (for TTS)
+2. Delegates recognition/synthesis to your provider implementation
+3. Exposes the standard `ISpeechToTextService` / `ITextToSpeechService` interface
+
+This means your app code doesn't change — you can swap between platform-native, Azure, ElevenLabs, or your own provider by changing only the DI registration.
