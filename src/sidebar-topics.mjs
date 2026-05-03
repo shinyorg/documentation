@@ -340,6 +340,7 @@ export const sidebarTopics = [
           { label: 'AddressEntry', link: 'controls/addressentry/', jumpTo: true },
         ]
       },
+      { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
       {
         label: 'Other Controls',
         items:[
@@ -351,6 +352,7 @@ export const sidebarTopics = [
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
           { label: 'TextToSpeechButton', link: 'controls/texttospeech/', jumpTo: true },
+          { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },
       { label: 'Release Notes', link: 'controls/release-notes' }
