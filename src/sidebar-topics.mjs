@@ -351,7 +351,6 @@ export const sidebarTopics = [
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
-          { label: 'TextToSpeechButton', link: 'controls/texttospeech/', jumpTo: true },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },
@@ -374,6 +373,7 @@ export const sidebarTopics = [
           { label: 'Projections & Streaming', link: 'documentdb/projections' },
           { label: 'Aggregates', link: 'documentdb/aggregates' },
           { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
+          { label: 'Spatial', link: 'documentdb/spatial' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
           { label: 'Release Notes', link: 'documentdb/release-notes' }
