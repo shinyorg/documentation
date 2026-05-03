@@ -18,13 +18,13 @@ All Shiny controls that support feedback have a `UseFeedback` property (default:
 
 | Parameter | Description |
 |---|---|
-| `controlType` | The `Type` of the control (e.g. `typeof(ChatView)`, `typeof(SecurityPin)`) |
+| `control` | The actual control instance (e.g. the `ChatView`, `SecurityPin`, `Button`) — use pattern matching like `control is ChatView` to identify the source |
 | `eventName` | The interaction that occurred (e.g. `"MessageSent"`, `"Completed"`, `"Clicked"`) |
-| `details` | Optional context — for `ChatView`, this is the message text; for `SecurityPin`, `"LongPress"` on completion |
+| `args` | Optional context — for `ChatView`, this is the `ChatMessage` object; for standard MAUI controls, the native `EventArgs`; `"LongPress"` string for SecurityPin completion |
 
 ## Default Behavior
 
-`UseShinyControls()` registers `HapticFeedbackService` as the default implementation. It performs a click haptic for most events and a long press haptic when `details` is `"LongPress"`.
+`UseShinyControls()` registers `HapticFeedbackService` as the default implementation. It performs a click haptic for most events and a long press haptic when `eventName` is `"LongPress"`.
 
 ```csharp
 builder.UseShinyControls(); // registers HapticFeedbackService by default
@@ -44,26 +44,19 @@ builder.UseShinyControls(cfg =>
 ### Example: Text-to-Speech for Chat
 
 ```csharp
-public class ChatTtsFeedbackService : IFeedbackService
+public class ChatTtsFeedbackService(ITextToSpeech tts) : HapticFeedbackService
 {
-    readonly ITextToSpeech tts;
-    public ChatTtsFeedbackService(ITextToSpeech tts) => this.tts = tts;
-
-    public async void OnRequested(Type controlType, string eventName, string? details)
+    public override async void OnRequested(object control, string eventName, object? args)
     {
-        // Speak incoming chat messages aloud
-        if (controlType == typeof(ChatView) && eventName == "MessageReceived" && details is not null)
-        {
-            await tts.SpeakAsync(details);
-            return;
-        }
+        // Let haptic do its thing first
+        base.OnRequested(control, eventName, args);
 
-        // Default haptic for everything else
-        try
+        // Speak incoming chat messages aloud
+        if (control is ChatView && eventName == "MessageReceived" && args is ChatMessage { IsFromMe: false } msg)
         {
-            HapticFeedback.Default.Perform(HapticFeedbackType.Click);
+            var say = $"Message from {msg.SenderId}. {msg.Text}";
+            await tts.SpeakAsync(say);
         }
-        catch { }
     }
 }
 ```
@@ -73,14 +66,14 @@ public class ChatTtsFeedbackService : IFeedbackService
 ```csharp
 public class SoundFeedbackService : IFeedbackService
 {
-    public void OnRequested(Type controlType, string eventName, string? details)
+    public void OnRequested(object control, string eventName, object? args)
     {
-        var sound = (controlType.Name, eventName) switch
+        var sound = (control, eventName) switch
         {
-            ("SecurityPin", "Completed") => "success.wav",
-            ("SecurityPin", "DigitEntered") => "click.wav",
-            ("ChatView", "MessageSent") => "swoosh.wav",
-            ("ChatView", "MessageReceived") => "chime.wav",
+            (SecurityPin, "Completed") => "success.wav",
+            (SecurityPin, "DigitEntered") => "click.wav",
+            (ChatView, "MessageSent") => "swoosh.wav",
+            (ChatView, "MessageReceived") => "chime.wav",
             _ => null
         };
 
@@ -92,7 +85,9 @@ public class SoundFeedbackService : IFeedbackService
 
 ## Standard MAUI Control Integration
 
-Beyond Shiny's own controls, you can opt in to automatic feedback for standard MAUI controls — Button, Entry, Slider, Switch, and more. This uses `Application.DescendantAdded`/`DescendantRemoved` to hook into the visual tree lifecycle, binding and unbinding events automatically with no modifications to the controls themselves.
+Beyond Shiny's own controls, you can opt in to automatic feedback for standard MAUI controls — Button, Entry, Slider, Switch, and more. The hook system is fully pluggable and AOT-compatible. It uses `Application.DescendantAdded`/`DescendantRemoved` to hook into the visual tree lifecycle, binding and unbinding events automatically with no modifications to the controls themselves.
+
+### With all defaults
 
 ```csharp
 builder.UseShinyControls(cfg =>
@@ -101,32 +96,68 @@ builder.UseShinyControls(cfg =>
 });
 ```
 
-### Integrated MAUI Controls
+### Defaults + custom hooks
 
-| Control | Event | Details | Description |
+Add your own control hooks on top of the built-in defaults:
+
+```csharp
+cfg.AddDefaultMauiControlFeedback(x =>
+{
+    x.Hook<MyCustomControl>(nameof(MyCustomControl.Tapped),
+        (c, h) => c.Tapped += h,
+        (c, h) => c.Tapped -= h);
+});
+```
+
+### Custom hooks only (no defaults)
+
+Use `AddMauiControlFeedback` to register only the hooks you want:
+
+```csharp
+cfg.AddMauiControlFeedback(x =>
+{
+    x.Hook<Button>(nameof(Button.Clicked),
+        (btn, h) => btn.Clicked += h,
+        (btn, h) => btn.Clicked -= h);
+
+    x.Hook<Slider, ValueChangedEventArgs>(nameof(Slider.ValueChanged),
+        (s, h) => s.ValueChanged += h,
+        (s, h) => s.ValueChanged -= h);
+});
+```
+
+Two `Hook` overloads are available:
+- `Hook<TControl>(eventName, subscribe, unsubscribe)` — for `EventHandler` events (args passed as `EventArgs`)
+- `Hook<TControl, TEventArgs>(eventName, subscribe, unsubscribe)` — for `EventHandler<TEventArgs>` events (typed args passed through)
+
+### Default MAUI Control Hooks
+
+The `control` parameter is the actual control instance, and `args` is the native event args object.
+
+| Control | Event | Args | Description |
 |---|---|---|---|
-| `Button` | `Clicked` | — | Button tapped |
-| `Entry` | `TextChanged` | new text value | Text input changed |
-| `Slider` | `ValueChanged` | new value | Slider moved |
-| `Switch` | `Toggled` | value | Switch toggled |
-| `CheckBox` | `CheckedChanged` | value | Checkbox toggled |
-| `DatePicker` | `DateSelected` | new date | Date selected |
-| `TimePicker` | `TimeChanged` | — | Time changed |
-| `Picker` | `SelectedIndexChanged` | — | Selection changed |
-| `SearchBar` | `SearchButtonPressed` | — | Search submitted |
-| `Stepper` | `ValueChanged` | new value | Stepper changed |
-| `Editor` | `TextChanged` | new text value | Editor text changed |
-| `RadioButton` | `CheckedChanged` | value | Radio button toggled |
+| `Button` | `Clicked` | `EventArgs` | Button tapped |
+| `Entry` | `TextChanged` | `TextChangedEventArgs` | Text input changed |
+| `Slider` | `ValueChanged` | `ValueChangedEventArgs` | Slider moved |
+| `Switch` | `Toggled` | `ToggledEventArgs` | Switch toggled |
+| `CheckBox` | `CheckedChanged` | `CheckedChangedEventArgs` | Checkbox toggled |
+| `DatePicker` | `DateSelected` | `DateChangedEventArgs` | Date selected |
+| `TimePicker` | `TimeChanged` | `PropertyChangedEventArgs` | Time changed |
+| `Picker` | `SelectedIndexChanged` | `EventArgs` | Selection changed |
+| `SearchBar` | `SearchButtonPressed` | `EventArgs` | Search submitted |
+| `Stepper` | `ValueChanged` | `ValueChangedEventArgs` | Stepper changed |
+| `Editor` | `TextChanged` | `TextChangedEventArgs` | Editor text changed |
+| `RadioButton` | `CheckedChanged` | `CheckedChangedEventArgs` | Radio button toggled |
 
 Events are properly unhooked when controls are removed from the visual tree, ensuring no memory leaks.
 
 ## Shiny Control Events Reference
 
-| Control | Event Name | Details | Description |
+| Control | Event Name | Args | Description |
 |---|---|---|---|
-| `ChatView` | `MessageSent` | message text | User sent a message |
-| `ChatView` | `MessageReceived` | message text | External message arrived |
-| `ChatView` | `MessageTapped` | message text | User tapped a message bubble |
+| `ChatView` | `MessageSent` | `ChatMessage` | User sent a message |
+| `ChatView` | `MessageReceived` | `ChatMessage` | External message arrived |
+| `ChatView` | `MessageTapped` | `ChatMessage` | User tapped a message bubble |
 | `ChatView` | `AttachImage` | — | User tapped the attach button |
 | `Fab` | `Clicked` | — | Fab button tapped |
 | `FabMenu` | `Toggled` | — | Menu opened or closed |

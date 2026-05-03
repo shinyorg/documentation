@@ -1,0 +1,158 @@
+---
+title: 'The Feedback Service — One Hook to Rule Them All'
+date: 2026-05-03
+authors:
+  - allanritchie
+tags:
+  - Controls
+  - Release
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.Maui.Controls" showLabel={true} />
+
+Every tap, swipe, and keystroke in your app is an opportunity.  An opportunity to confirm the user's action, guide their attention, or add a layer of polish that separates "functional" from "delightful."  Most apps handle this with scattered `HapticFeedback.Default.Perform()` calls sprinkled across code-behind files.  It works — until you want text-to-speech for accessibility, sound effects for a kiosk app, analytics for product telemetry, or different feedback for different controls.  Then you're threading conditional logic through every view in your app.
+
+Shiny Controls v1.0 ships with `IFeedbackService` — a single injectable service that every interactive control in the library already calls.  You implement it once.  Every control uses it automatically.
+
+---
+
+## How It Works
+
+Every Shiny control that supports feedback has a `UseFeedback` property (default: `true`).  When a user interaction occurs — a message sent, a pin digit entered, a panel opened — the control calls `IFeedbackService.OnRequested()` with three things:
+
+```csharp
+public interface IFeedbackService
+{
+    void OnRequested(object control, string eventName, object? args = null);
+}
+```
+
+- **`control`** — the actual control instance, not a `Type`.  Pattern match directly: `control is ChatView`, `control is SecurityPin`.
+- **`eventName`** — what happened: `"MessageReceived"`, `"DigitEntered"`, `"Opened"`.
+- **`args`** — contextual data.  For `ChatView`, this is the full `ChatMessage` object.  For standard MAUI controls, it's the native `EventArgs`.  For `SecurityPin` completion, it's `"LongPress"`.
+
+The default `HapticFeedbackService` does what you'd expect — click haptic for most events, long press haptic for completion events.  But the real power is in replacing it.
+
+## Custom Feedback: TTS + Sound Effects
+
+Here's a real example from our sample app.  One service, three behaviors — haptic, text-to-speech for incoming chat messages, and audio cues for PIN entry:
+
+```csharp
+public class MyCustomFeedbackService(
+    ITextToSpeechService textToSpeech,
+    IAudioManager audioManager
+) : HapticFeedbackService
+{
+    public override async void OnRequested(object control, string eventName, object? args)
+    {
+        // haptic first — always
+        base.OnRequested(control, eventName, args);
+
+        // speak incoming chat messages aloud
+        if (control is ChatView && args is ChatMessage { IsFromMe: false } msg)
+        {
+            await textToSpeech.SpeakAsync(
+                $"Message from {msg.SenderId}. {msg.Text}"
+            );
+        }
+        // click and success sounds for PIN entry
+        else if (control is SecurityPin)
+        {
+            var sound = eventName.Equals("completed", StringComparison.OrdinalIgnoreCase)
+                ? "pin_success.wav"
+                : "pin_click.wav";
+
+            var raw = await FileSystem.OpenAppPackageFileAsync(sound);
+            audioManager.CreatePlayer(raw).Play();
+        }
+    }
+}
+```
+
+Register it in one line:
+
+```csharp
+builder.UseShinyControls(cfg =>
+{
+    cfg.SetCustomFeedback<MyCustomFeedbackService>();
+});
+```
+
+Because `control` is the live instance and `args` carries typed data, you can make nuanced decisions without parsing strings.  The `ChatMessage` gives you sender, timestamp, text, and image URL.  The `SecurityPin` instance gives you its current value and length.  Cast, match, and go.
+
+## Pluggable MAUI Control Hooks
+
+Shiny's own controls call `IFeedbackService` internally.  But what about standard MAUI controls — `Button`, `Slider`, `Entry`?  The `MauiControlFeedbackBuilder` hooks them in automatically, with an AOT-compatible, fully pluggable design:
+
+### All defaults
+
+```csharp
+cfg.AddDefaultMauiControlFeedback();
+```
+
+This registers hooks for 12 standard MAUI controls — `Button.Clicked`, `Entry.TextChanged`, `Slider.ValueChanged`, `Switch.Toggled`, and more.  Each hook passes the control instance as `control` and the native event args as `args`.
+
+### Defaults + your own
+
+```csharp
+cfg.AddDefaultMauiControlFeedback(x =>
+{
+    x.Hook<MyCustomControl>(nameof(MyCustomControl.Tapped),
+        (c, h) => c.Tapped += h,
+        (c, h) => c.Tapped -= h);
+});
+```
+
+### Only what you need
+
+```csharp
+cfg.AddMauiControlFeedback(x =>
+{
+    x.Hook<Button>(nameof(Button.Clicked),
+        (btn, h) => btn.Clicked += h,
+        (btn, h) => btn.Clicked -= h);
+
+    x.Hook<Slider, ValueChangedEventArgs>(nameof(Slider.ValueChanged),
+        (s, h) => s.ValueChanged += h,
+        (s, h) => s.ValueChanged -= h);
+});
+```
+
+Two overloads cover every case:
+- `Hook<TControl>(eventName, subscribe, unsubscribe)` for plain `EventHandler` events
+- `Hook<TControl, TEventArgs>(eventName, subscribe, unsubscribe)` for typed `EventHandler<TEventArgs>` events
+
+Under the hood, each hook uses a `ConditionalWeakTable` to track handlers per control instance — no leaks, no dictionaries to manage, proper unsubscription when controls leave the visual tree.  Zero reflection, fully AOT-safe.
+
+## What Ships Built-In
+
+Every Shiny control fires feedback through this system.  Here's the full event catalog:
+
+| Control | Events |
+|---|---|
+| **ChatView** | `MessageSent`, `MessageReceived`, `MessageTapped` (all pass `ChatMessage`), `AttachImage` |
+| **SecurityPin** | `DigitEntered`, `Completed` |
+| **FloatingPanel** | `Opened`, `Closed`, `DetentChanged` |
+| **ImageViewer** | `Opened`, `Closed`, `DoubleTapped` |
+| **ImageEditor** | `ToolModeChanged`, `Undo`, `Redo`, `Rotate`, `Reset`, `CropApplied`, `Saved` |
+| **Fab / FabMenu** | `Clicked`, `Toggled` |
+| **Scheduler** | `DaySelected`, `EventSelected`, `TimeSlotSelected` |
+| **TableView Cells** | `Tapped` |
+| **Toast** | `Show` |
+
+Any control's feedback can be suppressed per-instance with `UseFeedback="False"`.
+
+## The Design Philosophy
+
+Most feedback systems are either too simple (a global haptic toggle) or too complex (per-control event subscriptions scattered across your app).  `IFeedbackService` sits in the sweet spot:
+
+1. **One service, all controls.**  Implement once, every control calls it.
+2. **Instance, not type.**  You get the actual control, not `typeof(Button)`.  Inspect properties, check state, make decisions.
+3. **Typed args, not strings.**  `ChatMessage`, `ValueChangedEventArgs`, `ToggledEventArgs` — not `"the message text"`.
+4. **Pluggable hooks, not hardcoded events.**  Add your own controls to the system with three lambdas.
+5. **AOT-safe.**  No reflection, no expressions, no `Delegate.CreateDelegate`.  Just generics and delegates.
+
+Whether you're building an accessible app that speaks every incoming message, a kiosk that plays sound effects, or just want consistent haptic feedback across your entire UI — `IFeedbackService` is one implementation away.
+
+Check out the [full documentation](/controls/feedback/) and the sample app for a working demo with TTS and audio integration.
