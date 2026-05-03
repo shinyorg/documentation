@@ -328,7 +328,7 @@ export default defineConfig({
             },
             {
               id: 'docdb-v4',
-              content: 'Document DB v: Give your LLM Database Powers!',
+              content: 'Document DB v4: Give your LLM Database Powers!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/ai-tools/' },
               dismissable: false
