@@ -82,11 +82,6 @@ const AppleInfoPlist = (props: Props) => {
   }
   if (has('music')) {
     addKey('NSAppleMusicUsageDescription');
-    src += `
-        <!-- Only needed if using IMusicIdentifier for song recognition -->
-        <key>NSMicrophoneUsageDescription</key>
-        <string>Used to identify songs playing nearby.</string>
-        `;
   }
   if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('spatial-geofencing') || has('bluetoothle') || has('blehosting')) {
     src += `
