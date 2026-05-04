@@ -349,6 +349,7 @@ export const sidebarTopics = [
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
+          { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },
