@@ -320,6 +320,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'SheetView',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/sheetview/' },
+          { label: 'Properties & Events', link: 'controls/sheetview/properties' },
+          { label: 'Examples', link: 'controls/sheetview/examples' },
+          { label: 'Blazor Usage', link: 'controls/sheetview/blazor' },
+        ]
+      },
+      {
         label: 'Fab & FabMenu',
         jumpTo: true,
         items:[
@@ -354,7 +364,7 @@ export const sidebarTopics = [
         items:[
           { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
           { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
-          { label: 'GradientSlider', link: 'controls/gradient-slider/', jumpTo: true },
+          { label: 'Slider', link: 'controls/slider/', jumpTo: true },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
