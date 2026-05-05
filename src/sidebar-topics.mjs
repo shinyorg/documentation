@@ -286,7 +286,8 @@ export const sidebarTopics = [
         label: 'ChatView',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/chatview/' },
+          { label: 'Overview', link: 'controls/chatview/' },
+          { label: 'Getting Started', link: 'controls/chatview/getting-started' },
           { label: 'Messages', link: 'controls/chatview/messages' },
           { label: 'Participants & Avatars', link: 'controls/chatview/participants' },
           { label: 'Input Bar & Tools', link: 'controls/chatview/input-bar' },
