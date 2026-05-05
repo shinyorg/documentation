@@ -287,8 +287,16 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'controls/chatview/' },
-          { label: 'Data Models', link: 'controls/chatview/data-models' },
-          { label: 'Properties & Commands', link: 'controls/chatview/configuration' },
+          { label: 'Messages', link: 'controls/chatview/messages' },
+          { label: 'Participants & Avatars', link: 'controls/chatview/participants' },
+          { label: 'Input Bar & Tools', link: 'controls/chatview/input-bar' },
+          { label: 'Typing Indicators', link: 'controls/chatview/typing-indicators' },
+          { label: 'Scrolling & Pagination', link: 'controls/chatview/scrolling-pagination' },
+          { label: 'Acknowledgements', link: 'controls/chatview/acknowledgements' },
+          { label: 'Bubble Tools', link: 'controls/chatview/bubble-tools' },
+          { label: 'Message Templates', link: 'controls/chatview/message-templates' },
+          { label: 'Scenarios', link: 'controls/chatview/scenarios' },
+          { label: 'API Reference', link: 'controls/chatview/api-reference' },
         ]
       },
       {
