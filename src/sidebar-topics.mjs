@@ -336,6 +336,7 @@ export const sidebarTopics = [
           { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', jumpTo: true },
           { label: 'CountryPicker', link: 'controls/countrypicker/', jumpTo: true },
           { label: 'AddressEntry', link: 'controls/addressentry/', jumpTo: true },
+          { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
         ]
       },
       { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
@@ -344,12 +345,14 @@ export const sidebarTopics = [
         items:[
           { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
           { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
+          { label: 'GradientSlider', link: 'controls/gradient-slider/', jumpTo: true },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
+          { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
+          { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
-          { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },

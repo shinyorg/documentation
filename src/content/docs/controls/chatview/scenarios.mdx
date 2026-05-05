@@ -1,0 +1,528 @@
+---
+title: ChatView | Scenarios
+description: Complete implementation patterns for AI assistants, customer support, group chat, and more
+---
+
+## AI Assistant / Chatbot
+
+A single-participant bot conversation with typing indicators and streaming responses.
+
+### Setup
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                TypingParticipants="{Binding TypingParticipants}"
+                ShowAvatarsInSingleChat="True"
+                SendCommand="{Binding SendCommand}"
+                MyBubbleColor="#007AFF"
+                MyTextColor="White"
+                OtherBubbleColor="#F0F0F0"
+                OtherTextColor="Black"
+                PlaceholderText="Ask me anything..." />
+```
+
+### ViewModel
+
+```csharp
+public partial class AiChatViewModel : ObservableObject
+{
+    readonly IAiService aiService;
+
+    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
+    [ObservableProperty] ObservableCollection<ChatParticipant> typingParticipants = [];
+
+    [ObservableProperty]
+    ObservableCollection<ChatParticipant> participants = new()
+    {
+        new ChatParticipant
+        {
+            Id = "assistant",
+            DisplayName = "AI Assistant",
+            Avatar = ImageSource.FromFile("ai_bot.png")
+        }
+    };
+
+    ChatParticipant Bot => Participants[0];
+
+    [RelayCommand]
+    async Task Send(string text)
+    {
+        // Add user message
+        Messages.Add(new ChatMessage
+        {
+            Text = text,
+            SenderId = "me",
+            IsFromMe = true,
+            Timestamp = DateTimeOffset.Now
+        });
+
+        // Show typing indicator
+        TypingParticipants.Add(Bot);
+
+        try
+        {
+            // Call AI service
+            var response = await aiService.GetResponseAsync(text);
+
+            // Add bot response
+            Messages.Add(new ChatMessage
+            {
+                Text = response,
+                SenderId = "assistant",
+                IsFromMe = false,
+                Timestamp = DateTimeOffset.Now
+            });
+        }
+        finally
+        {
+            TypingParticipants.Remove(Bot);
+        }
+    }
+}
+```
+
+### With Action Buttons (using Message Templates)
+
+For AI assistants that suggest actions:
+
+```csharp
+// After AI suggests an action
+Messages.Add(new ActionChatMessage
+{
+    Text = "I found a flight from NYC to LA on June 15. Would you like to book it?",
+    ActionText = "Book Flight",
+    SenderId = "assistant",
+    IsFromMe = false
+});
+```
+
+See [Message Templates](./message-templates) for the full DataTemplateSelector setup.
+
+---
+
+## Customer Support Chat
+
+A support scenario with agent identity, server confirmation, and file attachments.
+
+### Setup
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                ShowAvatarsInSingleChat="True"
+                SendCommand="{Binding SendCommand}"
+                AttachImageCommand="{Binding AttachCommand}"
+                IsMultiPerson="False"
+                MyBubbleColor="#DCF8C6"
+                OtherBubbleColor="White"
+                PlaceholderText="Describe your issue..." />
+```
+
+### ViewModel
+
+```csharp
+public partial class SupportChatViewModel : ObservableObject
+{
+    readonly ISupportService supportService;
+
+    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
+    [ObservableProperty]
+    ObservableCollection<ChatParticipant> participants = new()
+    {
+        new ChatParticipant
+        {
+            Id = "agent",
+            DisplayName = "Support Agent",
+            Avatar = ImageSource.FromFile("support_avatar.png")
+        }
+    };
+
+    [RelayCommand]
+    async Task Send(string text)
+    {
+        var msg = new ChatMessage
+        {
+            Text = text,
+            SenderId = "me",
+            IsFromMe = true,
+            IsSent = false, // Show pending state
+            Timestamp = DateTimeOffset.Now
+        };
+        Messages.Add(msg);
+
+        // Send to server
+        var response = await supportService.SendMessageAsync(text);
+
+        // Confirm delivery
+        var index = Messages.IndexOf(msg);
+        Messages.RemoveAt(index);
+        msg.IsSent = true;
+        msg.Identifier = response.ServerMessageId;
+        Messages.Insert(index, msg);
+    }
+
+    [RelayCommand]
+    async Task Attach()
+    {
+        var photo = await MediaPicker.PickPhotoAsync();
+        if (photo is null) return;
+
+        Messages.Add(new ChatMessage
+        {
+            ImageUrl = photo.FullPath,
+            SenderId = "me",
+            IsFromMe = true,
+            Timestamp = DateTimeOffset.Now
+        });
+    }
+
+    // Called when receiving messages from the agent (e.g., via SignalR)
+    public void OnAgentMessage(string text)
+    {
+        Messages.Add(new ChatMessage
+        {
+            Text = text,
+            SenderId = "agent",
+            IsFromMe = false,
+            Timestamp = DateTimeOffset.Now
+        });
+    }
+}
+```
+
+---
+
+## Group Chat
+
+A multi-person conversation with per-user colors, typing indicators, and reactions.
+
+### Setup
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                IsMultiPerson="True"
+                TypingParticipants="{Binding TypingParticipants}"
+                SendCommand="{Binding SendCommand}"
+                LoadMoreCommand="{Binding LoadMoreCommand}"
+                BubbleToolItemTappedCommand="{Binding BubbleToolTappedCommand}">
+    <shiny:ChatView.BubbleToolItems>
+        <shiny:CopyBubbleTool />
+        <shiny:FabMenuItem Text="👍" FabBackgroundColor="#FFC107"
+                           Command="{Binding ReactCommand}" />
+        <shiny:FabMenuItem Text="Reply" FabBackgroundColor="#2196F3"
+                           Command="{Binding ReplyCommand}" />
+    </shiny:ChatView.BubbleToolItems>
+</shiny:ChatView>
+```
+
+### ViewModel
+
+```csharp
+public partial class GroupChatViewModel : ObservableObject
+{
+    readonly IChatHub chatHub;
+
+    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
+    [ObservableProperty] ObservableCollection<ChatParticipant> typingParticipants = [];
+    [ObservableProperty]
+    ObservableCollection<ChatParticipant> participants = new()
+    {
+        new() { Id = "alice", DisplayName = "Alice", BubbleColor = Color.FromArgb("#E3F2FD") },
+        new() { Id = "bob", DisplayName = "Bob", BubbleColor = Color.FromArgb("#FFF3E0") },
+        new() { Id = "charlie", DisplayName = "Charlie", BubbleColor = Color.FromArgb("#F3E5F5") }
+    };
+
+    [RelayCommand]
+    void Send(string text)
+    {
+        var msg = new ChatMessage
+        {
+            Text = text,
+            SenderId = "me",
+            IsFromMe = true,
+            Timestamp = DateTimeOffset.Now
+        };
+        Messages.Add(msg);
+        chatHub.SendMessage(text);
+    }
+
+    [RelayCommand]
+    async Task LoadMore()
+    {
+        var older = await chatHub.GetHistory(before: Messages.First().Timestamp, count: 30);
+        foreach (var msg in older)
+            Messages.Insert(0, msg);
+    }
+
+    [RelayCommand]
+    void React(ChatMessage message)
+    {
+        message.Acknowledgements ??= new List<Acknowledgement>();
+        message.Acknowledgements.Add(new Acknowledgement
+        {
+            Glyph = "👍",
+            UserId = "me",
+            Timestamp = DateTime.Now
+        });
+
+        // Refresh UI
+        var i = Messages.IndexOf(message);
+        Messages.RemoveAt(i);
+        Messages.Insert(i, message);
+
+        chatHub.SendReaction(message.Identifier, "👍");
+    }
+
+    [RelayCommand]
+    void Reply(ChatMessage message)
+    {
+        // Could set entry text to quote the message
+    }
+
+    // SignalR callbacks
+    public void OnMessageReceived(string senderId, string text, DateTimeOffset timestamp)
+    {
+        Messages.Add(new ChatMessage
+        {
+            Text = text,
+            SenderId = senderId,
+            IsFromMe = false,
+            Timestamp = timestamp
+        });
+    }
+
+    public void OnUserTyping(string userId)
+    {
+        var participant = Participants.FirstOrDefault(p => p.Id == userId);
+        if (participant != null && !TypingParticipants.Contains(participant))
+            TypingParticipants.Add(participant);
+    }
+
+    public void OnUserStoppedTyping(string userId)
+    {
+        var participant = TypingParticipants.FirstOrDefault(p => p.Id == userId);
+        if (participant != null)
+            TypingParticipants.Remove(participant);
+    }
+}
+```
+
+---
+
+## Read-Only Chat History
+
+A view-only transcript with no input bar — useful for audit logs, shared conversations, or review views.
+
+### Setup
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                IsMultiPerson="True"
+                IsInputBarVisible="False"
+                LoadMoreCommand="{Binding LoadMoreCommand}"
+                MessageTappedCommand="{Binding MessageTappedCommand}" />
+```
+
+### ViewModel
+
+```csharp
+public partial class TranscriptViewModel : ObservableObject
+{
+    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
+    [ObservableProperty] ObservableCollection<ChatParticipant> participants = [];
+
+    public async Task LoadTranscript(string conversationId)
+    {
+        var transcript = await transcriptService.GetTranscript(conversationId);
+
+        Participants = new ObservableCollection<ChatParticipant>(transcript.Participants);
+        Messages = new ObservableCollection<ChatMessage>(transcript.Messages);
+    }
+
+    [RelayCommand]
+    void MessageTapped(ChatMessage message)
+    {
+        // Show message details, metadata, etc.
+    }
+
+    [RelayCommand]
+    async Task LoadMore()
+    {
+        var older = await transcriptService.GetOlderMessages(Messages.First().Timestamp);
+        foreach (var msg in older)
+            Messages.Insert(0, msg);
+    }
+}
+```
+
+---
+
+## Chat with Scroll-to-Unread
+
+For apps where users return to conversations with unread messages:
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                ScrollToFirstUnread="True"
+                FirstUnreadMessageId="{Binding FirstUnreadId}"
+                SendCommand="{Binding SendCommand}" />
+```
+
+```csharp
+public partial class InboxChatViewModel : ObservableObject
+{
+    [ObservableProperty] string? firstUnreadId;
+
+    public async Task LoadConversation(string conversationId)
+    {
+        var data = await chatService.GetConversation(conversationId);
+
+        Messages = new ObservableCollection<ChatMessage>(data.Messages);
+        Participants = new ObservableCollection<ChatParticipant>(data.Participants);
+
+        // Set before or at the same time as Messages
+        FirstUnreadId = data.FirstUnreadMessageId;
+    }
+}
+```
+
+The view scrolls to the unread message on initial load, giving the user context of what they missed.
+
+---
+
+## Bot with Button-Only Interaction
+
+No free-text input — the user interacts only through buttons in message templates:
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                ShowAvatarsInSingleChat="True"
+                IsInputBarVisible="False">
+    <shiny:ChatView.MessageTemplateSelector>
+        <local:BotMessageTemplateSelector />
+    </shiny:ChatView.MessageTemplateSelector>
+</shiny:ChatView>
+```
+
+The bot sends `ActionChatMessage` objects with buttons. When a button is tapped, your ViewModel adds a "user response" message and triggers the next bot step:
+
+```csharp
+[RelayCommand]
+void ButtonTapped(ActionChatMessage message)
+{
+    // Show what the user chose
+    Messages.Add(new ChatMessage
+    {
+        Text = message.ActionText,
+        SenderId = "me",
+        IsFromMe = true,
+        Timestamp = DateTimeOffset.Now
+    });
+
+    // Trigger next step in the flow
+    _ = ContinueFlow(message.ActionText);
+}
+```
+
+---
+
+## Chat in a Modal/Panel
+
+Embed ChatView inside a floating panel or modal for in-app support widgets:
+
+```xml
+<shiny:FloatingPanel>
+    <shiny:ChatView Messages="{Binding Messages}"
+                    Participants="{Binding Participants}"
+                    ShowAvatarsInSingleChat="True"
+                    SendCommand="{Binding SendCommand}"
+                    MyBubbleColor="#007AFF"
+                    MyTextColor="White" />
+</shiny:FloatingPanel>
+```
+
+The ChatView adapts to any container size — just ensure the container has a defined height.
+
+---
+
+## Blazor: Full-Featured Example
+
+```razor
+@page "/chat"
+@using Shiny.Blazor.Controls.Chat
+
+<div style="height: 100vh; display: flex; flex-direction: column;">
+    <ChatView Messages="messages"
+              Participants="participants"
+              IsMultiPerson="true"
+              TypingParticipants="typingParticipants"
+              SendCommand="OnSend"
+              AttachImageCommand="OnAttach"
+              LoadMoreCommand="OnLoadMore"
+              MyBubbleColor="#007AFF"
+              MyTextColor="#FFFFFF"
+              OtherBubbleColor="#F0F0F0"
+              OtherTextColor="#000000"
+              PlaceholderText="Type a message..." />
+</div>
+
+@code {
+    List<ChatMessage> messages = new();
+    List<ChatParticipant> participants = new()
+    {
+        new() { Id = "alice", DisplayName = "Alice", AvatarUrl = "/avatars/alice.png", BubbleColor = "#E3F2FD" },
+        new() { Id = "bob", DisplayName = "Bob", AvatarUrl = "/avatars/bob.png", BubbleColor = "#FFF3E0" }
+    };
+    List<ChatParticipant> typingParticipants = new();
+
+    async Task OnSend(string text)
+    {
+        messages.Add(new ChatMessage
+        {
+            Text = text,
+            SenderId = "me",
+            IsFromMe = true,
+            Timestamp = DateTimeOffset.Now
+        });
+        StateHasChanged();
+
+        // Simulate response
+        await Task.Delay(1000);
+        typingParticipants.Add(participants[0]);
+        StateHasChanged();
+
+        await Task.Delay(2000);
+        typingParticipants.Clear();
+        messages.Add(new ChatMessage
+        {
+            Text = "Got it, thanks!",
+            SenderId = "alice",
+            IsFromMe = false,
+            Timestamp = DateTimeOffset.Now
+        });
+        StateHasChanged();
+    }
+
+    Task OnAttach()
+    {
+        // Open file picker, upload, add image message
+        return Task.CompletedTask;
+    }
+
+    async Task OnLoadMore()
+    {
+        // Fetch older messages from API
+        var older = await Http.GetFromJsonAsync<List<ChatMessage>>("/api/messages?before=...");
+        if (older != null)
+        {
+            messages.InsertRange(0, older);
+            StateHasChanged();
+        }
+    }
+}
+```

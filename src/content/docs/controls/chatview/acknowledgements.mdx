@@ -1,0 +1,204 @@
+---
+title: ChatView | Acknowledgements
+description: Emoji reactions on messages — adding, grouping, rendering, and dynamic updates
+---
+
+## Overview
+
+Acknowledgements are emoji reactions displayed as pill-shaped badges below a message bubble. Think of Slack reactions or iMessage tapbacks — users can react to messages with emojis, and the reactions are grouped and counted.
+
+## How They Render
+
+Acknowledgements are grouped by `Glyph` and displayed as badges:
+
+- **Single reaction**: Shows the glyph only — `[👍]`
+- **Multiple same glyph**: Shows glyph + count — `[👍 3]`
+- **Multiple different glyphs**: Separate badges — `[👍 2] [❤️] [💯]`
+
+Badges appear in a horizontal row below the chat bubble with 4px spacing.
+
+## Adding Reactions
+
+Each `ChatMessage` has an `Acknowledgements` list:
+
+```csharp
+var message = new ChatMessage
+{
+    Text = "The deployment is complete!",
+    SenderId = "bot",
+    IsFromMe = false,
+    Acknowledgements = new List<Acknowledgement>
+    {
+        new() { Glyph = "🎉", UserId = "alice", Timestamp = DateTime.Now },
+        new() { Glyph = "👍", UserId = "bob", Timestamp = DateTime.Now },
+        new() { Glyph = "👍", UserId = "charlie", Timestamp = DateTime.Now }
+    }
+};
+// Renders: [🎉] [👍 2]
+```
+
+## The Acknowledgement Model
+
+| Property | Type | Description |
+|---|---|---|
+| `Glyph` | `string?` | The emoji or character (e.g., "👍", "❤️", "💯") |
+| `UserId` | `string` | ID of the user who reacted |
+| `Timestamp` | `DateTime` | When the reaction was added |
+
+Null or empty `Glyph` values are skipped during rendering.
+
+## Adding Reactions Dynamically
+
+Add reactions after the message is already displayed:
+
+```csharp
+// Initialize if null
+message.Acknowledgements ??= new List<Acknowledgement>();
+
+// Add a reaction
+message.Acknowledgements.Add(new Acknowledgement
+{
+    Glyph = "❤️",
+    UserId = "currentUser",
+    Timestamp = DateTime.Now
+});
+```
+
+:::note
+On MAUI, since `ChatMessage` does not implement `INotifyPropertyChanged`, you need to trigger a UI refresh after modifying acknowledgements. Remove and re-insert the message:
+```csharp
+var index = Messages.IndexOf(message);
+Messages.RemoveAt(index);
+Messages.Insert(index, message);
+```
+:::
+
+## Removing Reactions
+
+```csharp
+var reaction = message.Acknowledgements?
+    .FirstOrDefault(a => a.UserId == currentUserId && a.Glyph == "👍");
+
+if (reaction != null)
+    message.Acknowledgements.Remove(reaction);
+```
+
+## Toggle Pattern
+
+A common UX pattern is tap-to-toggle: if the user already reacted with this emoji, remove it; otherwise add it.
+
+```csharp
+void ToggleReaction(ChatMessage message, string glyph)
+{
+    message.Acknowledgements ??= new List<Acknowledgement>();
+
+    var existing = message.Acknowledgements
+        .FirstOrDefault(a => a.UserId == myId && a.Glyph == glyph);
+
+    if (existing != null)
+        message.Acknowledgements.Remove(existing);
+    else
+        message.Acknowledgements.Add(new Acknowledgement
+        {
+            Glyph = glyph,
+            UserId = myId,
+            Timestamp = DateTime.Now
+        });
+
+    // Refresh UI (MAUI)
+    var index = Messages.IndexOf(message);
+    Messages.RemoveAt(index);
+    Messages.Insert(index, message);
+}
+```
+
+## Real-Time Integration
+
+### Receiving Reactions from a Server
+
+```csharp
+hubConnection.On<string, string, string>("ReactionAdded", (messageId, userId, glyph) =>
+{
+    var msg = Messages.FirstOrDefault(m => m.Id == messageId || m.Identifier == messageId);
+    if (msg == null) return;
+
+    msg.Acknowledgements ??= new List<Acknowledgement>();
+    msg.Acknowledgements.Add(new Acknowledgement
+    {
+        Glyph = glyph,
+        UserId = userId,
+        Timestamp = DateTime.Now
+    });
+
+    // Refresh
+    var index = Messages.IndexOf(msg);
+    Messages.RemoveAt(index);
+    Messages.Insert(index, msg);
+});
+```
+
+### Sending a Reaction to the Server
+
+```csharp
+async Task ReactToMessage(ChatMessage message, string glyph)
+{
+    // Optimistically add locally
+    message.Acknowledgements ??= new List<Acknowledgement>();
+    message.Acknowledgements.Add(new Acknowledgement
+    {
+        Glyph = glyph,
+        UserId = myId,
+        Timestamp = DateTime.Now
+    });
+
+    var index = Messages.IndexOf(message);
+    Messages.RemoveAt(index);
+    Messages.Insert(index, message);
+
+    // Send to server
+    await hubConnection.SendAsync("AddReaction", message.Identifier, glyph);
+}
+```
+
+## Combining with Bubble Tools
+
+A natural way to expose reactions is through [bubble tools](./bubble-tools):
+
+```xml
+<shiny:ChatView.BubbleToolItems>
+    <shiny:FabMenuItem Text="👍" FabBackgroundColor="#FFC107"
+                       Command="{Binding ThumbsUpCommand}" />
+    <shiny:FabMenuItem Text="❤️" FabBackgroundColor="#E91E63"
+                       Command="{Binding HeartCommand}" />
+    <shiny:FabMenuItem Text="😂" FabBackgroundColor="#FF9800"
+                       Command="{Binding LaughCommand}" />
+</shiny:ChatView.BubbleToolItems>
+```
+
+```csharp
+[RelayCommand]
+void ThumbsUp(ChatMessage message) => ToggleReaction(message, "👍");
+
+[RelayCommand]
+void Heart(ChatMessage message) => ToggleReaction(message, "❤️");
+
+[RelayCommand]
+void Laugh(ChatMessage message) => ToggleReaction(message, "😂");
+```
+
+:::note
+When using direct commands on bubble tool items, the `CommandParameter` is automatically set to the `ChatMessage` being acted upon.
+:::
+
+## Visual Appearance
+
+| Aspect | Value |
+|---|---|
+| Badge background | `#E5E7EB` (light gray) |
+| Badge corner radius | 10px |
+| Glyph font size | 12pt |
+| Count font size | 11pt |
+| Badge spacing | 4px between badges |
+| Position | Below the bubble, above the timestamp |
+
+Badges render on both "my" and "other" messages. They appear regardless of `IsMultiPerson` setting.

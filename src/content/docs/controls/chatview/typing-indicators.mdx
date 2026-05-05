@@ -1,0 +1,191 @@
+---
+title: ChatView | Typing Indicators
+description: Animated typing dots, multi-person typing text, toast pills, and scroll-aware behavior
+---
+
+## Overview
+
+ChatView shows animated "typing" indicators when other participants are composing a message. The indicators appear as bouncing dots inside a bubble, mimicking the behavior of iMessage and WhatsApp.
+
+## Basic Setup
+
+Bind `TypingParticipants` to a collection of participants currently typing:
+
+### MAUI
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                TypingParticipants="{Binding TypingParticipants}"
+                SendCommand="{Binding SendCommand}" />
+```
+
+```csharp
+[ObservableProperty]
+ObservableCollection<ChatParticipant> typingParticipants = [];
+
+// When someone starts typing:
+TypingParticipants.Add(participants.First(p => p.Id == "alice"));
+
+// When they stop typing:
+TypingParticipants.Remove(participants.First(p => p.Id == "alice"));
+```
+
+### Blazor
+
+```razor
+<ChatView Messages="messages"
+          Participants="participants"
+          TypingParticipants="typingParticipants"
+          SendCommand="OnSend" />
+
+@code {
+    List<ChatParticipant> typingParticipants = new();
+
+    void SimulateTyping(string userId)
+    {
+        var participant = participants.First(p => p.Id == userId);
+        typingParticipants.Add(participant);
+        StateHasChanged();
+    }
+
+    void StopTyping(string userId)
+    {
+        typingParticipants.RemoveAll(p => p.Id == userId);
+        StateHasChanged();
+    }
+}
+```
+
+## How It Renders
+
+### MAUI
+
+Each typing participant gets their own animated bubble view, positioned **below** the message list (between the last message and the input bar). The bubble shows:
+
+1. An avatar + display name row (same rules as message avatars)
+2. Three dots that bounce in sequence (0.15s stagger between each dot)
+
+The animation is a continuous 1-second loop:
+- Dot 1 bounces at 0.0–0.4s
+- Dot 2 bounces at 0.15–0.55s
+- Dot 3 bounces at 0.30–0.70s
+
+Each dot translates vertically from 0 to -4px and back.
+
+### Blazor
+
+A single typing indicator line renders at the bottom of the message area. It shows:
+1. Three CSS-animated dots (using `@keyframes` with 0.15s/0.3s delays)
+2. Text describing who is typing
+
+The Blazor implementation shows a single combined indicator rather than per-participant bubbles.
+
+## Typing Text
+
+The descriptive text adapts to how many people are typing:
+
+| Count | Text |
+|---|---|
+| 1 | "Alice is typing..." |
+| 2 | "Alice, Bob are typing..." |
+| 3 | "Alice, Bob, Charlie are typing..." |
+| 4+ | "Multiple users are typing..." |
+
+## Scroll-Aware Behavior (MAUI)
+
+The typing indicator is smart about the user's scroll position:
+
+**When the user is near the bottom** (within 1 item of the last message):
+- The inline typing bubble is visible below the messages
+- The chat auto-scrolls to keep the typing bubble in view
+
+**When the user has scrolled up** (reading older messages):
+- The inline typing bubble is hidden (so it doesn't push the viewport)
+- A **toast pill** appears at the bottom of the message area showing `"{Name} is typing…"`
+
+This prevents the typing indicator from disrupting the user while they're reading older messages.
+
+## Toast Pill (MAUI)
+
+The toast pill is a centered pill-shaped overlay at the bottom of the message area. It combines two pieces of information:
+
+1. **Unread count**: "3 New Messages" (shown when messages arrive while scrolled up)
+2. **Typing text**: "Alice is typing…" (shown below the unread count)
+
+The pill is tappable — tapping it scrolls to the latest message and resets the unread count.
+
+:::note
+The typing text in the toast pill only appears when you have `ShowTypingIndicator = true` AND the user is scrolled away from the bottom. Typing-only pills (no unread count) are not tappable.
+:::
+
+## Disabling Typing Indicators
+
+Set `ShowTypingIndicator = false` to disable the feature entirely:
+
+```xml
+<shiny:ChatView ShowTypingIndicator="False" />
+```
+
+When disabled, `TypingParticipants` is ignored and no typing UI renders.
+
+## Real-World Integration
+
+### SignalR Example
+
+```csharp
+hubConnection.On<string>("UserTyping", userId =>
+{
+    var participant = Participants.FirstOrDefault(p => p.Id == userId);
+    if (participant != null && !TypingParticipants.Contains(participant))
+        TypingParticipants.Add(participant);
+});
+
+hubConnection.On<string>("UserStoppedTyping", userId =>
+{
+    var participant = TypingParticipants.FirstOrDefault(p => p.Id == userId);
+    if (participant != null)
+        TypingParticipants.Remove(participant);
+});
+```
+
+### Timeout-Based Typing (Auto-Stop)
+
+Many real-time systems use a timeout approach — "typing" events fire periodically, and if you stop receiving them, the user stopped typing:
+
+```csharp
+Dictionary<string, CancellationTokenSource> typingTimers = new();
+
+void OnTypingReceived(string userId)
+{
+    var participant = Participants.First(p => p.Id == userId);
+
+    // Cancel previous timeout
+    if (typingTimers.TryGetValue(userId, out var cts))
+        cts.Cancel();
+
+    // Add to typing list if not already there
+    if (!TypingParticipants.Contains(participant))
+        TypingParticipants.Add(participant);
+
+    // Auto-remove after 3 seconds of silence
+    var newCts = new CancellationTokenSource();
+    typingTimers[userId] = newCts;
+
+    _ = Task.Delay(3000, newCts.Token).ContinueWith(_ =>
+    {
+        MainThread.BeginInvokeOnMainThread(() =>
+            TypingParticipants.Remove(participant));
+    }, TaskContinuationOptions.NotOnCanceled);
+}
+```
+
+## Platform Differences
+
+| Behavior | MAUI | Blazor |
+|---|---|---|
+| Per-participant bubbles | Yes (individual animated views) | No (single combined indicator) |
+| Animation | MAUI Animation API (translate Y) | CSS @keyframes |
+| Scroll-aware hiding | Yes (hides when scrolled up, shows in toast) | No (always visible at bottom) |
+| Toast pill integration | Yes | No |
+| Avatar in typing bubble | Yes | No |
