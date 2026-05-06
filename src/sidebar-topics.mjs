@@ -396,6 +396,7 @@ export const sidebarTopics = [
           { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
           { label: 'Spatial', link: 'documentdb/spatial' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
+          { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
           { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
           { label: 'Release Notes', link: 'documentdb/release-notes' }
         ]

@@ -149,6 +149,84 @@ Unlike `SetProperty`, `RemoveProperty` works on any property type — scalar, ne
 | `BatchInsert` | Inserting many documents efficiently | Single transaction, prepared command | Auto-generates IDs; atomic rollback |
 | `GetDiff` | Diffing local changes vs stored state | Read-only; returns RFC 6902 patch | Deep nested diff; arrays replaced as whole |
 
+## Optimistic Concurrency (Row Versioning)
+
+Map a version property on your document type for automatic optimistic concurrency checks. The version is stored inside the JSON blob — no schema or table changes required. Works across all providers.
+
+### Configuration
+
+```csharp
+// Expression-based (reflection)
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}.MapVersionProperty<Order>(o => o.RowVersion));
+
+// AOT-safe overload
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}.MapVersionProperty<Order>("RowVersion", o => o.RowVersion, (o, v) => o.RowVersion = v));
+```
+
+All provider options classes support `MapVersionProperty`: `DocumentStoreOptions`, `LiteDbDocumentStoreOptions`, `CosmosDbDocumentStoreOptions`, and `IndexedDbDocumentStoreOptions`.
+
+### How it works
+
+| Operation | Behavior |
+|---|---|
+| `Insert` | Version is set to **1** before serialization |
+| `Update` | Reads the expected version from the object, checks it against the stored version, then increments. Throws `ConcurrencyException` on mismatch |
+| `Upsert` | Insert path sets version to 1. Update path checks and increments (only when the existing version > 0) |
+| `BatchInsert` | Version is set to 1 for each document |
+
+### Example
+
+```csharp
+public class Order
+{
+    public string Id { get; set; } = "";
+    public string Status { get; set; } = "";
+    public int RowVersion { get; set; }
+}
+
+// Insert — RowVersion is set to 1
+var order = new Order { Id = "ord-1", Status = "Pending" };
+await store.Insert(order);
+// order.RowVersion == 1
+
+// Update — RowVersion is checked and incremented
+order.Status = "Shipped";
+await store.Update(order);
+// order.RowVersion == 2
+
+// Concurrent update — throws ConcurrencyException
+var staleOrder = new Order { Id = "ord-1", Status = "Cancelled", RowVersion = 1 };
+await store.Update(staleOrder); // throws ConcurrencyException
+```
+
+### ConcurrencyException
+
+`ConcurrencyException` provides diagnostic properties:
+
+| Property | Description |
+|---|---|
+| `TypeName` | The document type name |
+| `DocumentId` | The document Id |
+| `ExpectedVersion` | The version the caller expected |
+| `ActualVersion` | The version found in the store (when available) |
+
+```csharp
+try
+{
+    await store.Update(staleOrder);
+}
+catch (ConcurrencyException ex)
+{
+    Console.WriteLine($"Conflict on {ex.TypeName} {ex.DocumentId}: expected v{ex.ExpectedVersion}, found v{ex.ActualVersion}");
+}
+```
+
 ## Get a document
 
 The `id` parameter accepts `Guid`, `int`, `long`, or `string`. Passing an unsupported type throws `ArgumentException`.

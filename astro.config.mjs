@@ -325,15 +325,8 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'docdb-v4',
-              content: 'Document DB v4: Give your LLM Database Powers!',
-              variant: 'tip',
-              link: { text: 'Feed The Machine Here', href: '/documentdb/ai-tools/' },
-              dismissable: false
-            },
-          {
               id: 'docdb-v5',
-              content: 'Document DB v5 BETA: Cosmos & Lite DB Providers, Spatial Support',
+              content: 'Document DB v5: New Providers, Versioning, Tenancy, & Multi-DB Support',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false

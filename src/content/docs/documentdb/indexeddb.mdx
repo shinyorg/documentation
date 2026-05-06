@@ -1,0 +1,148 @@
+---
+title: IndexedDB (Blazor WASM)
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.IndexedDb` package provides an IndexedDB-backed document store for **Blazor WebAssembly** applications. It implements the full `IDocumentStore` interface using JavaScript interop — no native dependencies, no file system access required.
+
+<NugetBadge name="Shiny.DocumentDb.IndexedDb" />
+
+## When to Use
+
+- **Blazor WebAssembly** apps that need client-side persistent storage
+- Offline-capable progressive web apps (PWAs)
+- Browser-based apps where you want the same document store API as your server/mobile code
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.IndexedDb
+```
+
+## Setup
+
+<Steps>
+1. Register with dependency injection in your Blazor WASM `Program.cs`:
+
+   ```csharp
+   using Shiny.DocumentDb.IndexedDb;
+
+   builder.Services.AddSingleton(new IndexedDbDocumentStoreOptions { DatabaseName = "MyAppDb" });
+   builder.Services.AddSingleton<IDocumentStore, IndexedDbDocumentStore>();
+   ```
+
+   Or with full options:
+
+   ```csharp
+   builder.Services.AddSingleton(new IndexedDbDocumentStoreOptions
+   {
+       DatabaseName = "MyAppDb",
+       Version = 1
+   }.MapTypeToStore<User>()           // dedicated object store
+    .MapTypeToStore<Order>("orders")  // explicit store name
+   );
+   builder.Services.AddSingleton<IDocumentStore, IndexedDbDocumentStore>();
+   ```
+
+2. Inject and use `IDocumentStore` in your components:
+
+   ```csharp
+   @inject IDocumentStore Store
+
+   @code {
+       private List<User> users = new();
+
+       protected override async Task OnInitializedAsync()
+       {
+           users = (await Store.Query<User>().ToList()).ToList();
+       }
+
+       private async Task AddUser()
+       {
+           var user = new User { Name = "Alice", Age = 25 };
+           await Store.Insert(user);
+           users.Add(user);
+       }
+   }
+   ```
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `DatabaseName` | `string` | (required) | The name of the IndexedDB database |
+| `Version` | `int` | `1` | IndexedDB database version. Increment when adding new object stores |
+| `StoreName` | `string` | `"documents"` | Default object store for unmapped types |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set to `false` for AOT safety |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback |
+
+## Store-Per-Type Mapping
+
+Similar to table-per-type mapping in SQL providers, you can map document types to dedicated IndexedDB object stores:
+
+```csharp
+builder.Services.AddSingleton(new IndexedDbDocumentStoreOptions
+{
+    DatabaseName = "MyAppDb"
+}.MapTypeToStore<User>()                          // auto-derived store name
+ .MapTypeToStore<Order>("orders")                 // explicit store name
+ .MapTypeToStore<Sensor>(s => s.DeviceKey)        // custom Id property
+);
+builder.Services.AddSingleton<IDocumentStore, IndexedDbDocumentStore>();
+```
+
+## Supported Operations
+
+The IndexedDB provider supports the full `IDocumentStore` API:
+
+- `Insert`, `Update`, `Upsert`, `BatchInsert`
+- `Get`, `Remove`, `Clear`
+- `SetProperty`, `RemoveProperty`
+- `GetDiff` (JSON patch diffing)
+- `Query<T>()` fluent LINQ queries (Where, OrderBy, Paginate, Select, aggregates)
+- `Count<T>()`
+- `RunInTransaction` (operations are batched in a single IndexedDB transaction)
+
+### Not Supported
+
+- **Raw SQL queries** — `Query<T>(string whereClause)` and `QueryStream<T>(string whereClause)` throw `NotSupportedException`. Use the LINQ-based `Query<T>()` overload instead.
+- **Spatial queries** — IndexedDB does not support R*Tree or GeoJSON indexes.
+
+## How It Works
+
+Under the hood, the provider:
+
+1. Opens an IndexedDB database with the configured name and version
+2. Creates object stores (with a `typeName` index) during the `upgradeneeded` event
+3. Stores documents as `{ key, id, typeName, data, createdAt, updatedAt }` records
+4. Uses the composite key `"{TypeName}:{Id}"` as the IndexedDB key path
+5. Queries load all documents of a type via the `typeName` index, then apply LINQ predicates client-side
+
+All IndexedDB operations are performed through a JavaScript ES module (`shiny-indexeddb.js`) bundled as a static web asset.
+
+## SQLite in Blazor WASM
+
+If you need SQL-level query features (raw WHERE clauses, JSON indexes, spatial queries), the existing **SQLite provider** is also WASM-compatible when paired with `SQLitePCLRaw.bundle_wasm`:
+
+- WAL pragma is automatically skipped on `OperatingSystem.IsBrowser()`
+- Spatial (R*Tree) is automatically disabled in the browser
+- `Backup()` is marked `[UnsupportedOSPlatform("browser")]`
+- Use `Data Source=:memory:` or Emscripten OPFS-mounted paths
+
+The IndexedDB provider is lighter (no native WASM SQLite binary) and simpler for most client-side storage scenarios. Choose SQLite-in-WASM only when you need its advanced query capabilities.
+
+## Versioning
+
+When you add new type-to-store mappings, increment `Version` so that the `upgradeneeded` event fires and creates the new object stores:
+
+```csharp
+opts.Version = 2; // was 1, now creating a new store
+opts.MapTypeToStore<NewType>();
+```
+
+IndexedDB handles the schema migration automatically — existing data in other stores is preserved.
