@@ -318,6 +318,13 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'speech-1',
+              content: 'Introducing Speech: Text-to-Speech, Speech-to-Text, Wake Word, Keywords, & 3rd party integrations!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/speech/' },
+              dismissable: false
+            },            
+            {
               id: 'mauishell-60',
               content: 'Shiny.Maui.Shell v6 support for AI routing tools',
               variant: 'tip',
