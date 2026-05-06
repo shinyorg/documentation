@@ -311,6 +311,13 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
+              id: 'aiconversations-1',
+              content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/aiconversation/' },
+              dismissable: false
+            },
+            {
               id: 'mauishell-60',
               content: 'Shiny.Maui.Shell v6 support for AI routing tools',
               variant: 'tip',
@@ -326,7 +333,7 @@ export default defineConfig({
             },
             {
               id: 'docdb-v5',
-              content: 'Document DB v5: New Providers, Versioning, Tenancy, & Multi-DB Support',
+              content: 'Document DB v5: New Providers, Versioning, Spatial, Multi-Tenancy, & Multi-DB Support',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false

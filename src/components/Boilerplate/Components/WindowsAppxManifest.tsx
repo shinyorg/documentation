@@ -18,6 +18,9 @@ const WindowsAppxManifest = (props: Props) => {
   if (has('ble') || has('blehosting')) {
     capabilities.push('      <DeviceCapability Name="bluetooth" />');
   }
+  if (has('speech') || has('aiconversation')) {
+    capabilities.push('      <DeviceCapability Name="microphone" />');
+  }
   if (has('gps') || has('geofencing')) {
     capabilities.push('      <DeviceCapability Name="location" />');
   }

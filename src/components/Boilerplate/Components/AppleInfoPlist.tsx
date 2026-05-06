@@ -80,6 +80,10 @@ const AppleInfoPlist = (props: Props) => {
   if (has('blehosting') || has('ble') || has('obd')) {
     addKey('NSBluetoothPeripheralUsageDescription');
   }
+  if (has('speech') || has('aiconversation')) {
+    addKey('NSSpeechRecognitionUsageDescription');
+    addKey('NSMicrophoneUsageDescription');
+  }
   if (has('music')) {
     addKey('NSAppleMusicUsageDescription');
   }

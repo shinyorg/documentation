@@ -1,0 +1,116 @@
+---
+title: Chat Client Provider
+description: How to implement IChatClientProvider for different AI backends
+---
+
+The `IChatClientProvider` interface is the bridge between the AI conversation service and your AI backend. You implement it to handle authentication, token management, and `IChatClient` construction.
+
+## Interface
+
+```csharp
+public interface IChatClientProvider
+{
+    Task<IChatClient> GetChatClient(CancellationToken cancelToken = default);
+}
+```
+
+The service calls `GetChatClient()` before each chat request, so your implementation can handle token refresh, re-authentication, or client rotation.
+
+## Registration
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.SetChatClientProvider<MyChatClientProvider>();
+});
+```
+
+## Example: OpenAI
+
+```csharp
+using Microsoft.Extensions.AI;
+using OpenAI;
+using Shiny.AiConversation;
+
+public class OpenAiChatClientProvider(IConfiguration config) : IChatClientProvider
+{
+    public Task<IChatClient> GetChatClient(CancellationToken cancelToken = default)
+    {
+        var client = new OpenAIClient(config["OpenAI:ApiKey"]);
+        return Task.FromResult(
+            client.GetChatClient("gpt-4o").AsIChatClient()
+        );
+    }
+}
+```
+
+## Example: GitHub Copilot (Device Code Flow)
+
+The sample apps include a full GitHub Copilot implementation that demonstrates:
+
+- OAuth 2.0 device code flow for authentication
+- Copilot API token exchange and caching
+- Custom HTTP pipeline policy for required headers
+- Automatic re-authentication on 401 responses
+
+```csharp
+public class GitHubCopilotChatClientProvider : IChatClientProvider
+{
+    public async Task<IChatClient> GetChatClient(CancellationToken cancelToken = default)
+    {
+        var copilotToken = await GetCopilotToken(cancelToken);
+
+        var options = new OpenAIClientOptions
+        {
+            Endpoint = new Uri("https://api.githubcopilot.com")
+        };
+        // Copilot API requires editor identification headers
+        options.AddPolicy(new CopilotHeadersPolicy(), PipelinePosition.PerCall);
+
+        var client = new OpenAIClient(
+            new ApiKeyCredential(copilotToken),
+            options
+        );
+
+        return client.GetChatClient("gpt-4o").AsIChatClient();
+    }
+}
+```
+
+See the full implementation in the [MAUI sample](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample/Services/GitHubCopilotChatClientProvider.cs) or [Blazor sample](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample.Blazor/Services/GitHubCopilotChatClientProvider.cs).
+
+## Example: Ollama (Local)
+
+```csharp
+using Microsoft.Extensions.AI;
+using Shiny.AiConversation;
+
+public class OllamaChatClientProvider : IChatClientProvider
+{
+    public Task<IChatClient> GetChatClient(CancellationToken cancelToken = default)
+    {
+        var client = new OllamaChatClient(
+            new Uri("http://localhost:11434"),
+            "llama3.1"
+        );
+        return Task.FromResult<IChatClient>(client);
+    }
+}
+```
+
+## Authentication Patterns
+
+Your provider can handle authentication however you need:
+
+| Pattern | When to use |
+|---|---|
+| API key from config | Simple server-side apps |
+| OAuth device code flow | Mobile apps needing user login |
+| Managed identity | Azure-hosted services |
+| Token refresh with caching | Any provider with expiring tokens |
+
+The service calls `GetChatClient()` on every request, so you can cache the client and refresh tokens transparently.
+
+:::note
+If your provider needs to show a login UI (e.g. device code flow), you can use events or navigation to prompt the user. See the GitHub Copilot sample for a complete implementation of this pattern on both MAUI and Blazor.
+:::

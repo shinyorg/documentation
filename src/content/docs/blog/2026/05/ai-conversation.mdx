@@ -1,0 +1,161 @@
+---
+title: "Introducing Shiny.AiConversation — AI Conversation"
+date: 2026-05-06
+authors:
+  - allanritchie
+tags:
+  - Release
+  - AI
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AiConversation" showLabel={true} />
+
+Building an AI-powered app today means stitching together a chat client, speech recognition, text-to-speech, audio playback, message persistence, and state management — across platforms, with proper lifecycle handling.  That's a lot of plumbing before you write your first prompt.
+
+**Shiny.AiConversation** wraps all of that into a single `IAiConversationService` interface.  Text chat, voice chat, hands-free wake word activation, configurable audio feedback, and persistent chat history — registered with one DI call, consumed through one service.
+
+---
+
+## The Problem
+
+Every AI chat app ends up building the same infrastructure:
+
+- An authenticated chat client that handles token refresh
+- Speech-to-text so users can talk instead of type
+- Text-to-speech so the AI can respond out loud
+- Sound effects for state transitions (thinking, responding, error)
+- A wake word listener for hands-free mode
+- Message persistence for chat history
+- State management so the UI knows what's happening
+- Thread safety so nothing blows up
+
+Each of these is a separate library, a separate abstraction, and a separate set of platform quirks.  You spend weeks on infrastructure before you ship a single feature.
+
+## The Solution
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.SetChatClientProvider<MyChatClientProvider>();
+    opts.SetMessageStore<MyMessageStore>();
+});
+```
+
+That's it.  The service registers `IAiConversationService` with all the wiring — speech services from [Shiny.Speech](https://www.nuget.org/packages/Shiny.Speech), chat completions from [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI), audio playback, time provider, and optional message persistence.
+
+## What You Can Do
+
+### Text Chat
+
+The simplest path.  Send a message, get a streaming response:
+
+```csharp
+aiService.AiResponded += response =>
+    Console.WriteLine($"AI: {response.Message}");
+
+await aiService.TalkTo("What is .NET MAUI?", cancellationToken);
+```
+
+The service handles the full lifecycle — acquires the chat client, prepends system prompts, streams the response, stores both messages if a message store is configured, fires the event, and manages state transitions throughout.
+
+### Voice Chat (Push-to-Talk)
+
+One method call captures speech and sends it to the AI:
+
+```csharp
+await aiService.ListenAndTalk(cancellationToken);
+```
+
+The service activates speech-to-text, waits for the user to stop speaking, sends the transcribed text through `TalkTo()`, and optionally reads the response aloud via text-to-speech.
+
+### Hands-Free Wake Word
+
+This is the "Hey Siri" experience:
+
+```csharp
+await aiService.StartWakeWord("Hey Copilot");
+```
+
+The service enters a continuous loop: listen for the wake phrase, capture the utterance that follows, send it to the AI, loop back.  The user never touches the screen.  Call `StopWakeWord()` when you're done.
+
+### Four Acknowledgement Modes
+
+Control how the AI delivers responses:
+
+| Mode | What Happens |
+|---|---|
+| `None` | Silent — text only, delivered via the `AiResponded` event |
+| `AudioBlip` | Short sound effects at each state transition |
+| `LessWordy` | Text-to-speech with a "be concise" system prompt |
+| `Full` | Full text-to-speech of the complete response |
+
+Sound effects are driven by string file names and a `SoundResolver` callback — the library stays platform-agnostic while you provide the stream:
+
+```csharp
+aiService.SoundResolver = name => FileSystem.OpenAppPackageFileAsync(name);
+aiService.ThinkSound = "think.mp3";
+aiService.OkSound = "ok.mp3";
+```
+
+### Chat History with AI Self-Lookup
+
+Register an `IMessageStore` and every message is automatically persisted.  But the interesting part is the **AI chat lookup tool** — it's an `AITool` that lets the AI search its own conversation history:
+
+> *"What did we talk about yesterday?"*
+> *"Find the recipe you gave me last week."*
+
+The tool is registered automatically when you call `SetMessageStore()`.  The AI gets search parameters (text, date range, limit) and queries your store directly.
+
+### Observable State
+
+The service exposes its current state and fires events:
+
+```csharp
+aiService.StateChanged += () =>
+{
+    // Status: Idle, Listening, Thinking, Responding
+    UpdateUI(aiService.Status);
+};
+```
+
+This is what powers the "Aura" visualization in our sample app — a pulsing orb that changes color based on what the AI is doing.
+
+## Bring Your Own Backend
+
+The library doesn't care which AI you use.  Implement `IChatClientProvider` to return any `IChatClient` from `Microsoft.Extensions.AI`:
+
+- **OpenAI** — `new OpenAIClient(apiKey).GetChatClient("gpt-4o").AsIChatClient()`
+- **GitHub Copilot** — OAuth device code flow with Copilot API token exchange
+- **Azure OpenAI** — Managed identity or API key
+- **Ollama** — Local model, no auth needed
+- **Anything else** — If it implements `IChatClient`, it works
+
+The sample apps include a complete GitHub Copilot implementation with device code flow, token caching, automatic re-authentication, and the custom HTTP headers the Copilot API requires.
+
+## Cross-Platform from Day One
+
+The library targets plain `net10.0` — no MAUI dependency in the library itself.  [Shiny.Speech](https://www.nuget.org/packages/Shiny.Speech) handles the platform abstraction for speech and audio, so the same `IAiConversationService` works on:
+
+- **MAUI** — Android, iOS, Windows, Mac Catalyst
+- **Blazor** — Server-side and WebAssembly (speech via Web Audio API)
+- **ASP.NET** — Server-side chat without speech
+
+We ship two sample apps that prove it: a full [MAUI sample](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample) with chat, settings, and an animated aura visualization, plus a [Blazor Server sample](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample.Blazor) with the same features translated to Razor components and CSS animations.
+
+## AOT Compatible
+
+The library is built with `IsAotCompatible=true`.  Generic type parameters on `SetChatClientProvider<T>()` and `SetMessageStore<T>()` carry `[DynamicallyAccessedMembers]` attributes so the trimmer knows what to keep.  No reflection surprises at runtime.
+
+## Get Started
+
+```bash
+dotnet add package Shiny.AiConversation
+```
+
+- [Documentation](/aiconversation/)
+- [GitHub Repository](https://github.com/shinyorg/aiconversation)
+- [MAUI Sample](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample)
+- [Blazor Sample](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample.Blazor)
+
+The library is MIT licensed and open source.  We'd love to hear what you build with it.

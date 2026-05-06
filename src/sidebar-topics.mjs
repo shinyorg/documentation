@@ -28,9 +28,21 @@ export const sidebarTopics = [
   {
     id: 'client',
     label: 'App Essentials',
-    link: '/mauishell/',
+    link: '/aiconversation/',
     icon: 'rocket',
     items: [
+      {
+        label: 'AI Conversations',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'aiconversation/' },
+          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
+          { label: 'Message Store', link: 'aiconversation/message-store' },
+          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
+          { label: 'Wake Word', link: 'aiconversation/wake-word' },
+          { label: 'AI Tools', link: 'aiconversation/ai-tools' },
+        ]
+      },
       {
         label: 'MAUI Shell',
         jumpTo: true,
