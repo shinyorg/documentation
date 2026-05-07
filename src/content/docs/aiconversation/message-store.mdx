@@ -10,7 +10,8 @@ The `IMessageStore` interface provides optional chat history persistence. When c
 ```csharp
 public interface IMessageStore
 {
-    Task Store(AiChatMessage chatMessage, CancellationToken cancellationToken);
+    Task Store(ChatMessage chatMessage, CancellationToken cancellationToken);
+    Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken);
     Task Clear(DateTimeOffset? beforeDate = null);
     Task<IReadOnlyList<AiChatMessage>> Query(
         string? messageContains = null,
@@ -21,6 +22,8 @@ public interface IMessageStore
     );
 }
 ```
+
+The first `Store` overload receives the user's `ChatMessage` (from `Microsoft.Extensions.AI`). The second overload is called once after the AI finishes responding, with the complete `ChatResponse` and the triggering user message.
 
 ## Registration
 
@@ -81,10 +84,38 @@ public class InMemoryMessageStore : IMessageStore
     readonly List<AiChatMessage> messages = [];
     readonly object sync = new();
 
-    public Task Store(AiChatMessage chatMessage, CancellationToken cancellationToken)
+    public Task Store(ChatMessage chatMessage, CancellationToken cancellationToken)
     {
+        var direction = chatMessage.Role == ChatRole.User
+            ? ChatMessageDirection.User
+            : ChatMessageDirection.AI;
+
         lock (sync)
-            messages.Add(chatMessage);
+        {
+            messages.Add(new AiChatMessage(
+                Guid.NewGuid().ToString(),
+                chatMessage.Text ?? "",
+                DateTimeOffset.UtcNow,
+                direction
+            ));
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken)
+    {
+        if (response.Text is not { } text)
+            return Task.CompletedTask;
+
+        lock (sync)
+        {
+            messages.Add(new AiChatMessage(
+                Guid.NewGuid().ToString(),
+                text,
+                DateTimeOffset.UtcNow,
+                ChatMessageDirection.AI
+            ));
+        }
         return Task.CompletedTask;
     }
 
@@ -133,8 +164,28 @@ The MAUI sample uses [Shiny.DocumentDb](https://www.nuget.org/packages/Shiny.Doc
 ```csharp
 public class DocumentDbMessageStore(IDocumentStore store) : IMessageStore
 {
-    public Task Store(AiChatMessage chatMessage, CancellationToken cancellationToken)
-        => store.Insert(chatMessage, cancellationToken: cancellationToken);
+    public Task Store(ChatMessage chatMessage, CancellationToken cancellationToken)
+    {
+        var direction = chatMessage.Role == ChatRole.User
+            ? ChatMessageDirection.User
+            : ChatMessageDirection.AI;
+
+        return store.Insert(
+            new AiChatMessage(Guid.NewGuid().ToString(), chatMessage.Text ?? "", DateTimeOffset.UtcNow, direction),
+            cancellationToken: cancellationToken
+        );
+    }
+
+    public Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken)
+    {
+        if (response.Text is not { } text)
+            return Task.CompletedTask;
+
+        return store.Insert(
+            new AiChatMessage(Guid.NewGuid().ToString(), text, DateTimeOffset.UtcNow, ChatMessageDirection.AI),
+            cancellationToken: cancellationToken
+        );
+    }
 
     public Task Clear(DateTimeOffset? beforeDate = null)
     {
