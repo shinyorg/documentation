@@ -70,6 +70,11 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
     { id: 'usemaccatalyst', label: 'Mac Catalyst', type: 'bool', defaultValue: false, category: 'project' },
     { id: 'usewindows', label: 'Windows', type: 'bool', defaultValue: false, category: 'project' },
 
+    // Developer tools
+    { id: 'devflow', label: 'MAUI DevFlow', type: 'bool', defaultValue: true, category: 'project',
+        version: '0.1.0-preview.8.26256.5',
+        description: 'Debug-only toolkit for visual tree inspection, performance profiling, network monitoring, and AI agent automation. Adds a DevFlow agent to your app that connects to the MAUI CLI (maui devflow) https://github.com/dotnet/maui-labs' },
+
     // Choices (rendered as dropdowns)
     { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
         description: 'The target framework for the project',

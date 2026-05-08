@@ -71,7 +71,8 @@ const TemplateBuilder = () => {
     const choiceParams = TEMPLATE_PARAMS.filter(p => p.type === 'choice');
     const stringParams = TEMPLATE_PARAMS.filter(p => p.type === 'string');
     const boolParams = TEMPLATE_PARAMS.filter(p => p.type === 'bool' && p.category !== 'project');
-    const platformParams = TEMPLATE_PARAMS.filter(p => p.type === 'bool' && p.category === 'project');
+    const platformParams = TEMPLATE_PARAMS.filter(p => p.type === 'bool' && p.category === 'project' && !p.description);
+    const projectFeatures = TEMPLATE_PARAMS.filter(p => p.type === 'bool' && p.category === 'project' && p.description);
 
     const isVisible = (p: { visibleWhen?: (state: TemplateState) => boolean }) =>
         !p.visibleWhen || p.visibleWhen(state);
@@ -157,6 +158,31 @@ const TemplateBuilder = () => {
                         ))}
                     </div>
                 </div>
+                {projectFeatures.map(p => (
+                    <label
+                        key={p.id}
+                        className={`template-builder__feature-callout${state[p.id] ? ' template-builder__feature-callout--active' : ''}`}
+                    >
+                        <input
+                            type="checkbox"
+                            checked={!!state[p.id]}
+                            onChange={e => updateState(p.id, e.target.checked)}
+                            className="template-builder__checkbox"
+                        />
+                        <span className="template-builder__feature-callout-toggle">
+                            <span className="template-builder__feature-callout-track" />
+                        </span>
+                        <span className="template-builder__feature-callout-content">
+                            <span className="template-builder__feature-callout-header">
+                                <span className="template-builder__feature-callout-title">{p.label}</span>
+                                {p.version && <span className="template-builder__version">{p.version}</span>}
+                            </span>
+                            {p.description && (
+                                <span className="template-builder__feature-callout-desc">{linkify(p.description)}</span>
+                            )}
+                        </span>
+                    </label>
+                ))}
             </section>
 
             {/* Category sections */}
