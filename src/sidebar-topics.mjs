@@ -12,6 +12,7 @@ export const sidebarTopics = [
     icon: 'open-book',
     items: [
       { label: 'App Builder', link: 'foundation/appbuilder' },
+      { label: 'Template Builder', link: 'foundation/builder' },
       { label: 'Architecture', link: 'foundation/architecture' },
       {
         label: 'Hosting Models',
@@ -151,7 +152,6 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'templates/' },
-          { label: 'Template Builder', link: 'templates/builder' },
           { label: 'Shiny Libraries', link: 'templates/shiny-libraries' },
           { label: '3rd Party Libraries', link: 'templates/third-party' },
           { label: 'Release Notes', link: 'templates/release-notes' }
