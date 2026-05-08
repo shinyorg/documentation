@@ -12,7 +12,7 @@ export const sidebarTopics = [
     icon: 'open-book',
     items: [
       { label: 'App Builder', link: 'foundation/appbuilder' },
-      { label: 'Template Builder', link: 'foundation/builder' },
+      { label: 'Template Builder', link: 'templates/builder' },
       { label: 'Architecture', link: 'foundation/architecture' },
       {
         label: 'Hosting Models',

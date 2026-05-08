@@ -242,9 +242,6 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
     { id: 'shinycontrols', label: 'Shiny Controls', type: 'bool', defaultValue: true, category: 'ui',
         version: shinyVersion('Shiny.Maui.Controls'),
         description: 'Scheduler, BottomSheet, ImageViewer, PillView, SecurityPin, Fab https://shinylib.net/controls/' },
-    { id: 'communitytoolkit', label: 'MAUI Community Toolkit', type: 'bool', defaultValue: true, category: 'ui',
-        version: '14.1.1',
-        description: 'Behaviors, converters, effects, and custom views by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/' },
     { id: 'mediaelement', label: 'CT Media Element', type: 'bool', defaultValue: false, category: 'ui',
         version: '9.0.0',
         description: 'Cross-platform media playback control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/mediaelement' },
@@ -384,6 +381,7 @@ export function computeSymbols(state: TemplateState): Record<string, boolean | s
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
     s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
     s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aiconversation);
+    s.communitytoolkit = !!(s.mediaelement || s.cameraview || s.usecsharpmarkup);
     // Platform targets (usemaccatalyst comes from state directly now)
 
     return s;
