@@ -147,7 +147,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // Logging
     { id: 'sentry', label: 'Sentry.IO', type: 'bool', defaultValue: false, category: 'logging',
-        version: '6.4.1',
+        version: '6.5.0',
         description: 'Error tracking & performance monitoring https://docs.sentry.io/platforms/dotnet/guides/maui/' },
 
     // Services bools
@@ -204,7 +204,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
         description: 'Optical character recognition by Kori Francis https://github.com/kfrancis/ocr',
         visibleWhen: noDesktop },
     { id: 'calendar', label: 'Calendar Store', type: 'bool', defaultValue: false, category: 'services',
-        version: '4.1.0',
+        version: '5.0.0',
         description: 'Read & write device calendar events by Gerald Versluis https://github.com/jfversluis/Plugin.Maui.CalendarStore',
         visibleWhen: noDesktop },
     { id: 'audio', label: 'Audio', type: 'bool', defaultValue: false, category: 'services',
@@ -238,7 +238,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
         version: shinyVersion('Shiny.Maui.Controls'),
         description: 'Scheduler, BottomSheet, ImageViewer, PillView, SecurityPin, Fab https://shinylib.net/controls/' },
     { id: 'communitytoolkit', label: 'MAUI Community Toolkit', type: 'bool', defaultValue: true, category: 'ui',
-        version: '14.1.0',
+        version: '14.1.1',
         description: 'Behaviors, converters, effects, and custom views by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/' },
     { id: 'mediaelement', label: 'CT Media Element', type: 'bool', defaultValue: false, category: 'ui',
         version: '9.0.0',
@@ -256,7 +256,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
         version: '1.1.0',
         description: 'Declarative animations library by Javier Suarez https://github.com/jsuarezruiz/AlohaKit.Animations/' },
     { id: 'livecharts', label: 'Live Charts', type: 'bool', defaultValue: false, category: 'ui',
-        version: '2.0.0',
+        version: '2.0.2',
         description: 'Animated, flexible charts by Alberto Rodriguez https://livecharts.dev/' },
     { id: 'skia', label: 'SkiaSharp', type: 'bool', defaultValue: false, category: 'ui',
         version: '3.119.2',
@@ -289,13 +289,13 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // Blazor components
     { id: 'mudblazor', label: 'MudBlazor', type: 'bool', defaultValue: false, category: 'blazor',
-        version: '9.2.0',
+        version: '9.4.0',
         description: 'Material Design Blazor component library https://mudblazor.com/' },
     { id: 'radzen', label: 'Radzen.Blazor', type: 'bool', defaultValue: false, category: 'blazor',
-        version: '10.1.0',
+        version: '10.3.2',
         description: '80+ Blazor UI components by Radzen https://blazor.radzen.com/' },
     { id: 'fluentui', label: 'Microsoft FluentUI', type: 'bool', defaultValue: false, category: 'blazor',
-        version: '4.14.0',
+        version: '4.14.1',
         description: 'Fluent Design Blazor components by Microsoft https://www.fluentui-blazor.net/' },
 
     // Storage
@@ -303,11 +303,11 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
         version: shinyVersion('Shiny.DocumentDb.Sqlite'),
         description: 'Document-oriented database on SQLite https://shinylib.net/documentdb/' },
     { id: 'sqlite', label: 'SQLite-net-pcl', type: 'bool', defaultValue: false, category: 'storage',
-        version: '1.10.196-beta',
+        version: '1.9.172',
         description: 'SQLite.NET-PCL by Frank Krueger https://github.com/praeclarum/sqlite-net' },
     { id: 'roomsharp', label: 'RoomSharp', type: 'bool', defaultValue: false, category: 'storage',
-        version: '0.4.7',
-        description: 'SQLite source generated ORM by Safwan Abdulghani https://roomsharp.safwan.pro/' },
+        version: '0.5.4',
+        description: 'SQLite source generated ORM by Safwan Abdulghani https://roomsharp.dev/' },
     { id: 'geospatialdb', label: 'Geospatial DB', type: 'bool', defaultValue: false, category: 'storage',
         version: shinyVersion('Shiny.Spatial'),
         description: 'Geospatial database & geofencing https://shinylib.net/spatial/' },
@@ -337,7 +337,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // Utilities
     { id: 'systemreactive', label: 'System.Reactive', type: 'bool', defaultValue: false, category: 'utility',
-        version: '6.0.1',
+        version: '6.1.0',
         description: 'Reactive Extensions for .NET https://github.com/dotnet/reactive' },
     { id: 'humanizer', label: 'Humanizer', type: 'bool', defaultValue: false, category: 'utility',
         version: '3.0.10',
@@ -346,7 +346,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
         version: '5.75.0',
         description: 'Unit of measurement conversions https://github.com/angularsen/UnitsNet' },
     { id: 'syslinqasync', label: 'System.Linq.Async', type: 'bool', defaultValue: false, category: 'utility',
-        version: '7.0.0',
+        version: '7.0.1',
         description: 'Async LINQ operators for IAsyncEnumerable https://github.com/dotnet/reactive' },
 ];
 
