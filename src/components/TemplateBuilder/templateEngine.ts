@@ -30,7 +30,7 @@ export function processTemplate(
     // Then process conditionals based on file type
     if (fileExtension === '.razor') {
         result = processRazorConditionals(result, symbols);
-    } else if (['.csproj', '.xml', '.xcprivacy', '.plist', '.xaml'].includes(fileExtension)) {
+    } else if (['.csproj', '.xml', '.xcprivacy', '.plist', '.xaml', '.md'].includes(fileExtension)) {
         result = processXmlConditionals(result, symbols);
         // Some XML files also have C-style conditionals in comments
         result = processCStyleConditionals(result, symbols);
