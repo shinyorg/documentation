@@ -1,0 +1,160 @@
+---
+title: Microsoft.Extensions.AI
+---
+import LibBuilder from '../../../components/Boilerplate/LibBuilder';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+| | |
+|---------|---------|
+| Downloads | <NugetDownloads name="Shiny.Speech.MicrosoftAI" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "windows"]} />
+
+## Overview
+
+`Shiny.Speech.MicrosoftAI` exposes your Shiny speech providers as standard [Microsoft.Extensions.AI](https://learn.microsoft.com/en-us/dotnet/ai/microsoft-extensions-ai) interfaces — `ISpeechToTextClient` and `ITextToSpeechClient`. This allows any code written against the M.E.AI abstractions to use Shiny's cloud providers (Azure, ElevenLabs, OpenAI) and platform audio infrastructure.
+
+:::note
+This package does **not** replace `ISpeechToTextService` / `ITextToSpeechService`. It adds a second set of registrations (`ISpeechToTextClient` / `ITextToSpeechClient`) that wrap your existing cloud providers. You need a cloud provider (Azure, ElevenLabs, or OpenAI) registered first.
+:::
+
+## Setup
+
+<LibBuilder componentName="speechmicrosoftai" client:load />
+
+Register a cloud provider, then add the M.E.AI adapters:
+
+```csharp
+// 1. Register a cloud provider
+builder.Services.AddAzureSpeech("subscription-key", "eastus");
+// — or —
+builder.Services.AddOpenAiSpeech("api-key");
+// — or —
+builder.Services.AddElevenLabsTextToSpeech("api-key");
+
+// 2. Add M.E.AI adapters
+builder.Services.AddShinySpeechClients();
+```
+
+You can also register them individually:
+
+```csharp
+builder.Services.AddShinySpeechToTextClient();  // ISpeechToTextClient only
+builder.Services.AddShinyTextToSpeechClient();   // ITextToSpeechClient only
+```
+
+## Usage
+
+Inject `ISpeechToTextClient` or `ITextToSpeechClient` from `Microsoft.Extensions.AI`:
+
+### Speech-to-Text
+
+```csharp
+using Microsoft.Extensions.AI;
+
+public class TranscriptionService(ISpeechToTextClient sttClient, IAudioSource audioSource)
+{
+    async Task<string?> TranscribeFromMic(CancellationToken ct)
+    {
+        await using var source = audioSource;
+        var audioStream = await source.StartCaptureAsync(ct);
+
+        var response = await sttClient.GetTextAsync(audioStream, new SpeechToTextOptions
+        {
+            SpeechLanguage = "en"
+        }, ct);
+
+        return response.Text;
+    }
+
+    async Task StreamTranscription(Stream audioStream, CancellationToken ct)
+    {
+        await foreach (var update in sttClient.GetStreamingTextAsync(audioStream, cancellationToken: ct))
+        {
+            switch (update.Kind)
+            {
+                case var k when k == SpeechToTextResponseUpdateKind.TextUpdating:
+                    Console.Write($"\r{update.Text}");   // partial result
+                    break;
+
+                case var k when k == SpeechToTextResponseUpdateKind.TextUpdated:
+                    Console.WriteLine($"\n{update.Text}"); // final result
+                    break;
+            }
+        }
+    }
+}
+```
+
+### Text-to-Speech
+
+```csharp
+using Microsoft.Extensions.AI;
+
+public class SpeechService(ITextToSpeechClient ttsClient)
+{
+    async Task Synthesize(CancellationToken ct)
+    {
+        var response = await ttsClient.GetAudioAsync(
+            "Hello from Shiny!",
+            new TextToSpeechOptions
+            {
+                VoiceId = "en-US-AriaNeural",
+                Speed = 1.0f,
+                Pitch = 1.0f,
+                AudioFormat = "audio/mpeg"
+            },
+            ct
+        );
+
+        // response.Contents contains DataContent with the audio bytes
+    }
+}
+```
+
+## Options Mapping
+
+The M.E.AI options are mapped to Shiny options automatically:
+
+### SpeechToTextOptions
+
+| M.E.AI Property | Shiny Property | Notes |
+|---|---|---|
+| `SpeechLanguage` | `SpeechRecognitionOptions.Culture` | ISO-639 string → `CultureInfo` |
+| `ModelId` | — | Passed through to response |
+
+### TextToSpeechOptions
+
+| M.E.AI Property | Shiny Property | Notes |
+|---|---|---|
+| `VoiceId` | `TextToSpeechOptions.Voice` | Mapped to `VoiceInfo.Id` |
+| `Language` | `TextToSpeechOptions.Culture` | BCP 47 string → `CultureInfo` |
+| `Speed` | `TextToSpeechOptions.SpeechRate` | `1.0` = normal |
+| `Pitch` | `TextToSpeechOptions.Pitch` | `1.0` = normal |
+| `Volume` | `TextToSpeechOptions.Volume` | `1.0` = normal |
+| `AudioFormat` | — | Used as the `DataContent` media type (default: `audio/mpeg`) |
+
+## Streaming Update Kinds
+
+### Speech-to-Text
+
+| Kind | When |
+|---|---|
+| `SessionOpen` | Audio capture session started |
+| `TextUpdating` | Partial recognition result (not final) |
+| `TextUpdated` | Final recognition result after silence |
+| `SessionClose` | Audio capture session ended |
+
+### Text-to-Speech
+
+| Kind | When |
+|---|---|
+| `SessionOpen` | Synthesis session started |
+| `AudioUpdated` | Complete audio chunk available |
+| `SessionClose` | Synthesis session ended |
+
+## Links
+* [Microsoft.Extensions.AI Documentation](https://learn.microsoft.com/en-us/dotnet/ai/microsoft-extensions-ai)
+* [M.E.AI ISpeechToTextClient API Reference](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.ispeechtotextclient?view=net-10.0-pp)
+* [M.E.AI ITextToSpeechClient API Reference](https://learn.microsoft.com/en-us/dotnet/api/microsoft.extensions.ai.itexttospeechclient?view=net-10.0-pp)
