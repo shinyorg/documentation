@@ -216,6 +216,8 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'speech/' },
           { label: 'Azure AI Speech', link: 'speech/azure' },
           { label: 'ElevenLabs', link: 'speech/elevenlabs' },
+          { label: 'OpenAI', link: 'speech/openai' },
+          { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
           { label: 'Custom Provider', link: 'speech/custom-provider' },
           { label: 'Release Notes', link: 'speech/release-notes' }
         ]
