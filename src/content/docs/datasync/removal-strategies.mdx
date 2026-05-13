@@ -1,0 +1,78 @@
+---
+title: Removal Strategies
+---
+
+Shiny.DataSync provides four strategies for removing data that the client should no longer have. All are optional and composable — use any combination on the same entity.
+
+## Strategy Overview
+
+| Strategy | When to use | Server provides |
+|----------|-------------|-----------------|
+| **Soft-Delete** | Server marks entities as deleted but still returns them in pull | A boolean flag on the entity (e.g. `IsDeleted`) |
+| **Tombstone** | Server tracks deleted IDs separately | `string[]` of deleted IDs at a dedicated endpoint |
+| **Reconciliation** | Need to catch all cases (unassigned work, bulk deletes) | `string[]` of all valid IDs at a dedicated endpoint |
+| **Expiry** | Server changes entity state to mean "not for this client anymore" | A state change on the entity (e.g. `AssignedTo` becomes null) |
+
+## Soft-Delete
+
+The simplest approach. The server includes a deletion flag on the entity, and the library removes it locally when detected during pull.
+
+```csharp
+e.SoftDeletePredicate = x => x.IsDeleted;
+```
+
+## Tombstone
+
+The server maintains a separate endpoint that returns the IDs of deleted entities. Supports incremental fetching via a date variable.
+
+```csharp
+e.TombstoneUri = "/api/items/tombstones";
+e.TombstoneHttpMethod = HttpMethod.Get;       // default: GET
+e.TombstoneDateVariable = "since";            // appends ?since=<timestamp>
+```
+
+**Server response**: `string[]` — an array of deleted entity IDs.
+
+## Reconciliation
+
+The nuclear option. The server returns all valid entity IDs, and any local entity not in the set is removed. This catches everything — bulk deletes, unassigned work orders, anything.
+
+```csharp
+e.ReconciliationUri = "/api/items/ids";
+e.ReconciliationHttpMethod = HttpMethod.Get;   // default: GET
+e.ReconciliationMinimumTime = TimeSpan.FromMinutes(30); // throttle — this is expensive
+```
+
+**Server response**: `string[]` — an array of all valid entity IDs.
+
+:::tip
+Reconciliation skips entities with pending local changes to avoid removing in-progress work. Use `ReconciliationMinimumTime` to throttle — this operation fetches the full ID set every time.
+:::
+
+## Expiry
+
+Similar to soft-delete, but instead of a deletion flag, it detects a meaningful state change. For example, a work order that becomes unassigned from the current user.
+
+```csharp
+e.ExpiryPredicate = x => x.AssignedTo == null;
+```
+
+## Combining Strategies
+
+You can combine strategies for maximum coverage:
+
+```csharp
+ds.AddEntity<WorkOrder>(x => x.Id, e =>
+{
+    e.PullUri = "/api/workorders";
+    e.PushUri = "/api/workorders";
+
+    // Real-time: catch soft-deletes and unassigned work orders during pull
+    e.SoftDeletePredicate = x => x.IsDeleted;
+    e.ExpiryPredicate = x => x.AssignedTo == null;
+
+    // Safety net: reconcile all IDs every 30 minutes
+    e.ReconciliationUri = "/api/workorders/ids";
+    e.ReconciliationMinimumTime = TimeSpan.FromMinutes(30);
+});
+```

@@ -12,6 +12,7 @@ export const sidebarTopics = [
     icon: 'open-book',
     items: [
       { label: 'App Builder', link: 'foundation/appbuilder' },
+      { label: 'Template Builder', link: 'templates/builder' },
       { label: 'Architecture', link: 'foundation/architecture' },
       {
         label: 'Hosting Models',
@@ -27,10 +28,22 @@ export const sidebarTopics = [
   },
   {
     id: 'client',
-    label: 'Mobile Essentials',
-    link: '/mauishell/',
+    label: 'App Essentials',
+    link: '/aiconversation/',
     icon: 'rocket',
     items: [
+      {
+        label: 'AI Conversations',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'aiconversation/' },
+          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
+          { label: 'Message Store', link: 'aiconversation/message-store' },
+          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
+          { label: 'Wake Word', link: 'aiconversation/wake-word' },
+          { label: 'AI Tools', link: 'aiconversation/ai-tools' },
+        ]
+      },
       {
         label: 'MAUI Shell',
         jumpTo: true,
@@ -123,6 +136,18 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Data Sync',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'datasync/' },
+          { label: 'Entity Registration', link: 'datasync/entity-registration' },
+          { label: 'Removal Strategies', link: 'datasync/removal-strategies' },
+          { label: 'Sync Interceptor', link: 'datasync/sync-interceptor' },
+          { label: 'Server API Contracts', link: 'datasync/server-contracts' },
+          { label: 'Release Notes', link: 'datasync/release-notes' }
+        ]
+      },
+      {
         label: 'Templates',
         jumpTo: true,
         items:[
@@ -184,6 +209,19 @@ export const sidebarTopics = [
           { label: 'Release Notes', link: 'locations/release-notes' }
         ]
       },
+      {
+        label: 'Speech',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'speech/' },
+          { label: 'Azure AI Speech', link: 'speech/azure' },
+          { label: 'ElevenLabs', link: 'speech/elevenlabs' },
+          { label: 'OpenAI', link: 'speech/openai' },
+          { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
+          { label: 'Custom Provider', link: 'speech/custom-provider' },
+          { label: 'Release Notes', link: 'speech/release-notes' }
+        ]
+      },
     ]
   },
   {
@@ -202,8 +240,6 @@ export const sidebarTopics = [
           { label: 'Lyrics', link: 'music/lyrics' },
           { label: 'Album Art', link: 'music/album-art' },
           { label: 'Copying Tracks', link: 'music/copying' },
-          { label: 'Song Identification', link: 'music/identification' },
-          { label: 'Music Management', link: 'music/management' },
           { label: 'Release Notes', link: 'music/release-notes' }
         ]
       },
@@ -265,9 +301,18 @@ export const sidebarTopics = [
         label: 'ChatView',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/chatview/' },
-          { label: 'Data Models', link: 'controls/chatview/data-models' },
-          { label: 'Properties & Commands', link: 'controls/chatview/configuration' },
+          { label: 'Overview', link: 'controls/chatview/' },
+          { label: 'Getting Started', link: 'controls/chatview/getting-started' },
+          { label: 'Messages', link: 'controls/chatview/messages' },
+          { label: 'Participants & Avatars', link: 'controls/chatview/participants' },
+          { label: 'Input Bar & Tools', link: 'controls/chatview/input-bar' },
+          { label: 'Typing Indicators', link: 'controls/chatview/typing-indicators' },
+          { label: 'Scrolling & Pagination', link: 'controls/chatview/scrolling-pagination' },
+          { label: 'Acknowledgements', link: 'controls/chatview/acknowledgements' },
+          { label: 'Bubble Tools', link: 'controls/chatview/bubble-tools' },
+          { label: 'Message Templates', link: 'controls/chatview/message-templates' },
+          { label: 'Scenarios', link: 'controls/chatview/scenarios' },
+          { label: 'API Reference', link: 'controls/chatview/api-reference' },
         ]
       },
       {
@@ -287,6 +332,16 @@ export const sidebarTopics = [
           { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
           { label: 'Examples', link: 'controls/floatingpanel/examples' },
           { label: 'Blazor Usage', link: 'controls/floatingpanel/blazor' },
+        ]
+      },
+      {
+        label: 'SheetView',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/sheetview/' },
+          { label: 'Properties & Events', link: 'controls/sheetview/properties' },
+          { label: 'Examples', link: 'controls/sheetview/examples' },
+          { label: 'Blazor Usage', link: 'controls/sheetview/blazor' },
         ]
       },
       {
@@ -315,18 +370,24 @@ export const sidebarTopics = [
           { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', jumpTo: true },
           { label: 'CountryPicker', link: 'controls/countrypicker/', jumpTo: true },
           { label: 'AddressEntry', link: 'controls/addressentry/', jumpTo: true },
+          { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
         ]
       },
+      { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
       {
         label: 'Other Controls',
         items:[
           { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
           { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
+          { label: 'Slider', link: 'controls/slider/', jumpTo: true },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
+          { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
+          { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
-          { label: 'TextToSpeechButton', link: 'controls/texttospeech/', jumpTo: true },
+          { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
+          { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },
       { label: 'Release Notes', link: 'controls/release-notes' }
@@ -348,6 +409,9 @@ export const sidebarTopics = [
           { label: 'Projections & Streaming', link: 'documentdb/projections' },
           { label: 'Aggregates', link: 'documentdb/aggregates' },
           { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
+          { label: 'Spatial', link: 'documentdb/spatial' },
+          { label: 'AI Tools', link: 'documentdb/ai-tools' },
+          { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
           { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
           { label: 'Release Notes', link: 'documentdb/release-notes' }
         ]
@@ -456,6 +520,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'di/' },
+          { label: 'AI Tools', link: 'di/ai-tools' },
           { label: 'Advanced Registration', link: 'di/advanced' },
           { label: 'Categories', link: 'di/categories' },
           { label: 'Configuration', link: 'di/configuration' },

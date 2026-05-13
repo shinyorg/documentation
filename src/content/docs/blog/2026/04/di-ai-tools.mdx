@@ -1,0 +1,185 @@
+---
+title: "Turn Any Interface Into an AI Tool — Shiny DI 3.0"
+date: 2026-04-29
+authors:
+  - allanritchie
+tags:
+  - Release
+  - AI
+  - DI
+heroImage: '../../../../../assets/di-ai-tools-hero.svg'
+---
+
+What if every service interface you already have could become an AI tool with a single attribute? Shiny Extensions DI 3.0 makes that happen — no adapter classes, no hand-rolled schemas, no registration boilerplate. Mark your interface with `[Tool]`, add `[Description]` to the methods that matter, and the source generator handles the rest.
+
+## The Problem
+
+You've built your services. Clean interfaces, proper DI registration, everything wired up. Now someone asks you to expose a few of those operations as AI tools for an LLM agent. Suddenly you're writing `AIFunction` subclasses by hand — one per operation — each with a constructor that takes the service, a metadata property with hand-written parameter schemas, and an `InvokeCoreAsync` override that extracts arguments from a dictionary and forwards them to your service method.
+
+For one or two tools, it's fine. For ten or twenty, it's tedious. And every time you change a method signature, you have to remember to update the corresponding tool class. The schema drifts, the argument parsing breaks, and the bugs only show up when the LLM calls the tool at runtime.
+
+## The Solution: `[Tool]` + `[Description]`
+
+```csharp
+[Tool]
+[Description("Manages customer orders")]
+public interface IOrderService
+{
+    [Description("Places a new order for a customer")]
+    Task<OrderResult> PlaceOrderAsync(
+        [Description("The customer identifier")] Guid customerId,
+        [Description("The product SKU")] string sku,
+        [Description("Number of units to order")] int quantity
+    );
+
+    [Description("Cancels an existing order")]
+    Task CancelOrderAsync(
+        [Description("The order to cancel")] Guid orderId,
+        [Description("Reason for cancellation")] string reason
+    );
+
+    // No [Description] — not exposed as a tool
+    Task<List<Order>> GetInternalAuditLogAsync();
+}
+```
+
+That's it. The source generator produces a fully typed `AIFunction` subclass for each described method, wires up the parameter metadata, and generates a registration extension — all at compile time.
+
+## What Gets Generated
+
+For `PlaceOrderAsync` above, the generator emits a class like this:
+
+```csharp
+public class IOrderServicePlaceOrderAsyncAITool : AIFunction
+{
+    private readonly IOrderService _service;
+
+    private static readonly AIFunctionMetadata _metadata =
+        new AIFunctionMetadata("IOrderServicePlaceOrderAsync")
+        {
+            Description = "Places a new order for a customer",
+            Parameters = new AIFunctionParameterMetadata[]
+            {
+                new("customerId")
+                {
+                    Description = "The customer identifier",
+                    ParameterType = typeof(Guid),
+                    IsRequired = true
+                },
+                new("sku")
+                {
+                    Description = "The product SKU",
+                    ParameterType = typeof(string),
+                    IsRequired = true
+                },
+                new("quantity")
+                {
+                    Description = "Number of units to order",
+                    ParameterType = typeof(int),
+                    IsRequired = true
+                }
+            }
+        };
+
+    public Guid CustomerId { get; set; }
+    public string Sku { get; set; }
+    public int Quantity { get; set; }
+
+    public IOrderServicePlaceOrderAsyncAITool(IOrderService service)
+    {
+        _service = service;
+    }
+
+    public override AIFunctionMetadata Metadata => _metadata;
+
+    protected override async Task<object?> InvokeCoreAsync(
+        IEnumerable<KeyValuePair<string, object?>>? arguments,
+        CancellationToken cancellationToken)
+    {
+        // argument extraction and service call
+        return await _service.PlaceOrderAsync(
+            this.CustomerId, this.Sku, this.Quantity);
+    }
+}
+```
+
+A second class is generated for `CancelOrderAsync`. The `GetInternalAuditLogAsync` method is skipped because it has no `[Description]`.
+
+## Registration
+
+All generated tools are registered with a single call:
+
+```csharp
+services.AddGeneratedAITools();
+```
+
+This registers each tool as `Transient<AITool, GeneratedToolClass>`. You can then resolve all tools and pass them to any `IChatClient`:
+
+```csharp
+var tools = serviceProvider.GetServices<AITool>().ToList();
+var options = new ChatOptions { Tools = tools };
+var response = await chatClient.GetResponseAsync(messages, options);
+```
+
+## Conditional Generation
+
+The AI tool code is only generated when `Microsoft.Extensions.AI` is referenced in your project. If you don't reference it, the `[Tool]` attribute still compiles (it's just an attribute), but no `AIFunction` classes or registration code are emitted. This means existing projects that add the DI package won't get unexpected dependencies.
+
+## AOT-Safe Argument Extraction
+
+The generated `InvokeCoreAsync` handles the `JsonElement`-vs-already-deserialized argument problem that trips up most hand-written AI tools. For every standard type, the generator emits a direct `JsonElement` accessor:
+
+| Type | Extraction | Reflection-free |
+|------|-----------|----------------|
+| `string` | `GetString()` | Yes |
+| `int`, `long`, `short`, `byte` | `GetInt32()`, `GetInt64()`, etc. | Yes |
+| `bool` | `GetBoolean()` | Yes |
+| `double`, `float`, `decimal` | `GetDouble()`, `GetSingle()`, `GetDecimal()` | Yes |
+| `Guid` | `GetGuid()` | Yes |
+| `DateTime` | `GetDateTime()` | Yes |
+| `DateTimeOffset` | `GetDateTimeOffset()` | Yes |
+| `DateOnly`, `TimeOnly`, `TimeSpan` | `Parse(GetString())` | Yes |
+| Enums | `Enum.Parse<T>(GetString())` | Yes |
+| Complex types | `JsonSerializer.Deserialize<T>()` | Needs `JsonSerializerContext` |
+
+If the argument arrives as a `JsonElement` (common when the framework hasn't pre-deserialized), the correct accessor is used. If it arrives already typed (some frameworks do this), a direct cast is used. Both paths are handled with a single `is JsonElement` check — no try/catch, no `Convert.ChangeType`.
+
+## CancellationToken Handling
+
+If your service method accepts a `CancellationToken`, the generator does the right thing automatically:
+
+```csharp
+[Description("Searches products")]
+Task<List<Product>> SearchAsync(
+    [Description("Search query")] string query,
+    CancellationToken cancellationToken  // not exposed as a tool parameter
+);
+```
+
+The `CancellationToken` is excluded from the tool's parameter metadata and properties. In `InvokeCoreAsync`, it's passed through from the framework's cancellation token — not extracted from the argument dictionary.
+
+## Methods Without `[Description]` Are Skipped
+
+Only methods with `[Description]` become tools. This gives you fine-grained control over what's exposed to the LLM. Internal methods, admin operations, or anything you don't want an AI agent calling — just don't add the attribute.
+
+## Works With Your Existing DI Setup
+
+The `[Tool]` attribute goes on interfaces, while `[Singleton]` / `[Scoped]` / `[Transient]` go on implementation classes — same as before. You keep using `AddGeneratedServices()` for your service registrations and add `AddGeneratedAITools()` alongside it:
+
+```csharp
+services.AddGeneratedServices();
+services.AddGeneratedAITools();  // only if M.E.AI is referenced
+```
+
+The two generators are independent. AI tool generation doesn't affect or depend on your service registrations.
+
+## Getting Started
+
+1. Add `[Tool]` to the interface
+2. Add `[Description]` to the interface and the methods you want exposed
+3. Add `[Description]` to parameters (optional but recommended — it helps the LLM)
+4. Reference `Microsoft.Extensions.AI` in your project
+5. Call `services.AddGeneratedAITools()` at startup
+6. Resolve `IEnumerable<AITool>` and pass to your chat client
+
+Check the [DI documentation](/di/) for the full setup guide and the [release notes](/di/release-notes/) for the complete changelog.

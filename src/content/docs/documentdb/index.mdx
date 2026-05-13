@@ -3,21 +3,34 @@ title: Document DB
 ---
 import GitHubStars from '/src/components/GitHubStars.astro';
 import NugetDownloads from '/src/components/NugetDownloads.astro';
+import NugetBadge from '/src/components/NugetBadge.astro';
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 import AiSkill from '/src/components/AiSkill.astro';
 
-A lightweight, database-agnostic document store for .NET that turns your database into a schema-free JSON document database with LINQ querying and full AOT/trimming support. Store entire object graphs — nested objects, child collections — as JSON documents. No `CREATE TABLE`, no `ALTER TABLE`, no JOINs, no migrations. One API, four database providers.
+A lightweight, database-agnostic document store for .NET that turns your database into a schema-free JSON document database with LINQ querying, spatial/geo queries, and full AOT/trimming support. Store entire object graphs — nested objects, child collections — as JSON documents. No `CREATE TABLE`, no `ALTER TABLE`, no JOINs, no migrations. One API, multiple database providers.
 
 <PlatformSupport frameworks={["dotnet", "maui", "blazor", "aspnet"]} os={["android", "ios", "windows"]} />
 
-- <GitHubStars org="shinyorg" repo="DocumentDb" />
-- <NugetDownloads name="Shiny.DocumentDb" />
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="DocumentDb" /> |
+| Downloads | <NugetDownloads name="Shiny.DocumentDb" /> |
+| SQLite | <NugetDownloads name="Shiny.DocumentDb.Sqlite" /> |
+| SQLCipher | <NugetDownloads name="Shiny.DocumentDb.Sqlite.SqlCipher" /> |
+| SQL Server | <NugetDownloads name="Shiny.DocumentDb.SqlServer" /> |
+| MySQL | <NugetDownloads name="Shiny.DocumentDb.MySql" /> |
+| PostgreSQL | <NugetDownloads name="Shiny.DocumentDb.PostgreSql" /> |
+| LiteDB | <NugetDownloads name="Shiny.DocumentDb.LiteDb" /> |
+| CosmosDB | <NugetDownloads name="Shiny.DocumentDb.CosmosDb" /> |
+| DI Extensions | <NugetDownloads name="Shiny.DocumentDb.Extensions.DependencyInjection" /> |
+| IndexedDB | <NugetDownloads name="Shiny.DocumentDb.IndexedDb" /> |
+| AI Tools | <NugetDownloads name="Shiny.DocumentDb.Extensions.AI" /> |
 
 ## Features
 
-- **Multi-provider** — SQLite, SQLCipher (encrypted SQLite), SQL Server, MySQL, and PostgreSQL with a single API
+- **Multi-provider** — SQLite, SQLCipher (encrypted SQLite), LiteDB, CosmosDB, IndexedDB (Blazor WASM), SQL Server, MySQL, and PostgreSQL with a single API
 - **Zero schema, zero migrations** — store objects as JSON documents
 - **Fluent query builder** — `store.Query<User>().Where(u => u.Age > 30).OrderBy(u => u.Name).Paginate(0, 20).ToList()` with full LINQ expression support for nested properties, `Any()`, `Count()`, string methods, null checks, and captured variables
 - **`IAsyncEnumerable<T>` streaming** — yield results one-at-a-time with `.ToAsyncEnumerable()`
@@ -32,10 +45,15 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Surgical field updates** — `SetProperty` updates a single JSON field without deserialization. `RemoveProperty` strips a field. Both support nested paths
 - **Typed Id lookups** — `Get`, `Remove`, `SetProperty`, and `RemoveProperty` accept the Id as `object` so you can pass a `Guid`, `int`, `long`, or `string` directly. Unsupported types throw `ArgumentException`
 - **Full AOT/trimming support** — all `JsonTypeInfo<T>` parameters are optional and auto-resolve from a configured `JsonSerializerContext`. Set `UseReflectionFallback = false` to catch missing registrations with clear exceptions
+- **Optimistic concurrency** — `MapVersionProperty<T>(x => x.RowVersion)` enables automatic version checking on update/upsert. Version is set to 1 on insert, checked and incremented on update. Throws `ConcurrencyException` on conflict. Works across all providers — stored in the JSON blob with zero schema changes
 - **Transactions** — `RunInTransaction` with automatic commit/rollback
 - **Batch insert** — `BatchInsert` inserts a collection in a single transaction with prepared command reuse, auto-generates IDs, and rolls back atomically on failure
-- **Hot backup** — `Backup` copies the database using the SQLite Online Backup API (SQLite/SQLCipher only; other providers throw `NotSupportedException`)
+- **Spatial / geo queries** — `WithinRadius`, `WithinBoundingBox`, and `NearestNeighbors` with `GeoPoint` support. SQLite uses R*Tree; CosmosDB uses native `ST_DISTANCE`/`ST_WITHIN`. [Learn more](/documentdb/spatial/)
+- **Hot backup** — `Backup` copies the database to a file. Available on `SqliteDocumentStore`, `SqlCipherDocumentStore`, and `LiteDbDocumentStore`
+- **Clear all** — `SqliteDocumentStore.ClearAllAsync()` deletes all documents across all tables including spatial sidecar data
 - **SQLCipher encryption** — separate `Shiny.DocumentDb.Sqlite.SqlCipher` package with AES-256 encryption, password-aware backup, and `RekeyAsync` to change the encryption key
+- **Multi-tenancy** — two isolation strategies: **shared-table** (single database with automatic `TenantId` column filtering) and **tenant-per-database** (separate database per tenant via lazy factory). Both resolve the current tenant via a user-implemented `ITenantResolver`. Consumer code is unchanged — tenant isolation is applied transparently
+- **AI tool integration** — `Shiny.DocumentDb.Extensions.AI` exposes document types as `Microsoft.Extensions.AI` tool functions for LLM agents. Per-type capability flags (`ReadOnly`, `All`), structured filter expressions, field visibility control, and page size caps. [Learn more](/documentdb/ai-tools/)
 
 ## Setup
 
@@ -70,11 +88,16 @@ A lightweight, database-agnostic document store for .NET that turns your databas
        dotnet add package Shiny.DocumentDb.PostgreSql
        ```
      </TabItem>
+     <TabItem label="IndexedDB">
+       ```bash
+       dotnet add package Shiny.DocumentDb.IndexedDb
+       ```
+     </TabItem>
    </Tabs>
 
-   Each provider package includes the core `Shiny.DocumentDb` package and DI extensions automatically.
+   Each provider package includes the core `Shiny.DocumentDb` package automatically.
 
-   A standalone DI package is also available for provider-agnostic registration:
+   For dependency injection, also install the DI extensions package:
 
    ```bash
    dotnet add package Shiny.DocumentDb.Extensions.DependencyInjection
@@ -82,94 +105,100 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 
 2. Register with dependency injection:
 
+   ```csharp
+   using Shiny.DocumentDb;
+
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
+   });
+   ```
+
+   Just swap the provider for your database:
+
    <Tabs>
      <TabItem label="SQLite">
        ```csharp
-       using Shiny.DocumentDb.Sqlite;
-
-       services.AddSqliteDocumentStore("Data Source=mydata.db");
-
-       // or with full options
-       services.AddSqliteDocumentStore(opts =>
-       {
-           opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
-           opts.TypeNameResolution = TypeNameResolution.FullName;
-           opts.JsonSerializerOptions = new JsonSerializerOptions
-           {
-               PropertyNamingPolicy = JsonNamingPolicy.CamelCase
-           };
-       });
+       opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
        ```
      </TabItem>
      <TabItem label="SQLCipher">
        ```csharp
-       using Shiny.DocumentDb.Sqlite.SqlCipher;
-
-       services.AddSqlCipherDocumentStore("mydata.db", "mySecretKey");
-
-       // or with full options
-       services.AddSqlCipherDocumentStore(opts =>
-       {
-           opts.DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey");
-           opts.TypeNameResolution = TypeNameResolution.FullName;
-       });
+       opts.DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey");
        ```
      </TabItem>
      <TabItem label="SQL Server">
        ```csharp
-       using Shiny.DocumentDb.SqlServer;
-
-       services.AddSqlServerDocumentStore("Server=localhost;Database=mydb;Trusted_Connection=true;");
-
-       // or with full options
-       services.AddSqlServerDocumentStore(opts =>
-       {
-           opts.DatabaseProvider = new SqlServerDatabaseProvider("Server=localhost;Database=mydb;Trusted_Connection=true;");
-           opts.TypeNameResolution = TypeNameResolution.FullName;
-       });
+       opts.DatabaseProvider = new SqlServerDatabaseProvider("Server=localhost;Database=mydb;Trusted_Connection=true;");
        ```
      </TabItem>
      <TabItem label="MySQL">
        ```csharp
-       using Shiny.DocumentDb.MySql;
-
-       services.AddMySqlDocumentStore("Server=localhost;Database=mydb;User=root;Password=pass;");
-
-       // or with full options
-       services.AddMySqlDocumentStore(opts =>
-       {
-           opts.DatabaseProvider = new MySqlDatabaseProvider("Server=localhost;Database=mydb;User=root;Password=pass;");
-           opts.TypeNameResolution = TypeNameResolution.FullName;
-       });
+       opts.DatabaseProvider = new MySqlDatabaseProvider("Server=localhost;Database=mydb;User=root;Password=pass;");
        ```
      </TabItem>
      <TabItem label="PostgreSQL">
        ```csharp
-       using Shiny.DocumentDb.PostgreSql;
-
-       services.AddPostgreSqlDocumentStore("Host=localhost;Database=mydb;Username=postgres;Password=pass;");
-
-       // or with full options
-       services.AddPostgreSqlDocumentStore(opts =>
-       {
-           opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=localhost;Database=mydb;Username=postgres;Password=pass;");
-           opts.TypeNameResolution = TypeNameResolution.FullName;
-       });
-       ```
-     </TabItem>
-     <TabItem label="Generic">
-       ```csharp
-       using Shiny.DocumentDb;
-
-       // Provider-agnostic registration — bring your own IDatabaseProvider
-       services.AddDocumentStore(opts =>
-       {
-           opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
-           opts.TypeNameResolution = TypeNameResolution.FullName;
-       });
+       opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=localhost;Database=mydb;Username=postgres;Password=pass;");
        ```
      </TabItem>
    </Tabs>
+
+   For multiple databases, register named stores using .NET keyed services:
+
+   ```csharp
+   services.AddDocumentStore("users", opts =>
+   {
+       opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=users.db");
+   });
+   services.AddDocumentStore("analytics", opts =>
+   {
+       opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=...");
+   });
+   ```
+
+   Inject via `[FromKeyedServices("name")]` or resolve dynamically with `IDocumentStoreProvider`:
+
+   ```csharp
+   public class MyService(
+       [FromKeyedServices("users")] IDocumentStore userStore,
+       [FromKeyedServices("analytics")] IDocumentStore analyticsStore) { }
+
+   // Or dynamically:
+   public class MyService(IDocumentStoreProvider stores)
+   {
+       void DoWork() => stores.GetStore("users").Insert(...);
+   }
+   ```
+
+   For multi-tenant applications, two isolation strategies are available:
+
+   ```csharp
+   // Shared-table: single database, automatic TenantId column filtering
+   services.AddSingleton<ITenantResolver, MyTenantResolver>();
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=...");
+   }, multiTenant: true);
+
+   // Tenant-per-database: separate database per tenant (scoped IDocumentStore)
+   services.AddSingleton<ITenantResolver, MyTenantResolver>();
+   services.AddMultiTenantDocumentStore(tenantId => new DocumentStoreOptions
+   {
+       DatabaseProvider = new SqliteDatabaseProvider($"Data Source={tenantId}.db")
+   });
+   ```
+
+   Both require an `ITenantResolver` implementation:
+
+   ```csharp
+   public class MyTenantResolver(IHttpContextAccessor http) : ITenantResolver
+   {
+       public string GetCurrentTenant()
+           => http.HttpContext?.User.FindFirst("tenant_id")?.Value
+              ?? throw new InvalidOperationException("No tenant context");
+   }
+   ```
 
    Or instantiate directly (no DI needed):
 
@@ -259,6 +288,7 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 | `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, all methods auto-resolve type info from the context |
 | `UseReflectionFallback` | `bool` | `true` | When `false`, throws `InvalidOperationException` if a type can't be resolved from the configured `TypeInfoResolver` instead of falling back to reflection. Recommended for AOT deployments |
 | `Logging` | `Action<string>?` | `null` | Callback invoked with every SQL statement executed |
+| `TenantIdAccessor` | `Func<string>?` | `null` | When set, enables shared-table multi-tenancy. All queries are filtered by TenantId and all inserts include the TenantId value. A dedicated TenantId column and index are created automatically |
 
 ### Table-Per-Type Mapping
 
@@ -303,52 +333,15 @@ All overloads return `DocumentStoreOptions` for fluent chaining. Duplicate table
 
 #### DI Registration with Table Mapping
 
-<Tabs>
-  <TabItem label="SQLite">
-    ```csharp
-    services.AddSqliteDocumentStore(opts =>
-    {
-        opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
-        opts.MapTypeToTable<User>();
-        opts.MapTypeToTable<Order>("orders");
-        opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
-    });
-    ```
-  </TabItem>
-  <TabItem label="SQL Server">
-    ```csharp
-    services.AddSqlServerDocumentStore(opts =>
-    {
-        opts.DatabaseProvider = new SqlServerDatabaseProvider("Server=localhost;Database=mydb;Trusted_Connection=true;");
-        opts.MapTypeToTable<User>();
-        opts.MapTypeToTable<Order>("orders");
-        opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
-    });
-    ```
-  </TabItem>
-  <TabItem label="MySQL">
-    ```csharp
-    services.AddMySqlDocumentStore(opts =>
-    {
-        opts.DatabaseProvider = new MySqlDatabaseProvider("Server=localhost;Database=mydb;User=root;Password=pass;");
-        opts.MapTypeToTable<User>();
-        opts.MapTypeToTable<Order>("orders");
-        opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
-    });
-    ```
-  </TabItem>
-  <TabItem label="PostgreSQL">
-    ```csharp
-    services.AddPostgreSqlDocumentStore(opts =>
-    {
-        opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=localhost;Database=mydb;Username=postgres;Password=pass;");
-        opts.MapTypeToTable<User>();
-        opts.MapTypeToTable<Order>("orders");
-        opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
-    });
-    ```
-  </TabItem>
-</Tabs>
+```csharp
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
+    opts.MapTypeToTable<User>();
+    opts.MapTypeToTable<Order>("orders");
+    opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
+});
+```
 
 ## AI Coding Assistant
 

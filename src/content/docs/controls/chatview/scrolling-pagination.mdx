@@ -1,0 +1,157 @@
+---
+title: ChatView | Scrolling & Pagination
+description: Smart auto-scroll, unread message pills, load-more pagination, and scroll-to-message
+---
+
+## Smart Scrolling
+
+ChatView manages scroll behavior automatically based on context:
+
+| Scenario | Behavior |
+|---|---|
+| You send a message | Always scrolls to bottom |
+| New message from others, you're at bottom | Scrolls to bottom |
+| New message from others, you've scrolled up | Does NOT scroll — shows unread pill |
+| Typing indicator appears, you're at bottom | Scrolls to keep it visible |
+| Typing indicator appears, you've scrolled up | Hides indicator, shows in toast pill |
+
+This prevents the jarring experience of being pulled away from what you're reading when new messages arrive.
+
+## Unread Message Pill
+
+When you're scrolled up and new messages arrive, a pill-shaped overlay appears at the bottom of the message area:
+
+- **"1 New Message"** or **"3 New Messages"**
+- Tapping the pill scrolls to the latest message and resets the counter
+
+The pill is only shown when `unreadCount > 0` — it disappears immediately when you scroll to the bottom.
+
+### How "Near Bottom" Is Determined
+
+- **MAUI**: The last visible item is within 1 item of the end of the list
+- **Blazor**: Scroll position is within 50px of the bottom (`scrollHeight - scrollTop - clientHeight < 50`)
+
+## Load-More Pagination
+
+Most chat apps load only recent messages initially, then fetch older ones when the user scrolls to the top.
+
+### MAUI — Automatic Trigger
+
+ChatView uses `CollectionView.RemainingItemsThreshold = 5`. When the user scrolls to within 5 items of the top, `LoadMoreCommand` fires automatically:
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                SendCommand="{Binding SendCommand}"
+                LoadMoreCommand="{Binding LoadMoreCommand}" />
+```
+
+```csharp
+[RelayCommand]
+async Task LoadMore()
+{
+    var olderMessages = await chatService.GetOlderMessages(
+        before: Messages.First().Timestamp,
+        count: 20
+    );
+
+    // Insert at the beginning — scroll position is preserved automatically
+    foreach (var msg in olderMessages)
+        Messages.Insert(0, msg);
+}
+```
+
+The command won't fire again while a previous load-more is still in progress (re-entrancy guard).
+
+### Blazor — Button Trigger
+
+Blazor shows a **"Load earlier messages"** button at the top of the message list when `LoadMoreCommand` has a delegate:
+
+```razor
+<ChatView Messages="messages"
+          SendCommand="OnSend"
+          LoadMoreCommand="OnLoadMore" />
+
+@code {
+    async Task OnLoadMore()
+    {
+        var older = await chatService.GetOlderMessages(20);
+        messages.InsertRange(0, older);
+        StateHasChanged();
+    }
+}
+```
+
+After loading, the Blazor component automatically maintains scroll position using JavaScript — the user sees the same content they were looking at, with new messages prepended above.
+
+### Scroll Position Preservation
+
+Both platforms preserve the user's scroll position when prepending messages. You don't need to handle this manually — just insert at index 0 and the view stays stable.
+
+## Scroll to First Unread
+
+For apps that track read position (e.g., returning to a chat), you can scroll to the first unread message on load:
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                ScrollToFirstUnread="True"
+                FirstUnreadMessageId="{Binding FirstUnreadId}" />
+```
+
+```csharp
+// Set before binding Messages (or at the same time)
+FirstUnreadId = lastReadReceipt.NextMessageId;
+```
+
+When `ScrollToFirstUnread = true` and `FirstUnreadMessageId` is set:
+- On initial load, the view scrolls to that message instead of the end
+- If the ID isn't found in the collection, falls back to scrolling to the end
+
+## Programmatic Scrolling (MAUI only)
+
+### Scroll to End
+
+```csharp
+chatView.ScrollToEnd(animate: true);
+```
+
+### Scroll to Specific Message
+
+```csharp
+// Scroll to a message by its Id
+chatView.ScrollToMessage(messageId: "abc-123", animate: true);
+```
+
+If the message ID isn't found in the collection, this falls back to `ScrollToEnd`.
+
+### Use Cases
+
+```csharp
+// After a search — jump to the found message
+void OnSearchResultSelected(string messageId)
+{
+    chatView.ScrollToMessage(messageId, animate: true);
+}
+
+// After loading history — scroll to where the user left off
+void OnHistoryLoaded(string lastReadId)
+{
+    chatView.ScrollToMessage(lastReadId, animate: false);
+}
+```
+
+## Platform Differences
+
+| Feature | MAUI | Blazor |
+|---|---|---|
+| Auto-scroll trigger | CollectionView built-in | JS scroll listener (50px threshold) |
+| Load-more trigger | Automatic (RemainingItemsThreshold=5) | Manual button at top |
+| Scroll position preservation | Native CollectionView behavior | JS `maintainScrollPosition()` |
+| `ScrollToEnd()` method | Public method on control | Internal only (auto-triggered) |
+| `ScrollToMessage()` method | Public method on control | Internal only (on initial load) |
+| Unread pill | Toast pill with tap-to-scroll | Div overlay with click handler |
+| Toast pill (typing + unread) | Combined pill overlay | Separate elements |
+| Virtualization | CollectionView (only visible items rendered) | All messages rendered in DOM |
+
+:::note
+On Blazor, all messages are rendered in the DOM at once (no virtualization). For very large message histories (1000+), consider limiting the visible collection and using load-more to keep the DOM manageable.
+:::

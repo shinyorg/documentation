@@ -1,0 +1,298 @@
+---
+title: ChatView | Bubble Tools
+description: Per-message action menus with built-in tools (Copy, Read Aloud, Reactions) and custom actions
+---
+
+## Overview
+
+Bubble tools add a three-dot menu (**⋮**) to each message bubble. When tapped, the menu expands upward as a FAB (Floating Action Button) menu, showing available actions for that message.
+
+This is a **MAUI-only** feature.
+
+## How It Works
+
+1. You define `BubbleToolItems` (for received messages) and/or `MyBubbleToolItems` (for your own messages) on the ChatView
+2. Each message bubble shows a small **⋮** button (28×28px) when tools are available for that message type
+3. Tapping it opens an animated FAB menu with the appropriate tool items
+4. Tapping a tool fires its command with the message as parameter
+5. The menu closes automatically after an item is tapped
+
+The **⋮** button appears:
+- To the **left** of "my" bubbles (right-aligned messages)
+- To the **right** of "other" bubbles (left-aligned messages)
+
+The tool list is selected based on message ownership:
+- **Received messages** (`IsFromMe = false`) → `BubbleToolItems`
+- **My messages** (`IsFromMe = true`) → `MyBubbleToolItems`
+- **Per-message override** → `ChatMessage.ToolItems` (replaces the default for that message only)
+
+## Basic Setup
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                SendCommand="{Binding SendCommand}">
+    <!-- Tools for received messages -->
+    <shiny:ChatView.BubbleToolItems>
+        <shiny:CopyBubbleTool />
+        <shiny:AcknowledgementBubbleTool Glyph="👍" Command="{Binding AckCommand}" />
+        <shiny:AcknowledgementBubbleTool Glyph="👎" Command="{Binding AckCommand}" />
+        <shiny:AcknowledgementSelectorBubbleTool Command="{Binding AckCommand}" />
+        <shiny:ChatBubbleTool Text="Reply"
+                              FabBackgroundColor="#2196F3"
+                              Command="{Binding ReplyCommand}" />
+    </shiny:ChatView.BubbleToolItems>
+
+    <!-- Tools for my own messages -->
+    <shiny:ChatView.MyBubbleToolItems>
+        <shiny:CopyBubbleTool />
+    </shiny:ChatView.MyBubbleToolItems>
+</shiny:ChatView>
+```
+
+## ChatBubbleTool Base Class
+
+`ChatBubbleTool` is a non-abstract base class for bubble tools. It can be used directly in XAML with a `Command` binding, or subclassed for self-contained tools. It provides:
+
+- `Message` property — automatically populated with the `ChatMessage` being acted upon
+- `RequestRefresh()` method — triggers a UI refresh after modifying message data (e.g. adding acknowledgements)
+
+```csharp
+public class ChatBubbleTool : FabMenuItem
+{
+    protected ChatMessage? Message { get; }   // Auto-populated via CommandParameter
+    protected void RequestRefresh();           // Refresh bubbles after data changes
+}
+```
+
+### Using Directly in XAML
+
+For simple ViewModel-bound actions, use `ChatBubbleTool` directly — no subclass needed. The `CommandParameter` is automatically set to the `ChatMessage`:
+
+```xml
+<shiny:ChatBubbleTool Text="Translate"
+                      FabBackgroundColor="#9C27B0"
+                      Command="{Binding TranslateCommand}" />
+```
+
+```csharp
+[RelayCommand]
+async Task Translate(ChatMessage message)
+{
+    var translated = await translationService.Translate(message.Text);
+    // ...
+}
+```
+
+### Subclassing for Self-Contained Tools
+
+For tools that handle their own logic without ViewModel involvement:
+
+```csharp
+public class TranslateTool : ChatBubbleTool
+{
+    public TranslateTool()
+    {
+        Text = "Translate";
+        FabBackgroundColor = Color.FromArgb("#9C27B0");
+        Clicked += OnClicked;
+    }
+
+    async void OnClicked(object? sender, EventArgs e)
+    {
+        if (Message is null || string.IsNullOrEmpty(Message.Text)) return;
+        // Translate Message.Text...
+    }
+}
+```
+
+## Built-in Tools
+
+### CopyBubbleTool
+
+Copies the message text to the clipboard. No ViewModel wiring needed — it's fully self-contained.
+
+```xml
+<shiny:ChatView.BubbleToolItems>
+    <shiny:CopyBubbleTool />
+</shiny:ChatView.BubbleToolItems>
+```
+
+| Aspect | Detail |
+|---|---|
+| Base Class | `ChatBubbleTool` |
+| Namespace | `Shiny.Maui.Controls.Chat` |
+| Package | `Shiny.Maui.Controls` |
+| Label | "Copy" |
+| Color | `#607D8B` (blue-gray) |
+| Behavior | Copies `Message.Text` to clipboard; falls back to `Message.ImageUrl` if text is empty |
+
+### TextToSpeechBubbleTool
+
+Reads the message text aloud using the device's text-to-speech engine. Requires the `Shiny.Maui.Controls.SpeechAddins` package.
+
+```xml
+<shiny:ChatView.BubbleToolItems>
+    <shiny:TextToSpeechBubbleTool SpeechRate="1.0"
+                                   Pitch="1.0"
+                                   Volume="1.0" />
+</shiny:ChatView.BubbleToolItems>
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `SpeechRate` | `float` | `1.0` | Speed (0.1 – 2.0) |
+| `Pitch` | `float` | `1.0` | Voice pitch (0.5 – 2.0) |
+| `Volume` | `float` | `1.0` | Volume (0.0 – 1.0) |
+| `VoiceName` | `string?` | `null` | Specific voice name |
+| `Culture` | `string?` | `null` | BCP 47 code (null = device default) |
+
+| Aspect | Detail |
+|---|---|
+| Base Class | `ChatBubbleTool` |
+| Namespace | `Shiny.Maui.Controls.SpeechAddins.Chat` |
+| Package | `Shiny.Maui.Controls.SpeechAddins` |
+| Label | "Read Aloud" |
+| Color | `#FF5722` (deep orange) |
+| Behavior | Cancels any in-progress speech, then reads `Message.Text` aloud |
+
+Requires `ITextToSpeechService` registered in DI (from `Shiny.Speech`).
+
+### AcknowledgementBubbleTool
+
+A single-tap toggle for a specific reaction emoji. Tapping adds the reaction to the message; tapping again removes it. Bind `Command` to notify your server — it receives an `AcknowledgementChangedContext`.
+
+```xml
+<shiny:ChatView.BubbleToolItems>
+    <shiny:AcknowledgementBubbleTool Glyph="👍" Command="{Binding AckCommand}" />
+    <shiny:AcknowledgementBubbleTool Glyph="👎" Command="{Binding AckCommand}" />
+</shiny:ChatView.BubbleToolItems>
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `Glyph` | `string` | `👍` | The emoji to toggle. Also used as the tool's display text. |
+| `UserId` | `string` | `"me"` | The user ID stamped on the acknowledgement |
+| `Command` | `ICommand` | `null` | Receives `AcknowledgementChangedContext` with `.Message` and `.Glyph` |
+
+| Aspect | Detail |
+|---|---|
+| Base Class | `ChatBubbleTool` |
+| Namespace | `Shiny.Maui.Controls.Chat` |
+| Package | `Shiny.Maui.Controls` |
+| Color | `#E5E7EB` (light gray) |
+| Behavior | Toggles the glyph on `Message.Acknowledgements`, fires `Command`, then refreshes the UI |
+
+### AcknowledgementSelectorBubbleTool
+
+Opens an action sheet with a grid of emoji reactions. The user picks one, and it's toggled on the message. Bind `Command` to notify your server.
+
+```xml
+<shiny:ChatView.BubbleToolItems>
+    <shiny:AcknowledgementSelectorBubbleTool Command="{Binding AckCommand}" />
+</shiny:ChatView.BubbleToolItems>
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `Glyphs` | `string[]?` | 12 common emojis | Custom set of glyphs to show in the selector |
+| `UserId` | `string` | `"me"` | The user ID stamped on the acknowledgement |
+| `Command` | `ICommand` | `null` | Receives `AcknowledgementChangedContext` with `.Message` and `.Glyph` |
+
+Default glyphs: 👍 👎 ❤️ 😂 😮 😢 😡 🔥 👏 🙏 💯 🎉
+
+| Aspect | Detail |
+|---|---|
+| Base Class | `ChatBubbleTool` |
+| Namespace | `Shiny.Maui.Controls.Chat` |
+| Package | `Shiny.Maui.Controls` |
+| Label | "❤️" |
+| Color | `#F3E5F5` (light purple) |
+| Behavior | Shows action sheet, toggles selected glyph on `Message.Acknowledgements`, fires `Command`, refreshes UI |
+
+### AcknowledgementChangedContext
+
+Passed to `Command` on acknowledgement tools:
+
+| Property | Type | Description |
+|---|---|---|
+| `Message` | `ChatMessage` | The message the reaction was toggled on |
+| `Glyph` | `string` | The emoji that was added or removed |
+
+```csharp
+[RelayCommand]
+async Task AckChanged(AcknowledgementChangedContext context)
+{
+    await hubConnection.SendAsync("ToggleReaction", context.Message.Identifier, context.Glyph);
+}
+```
+
+## Per-Message Tool Overrides
+
+Individual messages can define their own `ToolItems` that **replace** the ChatView-level `BubbleToolItems` for that message only:
+
+```csharp
+var systemMessage = new ChatMessage
+{
+    Text = "Meeting scheduled for tomorrow at 2:00 PM",
+    SenderId = "bot",
+    IsFromMe = false,
+    ToolItems = new List<FabMenuItem>
+    {
+        new FabMenuItem
+        {
+            Text = "Add to Calendar",
+            FabBackgroundColor = Colors.Green,
+            Command = AddToCalendarCommand
+        },
+        new FabMenuItem
+        {
+            Text = "Reschedule",
+            FabBackgroundColor = Colors.Orange,
+            Command = RescheduleCommand
+        }
+    }
+};
+```
+
+This is powerful for context-sensitive actions — a scheduling message gets calendar tools, an invoice message gets payment tools, etc.
+
+## FAB Menu Animation
+
+The bubble tools menu uses the same animation system as the input tools FAB:
+- Items appear with staggered fade + translate (30ms stagger, 200ms duration)
+- A semi-transparent black backdrop covers the chat area
+- Both backdrop tap and item tap close the menu
+- `CubicOut` easing on open, `CubicIn` on close
+
+## Haptic Feedback
+
+When `UseFeedback = true` (default), tapping a bubble tool triggers haptic feedback via the registered `IFeedbackService`.
+
+## Complete Example
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                Participants="{Binding Participants}"
+                IsMultiPerson="True"
+                SendCommand="{Binding SendCommand}">
+    <!-- Tools for received messages -->
+    <shiny:ChatView.BubbleToolItems>
+        <shiny:CopyBubbleTool />
+        <shiny:TextToSpeechBubbleTool />
+        <shiny:AcknowledgementBubbleTool Glyph="👍" Command="{Binding AckCommand}" />
+        <shiny:AcknowledgementBubbleTool Glyph="👎" Command="{Binding AckCommand}" />
+        <shiny:AcknowledgementSelectorBubbleTool Command="{Binding AckCommand}" />
+        <shiny:ChatBubbleTool Text="Reply"
+                              FabBackgroundColor="#2196F3"
+                              Command="{Binding ReplyCommand}" />
+    </shiny:ChatView.BubbleToolItems>
+
+    <!-- Tools for my own messages -->
+    <shiny:ChatView.MyBubbleToolItems>
+        <shiny:CopyBubbleTool />
+        <shiny:ChatBubbleTool Text="Delete"
+                              FabBackgroundColor="#F44336"
+                              Command="{Binding DeleteCommand}" />
+    </shiny:ChatView.MyBubbleToolItems>
+</shiny:ChatView>
+```

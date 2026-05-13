@@ -178,7 +178,7 @@ foreach (var playlist in playlists)
 }
 ```
 
-On Android, playlists are queried from `MediaStore.Audio.Playlists`. On iOS, playlists are queried via `MPMediaQuery.PlaylistsQuery`.
+On Android, playlists are queried from `MediaStore.Audio.Playlists`. On Apple platforms, playlists are queried via `MPMediaQuery.PlaylistsQuery`. Both include any custom playlists you've created (see below).
 
 ### Get Playlist Tracks
 
@@ -202,9 +202,58 @@ Each playlist is represented by a `PlaylistInfo` record:
 
 | Property | Type | Description |
 |---|---|---|
-| `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore playlist row ID. On iOS, it is the persistent ID. |
+| `Id` | `string` | Platform-specific unique identifier. On Android, this is the MediaStore playlist row ID. On Apple platforms, it is the persistent ID. Custom playlists use a `custom:` prefix. |
 | `Name` | `string` | The display name of the playlist. |
 | `SongCount` | `int` | The number of tracks in the playlist. |
+
+### Custom Playlist Management
+
+You can create and manage your own playlists through `IMediaLibrary`. Custom playlists are virtualized through the library — on Android, they are stored locally as JSON in app data since Android does not provide a writable playlist API for third-party apps. On Apple platforms, custom playlists are managed via MusicKit. In both cases, custom playlists appear alongside device playlists when calling `GetPlaylistsAsync()`.
+
+```csharp
+// Create a playlist
+var playlist = await _library.CreatePlaylistAsync("Road Trip");
+
+// Add tracks to it
+await _library.AddTrackToPlaylistAsync(playlist.Id, track);
+
+// Get tracks in the playlist
+var tracks = await _library.GetPlaylistTracksAsync(playlist.Id);
+
+// Remove a track
+await _library.RemoveTrackFromPlaylistAsync(playlist.Id, track.Id);
+
+// Remove the entire playlist
+await _library.RemovePlaylistAsync(playlist.Id);
+```
+
+Adding a track that already exists in the playlist is a no-op. Custom playlist IDs use a `custom:` prefix to distinguish them from device playlists.
+
+## Play Counts
+
+The `PlayCount` property on `MusicMetadata` tracks how many times a song has been played.
+
+```csharp
+var tracks = await _library.GetAllTracksAsync();
+
+foreach (var track in tracks.OrderByDescending(t => t.PlayCount).Take(10))
+{
+    Console.WriteLine($"{track.Title} — {track.PlayCount} plays");
+}
+```
+
+### Platform Differences
+
+| | Android | Apple Platforms |
+|---|---|---|
+| **Source** | Locally stored JSON file | `MPMediaItem.PlayCount` (system-tracked) |
+| **Incremented by** | `IMusicPlayer.PlayAsync()` | The OS (any music app) |
+| **Scope** | Your app only | All music playback on the device |
+| **Persists across installs** | No — cleared when app is uninstalled | Yes — managed by the OS |
+
+:::caution[Android play counts are app-scoped]
+On Android, play counts are stored in a local file within your app's data directory. They are only incremented when the user plays a track through `IMusicPlayer.PlayAsync()` — playback from other apps is not counted. If the user uninstalls your app, all play count data is lost. This is a platform limitation — Android does not provide a system-level play count API like Apple's `MPMediaItem.PlayCount`.
+:::
 
 ## MusicMetadata
 
@@ -221,8 +270,9 @@ Each track is represented by a `MusicMetadata` record with the following propert
 | `AlbumArtUri` | `string?` | URI to album artwork. Available on Android via MediaStore; `null` on iOS where artwork is accessed through `MPMediaItem.Artwork`. Use `GetAlbumArtPathAsync` for cross-platform album art retrieval. |
 | `IsExplicit` | `bool?` | Whether the track is marked as explicit content. iOS only via `MPMediaItem.IsExplicitItem`; always `null` on Android. |
 | `ContentUri` | `string` | URI used for playback and file operations. On Android, this is a `content://` URI. On iOS, this is an `ipod-library://` asset URL. **Empty for DRM-protected Apple Music subscription tracks.** |
-| `StoreId` | `string?` | Apple Music catalog ID (from `PlayParams.Id`). Enables streaming playback via `MPMusicPlayerController` on iOS. Always `null` on Android. |
-| `Year` | `int?` | The release year of the track. On Android from `MediaStore.Audio.Media.YEAR`; on iOS from `MPMediaItem.ReleaseDate`. `null` if unavailable. |
+| `StoreId` | `string?` | Track persistent ID for playback via `MPMusicPlayerController` on Apple platforms. Always `null` on Android. |
+| `Year` | `int?` | The release year of the track. On Android from `MediaStore.Audio.Media.YEAR`; on Apple platforms from `MPMediaItem.ReleaseDate`. `null` if unavailable. |
+| `PlayCount` | `int` | Number of times the track has been played. On Apple platforms from `MPMediaItem.PlayCount`; on Android tracked locally by the app. Default 0. |
 
 ## ContentUri, StoreId, and DRM
 
@@ -261,7 +311,10 @@ On Android, `ContentUri` is always populated for all music files. `StoreId` is a
 - Tracks are queried from `MediaStore.Audio.Media` via `ContentResolver`.
 - Only items flagged as music (`IsMusic != 0`) are returned — ringtones, notifications, podcasts, and videos are excluded.
 - Results are sorted alphabetically by title.
+- Custom playlists and play counts are stored locally as JSON — Android does not provide writable playlist or play count APIs for third-party apps.
 
-### iOS
+### Apple Platforms (iOS, Mac Catalyst)
 - Tracks are queried using `MPMediaQuery` from the `MediaPlayer` framework.
 - Only items with `MPMediaType.Music` are returned — podcasts, audiobooks, and movies are excluded.
+- Custom playlists are managed via MusicKit.
+- Play counts come from `MPMediaItem.PlayCount`, which is tracked by the OS across all music apps.

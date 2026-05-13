@@ -1,0 +1,119 @@
+---
+title: "DocumentDb AI Tools — Give Your LLM a Database"
+date: 2026-04-30
+authors:
+  - allanritchie
+tags:
+  - documentdb
+  - AI
+  - release
+excerpt: "Shiny.DocumentDb.Extensions.AI turns your document store into a set of LLM-callable tools. Register types, set capabilities, and let the agent query, insert, update, and delete documents through natural language."
+---
+
+You have a document store with customers, orders, and products. Now you want an LLM agent to answer questions about that data — or even modify it — without writing custom glue code for every operation. `Shiny.DocumentDb.Extensions.AI` makes that a one-time setup.
+
+## What It Does
+
+The new `Shiny.DocumentDb.Extensions.AI` package generates `Microsoft.Extensions.AI` tool functions from your registered document types. Each type can expose up to seven operations: get by ID, query with structured filters, count, aggregate (sum/min/max/avg), insert, update, and delete.
+
+You control everything: which types are visible to the LLM, which operations are allowed, which fields are exposed, and how many results a single query can return.
+
+## Setup in 30 Seconds
+
+```csharp
+var jsonContext = new AppJsonContext(new JsonSerializerOptions
+{
+    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+});
+
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
+    opts.JsonSerializerOptions = jsonContext.Options;
+});
+
+services.AddDocumentStoreAITools(tools =>
+{
+    tools.AddType(
+        jsonContext.Customer,
+        capabilities: DocumentAICapabilities.All,
+        configure: b => b
+            .Description("Customer records")
+            .Property(c => c.Status, "Active, Inactive, or Suspended")
+            .IgnoreProperties(c => c.PasswordHash)
+            .MaxPageSize(50)
+    );
+
+    tools.AddType(
+        jsonContext.Order,
+        capabilities: DocumentAICapabilities.ReadOnly
+    );
+});
+```
+
+That registers 11 tools: 7 for Customer (full CRUD) and 4 for Order (read-only). Types not registered are invisible to the LLM.
+
+## Structured Filters
+
+The query, count, and aggregate tools accept a structured filter that supports boolean combinators — `and`, `or`, `not` — and leaf comparisons with operators like `eq`, `gt`, `contains`, `startsWith`, and `in`. The library translates these JSON filter objects into LINQ expressions against the document store, so they work across all providers (SQLite, MySQL, SQL Server, PostgreSQL).
+
+When an LLM asks "show me customers older than 30 in Portland", it constructs:
+
+```json
+{
+  "and": [
+    { "field": "age", "op": "gt", "value": 30 },
+    { "field": "city", "op": "eq", "value": "Portland" }
+  ]
+}
+```
+
+This becomes `store.Query<Customer>().Where(c => c.Age > 30 && c.City == "Portland")` under the hood.
+
+## Field Visibility
+
+Not every field should be visible to an LLM agent. Use `AllowProperties` to create an allowlist or `IgnoreProperties` to hide specific fields:
+
+```csharp
+// Only expose these fields
+b.AllowProperties(c => c.Id, c => c.Name, c => c.Email);
+
+// Or hide sensitive fields
+b.IgnoreProperties(c => c.PasswordHash, c => c.InternalNotes);
+```
+
+Hidden fields don't appear in the tool's JSON schema, so the LLM doesn't know they exist and can't filter on them.
+
+## Capability Flags
+
+The `DocumentAICapabilities` flags enum gives you precise control:
+
+```csharp
+// Read-only: get, query, count, aggregate
+tools.AddType(jsonContext.AuditLog, capabilities: DocumentAICapabilities.ReadOnly);
+
+// Full CRUD
+tools.AddType(jsonContext.Customer, capabilities: DocumentAICapabilities.All);
+
+// Just query and count
+tools.AddType(jsonContext.Config, capabilities: DocumentAICapabilities.Query | DocumentAICapabilities.Count);
+```
+
+## AOT-Safe
+
+All tool schemas and serialization use `JsonTypeInfo<T>` from your source-generated JSON context. No reflection at runtime. The filter translator builds expression trees programmatically — it never calls `Expression.Compile()` — so the existing JSON-extract SQL translator handles AOT-safe code generation.
+
+## Try the Copilot Sample
+
+The repository includes a `Sample.CopilotConsole` project that authenticates with GitHub Copilot and starts an interactive chat session. The LLM can query customers, create orders, compute aggregates — all through the registered AI tools. Try it:
+
+```bash
+cd samples/Sample.CopilotConsole
+dotnet run
+```
+
+Then ask things like "How many customers do we have?", "Show me all shipped orders", or "Add a customer named Eve, age 28".
+
+## Getting Started
+
+Check the [AI Tools documentation](/documentdb/ai-tools/) for the full API reference and the [release notes](/documentdb/release-notes/) for the complete v4.0 changelog.

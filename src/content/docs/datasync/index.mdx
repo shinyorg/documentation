@@ -1,0 +1,181 @@
+---
+title: Getting Started
+---
+import LibBuilder from '../../../components/Boilerplate/LibBuilder';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="datasync" /> |
+| Downloads | <NugetDownloads name="Shiny.DataSync" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "windows", "macos"]} />
+
+Shiny.DataSync is an **AOT-compliant, offline-first data synchronization engine** for .NET MAUI and desktop applications. It syncs data between a local SQLite store and your HTTP APIs with automatic background scheduling via [Shiny Jobs](/jobs/).
+
+## Why DataSync?
+
+**Your server, your rules.** Unlike many sync frameworks that require you to adopt a specific server-side stack, protocol, or database schema, Shiny.DataSync is designed to work with **your existing API endpoints as-is**. There's no proprietary server SDK to install, no special database tables to create, and no middleware to configure. If your API can return JSON arrays and accept JSON POST bodies, you're ready to go.
+
+This means:
+- **Zero server-side changes** — keep your existing REST/HTTP endpoints exactly as they are. No new dependencies, no protocol negotiation, no server SDK lock-in.
+- **Freedom to mix and match** — sync different entity types against completely different backends, microservices, or even third-party APIs. Each entity has its own pull and push URIs.
+- **Incremental adoption** — add offline sync to one entity at a time without rewriting your API layer or committing to a framework migration.
+- **No vendor lock-in** — because the contract is plain HTTP + JSON, you can swap server implementations freely. Today it's ASP.NET Core, tomorrow it could be Node.js, Go, or a cloud function.
+
+**Background sync, built in.** DataSync automatically registers a [Shiny Jobs](/jobs/) background task when you call `AddDataSync()`. This means your data syncs even when your app is backgrounded or the user isn't actively using it — on both iOS and Android. Pending changes are queued locally, pushed when connectivity is available, and fresh data is pulled on schedule. Your users get a seamless offline-first experience with no extra plumbing.
+
+## Core Concepts
+
+- **Entities are plain classes** — no base classes, no attributes, no interfaces. Just POCOs with an ID property.
+- **AOT compliance is required** — all entity types must be registered in a `System.Text.Json` source-generated `JsonSerializerContext`. The type, its array type, and its List type must all be included.
+- **Sync direction per entity** — `SyncDirection.Both` (default), `PullOnly`, or `PushOnly`.
+- **Sync order** — `Sync()` runs: Clean → Push → Pull.
+- **Server wins** — no merge conflict resolution. Local changes are pushed as-is, pulled data overwrites local.
+- **SyncJob auto-registered** — `AddDataSync()` automatically registers a Shiny background job. No manual `AddJob()` needed.
+
+## Setup
+
+<LibBuilder componentName="datasync" client:load />
+
+### 1. Define entity classes
+
+```csharp
+public class TodoItem
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString();
+    public string Title { get; set; } = "";
+    public bool IsComplete { get; set; }
+    public bool IsDeleted { get; set; }
+    public long Version { get; set; }
+    public DateTimeOffset? UpdatedAt { get; set; }
+}
+```
+
+### 2. Create a JsonSerializerContext
+
+```csharp
+[JsonSerializable(typeof(TodoItem))]
+[JsonSerializable(typeof(TodoItem[]))]
+[JsonSerializable(typeof(List<TodoItem>))]
+public partial class AppJsonContext : JsonSerializerContext;
+```
+
+:::caution
+Always include `typeof(T)`, `typeof(T[])`, **and** `typeof(List<T>)` for every entity type. Missing any of these will cause runtime failures.
+:::
+
+### 3. Register DocumentDB (entity storage)
+
+```csharp
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider(
+        $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "app.db")}"
+    );
+    opts.MapTypeToTable<TodoItem>();
+    // Add MapTypeToTable for every entity type
+});
+```
+
+### 4. Register DataSync
+
+```csharp
+builder.Services.AddDataSync(ds =>
+{
+    ds.MetadataDatabasePath = Path.Combine(FileSystem.AppDataDirectory, "sync_meta.db");
+    ds.MaxPushAttempts = 5; // 0 = disabled (never auto-remove failed items)
+
+    ds.HttpJsonSerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+    {
+        TypeInfoResolver = AppJsonContext.Default
+    };
+
+    ds.AddEntity<TodoItem>(x => x.Id, e =>
+    {
+        e.Direction = SyncDirection.Both;
+        e.PullUri = "/api/todos";
+        e.PullDateVariable = "since";
+        e.PullMinimumTime = TimeSpan.FromMinutes(5);
+        e.PushUri = "/api/todos";
+        e.PushBufferSize = 50;
+        e.VersionSelector = x => x.Version;
+    });
+});
+```
+
+### 5. Configure the HttpClient
+
+The library uses `IHttpClientFactory` with the client name `"DataSync"`:
+
+```csharp
+builder.Services.AddHttpClient("DataSync", client =>
+{
+    client.BaseAddress = new Uri("https://your-api.com");
+});
+```
+
+### 6. For MAUI apps, call UseShiny()
+
+```csharp
+builder.UseMauiApp<App>().UseShiny();
+```
+
+## Quick Example
+
+```csharp
+public class MyViewModel
+{
+    readonly ISyncService _sync;
+
+    public MyViewModel(ISyncService sync)
+    {
+        _sync = sync;
+    }
+
+    async Task AddTodo(string title)
+    {
+        await _sync.Insert(new TodoItem { Title = title });
+    }
+
+    async Task CompleteTodo(TodoItem todo)
+    {
+        todo.IsComplete = true;
+        await _sync.Update(todo);
+    }
+
+    async Task DeleteTodo(TodoItem todo)
+    {
+        await _sync.Remove<TodoItem>(todo.Id);
+    }
+
+    async Task SyncAll()
+    {
+        // Full cycle: Clean -> Push -> Pull
+        await _sync.Sync();
+    }
+
+    void ObserveSync()
+    {
+        _sync.WhenSync().Subscribe(evt =>
+        {
+            // evt.Type: PushStarted, PushCompleted, PushFailed, PullStarted, PullCompleted, PullFailed
+            Console.WriteLine($"{evt.Type} - {evt.EntityType?.Name} ({evt.Count} items)");
+        });
+    }
+}
+```
+
+## Samples
+* [Sample MAUI App](https://github.com/shinyorg/datasync/tree/main/samples/Sample.Maui)
+* [Sample API](https://github.com/shinyorg/datasync/tree/main/samples/Sample.Api)
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-datasync" />
+
+## Links
+* [GitHub Repository](https://github.com/shinyorg/datasync)

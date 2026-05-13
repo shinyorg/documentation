@@ -1,0 +1,96 @@
+---
+title: AI Tools
+description: Register AI tools and use the built-in chat history lookup
+---
+
+The AI conversation service supports [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) tools (`AITool`) that are included in every chat request. This lets the AI call functions on the user's behalf.
+
+## How Tools Are Provided
+
+Tools are supplied through the `IContextProvider` visitor pattern. Each registered `IContextProvider` populates an `AiContext` via its `Apply()` method, adding tools to the context's `Tools` list. The `AiContext` also carries system prompts, quiet words, and speech options — so providers can influence the full request pipeline. The built-in `ContextProvider` automatically passes through any `AITool` instances registered in DI — so **any library that registers `AITool` instances in your service collection will have those tools available to the AI** via the default provider.
+
+You can also supply tools from a custom `IContextProvider`:
+
+```csharp
+public class MyToolProvider : IContextProvider
+{
+    public Task Apply(AiContext context)
+    {
+        context.Tools.Add(AIFunctionFactory.Create((string city) =>
+        {
+            return $"The weather in {city} is sunny, 72°F.";
+        }, "GetWeather", "Gets the current weather for a city"));
+
+        return Task.CompletedTask;
+    }
+}
+
+builder.Services.AddSingleton<IContextProvider, MyToolProvider>();
+```
+
+Or register `AITool` instances directly in DI (picked up by `ContextProvider`):
+
+```csharp
+// These tools are all automatically discovered and included in AI chat requests
+
+// Shiny.DI source-generated tools
+builder.Services.AddGeneratedAITools();
+
+// Shiny.DocumentDb tools
+builder.Services.AddDocumentStoreAITools(tools => { /* ... */ });
+
+// Your own custom tools
+builder.Services.AddSingleton<AITool>(sp =>
+{
+    return AIFunctionFactory.Create((string city) =>
+    {
+        return $"The weather in {city} is sunny, 72°F.";
+    }, "GetWeather", "Gets the current weather for a city");
+});
+```
+
+## Built-in: Chat History Lookup
+
+When an `IMessageStore` is registered, the built-in `ContextProvider` automatically adds a `ChatLookupAITool` to every request:
+
+```csharp
+opts.SetMessageStore<MyMessageStore>();
+```
+
+This gives the AI the ability to search past conversations. Users can ask questions like:
+- "What did we discuss yesterday?"
+- "Find the conversation where we talked about deployment"
+- "What was the recipe you gave me last week?"
+
+The tool exposes these search parameters to the AI:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `messageContains` | `string?` | Text to search for in messages |
+| `fromDate` | `DateTimeOffset?` | Start of date range |
+| `toDate` | `DateTimeOffset?` | End of date range |
+| `limit` | `int?` | Maximum results to return |
+
+## Custom Tools
+
+You can register any number of custom tools. They're standard `Microsoft.Extensions.AI` tools:
+
+```csharp
+// Function-based tool
+builder.Services.AddSingleton<AITool>(sp =>
+    AIFunctionFactory.Create(
+        async (string query, CancellationToken ct) =>
+        {
+            var db = sp.GetRequiredService<IDatabase>();
+            var results = await db.Search(query, ct);
+            return string.Join("\n", results);
+        },
+        "SearchDatabase",
+        "Searches the application database"
+    )
+);
+```
+
+:::note
+All registered `IContextProvider` implementations are executed in sequence, each adding their tools to the shared `AiContext`. The aggregated tools are then included in the chat request.
+:::

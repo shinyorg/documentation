@@ -1,0 +1,146 @@
+---
+title: AI Tools
+---
+
+Expose your service methods as AI-callable tools with zero boilerplate. Mark an interface with `[Tool]` and add `[Description]` to its methods — the source generator produces fully typed `AIFunction` subclasses compatible with [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI).
+
+Everything is source-generated at compile time — no reflection, fully AOT-compatible.
+
+## Setup
+
+Your project needs a reference to `Microsoft.Extensions.AI.Abstractions`. The generator only emits AI tool code when this package is detected.
+
+```bash
+dotnet add package Microsoft.Extensions.AI.Abstractions
+```
+
+## Defining a Tool
+
+Mark an interface with `[Tool]` and decorate each method you want exposed with `[Description]`:
+
+```csharp
+using System.ComponentModel;
+
+[Tool]
+[Description("Provides weather information")]
+public interface IWeatherService
+{
+    [Description("Get the current weather for a city")]
+    Task<WeatherResult> GetWeatherAsync(
+        [Description("City name")] string city,
+        [Description("Country code (e.g. 'US')")] string? country
+    );
+}
+```
+
+Then implement it as a normal service:
+
+```csharp
+[Singleton]
+public class WeatherService : IWeatherService
+{
+    public async Task<WeatherResult> GetWeatherAsync(string city, string? country)
+    {
+        // your implementation
+    }
+}
+```
+
+## What Gets Generated
+
+For each method with `[Description]`, the generator produces an `AIFunction` subclass that:
+
+- Overrides `Name`, `Description`, and `JsonSchema` with the values from your attributes
+- Resolves the service from DI and delegates to the real method
+- Extracts arguments from `AIFunctionArguments` using AOT-safe `JsonElement` accessors — no `JsonSerializer.Deserialize` for standard types
+
+It also generates an `AddGeneratedAITools()` extension method to register all tools in one call:
+
+```csharp
+builder.Services.AddGeneratedServices();   // registers [Singleton]/[Scoped]/[Transient] classes
+builder.Services.AddGeneratedAITools();    // registers generated AIFunction tools
+```
+
+## Supported Parameter Types
+
+All standard types use AOT-safe extraction — no reflection or serializer fallback:
+
+| Type | JSON Schema | Extraction |
+|---|---|---|
+| `string` | `string` | `GetString()` |
+| `bool` | `boolean` | `GetBoolean()` |
+| `int`, `long`, `short`, `byte` (and unsigned) | `integer` | `GetInt32()`, `GetInt64()`, etc. |
+| `double`, `float`, `decimal` | `number` | `GetDouble()`, `GetSingle()`, `GetDecimal()` |
+| `Guid` | `string` | `GetGuid()` |
+| `DateTime`, `DateTimeOffset` | `string` | `GetDateTime()`, `GetDateTimeOffset()` |
+| `DateOnly`, `TimeOnly`, `TimeSpan` | `string` | `Parse(GetString()!)` |
+| `Uri` | `string` | `new Uri(GetString()!)` |
+| Enums | `string` | `Enum.Parse<T>(GetString()!)` |
+| Complex types | `object` | `JsonSerializer.Deserialize<T>()` |
+
+## CancellationToken
+
+If a method parameter is `CancellationToken`, the generator passes the cancellation token from `InvokeCoreAsync` automatically — it won't appear in the JSON schema or argument extraction:
+
+```csharp
+[Tool]
+public interface IMyService
+{
+    [Description("Long running operation")]
+    Task<string> ProcessAsync(
+        [Description("Input data")] string input,
+        CancellationToken cancellationToken
+    );
+}
+```
+
+## Optional Parameters
+
+Parameters with default values are treated as optional — they won't appear in the JSON schema's `required` array, and the generator uses `TryGetProperty` with a null check:
+
+```csharp
+[Tool]
+public interface IDateTimeService
+{
+    [Description("Get current date/time")]
+    Task<DateTimeResult> GetCurrentDateTimeAsync(
+        [Description("IANA timezone name")] string? timezone = null
+    );
+}
+```
+
+## Methods Without Description
+
+Methods that don't have a `[Description]` attribute are skipped — they won't generate an AI tool. This lets you keep non-tool methods on the same interface:
+
+```csharp
+[Tool]
+public interface ICalculatorService
+{
+    [Description("Add two numbers")]
+    Task<double> AddAsync(double a, double b);
+
+    // No [Description] — not exposed as a tool
+    void Reset();
+}
+```
+
+## Using with Microsoft.Extensions.AI
+
+Once registered, the tools are available as `AITool` instances from the DI container. Pass them to any `IChatClient` via `ChatOptions`:
+
+```csharp
+var tools = host.Services.GetServices<AITool>().ToList();
+var options = new ChatOptions { Tools = tools };
+
+var response = await chatClient.GetResponseAsync(messages, options);
+```
+
+To enable automatic function invocation (the AI model calls your tools in a loop until it has a final answer), wrap your chat client with `UseFunctionInvocation`:
+
+```csharp
+IChatClient chatClient = innerClient
+    .AsBuilder()
+    .UseFunctionInvocation()
+    .Build(services);
+```

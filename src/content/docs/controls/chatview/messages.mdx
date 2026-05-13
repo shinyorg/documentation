@@ -1,0 +1,261 @@
+---
+title: ChatView | Messages
+description: Sending messages, images, links, pending state, and server confirmation workflows
+---
+
+## Message Basics
+
+Every message in ChatView is a `ChatMessage` object. The two critical properties that control rendering are:
+
+- **`IsFromMe`** — `true` renders the bubble on the right (your messages), `false` on the left (others)
+- **`SenderId`** — links the message to a `ChatParticipant` for avatar/name/color lookup
+
+```csharp
+var myMessage = new ChatMessage
+{
+    Text = "Hello!",
+    SenderId = "me",
+    IsFromMe = true,
+    Timestamp = DateTimeOffset.Now
+};
+
+var theirMessage = new ChatMessage
+{
+    Text = "Hi there!",
+    SenderId = "alice",
+    IsFromMe = false,
+    Timestamp = DateTimeOffset.Now
+};
+```
+
+## Sending Messages
+
+When the user presses **Send** or **Enter**, the `SendCommand` fires with the trimmed text string. The input field is automatically cleared.
+
+### MAUI
+
+```csharp
+[RelayCommand]
+void Send(string text)
+{
+    Messages.Add(new ChatMessage
+    {
+        Text = text,
+        SenderId = "me",
+        IsFromMe = true,
+        Timestamp = DateTimeOffset.Now
+    });
+}
+```
+
+### Blazor
+
+```csharp
+Task OnSend(string text)
+{
+    messages.Add(new ChatMessage
+    {
+        Text = text,
+        SenderId = "me",
+        IsFromMe = true,
+        Timestamp = DateTimeOffset.Now
+    });
+    StateHasChanged();
+    return Task.CompletedTask;
+}
+```
+
+## Pending Send State (DateSent)
+
+Real-world chat apps show a "sending..." state before server confirmation. ChatView supports this with `DateSent`:
+
+1. Create the message with `DateSent = null` — the bubble renders at **50% opacity**
+2. Add it to the Messages collection — user sees the dimmed bubble immediately
+3. Await your server's confirmation (or queue for offline/background send)
+4. Set `DateSent = DateTimeOffset.Now` — the bubble becomes fully opaque
+
+This is particularly useful for **offline/background mode** — messages can be queued locally and the `DateSent` timestamp records exactly when delivery was confirmed.
+
+```csharp
+[RelayCommand]
+async Task Send(string text)
+{
+    var msg = new ChatMessage
+    {
+        Text = text,
+        SenderId = "me",
+        IsFromMe = true,
+        DateSent = null, // Dimmed until confirmed
+        Timestamp = DateTimeOffset.Now
+    };
+    Messages.Add(msg);
+
+    // Send to your backend
+    var serverResponse = await chatService.SendAsync(text);
+
+    // Confirm delivery
+    msg.DateSent = DateTimeOffset.Now;
+    msg.Identifier = serverResponse.MessageId; // Optional: store server ID
+}
+```
+
+:::note
+On MAUI, `ChatMessage` does not implement `INotifyPropertyChanged`. To refresh the UI after changing `DateSent`, remove and re-insert the message in the collection:
+```csharp
+var index = Messages.IndexOf(msg);
+Messages.RemoveAt(index);
+msg.DateSent = DateTimeOffset.Now;
+Messages.Insert(index, msg);
+```
+:::
+
+The dimming only applies to messages where `IsFromMe = true`. Messages from others always render at full opacity regardless of `DateSent`.
+
+## Server Identifier
+
+The `Identifier` property lets you attach server-assigned metadata (message ID, correlation ID) to a message after sending. This is useful for:
+
+- Correlating local messages with server-side IDs
+- Implementing message deletion or editing by server ID
+- Tracking delivery/read receipts
+
+```csharp
+var msg = new ChatMessage { Text = "Hello", IsFromMe = true };
+Messages.Add(msg);
+
+var response = await api.SendMessage(msg.Text);
+msg.Identifier = response.ServerMessageId;
+```
+
+Later, you can find messages by identifier:
+```csharp
+var target = Messages.FirstOrDefault(m => m.Identifier == serverEventId);
+```
+
+## Image Messages
+
+Set `ImageUrl` to render an image bubble instead of text. Text and image are mutually exclusive — if `ImageUrl` is set, the text label is hidden.
+
+```csharp
+Messages.Add(new ChatMessage
+{
+    ImageUrl = "https://example.com/photo.jpg",
+    SenderId = "me",
+    IsFromMe = true,
+    Timestamp = DateTimeOffset.Now
+});
+```
+
+Images render at a maximum of 250×250 pixels with `AspectFit` scaling (MAUI) or CSS `max-width/max-height` (Blazor). Local file paths work on MAUI; use URLs for Blazor.
+
+### Attach Button
+
+Show a "+" attach button by binding `AttachImageCommand`:
+
+```xml
+<shiny:ChatView Messages="{Binding Messages}"
+                SendCommand="{Binding SendCommand}"
+                AttachImageCommand="{Binding AttachCommand}" />
+```
+
+```csharp
+[RelayCommand]
+async Task Attach()
+{
+    var result = await MediaPicker.PickPhotoAsync();
+    if (result is not null)
+    {
+        Messages.Add(new ChatMessage
+        {
+            ImageUrl = result.FullPath,
+            SenderId = "me",
+            IsFromMe = true,
+            Timestamp = DateTimeOffset.Now
+        });
+    }
+}
+```
+
+The attach button appears automatically when `AttachImageCommand` is bound. No additional configuration needed.
+
+## Link Detection
+
+URLs in text messages are automatically detected and rendered as tappable links. The regex pattern matches `https://...` and `www....` URLs.
+
+- **MAUI**: Links open via `Launcher.OpenAsync()`. They appear as underlined blue text.
+- **Blazor**: Links render as `<a href="..." target="_blank">` tags.
+
+```csharp
+Messages.Add(new ChatMessage
+{
+    Text = "Check out https://example.com for more info",
+    SenderId = "bot",
+    IsFromMe = false
+});
+// "https://example.com" becomes a tappable link
+```
+
+:::note
+Link detection is only applied to the default text rendering. If you use a custom `MessageTemplate`, you must handle link rendering yourself.
+:::
+
+## Message Grouping
+
+Consecutive messages from the same sender within the same clock minute are visually grouped:
+
+- **Within a group**: 2px spacing, no avatar/name repeated, no timestamp
+- **Between groups**: 12px spacing, avatar and name shown on first message, timestamp on last message
+- **Tail radius**: The last message in a group gets a smaller corner radius (4px vs 18px) on the bottom-left (others) or bottom-right (yours) to simulate a speech bubble "tail"
+
+A new group starts when:
+1. The sender changes, OR
+2. The timestamp minute changes (even same sender)
+
+## Timestamp Formatting
+
+Timestamps appear below the last message in each group:
+- **Today**: Time only — `"2:30 PM"`
+- **Previous days**: Date + time — `"Apr 15, 2:30 PM"`
+
+## Message Tapped
+
+Handle taps on message bubbles:
+
+### MAUI
+```xml
+<shiny:ChatView MessageTappedCommand="{Binding MessageTappedCommand}" />
+```
+```csharp
+[RelayCommand]
+void MessageTapped(ChatMessage message)
+{
+    // Navigate to detail, show actions, etc.
+}
+```
+
+### Blazor
+```razor
+<ChatView MessageTappedCommand="OnMessageTapped" />
+
+@code {
+    Task OnMessageTapped(ChatMessage message)
+    {
+        // Handle tap
+        return Task.CompletedTask;
+    }
+}
+```
+
+## Programmatic Entry (MAUI only)
+
+You can read/write the input field and submit programmatically:
+
+```csharp
+// Set text without sending
+chatView.EntryText = "Pre-filled message";
+
+// Submit the current text (triggers SendCommand)
+chatView.SubmitEntry();
+```
+
+This is used by tools like `SpeechToTextTool` to backfill transcribed speech into the input field.

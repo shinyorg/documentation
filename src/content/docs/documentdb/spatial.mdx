@@ -1,0 +1,211 @@
+---
+title: Spatial / Geo Queries
+---
+
+Spatial queries let you find documents by geographic proximity — within a radius, inside a bounding box, or nearest to a point. Supported on **SQLite** (via R*Tree virtual tables) and **CosmosDB** (via native GeoJSON). Other providers throw `NotSupportedException`.
+
+## Spatial Types
+
+### GeoPoint
+
+A geographic coordinate using WGS84. Serializes as GeoJSON `{"type":"Point","coordinates":[longitude,latitude]}`.
+
+```csharp
+public readonly record struct GeoPoint(double Latitude, double Longitude);
+```
+
+### GeoBoundingBox
+
+A rectangular area for bounding box queries.
+
+```csharp
+public readonly record struct GeoBoundingBox(
+    double MinLatitude, double MinLongitude,
+    double MaxLatitude, double MaxLongitude);
+```
+
+### SpatialResult\<T\>
+
+Wraps a document with its computed distance from the query center point.
+
+```csharp
+public class SpatialResult<T> where T : class
+{
+    public required T Document { get; init; }
+    public double DistanceMeters { get; init; }
+}
+```
+
+## Configuration
+
+Register which `GeoPoint` property to use for spatial indexing per document type using `MapSpatialProperty`:
+
+```csharp
+public class Restaurant
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public GeoPoint Location { get; set; }
+    public string Cuisine { get; set; } = "";
+}
+
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}
+.MapSpatialProperty<Restaurant>(r => r.Location)
+);
+```
+
+:::tip[AOT-safe overload]
+For full AOT/trimming safety, use the delegate overload which avoids expression compilation:
+```csharp
+.MapSpatialProperty<Restaurant>("Location", r => r.Location)
+```
+:::
+
+You can map multiple types:
+
+```csharp
+var options = new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}
+.MapSpatialProperty<Restaurant>(r => r.Location)
+.MapSpatialProperty<Hotel>(h => h.Coordinates);
+```
+
+## Checking Provider Support
+
+Not all providers support spatial queries. Check at runtime:
+
+```csharp
+if (store.SupportsSpatial)
+{
+    var nearby = await store.WithinRadius<Restaurant>(center, 5000);
+}
+```
+
+| Provider | `SupportsSpatial` |
+|---|---|
+| SQLite | `true` (when spatial properties are mapped) |
+| SQLCipher | `true` (inherits SQLite R*Tree support) |
+| CosmosDB | `true` (when spatial properties are mapped) |
+| LiteDB | `false` |
+| MySQL | `false` |
+| SQL Server | `false` |
+| PostgreSQL | `false` |
+
+## Queries
+
+### WithinRadius
+
+Find documents within a distance (meters) of a center point, ordered by distance ascending. Returns `SpatialResult<T>` with the computed distance.
+
+```csharp
+var nearby = await store.WithinRadius<Restaurant>(
+    new GeoPoint(45.5231, -122.6765), // Portland, OR
+    5000); // 5km radius
+
+foreach (var result in nearby)
+{
+    Console.WriteLine($"{result.Document.Name} — {result.DistanceMeters:N0}m away");
+}
+```
+
+With an additional predicate filter:
+
+```csharp
+var italianNearby = await store.WithinRadius<Restaurant>(
+    new GeoPoint(45.5231, -122.6765),
+    5000,
+    filter: r => r.Cuisine == "Italian");
+```
+
+### WithinBoundingBox
+
+Find documents within a rectangular geographic area.
+
+```csharp
+var inArea = await store.WithinBoundingBox<Restaurant>(
+    new GeoBoundingBox(45.0, -123.0, 46.0, -122.0));
+```
+
+With a filter:
+
+```csharp
+var inArea = await store.WithinBoundingBox<Restaurant>(
+    new GeoBoundingBox(45.0, -123.0, 46.0, -122.0),
+    filter: r => r.Cuisine == "Italian");
+```
+
+### NearestNeighbors
+
+Find the K closest documents to a point, ordered by distance ascending.
+
+```csharp
+var closest = await store.NearestNeighbors<Restaurant>(
+    new GeoPoint(45.5231, -122.6765),
+    count: 10);
+
+foreach (var result in closest)
+{
+    Console.WriteLine($"{result.Document.Name} — {result.DistanceMeters:N0}m");
+}
+```
+
+With a filter:
+
+```csharp
+var closestItalian = await store.NearestNeighbors<Restaurant>(
+    new GeoPoint(45.5231, -122.6765),
+    count: 5,
+    filter: r => r.Cuisine == "Italian");
+```
+
+## How It Works
+
+### SQLite — R*Tree Sidecar
+
+SQLite uses [R*Tree virtual tables](https://www.sqlite.org/rtree.html) for spatial indexing. For each table with spatial-mapped types, the library creates two companion tables:
+
+- **`{table}_spatial_map`** — maps document text IDs to integer rowids (R*Tree requires integer keys)
+- **`{table}_spatial`** — the R*Tree index storing latitude/longitude bounding boxes
+
+These tables are created automatically when the table is first used. CRUD operations automatically sync the spatial index:
+
+| Operation | Spatial Sync |
+|---|---|
+| Insert / Update / Upsert | Extracts `GeoPoint` from document and upserts into R*Tree |
+| Remove | Deletes spatial entry for that document |
+| Clear | Removes all spatial entries for that type |
+
+**Radius queries** use a two-phase approach: the R*Tree provides a fast bounding box pre-filter, then a Haversine post-filter computes exact distances for precision.
+
+**Nearest neighbor queries** use an expanding bounding box strategy — starting at 10km and doubling until enough candidates are found.
+
+### CosmosDB — Native GeoJSON
+
+CosmosDB has built-in geospatial support. The `GeoPoint` type serializes as GeoJSON directly in the document:
+
+```json
+{
+  "id": "rest-1",
+  "typeName": "Restaurant",
+  "data": {
+    "name": "Pizzeria Roma",
+    "location": {
+      "type": "Point",
+      "coordinates": [-122.6765, 45.5231]
+    }
+  }
+}
+```
+
+CosmosDB automatically indexes GeoJSON properties. The library adds spatial index policies to the container during initialization. Queries use native SQL functions:
+
+- **WithinRadius**: `ST_DISTANCE(c.data.location, point) <= @radius`
+- **WithinBoundingBox**: `ST_WITHIN(c.data.location, polygon)`
+- **NearestNeighbors**: `ORDER BY ST_DISTANCE(c.data.location, point) OFFSET 0 LIMIT @count`
+
+No sidecar tables or manual sync needed — CosmosDB handles everything natively.

@@ -102,6 +102,10 @@ const AndroidManifest = (props: Props) => {
       </queries>`;
   }
 
+  if (has('speech') || has('aiconversation')) {
+    src += addP('RECORD_AUDIO');
+  }
+
   if (has('music')) {
     src += `
       <!-- Android 13+ (API 33+) -->`;

@@ -1,0 +1,99 @@
+---
+title: Wake Word
+description: Hands-free voice activation for AI conversations
+---
+
+Wake word detection enables a hands-free "Hey Siri" style experience. The service listens continuously for a keyword phrase, captures the user's utterance that follows, and sends it to the AI automatically.
+
+## Starting Wake Word
+
+```csharp
+await aiService.StartWakeWord("Hey Copilot");
+```
+
+Once started, the service:
+1. Continuously listens for the wake word phrase
+2. When detected, captures the user's utterance via speech-to-text
+3. Sends the utterance to the AI via `TalkTo()`
+4. If the AI response ends with a question, skips wake word detection and listens directly for the user's reply (conversation continuation)
+5. Otherwise, loops back to listening for the wake word
+
+## Stopping Wake Word
+
+```csharp
+aiService.StopWakeWord();
+```
+
+This cancels the background listening loop and returns the service to an idle state. The `WakeWord` property is cleared and `IsWakeWordEnabled` returns to `false`.
+
+## Checking State
+
+```csharp
+if (aiService.IsWakeWordEnabled)
+{
+    Console.WriteLine($"Listening for: {aiService.WakeWord}");
+}
+```
+
+## Conversation Continuation
+
+When the AI asks a question (its response ends with `?`), the wake word loop skips keyword detection and immediately listens for the user's reply. This creates a natural back-and-forth conversation without requiring the user to say the wake word again after every AI response.
+
+The conversation continues as long as the AI keeps asking questions. Once the AI gives a statement that doesn't end with a question, the loop returns to wake word detection.
+
+If voice interruption is enabled and the user says a quiet word during TTS playback, the conversation breaks immediately and returns to wake word detection. See [Voice Interruption](#voice-interruption) below.
+
+## Voice Interruption
+
+During text-to-speech playback, the service can listen for voice interruptions. This is controlled by the `QuietWords` property:
+
+```csharp
+// Default quiet words: cancel, quiet, shut up, stop, nevermind, never mind, hush
+// Customize:
+aiService.QuietWords = ["stop", "cancel", "quiet"];
+
+// Disable voice interruption entirely:
+aiService.QuietWords = null;
+```
+
+Two interruption behaviors:
+- **Quiet words** — If the user says only a quiet word (e.g., "stop"), TTS is silenced and the conversation loop breaks, returning to wake word detection
+- **Other speech** — If the user says anything else during TTS (e.g., "actually, tell me about..."), TTS is silenced and the new utterance is sent to the AI as the next message, continuing the conversation
+
+:::note
+Quiet words must be the user's entire utterance to trigger. Saying "cancel this appointment" will **not** trigger the quiet word — it will be treated as a new message to the AI.
+:::
+
+## Constraints
+
+- **Only one wake word at a time** — calling `StartWakeWord()` while already active throws `InvalidOperationException`
+- **Exclusive with ListenAndTalk** — `ListenAndTalk()` throws `InvalidOperationException` if wake word is active (they both use the microphone)
+- **Waits for in-progress work** — `StartWakeWord()` waits for any active `TalkTo()` call to complete before starting the listener
+
+## Example: Settings Toggle
+
+```csharp
+async Task ToggleWakeWord()
+{
+    if (aiService.IsWakeWordEnabled)
+    {
+        aiService.StopWakeWord();
+    }
+    else
+    {
+        await aiService.StartWakeWord("Hey Copilot");
+    }
+}
+```
+
+## How It Works
+
+Wake word detection is powered by [Shiny.Speech](https://www.nuget.org/packages/Shiny.Speech)'s `ISpeechToTextService`. The service calls `ListenForKeyword()` to detect the wake phrase, then `ListenUntilSilence()` to capture the user's command. Both are platform-native implementations — no cloud API is needed for the wake word detection itself.
+
+:::note
+The quality of wake word detection depends on the platform's speech recognition engine. For best results, use short, distinctive phrases (2-3 words) that are unlikely to occur in background conversation.
+:::
+
+:::caution[Android]
+Android's native speech recognition stops and restarts between segments, causing brief pauses during continuous wake word listening. This can result in missed wake words during the restart gap. For a smoother experience on Android, use [Azure Speech Services](https://www.nuget.org/packages/Shiny.Speech.Azure) which provides continuous streaming recognition without interruptions. See [Platform Notes](/aiconversation/#platform-notes) for setup details.
+:::

@@ -125,8 +125,6 @@ export default defineConfig({
       '/client/music/copying': '/music/copying',
       '/client/music/lyrics': '/music/lyrics',
       '/client/music/album-art': '/music/album-art',
-      '/client/music/identification': '/music/identification',
-      '/client/music/management': '/music/management',
       '/client/music/release-notes': '/music/release-notes',
       '/client/health/': '/health/',
       '/client/configuration/': '/configuration/',
@@ -313,6 +311,20 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
+              id: 'aiconversations-1',
+              content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/aiconversation/' },
+              dismissable: false
+            },
+            {
+              id: 'speech-1',
+              content: 'Introducing Speech: Text-to-Speech, Speech-to-Text, Wake Word, Keywords, & 3rd party integrations!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/speech/' },
+              dismissable: false
+            },            
+            {
               id: 'mauishell-60',
               content: 'Shiny.Maui.Shell v6 support for AI routing tools',
               variant: 'tip',
@@ -327,6 +339,20 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'docdb-v5',
+              content: 'Document DB v5: New Providers, Versioning, Spatial, Multi-Tenancy, & Multi-DB Support',
+              variant: 'tip',
+              link: { text: 'Feed The Machine Here', href: '/documentdb/' },
+              dismissable: false
+            },    
+            {
+              id: 'extensions-30',
+              content: 'Shiny.Extensions.DependencyInjection v3: Turn any DI service into an AI Tool',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/extensions/di/ai-tools/' },
+              dismissable: false
+            },            
+            {
               id: 'mobilev4-1',
               content: 'Client v4.1 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
               variant: 'tip',
@@ -335,21 +361,21 @@ export default defineConfig({
             },
             {
               id: 'controls1-1',
-              content : 'Controls: TableView, Scheduler, ChatView, ImageEditor, and more for MAUI & Blazor!',
+              content : 'Controls: Haptic Feedback Anywhere, TableView, Scheduler, ChatView, ImageEditor, and more for MAUI & Blazor!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/controls/' },
               dismissable: false
             },
             {
-              id: 'health1beta-1',
-              content: 'Shiny.Health v1 BETA: Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
+              id: 'health-1',
+              content: 'Shiny.Health v1: Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
               variant: 'tip',
               link: { text: 'Learn More', href: '/health/' },
               dismissable: false
             },
             {
-              id: 'music2-1',
-              content: 'Shiny.Music v3: Lyrics, Album Art, Playlists, and more!',
+              id: 'music3-1',
+              content: 'Shiny.Music v3: Lyrics, Album Art, Playlists, MusicKit and more!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/music' },
               dismissable: false

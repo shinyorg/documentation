@@ -1,0 +1,255 @@
+---
+title: AI Conversations | Getting Started
+description: A centralized AI conversation service with chat, speech, wake word, and message persistence for .NET MAUI and Blazor
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import LibBuilder from '../../../components/Boilerplate/LibBuilder';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Steps } from '@astrojs/starlight/components';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Shiny.AiConversation is a centralized AI conversation service that combines [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) chat completions with [Shiny.Speech](https://www.nuget.org/packages/Shiny.Speech) for speech recognition, text-to-speech, wake word detection, and audio feedback — all behind a single `IAiConversationService` interface.
+
+Building a conversational AI experience in a mobile or web app typically means stitching together many concerns yourself: managing chat client authentication, wiring up speech-to-text and text-to-speech, handling microphone permissions, coordinating state between listening/thinking/responding phases, playing audio cues, persisting message history, and exposing tools for the AI to call. Each of these is a separate library with its own lifecycle and threading model.
+
+Shiny.AiConversation collapses all of that into a single service registration and one interface. By default, it resolves `IChatClient` directly from your DI container — just register your chat client and the library handles the rest. For advanced scenarios (on-demand authentication, token refresh), you can implement `IChatClientProvider`. Either way, the library manages the entire flow — from capturing the user's voice, streaming it through speech recognition, sending the transcript to the chat model, reading the response aloud, and optionally persisting the conversation. The entire flow is observable through a simple `Status` property so your UI always knows what's happening.
+
+This means you can go from zero to a fully functional voice-enabled AI assistant with wake word support, audio feedback, and chat history in under 50 lines of registration code — and swap AI backends (OpenAI, Azure, Ollama, GitHub Copilot) without changing your app logic.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="aiconversation" /> |
+| Downloads | <NugetDownloads name="Shiny.AiConversation" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "windows", "web"]} />
+
+## Features
+
+- **Access checking** — `RequestAccess()` verifies speech-to-text permissions before starting voice features
+- **Text chat** — send messages via `TalkTo()` and receive streaming AI responses
+- **Voice chat** — `ListenAndTalk()` captures speech and sends it to the AI in one call
+- **Wake word** — hands-free activation with `StartWakeWord("Hey Copilot")` that listens continuously
+- **Text-to-speech** — AI responses can be read aloud automatically
+- **Audio feedback** — configurable sound effects for thinking, responding, ok, cancel, and error states
+- **Acknowledgement modes** — `None`, `AudioBlip`, `LessWordy`, or `Full` text-to-speech
+- **Context providers** — pluggable `IContextProvider` visitor pattern for populating an `AiContext` per request. Each provider's `Apply(AiContext)` method receives a mutable context containing system prompts, AI tools, quiet words, speech-to-text options, and text-to-speech options. A built-in `ContextProvider` handles time-based prompts, acknowledgement-aware voice prompts, and DI-registered `AITool` instances. Register additional providers to inject custom prompts, tools, or override speech settings.
+- **Message persistence** — optional `IMessageStore` for chat history storage and retrieval
+- **AI chat lookup tool** — automatically available when an `IMessageStore` is registered, lets the AI search its own conversation history
+- **Conversation continuation** — AI responses ending with a question automatically keep the microphone open for a reply
+- **Voice interruption** — configurable quiet words (e.g., "stop", "cancel") immediately silence TTS; any other speech during TTS interrupts and continues the conversation with the new utterance
+- **Speech options** — configurable `SpeechToTextOptions` and `TextToSpeechOptions` (culture, silence timeout, voice, speech rate, etc.)
+- **State tracking** — observable `Status` property (`Idle`, `Listening`, `Thinking`, `Responding`)
+- **Pluggable providers** — default resolves `IChatClient` from DI; optionally implement `IChatClientProvider` for custom auth (OpenAI, Copilot, Ollama, etc.)
+- **AOT compatible** — fully trimmer-safe with `IsAotCompatible` enabled
+- **Cross-platform** — works on MAUI (Android, iOS, Windows) and Blazor (Server, WASM)
+
+## Architecture
+
+```
+┌─────────────────────────────────┐
+│     IAiConversationService      │  ← Your app talks to this
+├─────────────────────────────────┤
+│  IChatClientProvider            │  ← Default resolves IChatClient from DI
+│  ISpeechToTextService           │  ← From Shiny.Speech
+│  ITextToSpeechService           │  ← From Shiny.Speech
+│  IAudioPlayer                   │  ← From Shiny.Speech
+│  IMessageStore?                 │  ← Optional persistence (you implement)
+│  IEnumerable<IContextProvider>  │  ← System prompts & tools (pluggable)
+└─────────────────────────────────┘
+```
+
+## Setup
+
+<LibBuilder componentName="aiconversation" client:load />
+
+<Steps>
+1. Install the NuGet package
+
+   <NugetBadge name="Shiny.AiConversation" showLabel={true} />
+
+   ```bash
+   dotnet add package Shiny.AiConversation
+   ```
+
+2. Register a chat client
+
+   The simplest approach is to register an `IChatClient` in DI — the library resolves it automatically:
+
+   ```csharp
+   builder.Services.AddChatClient(new OpenAIClient("your-api-key").GetChatClient("gpt-4o").AsIChatClient());
+   ```
+
+   Or use one of the built-in provider packages:
+
+   | Package | Description |
+   |---|---|
+   | `Shiny.AiConversation.OpenAi` | Static OpenAI-compatible client (OpenAI, Azure, Ollama) |
+   | `Shiny.AiConversation.Maui.GithubCopilot` | GitHub Copilot with device code auth (MAUI only) |
+
+   ```csharp
+   // OpenAI
+   opts.AddStaticOpenAIChatClient("your-api-key", "https://api.openai.com/v1", "gpt-4o");
+
+   // GitHub Copilot (MAUI only — handles auth, token storage, everything)
+   opts.AddGithubCopilotChatClient();
+   ```
+
+   For other backends, implement `IChatClientProvider` — see [Chat Client Provider](/aiconversation/chat-client-provider).
+
+3. Register the service in your app
+
+   **MAUI (MauiProgram.cs):**
+   ```csharp
+   builder.Services.AddShinyAiConversation(opts =>
+   {
+       // Optional: add message store, configure settings
+   });
+   ```
+
+   **Blazor (Program.cs):**
+   ```csharp
+   builder.Services.AddShinyAiConversation(opts =>
+   {
+       // Optional: add message store, configure settings
+   });
+   ```
+
+4. Add custom system prompts (optional)
+
+   System prompts, tools, and speech settings are supplied by `IContextProvider` implementations using a visitor pattern. A `ContextProvider` is auto-registered. Add your own:
+
+   ```csharp
+   public class MyContextProvider : IContextProvider
+   {
+       public Task Apply(AiContext context)
+       {
+           context.SystemPrompts.Add("You are a helpful assistant.");
+           // context.Tools.Add(...) to add AI tools
+           // context.Acknowledgement is available to adjust behavior per mode
+           // context.QuietWords — modify quiet words for voice interruption
+           // context.SpeechToTextOptions — set/override speech recognition options
+           // context.TextToSpeechOptions — set/override text-to-speech options
+           return Task.CompletedTask;
+       }
+   }
+
+   // Register in DI (multiple providers are supported, executed in sequence)
+   builder.Services.AddShinyAiConversation(opts =>
+   {
+       opts.AddContextProvider<MyContextProvider>();
+   });
+   ```
+
+5. Use the service
+
+   ```csharp
+   public class ChatViewModel(IAiConversationService aiService)
+   {
+       public async Task Send(string message)
+       {
+           aiService.AiResponded += response =>
+           {
+               if (response.Response.Text is { } text)
+                   Console.WriteLine($"AI: {text}");
+           };
+
+           await aiService.TalkTo(message, CancellationToken.None);
+       }
+   }
+   ```
+</Steps>
+
+## Quick Example
+
+```csharp
+// Check access before using voice features
+var access = await aiService.RequestAccess();
+if (access != AccessState.Available)
+    return; // Speech is not available
+
+// Text chat
+await aiService.TalkTo("What is .NET MAUI?", cancellationToken);
+
+// Voice chat (push-to-talk)
+await aiService.ListenAndTalk(cancellationToken);
+
+// Hands-free wake word
+await aiService.StartWakeWord("Hey Copilot");
+// ... user says "Hey Copilot, what's the weather?"
+// Service automatically captures and sends to AI
+aiService.StopWakeWord();
+
+// Chat history (requires IMessageStore)
+var history = await aiService.GetChatHistory(limit: 50);
+await aiService.ClearChatHistory();
+
+// Acknowledgement modes
+aiService.Acknowledgement = AiAcknowledgement.Full;      // Read response aloud
+aiService.Acknowledgement = AiAcknowledgement.LessWordy;  // Concise TTS
+aiService.Acknowledgement = AiAcknowledgement.AudioBlip;   // Sound effects only
+aiService.Acknowledgement = AiAcknowledgement.None;        // Silent
+```
+
+## Platform Notes
+
+:::caution[Android Speech Recognition]
+Android's native speech recognition engine works in short recording segments — it automatically stops listening after a period of silence and must restart for the next segment. This creates brief pauses during continuous listening (wake word, `ListenAndTalk`) that are noticeable compared to iOS, which streams continuously.
+
+If smooth, uninterrupted speech recognition is important for your app, consider using [Azure Speech Services](https://www.nuget.org/packages/Shiny.Speech.Azure) via [Shiny.Speech](https://shinylib.net/speech). Azure provides continuous streaming recognition on all platforms, eliminating the start/stop behavior on Android.
+
+```csharp
+builder.Services.AddAzureSpeech("your-subscription-key", "eastus");
+```
+:::
+
+## Platform Permissions
+
+Since AI Conversations uses Shiny.Speech for voice features, you must declare speech and microphone permissions.
+
+**Android** — Add to `AndroidManifest.xml`:
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+```
+
+**iOS** — Add to `Info.plist`:
+```xml
+<key>NSSpeechRecognitionUsageDescription</key>
+<string>This app uses speech recognition</string>
+<key>NSMicrophoneUsageDescription</key>
+<string>This app uses the microphone for speech recognition</string>
+```
+
+**Windows** — Add the `Microphone` capability to your `Package.appxmanifest`:
+```xml
+<Capabilities>
+    <DeviceCapability Name="microphone" />
+</Capabilities>
+```
+
+## Dependencies
+
+All required dependencies are pulled in transitively by the `Shiny.AiConversation` package — you only need to install the one package.
+
+| Package | Purpose |
+|---|---|
+| `Microsoft.Extensions.AI` | `IChatClient` abstraction for AI chat completions |
+| `Shiny.Speech` | Speech-to-text, text-to-speech, and audio playback |
+
+## Samples
+
+* [Sample MAUI App](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample) — Full chat app with GitHub Copilot authentication, settings, and aura visualization
+* [Sample Blazor WASM App](https://github.com/shinyorg/aiconversation/tree/main/samples/Sample.Blazor) — Blazor WebAssembly app with static OpenAI provider
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-ai" />
+
+## Next Steps
+
+- [Chat Client Provider](/aiconversation/chat-client-provider) — How to implement `IChatClientProvider` for different AI backends
+- [Message Store](/aiconversation/message-store) — Persist and query chat history
+- [Acknowledgements & Sound](/aiconversation/acknowledgements) — Configure audio feedback and text-to-speech modes
+- [Wake Word](/aiconversation/wake-word) — Hands-free voice activation
+- [AI Tools](/aiconversation/ai-tools) — Register AI tools including the built-in chat history lookup

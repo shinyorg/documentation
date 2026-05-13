@@ -1,0 +1,190 @@
+---
+title: Message Store
+description: Persist and query chat history with IMessageStore
+---
+
+The `IMessageStore` interface provides optional chat history persistence. When configured, every user message and AI response is automatically stored.
+
+## Interface
+
+```csharp
+public interface IMessageStore
+{
+    Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken);
+    Task Clear(DateTimeOffset? beforeDate = null);
+    Task<IReadOnlyList<AiChatMessage>> Query(
+        string? messageContains = null,
+        DateTimeOffset? fromDate = null,
+        DateTimeOffset? toDate = null,
+        int? limit = null,
+        CancellationToken cancellationToken = default
+    );
+}
+```
+
+The `Store` method is called once after the AI finishes responding, with the complete `ChatResponse` and the triggering user message.
+
+## Registration
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.SetChatClientProvider<MyChatClientProvider>();
+    opts.SetMessageStore<MyMessageStore>(addAiLookupTool: true);
+});
+```
+
+The `addAiLookupTool` parameter (default `true`) registers a `ChatLookupAITool` that allows the AI to search its own conversation history when answering questions like "What did we talk about yesterday?"
+
+## AiChatMessage
+
+```csharp
+public record AiChatMessage(
+    string Id,
+    string Message,
+    DateTimeOffset Timestamp,
+    ChatMessageDirection Direction  // User or AI
+);
+```
+
+## Querying History
+
+The service exposes history through `IAiConversationService`:
+
+```csharp
+// Get recent messages
+var recent = await aiService.GetChatHistory(limit: 50);
+
+// Search by content
+var results = await aiService.GetChatHistory(messageContains: "weather");
+
+// Filter by date range
+var today = await aiService.GetChatHistory(
+    startDate: DateTimeOffset.Now.Date,
+    endDate: DateTimeOffset.Now
+);
+
+// Clear all history
+await aiService.ClearChatHistory();
+
+// Clear history older than 30 days
+await aiService.ClearChatHistory(beforeDate: DateTimeOffset.Now.AddDays(-30));
+```
+
+:::note
+`GetChatHistory()` and `ClearChatHistory()` throw `InvalidOperationException` if no `IMessageStore` is registered.
+:::
+
+## Example: In-Memory Store
+
+```csharp
+public class InMemoryMessageStore : IMessageStore
+{
+    readonly List<AiChatMessage> messages = [];
+    readonly object sync = new();
+
+    public Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken)
+    {
+        if (response.Text is not { } text)
+            return Task.CompletedTask;
+
+        lock (sync)
+        {
+            messages.Add(new AiChatMessage(
+                Guid.NewGuid().ToString(),
+                text,
+                DateTimeOffset.UtcNow,
+                ChatMessageDirection.AI
+            ));
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task Clear(DateTimeOffset? beforeDate = null)
+    {
+        lock (sync)
+        {
+            if (beforeDate.HasValue)
+                messages.RemoveAll(m => m.Timestamp <= beforeDate.Value);
+            else
+                messages.Clear();
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<AiChatMessage>> Query(
+        string? messageContains = null,
+        DateTimeOffset? fromDate = null,
+        DateTimeOffset? toDate = null,
+        int? limit = null,
+        CancellationToken cancellationToken = default)
+    {
+        lock (sync)
+        {
+            IEnumerable<AiChatMessage> query = messages.OrderBy(m => m.Timestamp);
+
+            if (!String.IsNullOrWhiteSpace(messageContains))
+                query = query.Where(m => m.Message.Contains(messageContains, StringComparison.OrdinalIgnoreCase));
+            if (fromDate.HasValue)
+                query = query.Where(m => m.Timestamp >= fromDate.Value);
+            if (toDate.HasValue)
+                query = query.Where(m => m.Timestamp <= toDate.Value);
+            if (limit.HasValue)
+                query = query.Take(limit.Value);
+
+            return Task.FromResult<IReadOnlyList<AiChatMessage>>(query.ToList().AsReadOnly());
+        }
+    }
+}
+```
+
+## Example: DocumentDB Store
+
+The MAUI sample uses [Shiny.DocumentDb](https://www.nuget.org/packages/Shiny.DocumentDb.Sqlite) for SQLite-backed persistence:
+
+```csharp
+public class DocumentDbMessageStore(IDocumentStore store) : IMessageStore
+{
+    public Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken)
+    {
+        if (response.Text is not { } text)
+            return Task.CompletedTask;
+
+        return store.Insert(
+            new AiChatMessage(Guid.NewGuid().ToString(), text, DateTimeOffset.UtcNow, ChatMessageDirection.AI),
+            cancellationToken: cancellationToken
+        );
+    }
+
+    public Task Clear(DateTimeOffset? beforeDate = null)
+    {
+        var query = store.Query<AiChatMessage>();
+        if (beforeDate.HasValue)
+            query = query.Where(x => x.Timestamp <= beforeDate.Value);
+        return query.ExecuteDelete();
+    }
+
+    public Task<IReadOnlyList<AiChatMessage>> Query(
+        string? messageContains = null,
+        DateTimeOffset? fromDate = null,
+        DateTimeOffset? toDate = null,
+        int? limit = null,
+        CancellationToken cancellationToken = default)
+    {
+        var query = store.Query<AiChatMessage>().OrderBy(x => x.Timestamp);
+
+        if (!String.IsNullOrWhiteSpace(messageContains))
+            query = query.Where(x => x.Message.Contains(messageContains));
+        if (fromDate.HasValue)
+            query = query.Where(x => x.Timestamp >= fromDate.Value);
+        if (toDate.HasValue)
+            query = query.Where(x => x.Timestamp <= toDate.Value);
+        if (limit.HasValue)
+            query = query.Paginate(0, limit.Value);
+
+        return query.ToList(cancellationToken);
+    }
+}
+```
+
+You could also implement `IMessageStore` with Entity Framework Core, Cosmos DB, or any other storage backend.
