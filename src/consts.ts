@@ -332,7 +332,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "category": "core",
         "version": "2.0.1",
         "additionalNugets": [
-            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.7" }
+            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.8" }
         ]
     },
     {
@@ -426,28 +426,28 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.AiConversation",
         "description": "AI Conversations",
         "category": "essentials",
-        "version": "1.0.0-beta-0022"
+        "version": "1.0.0-beta-0038"
     },
     {
         "id": "speech",
         "nuget": "Shiny.Speech",
         "description": "Speech (STT/TTS)",
         "category": "devices",
-        "version": "1.2.0"
+        "version": "2.0.0"
     },
     {
         "id": "speechazure",
         "nuget": "Shiny.Speech.Azure",
         "description": "Speech - Azure AI Speech",
         "category": "devices",
-        "version": "1.2.0"
+        "version": "2.0.0"
     },
     {
         "id": "speechelevenlabs",
         "nuget": "Shiny.Speech.ElevenLabs",
         "description": "Speech - ElevenLabs TTS",
         "category": "devices",
-        "version": "1.2.0"
+        "version": "2.0.0"
     },
     {
         "id": "datasync",

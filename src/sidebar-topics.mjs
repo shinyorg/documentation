@@ -386,6 +386,9 @@ export const sidebarTopics = [
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
+          { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
+          { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
+          { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
