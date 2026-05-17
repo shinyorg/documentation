@@ -11,13 +11,17 @@ import RN from '/src/components/ReleaseNote.astro';
 <RN type="fix">Fixed MAUI `StorageService.DeleteFile` — inverted condition (`!File.Exists`) prevented cached files from ever being deleted</RN>
 <RN type="fix">Fixed service scope leak in `LocalEventExecutor` — each event handler was creating a new scope instead of reusing the parent scope, leading to accumulated unreleased scopes</RN>
 <RN type="fix">Fixed child scope disposal in `MediatorContext` — `Request`, `Send`, and `Publish` now properly dispose child scopes in a `finally` block</RN>
-<RN type="fix">Fixed `StorageCacheService.GetOrCreate` race condition — concurrent calls could invoke the factory multiple times. Now uses `SemaphoreSlim` with double-check locking to ensure the factory runs exactly once</RN>
+<RN type="fix">Fixed `StorageCacheService` concurrency — replaced the single global semaphore with per-key locking via the new `KeyedLocker`, so the factory runs exactly once per key without serializing unrelated keys. `Get` now also takes the per-key lock, eliminating a sliding-expiration race where two concurrent reads could overwrite each other</RN>
+<RN type="fix">Fixed `MemoryCacheService.GetOrCreate` cache stampede — `IMemoryCache.GetOrCreateAsync` does not lock the factory, so N concurrent callers for the same key would each invoke the factory. Now wraps the factory in a per-key `KeyedLocker` so it runs exactly once per key</RN>
+<RN type="fix">Fixed `HttpRequestCacheMiddleware` double-wrap bug — `TryCacheEntry` was wrapping the result in a `CacheEntry<TResult>` before calling `ICacheService.Set<TResult>(...)`, which itself wraps the value, so the cache stored `CacheEntry<CacheEntry<TResult>>` and subsequent `Get<TResult>` calls always missed</RN>
+<RN type="fix">Fixed `HttpRequestCacheMiddleware` cache stampede — `Get → next → Set` was unsynchronized, so concurrent requests for the same URL would all hit the network. Now per-key locked via `KeyedLocker`</RN>
+<RN type="enhancement">New `Shiny.Mediator.Infrastructure.KeyedLocker` — per-key async mutual exclusion primitive used by cache services and middleware for stampede protection; safe for any singleton component that needs to serialize work by key</RN>
 <RN type="fix">Fixed `PublishToBackground` exception handling — `TryHandle` was fire-and-forget (`_ =`), so exception handlers were never awaited. Now properly awaited</RN>
 <RN type="fix">Fixed `InMemoryCommandScheduler` scope and activity lifecycle — moved scope/activity creation outside the try block and added `finally` disposal to prevent leaks</RN>
 <RN type="fix">Fixed Blazor `InternetService.WaitForAvailable` — single `TaskCompletionSource` meant only one concurrent caller could wait. Now supports multiple concurrent waiters</RN>
 <RN type="fix">Fixed `MemoryCacheService.Remove` with partial match — was modifying the cache entry collection during enumeration, causing `InvalidOperationException`. Now snapshots matching keys before removal</RN>
 <RN type="fix">Fixed `QueuedEventMiddleware` `SampleState` timer — added `CancellationTokenSource` to properly cancel in-flight timers on dispose and prevent stale callbacks</RN>
-<RN type="fix">Fixed `AbstractFileStorageService` concurrent access — simplified semaphore patterns and prevented potential deadlocks from double semaphore acquisition in `GetFileIndexer`</RN>
+<RN type="fix">Fixed `AbstractFileStorageService` concurrent access — simplified semaphore patterns and prevented potential deadlocks from double semaphore acquisition in `GetFileIndexer`. Data-file writes are now serialized per `(category, key)` with `KeyedLocker`, so two concurrent `Set` calls on the same key can no longer tear the file content</RN>
 <RN type="fix">Removed dead copy-pasted code from `EventStream` extension method (unused `TaskCompletionSource` and cancellation registration)</RN>
 
 ## 6.3.0 - April 2026
