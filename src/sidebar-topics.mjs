@@ -331,17 +331,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'controls/floatingpanel/' },
           { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
           { label: 'Examples', link: 'controls/floatingpanel/examples' },
-          { label: 'Blazor Usage', link: 'controls/floatingpanel/blazor' },
-        ]
-      },
-      {
-        label: 'SheetView',
-        jumpTo: true,
-        items:[
-          { label: 'Getting Started', link: 'controls/sheetview/' },
-          { label: 'Properties & Events', link: 'controls/sheetview/properties' },
-          { label: 'Examples', link: 'controls/sheetview/examples' },
-          { label: 'Blazor Usage', link: 'controls/sheetview/blazor' },
+          { label: 'Sheet View (Blazor Only)', link: 'controls/sheetview/' },
         ]
       },
       {

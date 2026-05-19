@@ -1,61 +1,70 @@
 ---
-title: Persistent Services
+title: Persistent Properties
 ---
 import { Steps } from '@astrojs/starlight/components';
 
-The most powerful feature of Stores. Register an `INotifyPropertyChanged` class as a persistent service, and every property change is automatically written to the backing store. When the app restarts, the object is rehydrated from the store.
+The most powerful feature of Stores. Mark a `partial` property with `[Bind]` and the DI source generator emits a getter/setter that reads from and writes to the backing key/value store — no `INotifyPropertyChanged`, no runtime reflection, no manual wiring. The class is automatically rehydrated on every read, so it survives app restarts.
 
 <Steps>
-1. Create a class that implements `INotifyPropertyChanged`:
+1. Create a `partial` class with `partial` properties marked `[Bind]`:
    ```csharp
-   [Reflector] // Optional but recommended — removes reflection for AOT safety
-   public partial class AppSettings : INotifyPropertyChanged
+   using Shiny;
+
+   public partial class AppSettings
    {
-       string theme = "light";
-       public string Theme
-       {
-           get => theme;
-           set { theme = value; OnPropertyChanged(); }
-       }
+       [Bind]                       // default store
+       public partial string Theme { get; set; }
 
-       bool notificationsEnabled = true;
-       public bool NotificationsEnabled
-       {
-           get => notificationsEnabled;
-           set { notificationsEnabled = value; OnPropertyChanged(); }
-       }
+       [Bind]
+       public partial bool NotificationsEnabled { get; set; }
 
-       // INotifyPropertyChanged implementation
-       public event PropertyChangedEventHandler? PropertyChanged;
-       void OnPropertyChanged([CallerMemberName] string? name = null)
-           => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+       [Bind("secure")]             // secure store
+       public partial string Token { get; set; }
+
+       [Bind(Key = "ui_density")]   // override the storage key (defaults to property name)
+       public partial int Density { get; set; }
    }
    ```
 
-2. Register as a persistent service:
+2. Register it like any other service (the generator handles construction):
    ```csharp
-   // Uses the default "settings" store
-   builder.Services.AddPersistentService<AppSettings>();
-
-   // Or target a specific store
-   builder.Services.AddPersistentService<SecureSettings>("secure");
+   [Singleton]
+   public partial class AppSettings { /* same as above */ }
    ```
 
-3. Inject and use — changes are persisted automatically:
+   Or hand-write the registration if you prefer:
+   ```csharp
+   builder.Services.AddSingleton<AppSettings>();
+   ```
+
+3. Inject and use — every set persists, every get reads from the store:
    ```csharp
    public class SettingsViewModel(AppSettings settings)
    {
-       public AppSettings Settings => settings;
-
        public void ToggleNotifications()
        {
-           // This change is automatically persisted to the store
-           Settings.NotificationsEnabled = !Settings.NotificationsEnabled;
+           settings.NotificationsEnabled = !settings.NotificationsEnabled;
        }
    }
    ```
 </Steps>
 
-:::tip
-Mark your persistent service class with `[Reflector]` from [Shiny Reflector](/reflector/) and make it `partial`. This eliminates runtime reflection for property binding, making it AOT-compatible and faster. Reflector is already built into the Stores package.
+## Direct Store Access
+
+If you don't need binding, access the stores directly via the `Shiny.Stores` static accessor:
+
+```csharp
+Shiny.Stores.Default.Set("theme", "dark");
+var theme = Shiny.Stores.Default.Get<string>("theme");
+
+Shiny.Stores.Secure.Set("token", "abc123");
+
+// Arbitrary keyed stores
+Shiny.Stores.Keyed("my-store").Set("k", "v");
+```
+
+The static accessor is initialized automatically by the hosted initializer that `AddShinyStores()` registers. For host-less scenarios (unit tests, console apps without `IHost`), call `Shiny.Stores.Initialize(serviceProvider)` manually after building your provider.
+
+:::caution
+`Shiny.Stores.Default`/`Secure`/`Keyed` throw `InvalidOperationException` if you call them before initialization. Make sure `AddShinyStores()` is called and either the host has started (so the hosted initializer fires) or `Stores.Initialize(...)` has been called explicitly.
 :::

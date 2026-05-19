@@ -21,8 +21,8 @@ Persist class properties across sessions with a single line of code. Shiny Store
 
 - Unified key/value store interface across all platforms
 - Built-in stores for Preferences, Secure Storage, Local Storage, Session Storage, and In-Memory
-- Persistent services — bind `INotifyPropertyChanged` objects to a store and property changes are saved automatically
-- Integrates with [Shiny Reflector](/reflector/) for AOT-safe, reflection-free binding
+- Source-generated property binding — mark partial properties with `[Bind]` and the generator emits getter/setter bodies that round-trip through the store. No `INotifyPropertyChanged`, no reflection
+- Static `Shiny.Stores` accessor for direct `Stores.Default.Set/Get`, `Stores.Secure.Set/Get`, and arbitrary keyed lookups
 - Custom store support — implement `IKeyValueStore` for your own storage backend
 
 ## Setup
@@ -49,44 +49,44 @@ Persist class properties across sessions with a single line of code. Shiny Store
 
 ## Available Stores
 
-Each platform provides different store implementations, identified by a string alias:
+Each platform provides different store implementations, registered as **keyed** singletons in DI using `StoreKeys`:
 
-| Platform | Alias | Implementation |
+| Platform | Key | Implementation |
 |---|---|---|
-| Android | `settings` | SharedPreferences |
-| Android | `secure` | EncryptedSharedPreferences |
-| iOS / macOS | `settings` | NSUserDefaults |
-| iOS / macOS | `secure` | Keychain |
-| Windows | `settings` | ApplicationData.LocalSettings |
-| Windows | `secure` | Secure Storage |
-| Blazor WebAssembly | `settings` | localStorage |
-| Blazor WebAssembly | `session` | sessionStorage |
-| All | `memory` | In-memory dictionary (great for testing) |
+| Android | `StoreKeys.Default` | SharedPreferences |
+| Android | `StoreKeys.Secure` | EncryptedSharedPreferences |
+| iOS / macOS | `StoreKeys.Default` | NSUserDefaults |
+| iOS / macOS | `StoreKeys.Secure` | Keychain |
+| Windows | `StoreKeys.Default` | ApplicationData.LocalSettings |
+| Windows | `StoreKeys.Secure` | Secure Storage |
+| Blazor WebAssembly | `StoreKeys.Default` | localStorage |
+| Blazor WebAssembly | `"session"` | sessionStorage |
 
 ## Using Stores Directly
 
-Inject `IKeyValueStoreFactory` to access any store by alias:
+The simplest path is the static `Shiny.Stores` accessor:
 
 ```csharp
-public class SettingsService(IKeyValueStoreFactory storeFactory)
+public class SettingsService
 {
-    public void SaveTheme(string theme)
-    {
-        var store = storeFactory.GetStore("settings");
-        store.Set("theme", theme);
-    }
+    public void SaveTheme(string theme) => Shiny.Stores.Default.Set("theme", theme);
+    public string? GetTheme() => Shiny.Stores.Default.Get<string>("theme");
+    public void SaveToken(string token) => Shiny.Stores.Secure.Set("auth_token", token);
+}
+```
 
-    public string GetTheme()
-    {
-        var store = storeFactory.GetStore("settings");
-        return store.Get<string>("theme", "light");
-    }
+The accessor is wired up automatically by `AddShinyStores()` via a hosted initializer. For host-less tests/console apps, call `Shiny.Stores.Initialize(serviceProvider)` after `BuildServiceProvider()`.
 
-    public void SaveToken(string token)
-    {
-        var store = storeFactory.GetStore("secure");
-        store.Set("auth_token", token);
-    }
+For DI-friendly access, inject the keyed `IKeyValueStore` directly:
+
+```csharp
+public class SettingsService(
+    [FromKeyedServices(StoreKeys.Default)] IKeyValueStore settings,
+    [FromKeyedServices(StoreKeys.Secure)] IKeyValueStore secure
+)
+{
+    public void SaveTheme(string theme) => settings.Set("theme", theme);
+    public string GetTheme() => settings.Get<string>("theme") ?? "light";
 }
 ```
 
@@ -102,19 +102,23 @@ store.IncrementValue(key);              // Thread-safe integer increment
 
 ## Custom Stores
 
-Implement `IKeyValueStore` to create your own storage backend:
+Implement `IKeyValueStore` to create your own storage backend, then register it as a keyed singleton:
 
 ```csharp
 public class RedisKeyValueStore : IKeyValueStore
 {
-    public string Alias => "redis";
-
-    public T? Get<T>(string key, T? defaultValue = default) { /* ... */ }
+    public bool IsReadOnly => false;
+    public T? Get<T>(string key) { /* ... */ }
     public void Set<T>(string key, T value) { /* ... */ }
     public bool Contains(string key) { /* ... */ }
     public bool Remove(string key) { /* ... */ }
     public void Clear() { /* ... */ }
 }
+
+builder.Services.AddKeyedSingleton<IKeyValueStore, RedisKeyValueStore>("redis");
+
+// Access via the static helper
+Shiny.Stores.Keyed("redis").Set("key", "value");
 ```
 
 ## AI Coding Assistant

@@ -53,3 +53,52 @@ Prevent overwriting an existing registration:
 public class DefaultLogger : ILogger { }
 // Uses TryAddSingleton — won't replace an ILogger that's already registered
 ```
+
+## Factory-Form Source Generation
+
+Classes attributed with `[Singleton]`/`[Scoped]`/`[Transient]`/`[Service]` are emitted in **factory form** — the generator expands the constructor and wires DI lookups at compile time. No reflection at runtime.
+
+```csharp
+[Singleton]
+public class MyService(IDep dep) : IMyService { }
+
+// Generated:
+// services.AddSingleton<IMyService>(sp => new MyService(sp.GetRequiredService<IDep>()));
+```
+
+Constructor selection matches `ActivatorUtilities` rules:
+- `[ActivatorUtilitiesConstructor]` is honored
+- Otherwise, the constructor with the most parameters is picked
+- `[FromKeyedServices("key")]` parameters resolve via `GetRequiredKeyedService<T>("key")`
+- `IServiceProvider` parameters are passed through directly
+
+Multi-interface classes emit explicit forwarders rather than relying on reflection:
+
+```csharp
+[Singleton]
+public class MyService : IFoo, IBar { }
+
+// Generated:
+// services.AddSingleton<MyService>(sp => new MyService());
+// services.AddSingleton<IFoo>(sp => sp.GetRequiredService<MyService>());
+// services.AddSingleton<IBar>(sp => sp.GetRequiredService<MyService>());
+```
+
+Because every attributed registration is factory-based, resolve chains like `OnResolved` and `BindOnResolve` compose naturally.
+
+## Resolve Chains
+
+Chain a callback onto the most recently registered factory-based service. The callback fires after the container constructs the instance but before it's returned. Fires once per construction: singleton → once total, scoped → once per scope, transient → every resolve.
+
+```csharp
+services
+    .AddSingleton<IFoo>(sp => new Foo())
+    .OnResolved<IFoo>((foo, sp) => foo.Configure(sp.GetRequiredService<IOptions>()));
+
+// Action<TService> overload when the IServiceProvider isn't needed
+services
+    .AddSingleton<IFoo>(sp => new Foo())
+    .OnResolved<IFoo>(foo => foo.Initialize());
+```
+
+The chain is AOT-clean — it wraps the factory directly. Type-based registrations (`AddSingleton<TService, TImpl>()`) and pre-built instance registrations are rejected at registration time; use a factory-based form instead (or rely on the source generator, which always emits factory form).
