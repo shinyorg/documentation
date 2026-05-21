@@ -4,6 +4,42 @@ tableOfContents: true
 ---
 import RN from '/src/components/ReleaseNote.astro';
 
+## v6.1 - May 20, 2026
+
+<RN type="fix">**`NavigateTo<TViewModel>(relativeNavigation: false)` no longer hangs / crashes for `ShellContent`-declared routes** — pages declared in `AppShell.xaml` as `<ShellContent ContentTemplate="{DataTemplate ...}">` (with `[ShellMap<TPage>(registerRoute: false)]`) are constructed by MAUI via the DataTemplate and never go through `ShinyRouteFactory.GetOrCreate`. The previous implementation awaited the static `ShinyRouteFactory.PageResolved` event for completion — that event never fired for these pages, so the awaiter hung and the subscribed handler leaked. A subsequent unrelated navigation through a registered route would wake the leaked handler with the wrong page and throw `InvalidOperationException("Page BindingContext is not of type '<original target VM>'")` — on iOS surfaced asynchronously through `NSAsyncSynchronizationContextDispatcher` against a stale `async void` call site, which made the crash look like it originated from a much later, unrelated navigation. `NavigateTo<TViewModel>` now reads `Shell.Current.CurrentPage.BindingContext` directly after `GoToAsync` returns, which works uniformly for registered routes and `ShellContent`-declared routes</RN>
+<RN type="fix">**`NavigationBuilder.Navigate` no longer suffers cross-navigation handler crosstalk** — the builder previously subscribed to the same static `PageResolved` event, so two concurrent builders (or a builder running alongside a `NavigateTo<TVM>`) could fire each other's configure callbacks against the wrong page. `Navigate` now walks `Shell.Current.Navigation.NavigationStack` after `GoToAsync` returns and applies each segment's configure callback to the page at the corresponding stack index, with a warning log when the resolved page's `BindingContext` doesn't match the segment's expected ViewModel type</RN>
+<RN type="enhancement" breaking={true}>**`ShinyRouteFactory.PageResolved` static event removed** — the event lived in the `Shiny.Infrastructure` namespace and was only consumed internally by `NavigateTo<TViewModel>` and `NavigationBuilder.Navigate`. Both consumers have been rewritten and no longer need it. `ShinyRouteFactory.GetOrCreate` still resolves the page from DI and assigns `BindingContext` for registered routes — it just no longer broadcasts. If any external code was subscribing to this event for analytics or diagnostics, move that logic to `INavigator.Navigated` instead</RN>
+<RN type="enhancement" breaking={true}>**`configure` callbacks now run after navigation completes** — `NavigateTo<TViewModel>(configure: vm => ...)` and `NavigationBuilder.Add<TViewModel>(vm => ...)` previously invoked `configure` synchronously inside `ShinyRouteFactory.GetOrCreate`, before the page was rendered. They now run after `Shell.GoToAsync` returns, so values set via `configure` propagate to the UI through `INotifyPropertyChanged` rather than being pre-set on a brand-new VM. For most ViewModels this is invisible; if a value must be present before the first render, migrate to `[ShellProperty]` parameters — the source-generated `NavigateTo{Name}` methods set `[ShellProperty]` values before page realization</RN>
+
+### Migration from v6.0.3
+
+No code changes are required for the common cases — `NavigateTo<TViewModel>(relativeNavigation: false)` against a `ShellContent`-declared route now works rather than hanging or eventually crashing, and existing `configure` callbacks continue to compile and run. Two corner cases worth checking:
+
+1. **External subscribers to `ShinyRouteFactory.PageResolved`** — the event was always part of the `Shiny.Infrastructure` namespace, but if you wired anything to it (logging, analytics, dev tooling), move that logic to `INavigator.Navigated`:
+
+   ```csharp
+   // Before (v6.0.x)
+   ShinyRouteFactory.PageResolved += (_, page) =>
+       logger.LogDebug("Page resolved: {Type}", page.GetType());
+
+   // After (v6.1)
+   navigator.Navigated += (_, args) =>
+       logger.LogDebug("Navigated to: {Uri}", args.ToUri);
+   ```
+
+2. **`configure` callbacks that depend on pre-render timing** — if your callback sets values that the first render must read synchronously (e.g., a `CollectionView.ItemsSource` that can't tolerate a re-bind), migrate those values to `[ShellProperty]` parameters and use the generated typed navigation method. `[ShellProperty]` values are applied inside the page-creation flow, before the UI renders:
+
+   ```csharp
+   // Before — pre-render timing relied on configure
+   await navigator.NavigateTo<DetailViewModel>(vm => vm.Items = preloadedItems);
+
+   // After — declare as ShellProperty so the source-generated NavigateToDetail wires it pre-render
+   [ShellProperty]
+   public IReadOnlyList<Item> Items { get; set; }
+
+   await navigator.NavigateToDetail(items: preloadedItems);
+   ```
+
 ## v6.0.3 - April 29, 2026
 
 <RN type="fix">**`IApplication` resolved at initialization instead of constructor injection** — `ShinyShellNavigator` now resolves `IApplication` from the service provider during `Initialize` instead of requiring it via constructor injection. This fixes DI resolution failures when `IApplication` is not yet available at service registration time</RN>
