@@ -1,18 +1,72 @@
-import { ShinyComponents, DEFAULT_VERSION } from '../../consts';
+import type { TemplateKind } from './templateFiles';
 
-/** Look up the version of a Shiny NuGet package from the shared ShinyComponents data. */
-function shinyVersion(nuget: string): string {
-    const comp = ShinyComponents.find(c =>
-        c.nuget === nuget ||
-        c.additionalNugets?.some(n => n.nuget === nuget)
-    );
-    if (comp) {
-        if (comp.nuget === nuget) return comp.version;
-        const additional = comp.additionalNugets?.find(n => n.nuget === nuget);
-        if (additional) return additional.version;
-    }
-    return DEFAULT_VERSION;
-}
+/**
+ * Single source of truth for every NuGet package version surfaced in any of the
+ * three template builder tabs (MAUI / ASP.NET / Blazor). Updating a key here
+ * propagates to every config that references it.
+ */
+export const VERSIONS = {
+    // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
+    shinyMediator: '6.4.0',
+    shinyShell: '6.1.0',
+    shinyControls: '1.0.1-beta-0078',
+    // Shiny — client packages that share the core release train
+    shinyClient: '4.0.1',
+    shinyConfiguration: '4.0.1',
+    shinyLocalization: '2.0.1',
+    shinyStores: '3.0.0',
+    shinyReflector: '1.7.2',
+    shinyDI: '3.0.0',
+    shinySpatial: '1.1.0',
+    shinyContactStore: '1.0.1',
+    shinySpeech: '2.0.0',
+    shinyAiConversation: '1.0.0-beta-0043',
+    shinyMusic: '3.0.1',
+    shinyHealth: '1.0.0',
+    shinyDocumentDb: '5.0.1',
+    shinyMauiHosting: '3.0.0',
+    shinyWebHosting: '3.0.0',
+
+    // MAUI tooling
+    devflow: '0.1.0-preview.8.26256.5',
+
+    // Microsoft + third-party
+    ctMvvm: '8.4.2',
+    ctMauiMarkup: '7.0.1',
+    ctMediaElement: '9.0.0',
+    ctCamera: '6.0.1',
+    sentry: '6.5.0',
+    barcodes: '3.0.3',
+    biometric: '2.5.1',
+    screenrecord: '1.0.0-preview5',
+    ocr: '1.1.1',
+    calendar: '5.0.0',
+    audio: '4.0.0',
+    uraniumUi: '2.15.0',
+    skeleton: '2.0.0',
+    alohakit: '1.1.0',
+    liveCharts: '2.0.4',
+    skia: '3.119.2',
+    skiaExtended: '3.0.0',
+    ffImageLoading: '1.3.2',
+    userDialogs: '9.2.2',
+    debugRainbows: '1.2.2',
+    cards: '1.1.2',
+    mudblazor: '9.4.0',
+    radzen: '10.4.4',
+    fluentUI: '4.14.2',
+    sqliteNetPcl: '1.9.172',
+    roomsharp: '0.5.5',
+    msExtAi: '10.6.0',
+    androidAuto: '1.7.0.3',
+    systemReactive: '6.1.0',
+    humanizer: '3.0.10',
+    unitsNet: '5.75.0',
+    sysLinqAsync: '7.0.1',
+    refit: '10.1.6',
+    orleans: '10.1.0',
+    scalar: '2.14.14',
+} as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';
 
@@ -36,13 +90,34 @@ export interface TemplateParam {
     visibleWhen?: (state: TemplateState) => boolean;
 }
 
+export interface TemplateCategory {
+    id: string;
+    title: string;
+    span: 4 | 6 | 8 | 12;
+}
+
 export interface TemplateState {
     projectName: string;
     applicationId: string;
     [key: string]: string | boolean;
 }
 
-export const CATEGORIES = [
+export interface TemplateConfig {
+    kind: TemplateKind;
+    label: string;
+    blurb: string;
+    /** Whether this kind exposes the Application ID field (mostly relevant to MAUI). */
+    showApplicationId: boolean;
+    categories: readonly TemplateCategory[];
+    params: TemplateParam[];
+    computeSymbols: (state: TemplateState) => Record<string, boolean | string>;
+}
+
+// ---------------------------------------------------------------------------
+// MAUI (ShinyApp)
+// ---------------------------------------------------------------------------
+
+const MAUI_CATEGORIES: readonly TemplateCategory[] = [
     { id: 'project', title: 'Project', span: 12 },
     { id: 'framework', title: 'Framework', span: 6 },
     { id: 'markup', title: 'Markup', span: 6 },
@@ -56,15 +131,12 @@ export const CATEGORIES = [
     { id: 'ai', title: 'AI', span: 6 },
     { id: 'platform', title: 'Platform', span: 6 },
     { id: 'utility', title: 'Utilities', span: 6 },
-] as const;
+];
 
-/** Visibility helpers based on selected platforms */
 const noDesktop = (s: TemplateState) => !s.usewindows && !s.usemaccatalyst;
-const noWindows = (s: TemplateState) => !s.usewindows;
-const noMacCatalyst = (s: TemplateState) => !s.usemaccatalyst;
 
-export const TEMPLATE_PARAMS: TemplateParam[] = [
-    // Platform targets (rendered specially in the Project section)
+const MAUI_PARAMS: TemplateParam[] = [
+    // Platform targets
     { id: 'useios', label: 'iOS', type: 'bool', defaultValue: true, category: 'project' },
     { id: 'useandroid', label: 'Android', type: 'bool', defaultValue: true, category: 'project' },
     { id: 'usemaccatalyst', label: 'Mac Catalyst', type: 'bool', defaultValue: false, category: 'project' },
@@ -72,10 +144,10 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // Developer tools
     { id: 'devflow', label: 'MAUI DevFlow', type: 'bool', defaultValue: true, category: 'project',
-        version: '0.1.0-preview.8.26256.5',
+        version: VERSIONS.devflow,
         description: 'Debug-only toolkit for visual tree inspection, performance profiling, network monitoring, and AI agent automation. Adds a DevFlow agent to your app that connects to the MAUI CLI (maui devflow) https://github.com/dotnet/maui-labs' },
 
-    // Choices (rendered as dropdowns)
+    // Choices
     { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
         description: 'The target framework for the project',
         choices: [
@@ -129,95 +201,95 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // Framework bools
     { id: 'ctmvvm', label: 'Community Toolkit MVVM', type: 'bool', defaultValue: true, category: 'framework',
-        version: '8.4.2',
+        version: VERSIONS.ctMvvm,
         description: 'Source-generated MVVM helpers (ObservableProperty, RelayCommand) by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/mvvm/' },
     { id: 'shinymediator', label: 'Shiny Mediator', type: 'bool', defaultValue: true, category: 'framework',
-        version: shinyVersion('Shiny.Mediator.Maui'),
+        version: VERSIONS.shinyMediator,
         description: 'Event-driven messaging, middleware, and request/response pipeline https://shinylib.net/mediator/' },
 
-    // Markup bools
+    // Markup
     { id: 'blazor', label: 'Blazor Hybrid', type: 'bool', defaultValue: false, category: 'markup',
         description: 'Add Blazor Hybrid support' },
     { id: 'usecsharpmarkup', label: 'C# Markup (CT)', type: 'bool', defaultValue: false, category: 'markup',
-        version: '7.0.1',
+        version: VERSIONS.ctMauiMarkup,
         description: 'Build MAUI UI in C# with fluent syntax https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/markup/markup' },
 
-    // Configuration bools
+    // Configuration
     { id: 'configuration', label: 'AppSettings.json', type: 'bool', defaultValue: true, category: 'configuration',
-        version: shinyVersion('Shiny.Extensions.Configuration'),
+        version: VERSIONS.shinyConfiguration,
         description: 'App configuration from JSON files https://shinylib.net/extensions/configuration/' },
     { id: 'localization', label: 'Localization', type: 'bool', defaultValue: false, category: 'configuration',
-        version: shinyVersion('Shiny.Extensions.Localization.Generator'),
+        version: VERSIONS.shinyLocalization,
         description: 'Source-generated localization https://shinylib.net/extensions/localization/' },
 
     // Logging
     { id: 'sentry', label: 'Sentry.IO', type: 'bool', defaultValue: false, category: 'logging',
-        version: '6.5.0',
+        version: VERSIONS.sentry,
         description: 'Error tracking & performance monitoring https://docs.sentry.io/platforms/dotnet/guides/maui/' },
 
-    // Services bools
+    // Services
     { id: 'bluetoothle', label: 'Bluetooth LE', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.BluetoothLE'),
+        version: VERSIONS.shinyClient,
         description: 'BLE client operations https://shinylib.net/client/ble/' },
     { id: 'blehosting', label: 'Bluetooth LE Hosting', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.BluetoothLE.Hosting'),
+        version: VERSIONS.shinyClient,
         description: 'BLE peripheral/server hosting https://shinylib.net/client/blehosting/' },
     { id: 'jobs', label: 'Background Jobs', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Jobs'),
+        version: VERSIONS.shinyClient,
         description: 'Periodic background tasks https://shinylib.net/client/jobs/',
         visibleWhen: noDesktop },
     { id: 'gps', label: 'GPS', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Locations'),
+        version: VERSIONS.shinyClient,
         description: 'Foreground & background GPS tracking https://shinylib.net/client/locations/gps/' },
     { id: 'geofencing', label: 'Geofencing', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Locations'),
+        version: VERSIONS.shinyClient,
         description: 'Monitor geofence regions https://shinylib.net/client/locations/geofencing/' },
     { id: 'httptransfers', label: 'HTTP Transfers', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Net.Http'),
+        version: VERSIONS.shinyClient,
         description: 'Background HTTP uploads & downloads https://shinylib.net/client/httptransfers/' },
     { id: 'notifications', label: 'Local Notifications', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Notifications'),
+        version: VERSIONS.shinyClient,
         description: 'Schedule & manage local notifications https://shinylib.net/client/notifications/' },
     { id: 'health', label: 'Health Data', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Health'),
+        version: VERSIONS.shinyHealth,
         description: 'Cross-platform health data access (HealthKit/Health Connect) https://shinylib.net/health/',
         visibleWhen: noDesktop },
     { id: 'contactstore', label: 'Contact Store', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Maui.ContactStore'),
+        version: VERSIONS.shinyContactStore,
         description: 'Full CRUD access to device contacts https://shinylib.net/contactstore/',
         visibleWhen: noDesktop },
     { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Speech'),
+        version: VERSIONS.shinySpeech,
         description: 'Speech-to-text, text-to-speech, and audio playback https://shinylib.net/speech/' },
     { id: 'aiconversation', label: 'AI Conversation', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.AiConversation'),
+        version: VERSIONS.shinyAiConversation,
         description: 'AI Conversation with speech recognition and text-to-speech https://shinylib.net/aiconversation/' },
     { id: 'barcodes', label: 'Barcode Scanning', type: 'bool', defaultValue: false, category: 'services',
-        version: '3.0.3',
+        version: VERSIONS.barcodes,
         description: 'Native barcode scanning using MLKit & Vision by afriscic https://github.com/afriscic/BarcodeScanning.Native.Maui',
         visibleWhen: noDesktop },
     { id: 'fingerprint', label: 'Biometric Auth', type: 'bool', defaultValue: false, category: 'services',
-        version: '2.5.1',
-        description: 'Fingerprint & face recognition by Oscore https://github.com/oscoreio/Maui.Biometric',
+        version: VERSIONS.biometric,
+        description: 'Fingerprint & face recognition by Oscore (Oscore.Maui.Biometric) https://github.com/oscoreio/Maui.Biometric',
         visibleWhen: noDesktop },
     { id: 'screenrecord', label: 'Screen Recording', type: 'bool', defaultValue: false, category: 'services',
-        version: '1.0.0-preview5',
+        version: VERSIONS.screenrecord,
         description: 'Record the device screen by Gerald Versluis https://github.com/jfversluis/Plugin.Maui.ScreenRecording',
         visibleWhen: noDesktop },
     { id: 'ocr', label: 'OCR', type: 'bool', defaultValue: false, category: 'services',
-        version: '1.1.1',
+        version: VERSIONS.ocr,
         description: 'Optical character recognition by Kori Francis https://github.com/kfrancis/ocr',
         visibleWhen: noDesktop },
     { id: 'calendar', label: 'Calendar Store', type: 'bool', defaultValue: false, category: 'services',
-        version: '5.0.0',
+        version: VERSIONS.calendar,
         description: 'Read & write device calendar events by Gerald Versluis https://github.com/jfversluis/Plugin.Maui.CalendarStore',
         visibleWhen: noDesktop },
     { id: 'audio', label: 'Audio', type: 'bool', defaultValue: false, category: 'services',
-        version: '4.0.0',
+        version: VERSIONS.audio,
         description: 'Record & play audio by Gerald Versluis https://github.com/jfversluis/Plugin.Maui.Audio',
         visibleWhen: noDesktop },
     { id: 'music', label: 'Music Library', type: 'bool', defaultValue: false, category: 'services',
-        version: shinyVersion('Shiny.Music'),
+        version: VERSIONS.shinyMusic,
         description: 'Music library & player https://shinylib.net/music/',
         visibleWhen: noDesktop },
 
@@ -228,7 +300,7 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
         description: 'Creates a sample MSAL or Web Authenticator service',
         visibleWhen: (s) => s.authtype !== 'None' },
     { id: 'refit', label: 'Refit HTTP Client', type: 'bool', defaultValue: false, category: 'code',
-        version: '10.1.6',
+        version: VERSIONS.refit,
         description: 'Type-safe REST client from interfaces by Paul Betts https://github.com/reactiveui/refit',
         visibleWhen: (s) => s.authtype !== 'None' },
     { id: 'appactions', label: 'App Actions', type: 'bool', defaultValue: false, category: 'code',
@@ -240,98 +312,98 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // UI libs
     { id: 'shinycontrols', label: 'Shiny Controls', type: 'bool', defaultValue: true, category: 'ui',
-        version: shinyVersion('Shiny.Maui.Controls'),
+        version: VERSIONS.shinyControls,
         description: 'Scheduler, BottomSheet, ImageViewer, PillView, SecurityPin, Fab https://shinylib.net/controls/' },
     { id: 'mediaelement', label: 'CT Media Element', type: 'bool', defaultValue: false, category: 'ui',
-        version: '9.0.0',
+        version: VERSIONS.ctMediaElement,
         description: 'Cross-platform media playback control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/mediaelement' },
     { id: 'cameraview', label: 'CT Camera', type: 'bool', defaultValue: false, category: 'ui',
-        version: '6.0.1',
+        version: VERSIONS.ctCamera,
         description: 'Camera preview & capture control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/camera-view' },
     { id: 'uraniumui', label: 'Uranium UI', type: 'bool', defaultValue: false, category: 'ui',
-        version: '2.15.0',
+        version: VERSIONS.uraniumUi,
         description: 'Material Design component library by Enis Necipoglu https://enisn-projects.io/docs/en/uranium/latest' },
     { id: 'skeleton', label: 'Skeleton', type: 'bool', defaultValue: false, category: 'ui',
-        version: '2.0.0',
-        description: 'Loading placeholder animations by Horus Software https://github.com/HorusSoftwareUY/Xamarin.Forms.Skeleton' },
+        version: VERSIONS.skeleton,
+        description: 'Loading placeholder animations by Horus Software (HorusStudio.Maui.Skeleton) https://github.com/HorusSoftwareUY/Xamarin.Forms.Skeleton' },
     { id: 'alohakitanimations', label: 'AlohaKit Animations', type: 'bool', defaultValue: false, category: 'ui',
-        version: '1.1.0',
+        version: VERSIONS.alohakit,
         description: 'Declarative animations library by Javier Suarez https://github.com/jsuarezruiz/AlohaKit.Animations/' },
     { id: 'livecharts', label: 'Live Charts', type: 'bool', defaultValue: false, category: 'ui',
-        version: '2.0.2',
+        version: VERSIONS.liveCharts,
         description: 'Animated, flexible charts by Alberto Rodriguez https://livecharts.dev/' },
     { id: 'skia', label: 'SkiaSharp', type: 'bool', defaultValue: false, category: 'ui',
-        version: '3.119.2',
+        version: VERSIONS.skia,
         description: '2D graphics engine powered by Google Skia by Mono https://github.com/mono/SkiaSharp' },
     { id: 'skiaextended', label: 'SkiaSharp Extended (Lottie)', type: 'bool', defaultValue: false, category: 'ui',
-        version: '3.0.0',
+        version: VERSIONS.skiaExtended,
         description: 'Lottie animations & SVG support for SkiaSharp by Mono https://github.com/mono/SkiaSharp.Extended' },
     { id: 'ffimageloading', label: 'FFImageLoading', type: 'bool', defaultValue: false, category: 'ui',
-        version: '1.3.2',
+        version: VERSIONS.ffImageLoading,
         description: 'Fast image loading with caching & transformations by microspaze https://github.com/microspaze/FFImageLoading.Maui' },
     { id: 'userdialogs', label: 'ACR User Dialogs', type: 'bool', defaultValue: false, category: 'ui',
-        version: '9.2.2',
+        version: VERSIONS.userDialogs,
         description: 'Alerts, confirmations, loading indicators & toasts by Allan Ritchie https://github.com/aritchie/userdialogs' },
     { id: 'debugrainbows', label: 'Debug Rainbows', type: 'bool', defaultValue: false, category: 'ui',
-        version: '1.2.2',
+        version: VERSIONS.debugRainbows,
         description: 'Visual layout debugging overlay (debug only) by Steven Thewissen https://github.com/sthewissen/Plugin.Maui.DebugRainbows' },
     { id: 'markdown', label: 'Shiny Markdown', type: 'bool', defaultValue: false, category: 'ui',
-        version: shinyVersion('Shiny.Maui.Controls.Markdown'),
+        version: VERSIONS.shinyControls,
         description: 'Native markdown renderer and editor (no WebView) https://shinylib.net/controls/markdown/' },
     { id: 'mermaiddiagrams', label: 'Shiny Mermaid Diagrams', type: 'bool', defaultValue: false, category: 'ui',
-        version: shinyVersion('Shiny.Maui.Controls.MermaidDiagrams'),
+        version: VERSIONS.shinyControls,
         description: 'Native Mermaid flowchart rendering (no WebView) https://shinylib.net/controls/mermaid-diagrams/' },
     { id: 'uxdivers', label: 'UX Divers Dialogs', type: 'bool', defaultValue: false, category: 'ui',
-        version: shinyVersion('Shiny.Maui.Shell'),
+        version: VERSIONS.shinyShell,
         description: 'Popups IDialogs implementation for Shiny MAUI Shell https://github.com/shinyorg/mauishell',
         visibleWhen: (s) => s.mvvmframework === 'Shiny MAUI Shell' },
     { id: 'cards', label: 'CardsView', type: 'bool', defaultValue: false, category: 'ui',
-        version: '1.1.2',
+        version: VERSIONS.cards,
         description: 'Swipeable card stack views by Andrei Misiukevich https://www.nuget.org/packages/CardsView.Maui' },
 
     // Blazor components
     { id: 'mudblazor', label: 'MudBlazor', type: 'bool', defaultValue: false, category: 'blazor',
-        version: '9.4.0',
+        version: VERSIONS.mudblazor,
         description: 'Material Design Blazor component library https://mudblazor.com/' },
     { id: 'radzen', label: 'Radzen.Blazor', type: 'bool', defaultValue: false, category: 'blazor',
-        version: '10.3.2',
+        version: VERSIONS.radzen,
         description: '80+ Blazor UI components by Radzen https://blazor.radzen.com/' },
     { id: 'fluentui', label: 'Microsoft FluentUI', type: 'bool', defaultValue: false, category: 'blazor',
-        version: '4.14.1',
+        version: VERSIONS.fluentUI,
         description: 'Fluent Design Blazor components by Microsoft https://www.fluentui-blazor.net/' },
 
     // Storage
     { id: 'documentdb', label: 'Document DB', type: 'bool', defaultValue: false, category: 'storage',
-        version: shinyVersion('Shiny.DocumentDb.Sqlite'),
+        version: VERSIONS.shinyDocumentDb,
         description: 'Document-oriented database on SQLite https://shinylib.net/documentdb/' },
     { id: 'sqlite', label: 'SQLite-net-pcl', type: 'bool', defaultValue: false, category: 'storage',
-        version: '1.9.172',
+        version: VERSIONS.sqliteNetPcl,
         description: 'SQLite.NET-PCL by Frank Krueger https://github.com/praeclarum/sqlite-net' },
     { id: 'roomsharp', label: 'RoomSharp', type: 'bool', defaultValue: false, category: 'storage',
-        version: '0.5.4',
+        version: VERSIONS.roomsharp,
         description: 'SQLite source generated ORM by Safwan Abdulghani https://roomsharp.dev/' },
     { id: 'geospatialdb', label: 'Geospatial DB', type: 'bool', defaultValue: false, category: 'storage',
-        version: shinyVersion('Shiny.Spatial'),
+        version: VERSIONS.shinySpatial,
         description: 'Geospatial database & geofencing https://shinylib.net/spatial/' },
 
     // AI
     { id: 'msextai', label: 'Microsoft.Extensions.AI', type: 'bool', defaultValue: false, category: 'ai',
-        version: '10.5.2',
+        version: VERSIONS.msExtAi,
         description: 'Unified abstractions for AI services (IChatClient, IEmbeddingGenerator) https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions' },
     { id: 'aimediator', label: 'Mediator AI Tools', type: 'bool', defaultValue: false, category: 'ai',
-        version: shinyVersion('Shiny.Mediator.Maui'),
+        version: VERSIONS.shinyMediator,
         description: 'Source generates AI tools from mediator contracts https://shinylib.net/mediator/extensions/ai/' },
     { id: 'aishinyshell', label: 'Shell AI Tools', type: 'bool', defaultValue: false, category: 'ai',
         description: 'Source generates AI navigation tools from shell maps https://shinylib.net/mauishell/ai/',
         visibleWhen: (s) => s.mvvmframework === 'Shiny MAUI Shell' },
     { id: 'aidocumentdb', label: 'DocumentDB AI Tools', type: 'bool', defaultValue: false, category: 'ai',
-        version: shinyVersion('Shiny.DocumentDb.Sqlite'),
+        version: VERSIONS.shinyDocumentDb,
         description: 'Exposes document store operations as AI tools https://shinylib.net/documentdb/ai-tools/' },
 
     // Platform
     { id: 'androidauto', label: 'Android Auto', type: 'bool', defaultValue: false, category: 'platform',
-        version: '1.7.0.3',
-        description: 'Add Android Auto support',
+        version: VERSIONS.androidAuto,
+        description: 'Add Android Auto support (Xamarin.AndroidX.Car.App.App)',
         visibleWhen: (s) => !!s.useandroid },
     { id: 'carplay', label: 'iOS CarPlay', type: 'bool', defaultValue: false, category: 'platform',
         description: 'Add iOS CarPlay support',
@@ -339,24 +411,21 @@ export const TEMPLATE_PARAMS: TemplateParam[] = [
 
     // Utilities
     { id: 'systemreactive', label: 'System.Reactive', type: 'bool', defaultValue: false, category: 'utility',
-        version: '6.1.0',
+        version: VERSIONS.systemReactive,
         description: 'Reactive Extensions for .NET https://github.com/dotnet/reactive' },
     { id: 'humanizer', label: 'Humanizer', type: 'bool', defaultValue: false, category: 'utility',
-        version: '3.0.10',
+        version: VERSIONS.humanizer,
         description: 'String, date, number manipulation & humanization https://github.com/Humanizr/Humanizer' },
     { id: 'unitsnet', label: 'UnitsNet', type: 'bool', defaultValue: false, category: 'utility',
-        version: '5.75.0',
+        version: VERSIONS.unitsNet,
         description: 'Unit of measurement conversions https://github.com/angularsen/UnitsNet' },
     { id: 'syslinqasync', label: 'System.Linq.Async', type: 'bool', defaultValue: false, category: 'utility',
-        version: '7.0.1',
+        version: VERSIONS.sysLinqAsync,
         description: 'Async LINQ operators for IAsyncEnumerable https://github.com/dotnet/reactive' },
 ];
 
-/** Compute all derived symbols from the current parameter state */
-export function computeSymbols(state: TemplateState): Record<string, boolean | string> {
+function computeMauiSymbols(state: TemplateState): Record<string, boolean | string> {
     const s = { ...state } as Record<string, boolean | string>;
-
-    // Computed booleans from template.json
     s.usewebauthenticator = s.authtype === 'MAUI Web Authenticator';
     s.usemsal = s.authtype === 'MSAL Basic' || s.authtype === 'MSAL AzureB2C' || s.authtype === 'MSAL Broker';
     s.usemsalbasic = s.authtype === 'MSAL Basic';
@@ -382,18 +451,231 @@ export function computeSymbols(state: TemplateState): Record<string, boolean | s
     s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
     s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aiconversation);
     s.communitytoolkit = !!(s.mediaelement || s.cameraview || s.usecsharpmarkup);
-    // Platform targets (usemaccatalyst comes from state directly now)
-
     return s;
 }
 
-export function getDefaultState(): TemplateState {
+// ---------------------------------------------------------------------------
+// ASP.NET (ShinyAspNet)
+// ---------------------------------------------------------------------------
+
+const ASPNET_CATEGORIES: readonly TemplateCategory[] = [
+    { id: 'project', title: 'Project', span: 12 },
+    { id: 'data', title: 'Data', span: 6 },
+    { id: 'auth', title: 'Authentication', span: 6 },
+    { id: 'features', title: 'Features', span: 12 },
+    { id: 'extensions', title: 'Shiny Extensions', span: 12 },
+];
+
+const ASPNET_PARAMS: TemplateParam[] = [
+    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
+        description: 'The target framework for the project',
+        choices: [
+            { value: 'net10.0', label: '.NET 10.0', description: 'Target .NET 10.0' },
+        ],
+    },
+
+    // Data
+    { id: 'ef', label: 'Entity Framework', type: 'choice', defaultValue: 'none', category: 'data',
+        description: 'Adds Entity Framework Core with the chosen provider',
+        choices: [
+            { value: 'none', label: 'None', description: 'No EF Core provider' },
+            { value: 'sqlserver', label: 'SQL Server', description: 'Microsoft.EntityFrameworkCore.SqlServer' },
+            { value: 'postgresql', label: 'PostgreSQL', description: 'Npgsql.EntityFrameworkCore.PostgreSQL' },
+        ],
+    },
+    { id: 'connectionstring', label: 'Connection String', type: 'string', defaultValue: '', category: 'data',
+        description: 'The database connection string',
+        visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'efspatial', label: 'EF Spatial (NetTopologySuite)', type: 'bool', defaultValue: false, category: 'data',
+        description: 'Adds NetTopologySuite spatial support to your EF Core provider',
+        visibleWhen: (s) => s.ef !== 'none' },
+
+    // Auth
+    { id: 'jwtauth', label: 'JWT Authentication', type: 'bool', defaultValue: true, category: 'auth',
+        description: 'JWT bearer authentication with refresh tokens & sample sign-in/out handlers' },
+    { id: 'google', label: 'Google Authentication', type: 'bool', defaultValue: false, category: 'auth',
+        description: 'Microsoft.AspNetCore.Authentication.Google' },
+    { id: 'facebook', label: 'Facebook Authentication', type: 'bool', defaultValue: false, category: 'auth',
+        description: 'Microsoft.AspNetCore.Authentication.Facebook' },
+    { id: 'apple', label: 'Apple Authentication', type: 'bool', defaultValue: false, category: 'auth',
+        description: 'AspNet.Security.OAuth.Apple' },
+
+    // Features
+    { id: 'orleans', label: 'Microsoft Orleans', type: 'bool', defaultValue: true, category: 'features',
+        version: VERSIONS.orleans,
+        description: 'Distributed actor model framework with sample grain. https://learn.microsoft.com/en-us/dotnet/orleans/' },
+    { id: 'signalr', label: 'SignalR', type: 'bool', defaultValue: false, category: 'features',
+        description: 'Real-time messaging with a sample hub' },
+    { id: 'scalar', label: 'Scalar API Docs', type: 'bool', defaultValue: true, category: 'features',
+        version: VERSIONS.scalar,
+        description: 'OpenAPI documentation UI https://github.com/scalar/scalar' },
+    { id: 'deeplinks', label: 'Mobile Deep Link Files', type: 'bool', defaultValue: true, category: 'features',
+        description: 'Sample apple-app-site-association and assetlinks.json under wwwroot/.well-known' },
+
+    // Shiny Extensions
+    { id: 'shinymediator', label: 'Shiny Mediator', type: 'bool', defaultValue: true, category: 'extensions',
+        version: VERSIONS.shinyMediator,
+        description: 'Source-generated mediator with endpoints, middleware, and handlers https://shinylib.net/mediator/' },
+    { id: 'localization', label: 'Localization', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyLocalization,
+        description: 'Source-generated localization https://shinylib.net/extensions/localization/' },
+    { id: 'reflector', label: 'Reflector', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyReflector,
+        description: 'AOT-compatible source-generated reflection https://shinylib.net/extensions/reflector/' },
+];
+
+function computeAspNetSymbols(state: TemplateState): Record<string, boolean | string> {
+    const s = { ...state } as Record<string, boolean | string>;
+    s.efmssql = s.ef === 'sqlserver';
+    s.efpostgres = s.ef === 'postgresql';
+    s.efnone = s.ef === 'none';
+    // Auth handlers (Handlers/Auth/*) use Shiny.Mediator — force it on when jwtauth is enabled.
+    s.shinymediator = !!(s.shinymediator || s.jwtauth);
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Blazor WASM (ShinyBlazor)
+// ---------------------------------------------------------------------------
+
+const BLAZOR_CATEGORIES: readonly TemplateCategory[] = [
+    { id: 'project', title: 'Project', span: 12 },
+    { id: 'ui', title: 'UI Library', span: 12 },
+    { id: 'extensions', title: 'Shiny Extensions', span: 6 },
+    { id: 'services', title: 'Services', span: 6 },
+    { id: 'storage', title: 'Storage', span: 6 },
+    { id: 'ai', title: 'AI', span: 6 },
+    { id: 'components', title: 'Components', span: 12 },
+];
+
+const BLAZOR_PARAMS: TemplateParam[] = [
+    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
+        description: 'The target framework for the project',
+        choices: [
+            { value: 'net10.0', label: '.NET 10.0', description: 'Target .NET 10.0' },
+        ],
+    },
+    { id: 'uilibrary', label: 'UI Component Library', type: 'choice', defaultValue: 'None', category: 'ui',
+        description: 'Pick one component library — registration is wired in Program.cs & wwwroot/index.html',
+        choices: [
+            { value: 'None', label: 'None', description: 'No UI component library' },
+            { value: 'MudBlazor', label: 'MudBlazor', description: 'MudBlazor https://mudblazor.com/' },
+            { value: 'Radzen', label: 'Radzen.Blazor', description: 'Radzen.Blazor https://blazor.radzen.com/' },
+            { value: 'FluentUI', label: 'Microsoft FluentUI', description: 'Microsoft FluentUI https://www.fluentui-blazor.net/' },
+        ],
+    },
+
+    // Shiny extensions
+    { id: 'localization', label: 'Localization', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyLocalization,
+        description: 'Source-generated localization https://shinylib.net/extensions/localization/' },
+    { id: 'stores', label: 'Stores', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyStores,
+        description: 'Key/value store abstractions with persistent service binding https://shinylib.net/extensions/stores/' },
+    { id: 'reflector', label: 'Reflector', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyReflector,
+        description: 'AOT-compatible source-generated reflection https://shinylib.net/extensions/reflector/' },
+    { id: 'di', label: 'Shiny DI', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyDI,
+        description: 'Attribute-driven, source-generated DI registration https://shinylib.net/extensions/di/' },
+
+    // Services
+    { id: 'shinymediator', label: 'Shiny Mediator', type: 'bool', defaultValue: true, category: 'services',
+        version: VERSIONS.shinyMediator,
+        description: 'Event-driven messaging, middleware, and request/response pipeline https://shinylib.net/mediator/' },
+    { id: 'bluetoothle', label: 'Bluetooth LE (Web Bluetooth)', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Web Bluetooth (Chromium browsers only) https://shinylib.net/client/ble/' },
+    { id: 'gps', label: 'GPS', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Browser Geolocation https://shinylib.net/client/locations/gps/' },
+    { id: 'push', label: 'Push Notifications', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Web Push notifications https://shinylib.net/client/push/' },
+    { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'Speech-to-text and text-to-speech (Web Speech API) https://shinylib.net/speech/' },
+
+    // Storage
+    { id: 'documentdb', label: 'Document DB (IndexedDB)', type: 'bool', defaultValue: false, category: 'storage',
+        version: VERSIONS.shinyDocumentDb,
+        description: 'Document-oriented store backed by browser IndexedDB https://shinylib.net/documentdb/' },
+
+    // AI
+    { id: 'aiconversation', label: 'AI Conversation', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyAiConversation,
+        description: 'AI Conversation with speech recognition and text-to-speech https://shinylib.net/aiconversation/' },
+
+    // Components
+    { id: 'shinycontrols', label: 'Shiny Blazor Controls', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Shiny component library for Blazor https://shinylib.net/controls/' },
+    { id: 'markdown', label: 'Shiny Markdown', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Native markdown renderer & editor https://shinylib.net/controls/markdown/' },
+    { id: 'mermaiddiagrams', label: 'Shiny Mermaid Diagrams', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Mermaid flowchart rendering https://shinylib.net/controls/mermaid-diagrams/' },
+];
+
+function computeBlazorSymbols(state: TemplateState): Record<string, boolean | string> {
+    const s = { ...state } as Record<string, boolean | string>;
+    s.mudblazor = s.uilibrary === 'MudBlazor';
+    s.radzen = s.uilibrary === 'Radzen';
+    s.fluentui = s.uilibrary === 'FluentUI';
+    s.useui = s.uilibrary !== 'None';
+    // AI Conversation pulls in Speech automatically.
+    s.shinyspeech = !!(s.shinyspeech || s.aiconversation);
+    return s;
+}
+
+// ---------------------------------------------------------------------------
+// Registry
+// ---------------------------------------------------------------------------
+
+export const TEMPLATE_CONFIGS: Record<TemplateKind, TemplateConfig> = {
+    shinyapp: {
+        kind: 'shinyapp',
+        label: '.NET MAUI',
+        blurb: 'Cross-platform iOS, Android, Mac Catalyst, and Windows app powered by the Shiny stack.',
+        showApplicationId: true,
+        categories: MAUI_CATEGORIES,
+        params: MAUI_PARAMS,
+        computeSymbols: computeMauiSymbols,
+    },
+    shinyaspnet: {
+        kind: 'shinyaspnet',
+        label: 'ASP.NET',
+        blurb: 'ASP.NET Core API + service host with Mediator, EF Core, JWT auth, Orleans, SignalR, and Scalar wired in.',
+        showApplicationId: false,
+        categories: ASPNET_CATEGORIES,
+        params: ASPNET_PARAMS,
+        computeSymbols: computeAspNetSymbols,
+    },
+    shinyblazor: {
+        kind: 'shinyblazor',
+        label: 'Blazor WASM',
+        blurb: 'Standalone Blazor WebAssembly app targeting .NET 10 with optional Shiny libraries and a UI component library.',
+        showApplicationId: false,
+        categories: BLAZOR_CATEGORIES,
+        params: BLAZOR_PARAMS,
+        computeSymbols: computeBlazorSymbols,
+    },
+};
+
+export function getDefaultState(kind: TemplateKind): TemplateState {
+    const cfg = TEMPLATE_CONFIGS[kind];
     const state: TemplateState = {
         projectName: 'MyApp',
         applicationId: 'com.companyname.app',
     };
-    for (const p of TEMPLATE_PARAMS) {
+    for (const p of cfg.params) {
         state[p.id] = p.defaultValue;
     }
     return state;
+}
+
+/** Convenience: compute symbols for any template kind. */
+export function computeSymbols(kind: TemplateKind, state: TemplateState): Record<string, boolean | string> {
+    return TEMPLATE_CONFIGS[kind].computeSymbols(state);
 }

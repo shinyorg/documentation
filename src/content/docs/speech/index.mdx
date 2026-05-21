@@ -33,6 +33,7 @@ Shiny.Speech provides a unified API for **speech-to-text**, **text-to-speech**, 
 * ElevenLabs integration (TTS) with multilingual voice support
 * Microsoft.Extensions.AI adapter — expose providers as `ISpeechToTextClient` / `ITextToSpeechClient`
 * State tracking — `IsListening` (STT), `IsSpeaking` (TTS), `IsPlaying` (audio)
+* VU meter signal — `AudioLevelChanged` event on `ITextToSpeechService` and `IAudioPlayer` emits a normalized 0.0–1.0 RMS level during playback; `IsPlayerAnalysisSupported` reports availability per platform
 * Permission management via `AccessState` and `RequestAccess()`
 * Convenience extension methods: `ListenUntilSilence`, `StatementAfterKeyword`, `WaitListenForKeywords`, `ListenForKeywords`
 * CarPlay compatible — iOS audio routes through the car's mic/speakers automatically when CarPlay is active
@@ -170,6 +171,35 @@ public class MyViewModel
     }
 }
 ```
+
+## VU Meter (Audio Level)
+
+Both `ITextToSpeechService` and `IAudioPlayer` expose an `AudioLevelChanged` event that fires periodically while audio is playing, with a single normalized RMS level in the `0.0`–`1.0` range. Use it to drive a VU bar, waveform pulse, or speaking indicator. Check `IsPlayerAnalysisSupported` before binding UI — it's `false` on platforms where metering isn't available (e.g. Windows native TTS, Browser).
+
+```csharp
+public partial class TtsViewModel(ITextToSpeechService tts) : ObservableObject
+{
+    [ObservableProperty] double audioLevel; // 0.0 .. 1.0
+    public bool IsVuSupported => tts.IsPlayerAnalysisSupported;
+
+    public TtsViewModel(ITextToSpeechService tts) : this(tts)
+        => tts.AudioLevelChanged += (_, level) =>
+            MainThread.BeginInvokeOnMainThread(() => AudioLevel = level);
+}
+```
+
+```xml
+<ProgressBar Progress="{Binding AudioLevel}"
+             IsVisible="{Binding IsVuSupported}" />
+```
+
+| Surface | iOS / macOS | Android | Windows | Browser |
+|---|---|---|---|---|
+| Native TTS (`ITextToSpeechService`) | ✅ — `AVAudioEngine` + player-node tap | ✅ — `OnAudioAvailable` RMS | ❌ | ❌ |
+| Cloud TTS (`CloudTextToSpeech`) | ✅ — forwarded from `IAudioPlayer` | ✅ — forwarded from `IAudioPlayer` | ❌ | ❌ |
+| Generic playback (`IAudioPlayer`) | ✅ — `AVAudioPlayer.MeteringEnabled` | ✅ — `Visualizer` on session | ❌ | ❌ |
+
+On iOS / macOS the native TTS path routes `AVSpeechSynthesizer` through `AVAudioEngine` + `AVAudioPlayerNode` so a tap can compute RMS. The engine is created lazily and kept warm across utterances — first-utterance latency adds roughly 50–150 ms; subsequent calls are indistinguishable from the legacy direct path.
 
 ## Samples
 * [Sample MAUI App](https://github.com/shinyorg/speech/tree/main/samples/MauiSample)

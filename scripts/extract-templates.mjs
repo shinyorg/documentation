@@ -1,23 +1,38 @@
 #!/usr/bin/env node
 /**
- * Extracts template files from the ShinyApp template into a TypeScript module
+ * Extracts template files from a Shiny project template into a TypeScript module
  * for use in the browser-based template builder.
  *
- * Usage: node scripts/extract-templates.mjs [path-to-ShinyApp]
- * Default path: ../templates/ProjectTemplates/ShinyApp
+ * Usage:
+ *   node scripts/extract-templates.mjs                                # all known templates
+ *   node scripts/extract-templates.mjs <template-id>                  # one template
+ *   node scripts/extract-templates.mjs <template-id> <template-dir>   # custom source dir
+ *
+ * Known template ids:
+ *   shinyapp     -> ../templates/ProjectTemplates/ShinyApp     (sourceName ShinyApp)
+ *   shinyaspnet  -> ../templates/ProjectTemplates/ShinyAspNet  (sourceName ShinyAspNet)
+ *   shinyblazor  -> ../templates/ProjectTemplates/ShinyBlazor  (sourceName ShinyBlazor)
+ *
+ * Each run writes src/components/TemplateBuilder/templateFiles.<id>.ts
  */
 
-import { readFileSync, writeFileSync, readdirSync, statSync } from 'fs';
+import { readFileSync, writeFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { join, relative, extname } from 'path';
 
-const templateDir = process.argv[2] || join(import.meta.dirname, '..', '..', 'templates', 'ProjectTemplates', 'ShinyApp');
-const outputFile = join(import.meta.dirname, '..', 'src', 'components', 'TemplateBuilder', 'templateFiles.ts');
+const TEMPLATES_ROOT = join(import.meta.dirname, '..', '..', 'templates', 'ProjectTemplates');
+const OUTPUT_DIR = join(import.meta.dirname, '..', 'src', 'components', 'TemplateBuilder');
+
+const KNOWN = {
+    shinyapp:    { folder: 'ShinyApp',    sourceName: 'ShinyApp' },
+    shinyaspnet: { folder: 'ShinyAspNet', sourceName: 'ShinyAspNet' },
+    shinyblazor: { folder: 'ShinyBlazor', sourceName: 'ShinyBlazor' },
+};
 
 // Binary extensions that need base64 encoding
-const BINARY_EXTENSIONS = new Set(['.ttf', '.png', '.ico', '.woff', '.woff2']);
+const BINARY_EXTENSIONS = new Set(['.ttf', '.png', '.ico', '.woff', '.woff2', '.jpg', '.jpeg', '.gif']);
 
 // Extensions that should be copied without preprocessing
-const COPY_ONLY_EXTENSIONS = new Set(['.svg', '.ttf', '.txt', '.png', '.ico', '.woff', '.woff2']);
+const COPY_ONLY_EXTENSIONS = new Set(['.svg', '.ttf', '.txt', '.png', '.ico', '.woff', '.woff2', '.jpg', '.jpeg', '.gif']);
 
 // Files/dirs to skip
 const SKIP_PATTERNS = ['.template.config', '.DS_Store', '.claude-plugin', '.github', 'skills'];
@@ -42,27 +57,7 @@ function walkDir(dir, base = dir) {
     return results;
 }
 
-// Read template.json for modifiers
-const templateJson = JSON.parse(readFileSync(join(templateDir, '.template.config', 'template.json'), 'utf8'));
-const modifiers = templateJson.sources?.[0]?.modifiers || [];
-
-// Build a map of file path patterns to exclusion conditions
-function getExclusionCondition(filePath) {
-    const conditions = [];
-    for (const mod of modifiers) {
-        const excludes = Array.isArray(mod.exclude) ? mod.exclude : [mod.exclude];
-        for (const pattern of excludes) {
-            if (matchesGlob(filePath, pattern)) {
-                conditions.push(mod.condition);
-            }
-        }
-    }
-    return conditions.length > 0 ? conditions : undefined;
-}
-
 function matchesGlob(filePath, pattern) {
-    // Simple glob matching for the patterns used in template.json
-    // Supports: *, **, exact match
     const normalized = filePath.replace(/\\/g, '/');
     const normalizedPattern = pattern.replace(/\\/g, '/');
 
@@ -83,52 +78,92 @@ function matchesGlob(filePath, pattern) {
     return false;
 }
 
-// Collect all files
-const files = walkDir(templateDir);
-const entries = [];
-
-for (const { fullPath, relPath } of files) {
-    const ext = extname(relPath).toLowerCase();
-    const isBinary = BINARY_EXTENSIONS.has(ext);
-    const isCopyOnly = COPY_ONLY_EXTENSIONS.has(ext);
-    const exclusionConditions = getExclusionCondition(relPath);
-
-    let content;
-    if (isBinary) {
-        content = readFileSync(fullPath).toString('base64');
-    } else {
-        content = readFileSync(fullPath, 'utf8');
+function extractOne(templateId, templateDir) {
+    const templateJsonPath = join(templateDir, '.template.config', 'template.json');
+    if (!existsSync(templateJsonPath)) {
+        console.error(`[skip] ${templateId}: no template.json found at ${templateJsonPath}`);
+        return;
     }
 
-    entries.push({
-        path: relPath.replace(/\\/g, '/'),
-        content,
-        binary: isBinary || undefined,
-        copyOnly: isCopyOnly || undefined,
-        excludeConditions: exclusionConditions,
-    });
-}
+    const templateJson = JSON.parse(readFileSync(templateJsonPath, 'utf8'));
+    const modifiers = templateJson.sources?.[0]?.modifiers || [];
 
-// Sort for stable output
-entries.sort((a, b) => a.path.localeCompare(b.path));
+    const getExclusionCondition = (filePath) => {
+        const conditions = [];
+        for (const mod of modifiers) {
+            const excludes = Array.isArray(mod.exclude) ? mod.exclude : (mod.exclude ? [mod.exclude] : []);
+            for (const pattern of excludes) {
+                if (matchesGlob(filePath, pattern)) {
+                    conditions.push(mod.condition);
+                }
+            }
+        }
+        return conditions.length > 0 ? conditions : undefined;
+    };
 
-// Generate TypeScript
-let ts = `// AUTO-GENERATED by scripts/extract-templates.mjs — do not edit manually
+    const files = walkDir(templateDir);
+    const entries = [];
+
+    for (const { fullPath, relPath } of files) {
+        const ext = extname(relPath).toLowerCase();
+        const isBinary = BINARY_EXTENSIONS.has(ext);
+        const isCopyOnly = COPY_ONLY_EXTENSIONS.has(ext);
+        const exclusionConditions = getExclusionCondition(relPath);
+
+        let content;
+        if (isBinary) {
+            content = readFileSync(fullPath).toString('base64');
+        } else {
+            content = readFileSync(fullPath, 'utf8');
+        }
+
+        entries.push({
+            path: relPath.replace(/\\/g, '/'),
+            content,
+            binary: isBinary || undefined,
+            copyOnly: isCopyOnly || undefined,
+            excludeConditions: exclusionConditions,
+        });
+    }
+
+    entries.sort((a, b) => a.path.localeCompare(b.path));
+
+    const outputFile = join(OUTPUT_DIR, `templateFiles.${templateId}.ts`);
+    let ts = `// AUTO-GENERATED by scripts/extract-templates.mjs — do not edit manually
+// Template: ${templateId}
 // Source: ${templateDir}
 // Generated: ${new Date().toISOString()}
 
-export interface TemplateFile {
-    path: string;
-    content: string;
-    binary?: boolean;
-    copyOnly?: boolean;
-    /** Conditions under which this file is EXCLUDED (from template.json modifiers) */
-    excludeConditions?: string[];
-}
+import type { TemplateFile } from './templateFiles';
 
 export const templateFiles: TemplateFile[] = `;
 
-ts += JSON.stringify(entries, null, 2) + ';\n';
+    ts += JSON.stringify(entries, null, 2) + ';\n';
 
-writeFileSync(outputFile, ts, 'utf8');
-console.log(`Wrote ${entries.length} template files to ${outputFile}`);
+    writeFileSync(outputFile, ts, 'utf8');
+    console.log(`[${templateId}] wrote ${entries.length} files -> ${outputFile}`);
+}
+
+const [, , idArg, dirArg] = process.argv;
+
+if (idArg && dirArg) {
+    // Custom override
+    extractOne(idArg, dirArg);
+} else if (idArg) {
+    const cfg = KNOWN[idArg];
+    if (!cfg) {
+        console.error(`Unknown template id: ${idArg}. Known: ${Object.keys(KNOWN).join(', ')}`);
+        process.exit(1);
+    }
+    extractOne(idArg, join(TEMPLATES_ROOT, cfg.folder));
+} else {
+    // Run all known templates
+    for (const [id, cfg] of Object.entries(KNOWN)) {
+        const dir = join(TEMPLATES_ROOT, cfg.folder);
+        if (!existsSync(dir)) {
+            console.warn(`[skip] ${id}: ${dir} does not exist`);
+            continue;
+        }
+        extractOne(id, dir);
+    }
+}

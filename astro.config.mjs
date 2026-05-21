@@ -325,8 +325,8 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'mediator63-2',
-              content: 'Mediator 6.3: AI Tool Generation!',
+              id: 'mediator64-',
+              content: 'Mediator 6.4: AI Tool Generation!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
               dismissable: false
@@ -344,10 +344,10 @@ export default defineConfig({
               variant: 'tip',
               link: { text: 'Check It Out', href: '/extensions/di/ai-tools/' },
               dismissable: false
-            },            
+            },
             {
-              id: 'mobilev4-1',
-              content: 'Client v4.1 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT support and MANY other features!',
+              id: 'mobilev5-1',
+              content: 'Client v5 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
