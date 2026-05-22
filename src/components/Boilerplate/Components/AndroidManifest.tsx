@@ -104,6 +104,7 @@ const AndroidManifest = (props: Props) => {
 
   if (has('speech') || has('aiconversation')) {
     src += addP('RECORD_AUDIO');
+    src += addP('MODIFY_AUDIO_SETTINGS');
   }
 
   if (has('music')) {

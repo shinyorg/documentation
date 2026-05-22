@@ -18,22 +18,35 @@ using Shiny.Speech.Cloud;
 
 public class MyCloudSttProvider : ISpeechToTextProvider
 {
+    public event EventHandler<SpeechRecognitionError>? Error;
+
     public async IAsyncEnumerable<SpeechRecognitionResult> RecognizeAsync(
         Stream audioStream,
         SpeechRecognitionOptions? options = null,
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        // Read PCM audio from audioStream
-        // Send to your cloud API
-        // Yield results as they arrive
-        yield return new SpeechRecognitionResult(
-            "recognized text",
-            IsFinal: true,
-            Confidence: 0.95f
-        );
+        try
+        {
+            // Read PCM audio from audioStream
+            // Send to your cloud API
+            // Yield results as they arrive
+            yield return new SpeechRecognitionResult(
+                "recognized text",
+                IsFinal: true,
+                Confidence: 0.95f
+            );
+        }
+        catch (HttpRequestException ex)
+        {
+            // Non-fatal: raise Error and keep the session running.
+            // Throwing here would terminate the IAsyncEnumerable and end the session.
+            Error?.Invoke(this, new SpeechRecognitionError(ex.Message, ex));
+        }
     }
 }
 ```
+
+The `Error` event lets continuous providers surface transient failures (e.g. a network blip between chunked requests) without tearing down the `RecognizeAsync` enumerator. `CloudSpeechToText` subscribes to it internally and forwards each error to the service-level `ISpeechToTextService.Error` event, so app code only needs to wire one handler.
 
 Register with DI:
 
@@ -94,6 +107,10 @@ public interface ISpeechToTextProvider
         SpeechRecognitionOptions? options = null,
         CancellationToken cancellationToken = default
     );
+
+    // Raised for non-fatal errors during continuous recognition.
+    // CloudSpeechToText forwards this to ISpeechToTextService.Error.
+    event EventHandler<SpeechRecognitionError>? Error;
 }
 ```
 

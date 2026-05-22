@@ -8,7 +8,7 @@ import { Steps } from '@astrojs/starlight/components';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 import AiSkill from '/src/components/AiSkill.astro';
 
-MAUI apps often end up with a massive `MauiProgram.cs` where every plugin, service, and lifecycle hook is crammed together. Shiny MAUI Hosting lets you break that apart into modular `IMauiModule` classes — each responsible for its own service registration and post-build initialization. It also provides a static `Host.Services` accessor and platform lifecycle dispatch so your services can respond to foreground/background events, activity results, and more.
+MAUI apps often end up with a massive `MauiProgram.cs` where every plugin, service, and lifecycle hook is crammed together. Shiny MAUI Hosting lets you break that apart into modular `IMauiModule` classes — each responsible for its own service registration and post-build initialization. It also provides a static `Host.Services` accessor, platform lifecycle dispatch, an `IAppSupport` service for orientation/culture/time-zone change detection and device info, and an `IAppStore` service for cross-platform store version lookups and deep links.
 
 | | |
 |---------|---------|
@@ -22,9 +22,9 @@ MAUI apps often end up with a massive `MauiProgram.cs` where every plugin, servi
 - Modular `IMauiModule` interface — combines service registration and post-build initialization in one class
 - Static `Host.Services` for accessing the service provider from anywhere
 - `ILifecycleExecutor` for centralized platform lifecycle event dispatch
-- Shared lifecycle hooks: `IAppForeground`, `IAppBackground`
-- Apple lifecycle hooks: `IContinueActivity`, `IOnFinishedLaunching`
-- Android lifecycle hooks: `IOnApplicationCreated`, `IOnActivityOnCreate`, `IOnActivityRequestPermissionsResult`, `IOnActivityNewIntent`, `IOnActivityResult`
+- `IAppSupport` — device info, orientation control, and live change notifications for orientation, culture, and time zone
+- `IAppStore` — cross-platform store version lookups, deep links, and review-page launches for Apple App Store, Google Play, and Microsoft Store
+- Opt-in registration: each capability ships as its own extension method (`AddPlatformLifecycle`, `AddAppSupport`, `AddAppStore`) so apps only pay for what they use
 
 ## Setup
 
@@ -52,14 +52,21 @@ MAUI apps often end up with a massive `MauiProgram.cs` where every plugin, servi
    }
    ```
 
-3. Wire up modules in `MauiProgram.cs`:
+3. Wire everything up in `MauiProgram.cs`:
    ```csharp
    using Shiny;
 
    var builder = MauiApp.CreateBuilder();
    builder
        .UseMauiApp<App>()
-       .AddInfrastructureModules(new MyModule());
+       .AddInfrastructureModules(new MyModule())   // your IMauiModule list
+       .AddPlatformLifecycle()                     // lifecycle hooks (iOS/Android/macCatalyst)
+       .AddAppSupport()                            // IAppSupport
+       .AddAppStore(opts =>                        // IAppStore (omit if not needed)
+       {
+           opts.AppleAppId = "1234567890";
+           opts.WindowsProductId = "9NBLGGH4NNS1";
+       });
 
    return builder.Build();
    ```
@@ -101,9 +108,129 @@ var service = Host.Services.GetRequiredService<IMyService>();
 `Host.Services` throws `InvalidOperationException` if accessed before the app is initialized. Only use it after `MauiApp.Build()` completes.
 :::
 
+## App Support
+
+`IAppSupport` exposes device info, browser/map helpers, and live notifications for changes the user may make in system settings (orientation, locale, time zone). Each event has its own lazy subscription — the native listener spins up when you add the first handler and tears down when the last one detaches.
+
+```csharp
+public class SettingsViewModel
+{
+    public SettingsViewModel(IAppSupport app)
+    {
+        // Snapshot
+        Version current = app.AppVersion;
+        DisplayOrientation o = app.CurrentOrientation;
+        CultureInfo culture = app.CurrentCulture;
+        TimeZoneInfo tz = app.CurrentTimeZone;
+
+        // Live updates
+        app.OrientationChanged += (s, e) => { /* e is the new orientation */ };
+        app.CultureChanged += (s, e) => { /* e is the new CultureInfo */ };
+        app.TimeZoneChanged += (s, e) => { /* e is the new TimeZoneInfo */ };
+    }
+}
+```
+
+| Member | Notes |
+|--------|-------|
+| `AppVersion` | `AppInfo.Version` — the running app's version (CFBundleShortVersionString on iOS, versionName on Android) |
+| `DeviceManufacturer`, `DeviceModel` | From MAUI `DeviceInfo` |
+| `PlatformVersion` | `DeviceInfo.Version` — the OS version |
+| `CurrentOrientation` + `OrientationChanged` | Surfaced through MAUI's `DeviceDisplay.MainDisplayInfoChanged` on iOS/Android/macCatalyst/Windows |
+| `CurrentCulture` + `CultureChanged` | Native listeners on every platform; 30-second poller on bare TFMs |
+| `CurrentTimeZone` + `TimeZoneChanged` | Native listeners on every platform; 30-second poller on bare TFMs |
+| `OpenBrowser` | Wraps `Browser.OpenAsync` |
+| `OpenMap` | Wraps `Map.TryOpenAsync` |
+| `SetOrientation(DisplayOrientation)` | Programmatic orientation lock — returns `false` if the platform can't honor the request |
+| `ResetOrientation()` | Clears any lock set via `SetOrientation` |
+
+### Orientation Lock
+
+```csharp
+await app.SetOrientation(DisplayOrientation.Landscape);   // lock to landscape
+await app.ResetOrientation();                             // restore system default
+```
+
+| Platform | Mechanism |
+|----------|-----------|
+| Android | `Activity.RequestedOrientation` set to `SensorPortrait` / `SensorLandscape` (sensor variants let the device flip between left/right) |
+| iOS 16+ | `UIWindowScene.RequestGeometryUpdate` — the active view controller must permit the mask via `supportedInterfaceOrientations` or the request is silently dropped |
+| iOS 15 and earlier | Not supported — returns `false` |
+| macCatalyst | Not supported (windows don't rotate) — returns `false` |
+| Windows | `DisplayInformation.AutoRotationPreferences` |
+
+## App Store
+
+`IAppStore` looks up the latest published version from the relevant platform store and deep-links into the store or review page.
+
+```csharp
+public class UpdateChecker(IAppStore store)
+{
+    public async Task CheckForUpdates(CancellationToken ct = default)
+    {
+        var result = await store.GetCurrent(ct);
+        if (result?.NeedsUpdate == true)
+        {
+            // result.StoreVersion, result.CurrentVersion, result.ReleaseNotes, etc.
+            await store.OpenStore();
+        }
+    }
+
+    public Task PromptForReview() => store.OpenReviewPage();
+}
+```
+
+### AppStoreOptions
+
+Configure via `AddAppStore(...)` or `services.Configure<AppStoreOptions>(...)`.
+
+```csharp
+builder.AddAppStore(opts =>
+{
+    opts.AppleAppId = "1234567890";       // numeric App Store ID (required for iOS deep links)
+    opts.WindowsProductId = "9NBLGGH4NNS1"; // Microsoft Store Product ID (required on Windows)
+    opts.CountryCode = "us";
+});
+```
+
+| Option | Notes |
+|--------|-------|
+| `AppleAppId` | Numeric App Store ID. If not set, populated automatically after the first successful `GetCurrent` call (read from the iTunes lookup's `trackId`) |
+| `AppleBundleId` | Defaults to `AppInfo.PackageName` (CFBundleIdentifier on Apple platforms) |
+| `AndroidPackageName` | Defaults to `AppInfo.PackageName` (applicationId on Android) |
+| `WindowsProductId` | Required on Windows — distinct from the package family name; configure explicitly |
+| `CountryCode` | Two-letter region code for store lookups (default `"us"`) |
+
+### AppStoreResult
+
+```csharp
+public record AppStoreResult(
+    Version StoreVersion,
+    Version CurrentVersion,
+    bool NeedsUpdate,
+    string StoreUrl,
+    string? ReleaseNotes = null,
+    DateTimeOffset? ReleasedAt = null,
+    double? AverageRating = null,
+    long? RatingCount = null,
+    string? MinimumOsVersion = null
+);
+```
+
+| Platform | Lookup | Fields populated |
+|----------|--------|------------------|
+| iOS / macCatalyst | iTunes Search API | All fields including ratings, release date, release notes, minimum OS |
+| Android | Google Play HTML scrape | Version + `NeedsUpdate`. Ratings/notes/dates aren't reliably exposed in the page HTML |
+| Windows | Microsoft Store DisplayCatalog | Version, release notes (from `ProductDescription`), and `ReleasedAt` where available |
+| Other TFMs | Not supported | Returns `null` |
+
+:::caution
+Android version detection works by parsing the Play Store HTML. Google changes the page structure periodically — keep an eye out for `GetCurrent` returning `null` on Android and report it on the GitHub repo if it stops matching.
+:::
+
 ## Platform Lifecycle Hooks
 
-Register services that implement lifecycle interfaces to respond to platform events. The `ILifecycleExecutor` dispatches events to all registered handlers automatically.
+Call `AddPlatformLifecycle()` to register the `ILifecycleExecutor` and wire MAUI's `ConfigureLifecycleEvents`. Register services that implement lifecycle interfaces — the executor dispatches events to all registered handlers automatically.
 
 ### Shared (All Platforms)
 

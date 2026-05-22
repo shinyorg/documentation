@@ -13,10 +13,10 @@ import PlatformSupport from '/src/components/PlatformSupport.astro';
 
 ## Overview
 
-[ElevenLabs](https://elevenlabs.io) provides high-quality, AI-powered text-to-speech with natural-sounding voices and multilingual support. This provider replaces the platform-native `ITextToSpeechService` registration with ElevenLabs cloud synthesis while still using platform-native audio playback.
+[ElevenLabs](https://elevenlabs.io) provides high-quality, AI-powered text-to-speech with natural-sounding multilingual voices, and the [Scribe](https://elevenlabs.io/speech-to-text-api) speech-to-text model for transcription. This provider replaces the platform-native `ITextToSpeechService` and/or `ISpeechToTextService` registrations with ElevenLabs cloud calls while still using platform-native audio capture / playback for the actual microphone and speakers.
 
 :::note
-ElevenLabs is a **TTS-only** provider. For speech-to-text, use the platform-native `AddSpeechToText()` or [Azure AI Speech](./azure).
+Scribe is a **request/response** STT API — it is not a streaming recognizer. `CloudSpeechToText` buffers the captured PCM until you call `Stop()`, wraps it in a WAV container, and posts it once to `/v1/speech-to-text`. One final `SpeechRecognitionResult` is yielded. For continuous partial-result streaming during long sessions, use [Azure AI Speech](./azure) instead.
 :::
 
 ## Setup
@@ -24,19 +24,25 @@ ElevenLabs is a **TTS-only** provider. For speech-to-text, use the platform-nati
 <LibBuilder componentName="speechelevenlabs" client:load />
 
 ```csharp
-// In MauiProgram.cs
-builder.Services.AddElevenLabsTextToSpeech("your-api-key");
-// IAudioPlayer is automatically registered for platform audio playback
+// In MauiProgram.cs — register both STT (Scribe) and TTS
+builder.Services.AddElevenLabsSpeech("your-api-key");
+
+// Or pick one:
+builder.Services.AddElevenLabsSpeechToText("your-api-key"); // Scribe only
+builder.Services.AddElevenLabsTextToSpeech("your-api-key"); // TTS only
 ```
 
-Or with a config object for additional options:
+`IAudioSource` (microphone) is auto-registered when STT is enabled; `IAudioPlayer` (speakers) is auto-registered when TTS is enabled.
+
+Or with a config object:
 
 ```csharp
-builder.Services.AddElevenLabsTextToSpeech(new ElevenLabsConfig
+builder.Services.AddElevenLabsSpeech(new ElevenLabsConfig
 {
     ApiKey = "your-api-key",
-    DefaultVoiceId = "21m00Tcm4TlvDq8ikWAM",  // Rachel (default)
-    ModelId = "eleven_multilingual_v2"           // default
+    SpeechToTextModel = "scribe_v1",                // default
+    TextToSpeechModel = "eleven_multilingual_v2",   // default
+    DefaultVoiceId = "21m00Tcm4TlvDq8ikWAM"         // Rachel (default)
 });
 ```
 
@@ -47,7 +53,8 @@ public record ElevenLabsConfig
 {
     public required string ApiKey { get; init; }
     public string DefaultVoiceId { get; init; } = "21m00Tcm4TlvDq8ikWAM"; // Rachel
-    public string ModelId { get; init; } = "eleven_multilingual_v2";
+    public string TextToSpeechModel { get; init; } = "eleven_multilingual_v2";
+    public string SpeechToTextModel { get; init; } = "scribe_v1";
 }
 ```
 
@@ -55,24 +62,19 @@ public record ElevenLabsConfig
 |----------|-------------|---------|
 | `ApiKey` | Your ElevenLabs API key | *(required)* |
 | `DefaultVoiceId` | Voice ID to use when none specified in `TextToSpeechOptions` | `21m00Tcm4TlvDq8ikWAM` (Rachel) |
-| `ModelId` | The TTS model to use | `eleven_multilingual_v2` |
+| `TextToSpeechModel` | The TTS model to use | `eleven_multilingual_v2` |
+| `SpeechToTextModel` | The Scribe transcription model to use | `scribe_v1` |
 
-## Usage
-
-Once registered, inject and use `ITextToSpeechService` exactly as you would with platform-native speech:
+## TTS Usage
 
 ```csharp
 public class MyViewModel(ITextToSpeechService tts)
 {
     async Task Speak()
     {
-        // Simple speech with default voice
         await tts.SpeakAsync("Hello from ElevenLabs!");
 
-        // List available ElevenLabs voices
         var voices = await tts.GetVoicesAsync();
-
-        // Speak with a specific voice
         var voice = voices.FirstOrDefault(v => v.Name.Contains("Adam"));
         if (voice != null)
         {
@@ -87,15 +89,54 @@ public class MyViewModel(ITextToSpeechService tts)
 }
 ```
 
-## Combining with Platform STT
+## STT Usage (Scribe)
 
-A common pattern is to use ElevenLabs for high-quality TTS while keeping platform-native STT:
+Use it like any other `ISpeechToTextService`. Because Scribe is non-streaming, you'll get partial results from the audio source only after `Stop()` is called:
 
 ```csharp
-builder.Services.AddSpeechToText();   // Platform-native STT
+public class MyViewModel(ISpeechToTextService stt)
+{
+    async Task Listen(CancellationToken ct)
+    {
+        var access = await stt.RequestAccess();
+        if (access != AccessState.Available)
+            return;
+
+        stt.ResultReceived += (_, r) => Console.WriteLine($"[final] {r.Text}");
+
+        await stt.Start(new SpeechRecognitionOptions
+        {
+            Culture = CultureInfo.GetCultureInfo("en-US")
+        });
+
+        // ... user speaks ...
+
+        await stt.Stop(); // triggers the single POST + final result
+    }
+
+    // Or with the convenience extension method:
+    async Task<string?> ListenOnce(CancellationToken ct)
+        => await stt.ListenUntilSilence(cancellationToken: ct);
+}
+```
+
+## Combining ElevenLabs STT with Native TTS (or vice versa)
+
+You can mix-and-match — register only the direction you need, and let the other side stay platform-native:
+
+```csharp
+// Scribe STT + native TTS
+builder.Services.AddSpeechServices();
+builder.Services.AddElevenLabsSpeechToText("your-api-key");
+
+// Native STT + ElevenLabs TTS
+builder.Services.AddSpeechServices();
 builder.Services.AddElevenLabsTextToSpeech("your-api-key");
 ```
+
+Later registrations win when the same service is registered twice.
 
 ## Links
 * [ElevenLabs Documentation](https://elevenlabs.io/docs)
 * [ElevenLabs Voice Library](https://elevenlabs.io/voice-library)
+* [Scribe Speech-to-Text](https://elevenlabs.io/speech-to-text-api)
