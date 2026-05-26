@@ -355,6 +355,14 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'TreeView',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/treeview/' },
+          { label: 'Blazor Usage', link: 'controls/treeview/blazor' },
+        ]
+      },
+      {
         label: 'Input Controls',
         items:[
           { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', jumpTo: true },

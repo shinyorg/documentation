@@ -1,0 +1,197 @@
+---
+title: TreeView | Blazor Usage
+description: Using TreeView in Blazor applications with typed items, RenderFragment icon slots, and keyboard navigation
+---
+
+The Blazor `<TreeView TItem>` component mirrors the MAUI control. It's strongly typed in the item type, icons are `RenderFragment` slots, and standard arrow-key navigation is built in.
+
+## Setup
+
+Install the NuGet package:
+
+```bash
+dotnet add package Shiny.Blazor.Controls
+```
+
+Add the `@using` directive — typically in `_Imports.razor`:
+
+```razor
+@using Shiny.Blazor.Controls
+```
+
+## Basic Usage
+
+```razor
+<TreeView TItem="FileNode"
+          ItemsSource="rootItems"
+          ChildrenSelector="@(n => n.Children)"
+          HasChildrenSelector="@(n => n.IsFolder)"
+          CanSelectSelector="@(n => !n.IsLocked)"
+          SelectedItem="selected"
+          SelectedItemChanged="v => selected = v"
+          ItemExpanded="OnExpanded">
+    <ItemTemplate Context="node">
+        <span>@node.Icon</span>
+        <span>@node.Name</span>
+    </ItemTemplate>
+</TreeView>
+
+@code {
+    FileNode? selected;
+    List<FileNode> rootItems = new() { /* ... */ };
+
+    void OnExpanded(TreeItemEventArgs<FileNode> e) => Console.WriteLine($"Expanded {e.Item.Name}");
+
+    public class FileNode
+    {
+        public string Name { get; set; } = "";
+        public string Icon { get; set; } = "";
+        public bool IsFolder { get; set; }
+        public bool IsLocked { get; set; }
+        public List<FileNode>? Children { get; set; }
+    }
+}
+```
+
+## Lazy Loading
+
+```razor
+<TreeView TItem="FileNode"
+          @ref="tree"
+          ItemsSource="rootItems"
+          ChildrenLoader="LoadChildren"
+          HasChildrenSelector="@(n => n.IsFolder)"
+          LoadFailed="e => status = $\"Failed: {e.Exception.Message}\"">
+    <ItemTemplate Context="node">@node.Name</ItemTemplate>
+</TreeView>
+
+@code {
+    TreeView<FileNode>? tree;
+    string status = "";
+
+    async Task<IEnumerable<FileNode>> LoadChildren(FileNode parent)
+    {
+        await Task.Delay(500);
+        return await myService.GetChildrenAsync(parent.Id);
+    }
+
+    // Programmatic API:
+    async Task RefreshNode(FileNode n) => await tree!.RefreshAsync(n);
+    async Task ExpandAll() => await tree!.ExpandAllAsync();
+}
+```
+
+You can mix sync and lazy branches in the same tree — `ChildrenSelector` is consulted first, then `ChildrenLoader` is the fallback when the selector returns `null`.
+
+## Configurable Icons (RenderFragment Slots)
+
+```razor
+<TreeView TItem="FileNode" ItemsSource="rootItems" ChildrenSelector="@(n => n.Children)">
+    <ExpandedIcon>
+        <i class="fa-solid fa-chevron-down" style="color:#7C3AED"></i>
+    </ExpandedIcon>
+    <CollapsedIcon>
+        <i class="fa-solid fa-chevron-right" style="color:#7C3AED"></i>
+    </CollapsedIcon>
+    <RetryIcon>
+        <i class="fa-solid fa-rotate-right" style="color:#DC2626"></i>
+    </RetryIcon>
+    <LoadingTemplate>
+        <span class="spinner-border spinner-border-sm" />
+    </LoadingTemplate>
+    <ItemTemplate Context="node">
+        @node.Name
+    </ItemTemplate>
+</TreeView>
+```
+
+If no slot is supplied, the control falls back to the built-in glyphs (`▼`, `▶`, `↻`) coloured via the `ChevronColor` parameter.
+
+## Selection
+
+```razor
+<TreeView TItem="FileNode"
+          SelectionMode="BlazorTreeSelectionMode.Single"
+          SelectedItem="selected"
+          SelectedItemChanged="v => selected = v"
+          ItemsSource="rootItems" />
+```
+
+For multi-select:
+
+```razor
+<TreeView TItem="FileNode"
+          SelectionMode="BlazorTreeSelectionMode.Multiple"
+          SelectedItems="selected"
+          SelectedItemsChanged="v => selected = v"
+          ItemsSource="rootItems" />
+
+@code {
+    IList<FileNode> selected = new List<FileNode>();
+}
+```
+
+## Drag & Drop Reorder
+
+```razor
+<TreeView TItem="FileNode"
+          EnableDragDrop="true"
+          ItemDropped="OnDropped"
+          ItemsSource="rootItems"
+          ChildrenSelector="@(n => n.Children)" />
+
+@code {
+    void OnDropped(TreeItemDroppedEventArgs<FileNode> e)
+    {
+        var srcList = FindParentList(e.SourceItem);
+        var tgtList = FindParentList(e.TargetItem);
+        srcList.Remove(e.SourceItem);
+        tgtList.Insert(tgtList.IndexOf(e.TargetItem) + 1, e.SourceItem);
+        StateHasChanged();
+    }
+}
+```
+
+Drops onto descendants are rejected automatically.
+
+## Keyboard Navigation
+
+The Blazor TreeView is focusable (`tabindex="0"`) and supports:
+
+| Key | Action |
+|---|---|
+| `↑` / `↓` | Move focus to previous/next visible row |
+| `→` | Expand collapsed node, or move into first child if already expanded |
+| `←` | Collapse expanded node, or move focus to parent |
+| `Enter` / `Space` | Select the focused row |
+| `Home` / `End` | Jump to first / last visible row |
+
+## Parameters
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `ItemsSource` | `IEnumerable<TItem>` | — | Source for root items |
+| `RootLoader` | `Func<Task<IEnumerable<TItem>>>` | — | Async loader for roots (overrides `ItemsSource`) |
+| `ChildrenSelector` | `Func<TItem, IEnumerable<TItem>?>` | — | Sync children getter |
+| `ChildrenLoader` | `Func<TItem, Task<IEnumerable<TItem>>>` | — | Async children loader (fallback when selector returns null) |
+| `HasChildrenSelector` | `Func<TItem, bool>` | — | Whether the row should render a chevron |
+| `CanExpandSelector` | `Func<TItem, bool>` | — | Gate expansion gesture |
+| `CanSelectSelector` | `Func<TItem, bool>` | — | Gate selection gesture |
+| `SelectionMode` | `BlazorTreeSelectionMode` | `Single` | `None` / `Single` / `Multiple` |
+| `IndentSize` | `double` | `20` | Pixels of indent per depth level |
+| `ChevronSize` | `double` | `14` | Pixels |
+| `ChevronColor` | `string` | `"#666"` | CSS color used for glyph fallbacks |
+| `ShowGuideLines` | `bool` | `false` | Vertical connector lines |
+| `EnableDragDrop` | `bool` | `false` | Enables HTML5 drag/drop with `ItemDropped` event |
+| `CssClass` | `string?` | — | Extra class added to the root `<div>` |
+
+## Public Methods
+
+```csharp
+await tree.ExpandAsync(item);
+await tree.CollapseAsync(item);
+await tree.ExpandAllAsync();
+tree.CollapseAll();
+await tree.RefreshAsync(item);   // drops cache for this node
+await tree.ReloadAsync();        // re-runs RootLoader or rebinds ItemsSource
+```
