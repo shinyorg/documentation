@@ -38,9 +38,12 @@ for (const app of apps) {
     const destDir = join(outRoot, app.slug);
 
     console.log(`>>> ${app.dir}`);
+    // withastro/action exports VERSION=latest, which MSBuild picks up as $(Version).
+    // NuGet's RestoreTask then rejects "latest" when computing project identity.
+    const { VERSION, ...env } = process.env;
     execSync(
         `dotnet publish "${csprojPath}" -c ${config} -o "${publishDir}" --nologo`,
-        { stdio: 'inherit', cwd: repoRoot }
+        { stdio: 'inherit', cwd: repoRoot, env }
     );
 
     const wwwroot = join(publishDir, 'wwwroot');

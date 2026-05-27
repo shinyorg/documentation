@@ -76,11 +76,23 @@ If the upstream added new namespaces or moved files, double-check the per-sample
 
 If the upstream bumped library versions (i.e. a corresponding NuGet package release also happened), bump the matching `<PackageReference Version="...">` in the local csproj at the same time.
 
+**Diff the upstream csproj after each rsync.** The rsync intentionally excludes `*.csproj` because the local csproj differs (NuGet refs, `StaticWebAssetBasePath`, etc.) — but that means upstream csproj changes are silently missed. They sometimes carry runtime-critical settings, not just package versions. After every rsync:
+
+```bash
+diff ~/Desktop/dev/<repo>/samples/<SampleFolder>/<UpstreamName>.csproj \
+     playground/<Name>/<Name>.csproj
+```
+
+Review every property the upstream sets and decide whether to mirror it in the local csproj. The build succeeding does NOT mean the runtime will work — a missing property here breaks at first render, not at compile time.
+
+**The DocumentDb library is AOT/reflection-free; the sample csproj is pragmatic.** Library code (everything under `~/Desktop/dev/DocumentDb/src/`) and sample user code must never depend on reflection — fix issues via `JsonSerializerContext` source-gen, `[JSImport]`, or call-site changes. The app-level csproj is allowed to have `JsonSerializerIsReflectionEnabledByDefault=true` (the default) when Blazor framework components like `HeadOutlet` need it. Read the runtime exception stack: if the failing frame is inside Shiny code, fix the library/sample; if it's inside `Microsoft.AspNetCore.Components.*` or `Microsoft.JSInterop.JSRuntime`, accept reflection at the app level.
+
 ## Per-sample gotchas
 
 - **Every `wwwroot/index.html` has `<base href="/playground/<slug>/" />`** (not `/`). Browser asset resolution + Blazor routing both depend on this. If you seed a new sample, patch this before publishing or asset URLs will 404 in production.
 - **`Speech/Speech.csproj` overrides `<RootNamespace>BlazorSample</RootNamespace>`** locally. The Speech sample's Program.cs and `_Imports.razor` reference the `BlazorSample` namespace; the shared `Sample.Blazor` default in `Directory.Build.props` would break it. Other samples either already use `Sample.Blazor` or qualify explicitly.
-- **`DocumentDb/DocumentDb.csproj` keeps `EnableAotAnalyzer`/`EnableTrimAnalyzer` on** because the upstream sample is AOT-clean and we want regressions caught early. The native SQLite still gets compiled through emscripten — that's expected and needs the `wasm-tools` workload.
+- **`DocumentDb/DocumentDb.csproj` keeps `EnableAotAnalyzer`/`EnableTrimAnalyzer` on.** The native SQLite still gets compiled through emscripten — that's expected and needs the `wasm-tools` workload.
+- **The DocumentDb sample does NOT set `JsonSerializerIsReflectionEnabledByDefault=false`.** That setting blocks Blazor framework components (`HeadOutlet`, others) which use `IJSRuntime` with `Object[]` arg envelopes that need reflection. The library itself (`Shiny.DocumentDb.IndexedDb` 5.1.x+) is reflection-free — it uses `[JSImport]` from `System.Runtime.InteropServices.JavaScript` for JS interop — so apps that don't use `HeadOutlet` or similar may opt into `false`, but the playground keeps reflection on so the framework works. **Never re-introduce `=false` here as a "tighten AOT" change without verifying every framework component the sample uses.**
 - **`AiConversation/Program.cs` has a placeholder OpenAI key** (`"YOUR API KEY HERE"`). Chat won't work in the deployed playground. UI/wiring still demonstrates fine. If you wire up runtime key entry, do it in `AiConversation/` only — don't generalize to other samples.
 - **`Shiny/Shiny.csproj` sets `<OverrideHtmlAssetPlaceholders>true</OverrideHtmlAssetPlaceholders>`** because the upstream `wwwroot/index.html` uses Blazor's asset-fingerprint placeholders (`<link rel="preload" id="webassembly" />` and `_framework/blazor.webassembly#[.{fingerprint}].js`). The Razor SDK rewrites those during publish; without this flag the page would 404 on the script tag.
 - **`Shiny/Program.cs` has a placeholder VAPID push key** (`"BNbxGYNMhEIi9zrneh7mqV4oUanjLUK3m-REPLACE-ME"`). Web Push won't work in the deployed playground without a real key bound to a real push backend. BLE/GPS/HTTP/Battery/Connectivity pages work without any config.
