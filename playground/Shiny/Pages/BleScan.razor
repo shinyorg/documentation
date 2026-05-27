@@ -1,0 +1,179 @@
+@page "/blescan"
+@inject IBleManager BleManager
+@inject NavigationManager Navigation
+@implements IDisposable
+
+<PageTitle>BLE Scanner</PageTitle>
+
+<h3>BLE Scanner</h3>
+
+<div class="alert alert-secondary">
+    <strong>Web Bluetooth Scanning API required.</strong> This page uses the experimental <code>requestLEScan</code> API, which is only available in certain browsers. The page must also be served over HTTPS (or <code>http://localhost</code>).
+    <button class="btn btn-sm btn-link p-0 ms-2" @onclick="() => showBrowserHelp = !showBrowserHelp">
+        @(showBrowserHelp ? "Hide" : "Browser support")
+    </button>
+    @if (showBrowserHelp)
+    {
+        <hr />
+        <h6>Supported</h6>
+        <dl class="mb-0">
+            <dt>Google Chrome (desktop &amp; Android)</dt>
+            <dd>
+                Enable <code>chrome://flags/#enable-experimental-web-platform-features</code>, then restart the browser.
+                On Linux, BlueZ 5.43+ is also required.
+            </dd>
+
+            <dt>Brave (desktop)</dt>
+            <dd>
+                Enable <code>brave://flags/#enable-experimental-web-platform-features</code>, then restart the browser.
+            </dd>
+
+            <dt>Opera (desktop)</dt>
+            <dd>
+                Enable <code>opera://flags/#enable-experimental-web-platform-features</code>, then restart the browser.
+            </dd>
+        </dl>
+        <hr />
+        <h6>Not Supported</h6>
+        <dl class="mb-0">
+            <dt>Microsoft Edge</dt>
+            <dd>
+                Edge supports basic Web Bluetooth (<code>requestDevice</code>) but does <strong>not</strong> support the <code>requestLEScan</code> scanning API, even with experimental flags enabled.
+            </dd>
+
+            <dt>Firefox (all platforms)</dt>
+            <dd>
+                Mozilla has not implemented Web Bluetooth. There is no flag to enable it.
+            </dd>
+
+            <dt>Safari (macOS / iOS / iPadOS)</dt>
+            <dd>
+                Apple does not ship Web Bluetooth in Safari. Third-party browsers like
+                <a href="https://apps.apple.com/app/bluefy-web-ble-browser/id1492822055" target="_blank" rel="noopener">Bluefy</a>
+                support <code>requestDevice</code> but not <code>requestLEScan</code>.
+            </dd>
+
+            <dt>Samsung Internet</dt>
+            <dd>
+                Supports basic Web Bluetooth but not the scanning API.
+            </dd>
+        </dl>
+    }
+</div>
+
+<button class="btn btn-primary mb-3" @onclick="ToggleScan">
+    @(isScanning ? "Stop Scan" : "Start Scan")
+</button>
+
+@if (!string.IsNullOrEmpty(error))
+{
+    <div class="alert alert-danger">@error</div>
+}
+
+<table class="table table-striped">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>UUID</th>
+            <th>RSSI</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        @foreach (var p in peripherals.Values.OrderByDescending(x => x.Rssi))
+        {
+            <tr>
+                <td>@(p.Name ?? "Unknown")</td>
+                <td><code>@p.Uuid</code></td>
+                <td>@p.Rssi dBm</td>
+                <td>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectPeripheral(p)">
+                        Connect
+                    </button>
+                </td>
+            </tr>
+        }
+    </tbody>
+</table>
+
+@code {
+    bool isScanning;
+    bool showBrowserHelp;
+    string? error;
+    IDisposable? scanSub;
+    readonly Dictionary<string, PeripheralInfo> peripherals = new();
+
+    async Task ToggleScan()
+    {
+        if (isScanning)
+        {
+            scanSub?.Dispose();
+            scanSub = null;
+            isScanning = false;
+            return;
+        }
+
+        error = null;
+        var access = await BleManager.RequestAccess();
+        if (access != AccessState.Available)
+        {
+            error = $"BLE access is {access}";
+            return;
+        }
+
+        peripherals.Clear();
+        isScanning = true;
+
+        scanSub = BleManager
+            .Scan()
+            .Subscribe(
+                result =>
+                {
+                    InvokeAsync(() =>
+                    {
+                        var uuid = result.Peripheral.Uuid;
+                        if (peripherals.TryGetValue(uuid, out var existing))
+                        {
+                            existing.Rssi = result.Rssi;
+                        }
+                        else
+                        {
+                            peripherals[uuid] = new PeripheralInfo
+                            {
+                                Name = result.Peripheral.Name,
+                                Uuid = uuid,
+                                Rssi = result.Rssi
+                            };
+                        }
+                        StateHasChanged();
+                    });
+                },
+                ex =>
+                {
+                    InvokeAsync(() =>
+                    {
+                        error = ex.Message;
+                        isScanning = false;
+                        StateHasChanged();
+                    });
+                }
+            );
+    }
+
+    void SelectPeripheral(PeripheralInfo p)
+    {
+        scanSub?.Dispose();
+        scanSub = null;
+        isScanning = false;
+        Navigation.NavigateTo($"/bleperipheral/{Uri.EscapeDataString(p.Uuid)}");
+    }
+
+    public void Dispose() => scanSub?.Dispose();
+
+    class PeripheralInfo
+    {
+        public string? Name { get; set; }
+        public string Uuid { get; set; } = string.Empty;
+        public int Rssi { get; set; }
+    }
+}

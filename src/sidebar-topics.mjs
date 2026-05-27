@@ -24,6 +24,17 @@ export const sidebarTopics = [
         ]
       },
       { label: 'AI Skills', link: 'foundation/ai-skills' },
+      {
+        label: 'Blazor Playground',
+        items: [
+          { label: 'AI Conversation', link: '/playground/aiconversation/', attrs: { target: '_blank' } },
+          { label: 'Controls',        link: '/playground/controls/',       attrs: { target: '_blank' } },
+          { label: 'DocumentDb',      link: '/playground/documentdb/',     attrs: { target: '_blank' } },
+          { label: 'Mediator',        link: '/playground/mediator/',       attrs: { target: '_blank' } },
+          { label: 'Shiny Core',      link: '/playground/shiny/',          attrs: { target: '_blank' } },
+          { label: 'Speech',          link: '/playground/speech/',         attrs: { target: '_blank' } },
+        ]
+      },
     ],
   },
   {
@@ -42,6 +53,7 @@ export const sidebarTopics = [
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
           { label: 'Wake Word', link: 'aiconversation/wake-word' },
           { label: 'AI Tools', link: 'aiconversation/ai-tools' },
+          { label: 'Blazor Playground', link: '/playground/aiconversation/', attrs: { target: '_blank' } },
         ]
       },
       {
@@ -78,6 +90,7 @@ export const sidebarTopics = [
           { label: 'AWS S3', link: 'httptransfers/aws-s3' },
           { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
           { label: 'Monitoring', link: 'httptransfers/monitoring' },
+          { label: 'Blazor Playground', link: '/playground/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'httptransfers/release-notes' }
         ]
       },
@@ -103,6 +116,7 @@ export const sidebarTopics = [
           { label: 'Azure Push Notifications', link: 'push/azure' },
           { label: 'Firebase (iOS)', link: 'push/firebase-ios' },
           { label: 'FAQ', link: 'push/faq' },
+          { label: 'Blazor Playground', link: '/playground/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'push/release-notes' }
         ]
       },
@@ -174,6 +188,7 @@ export const sidebarTopics = [
           { label: 'Services/Characteristics/Descriptors', link: 'ble/gatt' },
           { label: 'Background Operations', link: 'ble/background' },
           { label: 'Best Practice/FAQ', link: 'ble/best-practices' },
+          { label: 'Blazor Playground', link: '/playground/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'ble/release-notes' }
         ]
       },
@@ -206,6 +221,7 @@ export const sidebarTopics = [
           { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
           { label: 'Geofencing', link: 'locations/geofencing' },
           { label: 'Motion Activity', link: 'locations/motionactivity' },
+          { label: 'Blazor Playground', link: '/playground/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'locations/release-notes' }
         ]
       },
@@ -219,6 +235,7 @@ export const sidebarTopics = [
           { label: 'OpenAI', link: 'speech/openai' },
           { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
           { label: 'Custom Provider', link: 'speech/custom-provider' },
+          { label: 'Blazor Playground', link: '/playground/speech/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'speech/release-notes' }
         ]
       },
@@ -391,6 +408,7 @@ export const sidebarTopics = [
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },
+      { label: 'Blazor Playground', link: '/playground/controls/', attrs: { target: '_blank' } },
       { label: 'Release Notes', link: 'controls/release-notes' }
     ]
   },
@@ -414,6 +432,7 @@ export const sidebarTopics = [
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
           { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
+          { label: 'Blazor Playground', link: '/playground/documentdb/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'documentdb/release-notes' }
         ]
       },
@@ -502,6 +521,7 @@ export const sidebarTopics = [
                 { label: 'Dapper', link: 'mediator/extensions/dapper' }
               ]
           },
+          { label: 'Blazor Playground', link: '/playground/mediator/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'mediator/release-notes' }
         ]
       },

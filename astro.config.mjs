@@ -251,6 +251,24 @@ export default defineConfig({
       '/client/other/configuration': '/configuration/',
   },
   integrations: [
+    // Dev-only: rewrite directory requests under /playground/ to their index.html
+    // so Starlight's catch-all route doesn't intercept them and 404. In production,
+    // GitHub Pages handles directory index resolution natively.
+    {
+      name: 'playground-dev-rewrites',
+      hooks: {
+        'astro:server:setup': ({ server }) => {
+          server.middlewares.use((req, _res, next) => {
+            const url = req.url;
+            if (url && (url === '/playground' || url.startsWith('/playground/')) && !url.includes('.')) {
+              const base = url.endsWith('/') ? url : `${url}/`;
+              req.url = `${base}index.html`;
+            }
+            next();
+          });
+        },
+      },
+    },
     react(),
     expressiveCode({
       themes: ['github-dark', 'github-light'],
