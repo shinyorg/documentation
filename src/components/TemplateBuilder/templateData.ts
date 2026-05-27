@@ -8,8 +8,8 @@ import type { TemplateKind } from './templateFiles';
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.4.0',
-    shinyShell: '6.1.0',
-    shinyControls: '1.0.1-beta-0078',
+    shinyShell: '6.1.1',
+    shinyControls: '1.0.1-beta-0079',
     // Shiny — client packages that share the core release train
     shinyClient: '4.0.1',
     shinyConfiguration: '4.0.1',
@@ -19,16 +19,16 @@ export const VERSIONS = {
     shinyDI: '3.0.0',
     shinySpatial: '1.1.0',
     shinyContactStore: '1.0.1',
-    shinySpeech: '2.0.0',
-    shinyAiConversation: '1.0.0-beta-0043',
+    shinySpeech: '2.1.0',
+    shinyAiConversation: '1.0.0-beta-0047',
     shinyMusic: '3.0.1',
     shinyHealth: '1.0.0',
-    shinyDocumentDb: '5.0.1',
+    shinyDocumentDb: '5.2.0',
     shinyMauiHosting: '3.0.0',
     shinyWebHosting: '3.0.0',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.8.26256.5',
+    devflow: '0.1.0-preview.10.26274.3',
 
     // Microsoft + third-party
     ctMvvm: '8.4.2',
@@ -46,14 +46,14 @@ export const VERSIONS = {
     skeleton: '2.0.0',
     alohakit: '1.1.0',
     liveCharts: '2.0.4',
-    skia: '3.119.2',
+    skia: '3.119.4',
     skiaExtended: '3.0.0',
     ffImageLoading: '1.3.2',
     userDialogs: '9.2.2',
     debugRainbows: '1.2.2',
     cards: '1.1.2',
-    mudblazor: '9.4.0',
-    radzen: '10.4.4',
+    mudblazor: '9.5.0',
+    radzen: '10.4.5',
     fluentUI: '4.14.2',
     sqliteNetPcl: '1.9.172',
     roomsharp: '0.5.5',
