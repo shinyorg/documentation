@@ -33,20 +33,20 @@ Persist class properties across sessions with a single line of code. Shiny Store
    dotnet add package Shiny.Extensions.Stores
    ```
 
-2. Register stores in your DI container and initialize the static accessor after build:
+2. Register stores in your DI container — the static `Shiny.Stores` accessor self-bootstraps on first use:
    ```csharp
    builder.Services.AddShinyStores();
-
    var host = builder.Build();
-   host.Services.UseShinyStores();
    ```
 
-3. For Blazor WebAssembly, also install and register the web stores:
+3. For Blazor WebAssembly, also install and register the web stores. Because `LocalStorageKeyValueStore` needs `IJSRuntime` from the built provider, Blazor apps **must** call `host.Services.UseShinyStores()` after `Build()` to snapshot the resolved store into the static accessor:
    ```bash
    dotnet add package Shiny.Extensions.Stores.Web
    ```
    ```csharp
-   builder.Services.AddShinyWebAssemblyStores();
+   builder.Services.AddLocalStorageKeyValueStore();
+   var host = builder.Build();
+   host.Services.UseShinyStores();   // required for Blazor
    ```
 </Steps>
 
@@ -78,7 +78,7 @@ public class SettingsService
 }
 ```
 
-The accessor is wired up by calling `serviceProvider.UseShinyStores()` once after the service provider is built (e.g. `host.Services.UseShinyStores()` after `host.Build()`). For tests/host-less scenarios, the same call works against any `IServiceProvider` returned by `BuildServiceProvider()`; `Shiny.Stores.Initialize(serviceProvider)` is the lower-level equivalent.
+The accessor is self-bootstrapping on mobile/desktop — `Default` and `Secure` lazily construct the platform-native store on first access, so no post-build initialization is required. For Blazor (where `IJSRuntime` only exists post-build) call `host.Services.UseShinyStores()` after `host.Build()` to snapshot the DI-resolved store into the static accessor. For tests and custom keys, use `Shiny.Stores.Register(key, store)` to override or register an arbitrary `IKeyValueStore`, and `Shiny.Stores.Reset()` to clear between runs.
 
 For DI-friendly access, inject the keyed `IKeyValueStore` directly:
 
@@ -120,7 +120,13 @@ public class RedisKeyValueStore : IKeyValueStore
 
 builder.Services.AddKeyedSingleton<IKeyValueStore, RedisKeyValueStore>("redis");
 
-// Access via the static helper
+// DI lookup
+[FromKeyedServices("redis")] IKeyValueStore redis;
+
+// To make a custom key visible to the static helper, register it explicitly.
+// (UseShinyStores only snapshots StoreKeys.Default / StoreKeys.Secure.)
+Shiny.Stores.Register("redis", host.Services.GetRequiredKeyedService<IKeyValueStore>("redis"));
+
 Shiny.Stores.Keyed("redis").Set("key", "value");
 ```
 
