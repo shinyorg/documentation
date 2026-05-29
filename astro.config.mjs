@@ -343,7 +343,7 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'mediator64-',
+              id: 'mediator64-1',
               content: 'Mediator 6.4: AI Tool Generation!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
@@ -354,13 +354,6 @@ export default defineConfig({
               content: 'Document DB v5: New Providers, Versioning, Spatial, Multi-Tenancy, & Multi-DB Support',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
-              dismissable: false
-            },    
-            {
-              id: 'extensions-30',
-              content: 'Shiny.Extensions.DependencyInjection v3: Turn any DI service into an AI Tool',
-              variant: 'tip',
-              link: { text: 'Check It Out', href: '/extensions/di/ai-tools/' },
               dismissable: false
             },
             {

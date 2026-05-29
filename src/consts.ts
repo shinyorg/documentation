@@ -387,10 +387,10 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "reflector",
-        "nuget": "Shiny.Reflector",
+        "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
         "category": "core",
-        "version": "1.7.2"
+        "version": "3.0.0"
     },
     {
         "id": "di",
