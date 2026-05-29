@@ -398,6 +398,7 @@ export const sidebarTopics = [
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
+          { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
@@ -579,6 +580,8 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'mauihost/' },
+          { label: 'App Support', link: 'mauihost/appsupport' },
+          { label: 'App Store', link: 'mauihost/appstore' },
           { label: 'Release Notes', link: 'mauihost/release-notes' }
         ]
       }
