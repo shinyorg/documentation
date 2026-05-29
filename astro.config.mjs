@@ -15,6 +15,13 @@ const googleAnalyticsId = 'G-SZKGGX6M5W';
 export default defineConfig({
   site: 'https://www.shinylib.net',
   output: 'static',
+  // Astro 6 made `markdown.gfm` optional with no default (the `.md` processor
+  // enables GFM internally), but @astrojs/mdx still reads this flag to decide
+  // whether to add remark-gfm. Without it, GFM tables break in every .mdx page.
+  markdown: {
+    gfm: true,
+    smartypants: true,
+  },
   redirects: {
       // Blog post redirects (flat → date-based)
       '/blog/v3/': '/blog/2023/09/v3/',

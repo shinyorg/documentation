@@ -245,7 +245,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TableView",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "scheduler",
@@ -253,7 +253,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Scheduler",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "floatingpanel",
@@ -261,14 +261,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "FloatingPanel",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "fontpicker",
         "nuget": "Shiny.Maui.Controls",
         "description": "FontPicker",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "pillview",
@@ -276,7 +276,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "PillView",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "imageviewer",
@@ -284,7 +284,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageViewer",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "imageeditor",
@@ -292,7 +292,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageEditor",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "chatview",
@@ -300,7 +300,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ChatView",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "markdown",
@@ -308,7 +308,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Markdown",
         "description": "Markdown",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "mermaiddiagrams",
@@ -316,14 +316,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.MermaidDiagrams",
         "description": "Mermaid Diagrams",
         "category": "controls",
-        "version": "1.0.1-beta-0079"
+        "version": "1.0.1-beta-0087"
     },
     {
         "id": "stores",
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
         "category": "core",
-        "version": "3.0.0"
+        "version": "4.1.0"
     },
     {
         "id": "localization",
@@ -390,14 +390,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
         "category": "core",
-        "version": "3.0.0"
+        "version": "4.1.0"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
         "category": "core",
-        "version": "3.0.0"
+        "version": "4.1.0"
     },
     {
         "id": "spatial",
@@ -465,14 +465,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
         "category": "core",
-        "version": "3.0.0"
+        "version": "4.1.0"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
         "category": "core",
-        "version": "3.0.0"
+        "version": "4.1.0"
     }
 ];
 
