@@ -1,0 +1,94 @@
+---
+title: Limitations
+---
+
+This page collects what the library does **not** do, so you can rule it out (or in) before adopting it. Where a limitation is provider-specific, see [Provider Reference](/documentdb/providers/) for the full matrix.
+
+## Design model
+
+DocumentDB is a **document store**, not a relational ORM. A few things follow from that and are not going to change:
+
+- **No JOINs across document types.** Store related data on the same document (embed child collections) or denormalize. Cross-document lookups happen with two `Get` calls.
+- **No referential integrity / foreign keys.** Nothing in the schema enforces that a `CustomerId` on an `Order` points to an existing `Customer`. Validate in application code.
+- **No schema, no migrations.** The flip side: removing a property from your C# type does not delete it from stored JSON. Old fields just stop being deserialized. Use `RemoveProperty` if you need to physically strip them.
+- **One document type per table is optional, not enforced.** By default all types share the `documents` table and are discriminated by `TypeName`. Mixing types on the same table prevents the database engine from using a per-type clustered key.
+
+## Document & API constraints
+
+- Every document type must expose a **public `Id` property** of type `Guid`, `int`, `long`, or `string`. Alternative names are supported via `MapTypeToTable<T>("tbl", x => x.MyKey)` but only when a custom table mapping is also set.
+- `string` Ids **must be supplied** before `Insert` — there is no auto-generation strategy for them.
+- The library is **async-only**. There are no synchronous overloads.
+- **One default table per store.** All unmapped types share `DocumentStoreOptions.TableName`.
+- **Two types cannot map to the same custom table.** Throws `InvalidOperationException` at registration.
+- **`SetProperty` is scalar-only.** Supported value types: `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`, `null`. To replace a nested object or collection, use `Update` (full replacement) or `Upsert` (merge — see provider note below).
+- **`UnitOfWork` is not thread-safe.** Use one instance per logical operation / request scope.
+- **Streaming methods hold the internal semaphore** for the duration of enumeration. Do not interleave other store operations inside the same `await foreach`.
+
+## Indexing
+
+- `CreateIndexAsync` only exists on the **concrete SQL `DocumentStore` types** (SQLite, SQLCipher, PostgreSQL, SQL Server, MySQL). It is not on `IDocumentStore`.
+- **No composite / multi-column indexes.** `CreateIndexAsync<T>(expression)` takes a single property-access chain.
+- **No `INCLUDE` columns, no filtered indexes** beyond the automatic `WHERE TypeName = '...'` filter applied by the library.
+- **SQL Server `CreateIndexAsync` is broken** — it emits an index on `TypeName` and ignores the JSON path. Create JSON indexes manually via a `PERSISTED` computed column. See [Provider Reference](/documentdb/providers/#sql-server-createindexasync--known-issue).
+- **CosmosDB, LiteDB, IndexedDB** do not expose `CreateIndexAsync`. CosmosDB indexes everything automatically (tune via container indexing policy). LiteDB does not configure indexes. IndexedDB indexes are fixed at object-store creation time (when you bump `Version`).
+
+## Queries
+
+The expression API translates a subset of C#. Anything outside this list throws `NotSupportedException` at query time:
+
+| Supported in `.Where()` / `.Select()` | Not supported |
+|---|---|
+| `==`, `!=`, `>`, `>=`, `<`, `<=`, `&&`, `\|\|`, `!` | `string.ToLower()`, `ToUpper()` |
+| `null` / `!= null` | `string.IsNullOrEmpty()`, `IsNullOrWhiteSpace()` |
+| `string.Contains`, `StartsWith`, `EndsWith` (translated to `LIKE`) | `string.Equals(other, StringComparison.*)` |
+| Nested property access (`o.Address.City`) | `Math.*`, `DateTime.AddDays`, `TimeSpan` arithmetic |
+| `collection.Any()`, `Any(predicate)`, `Count()`, `Count(predicate)` | Explicit casts beyond boxing (`(int)x.Age`) |
+| Captured closure variables | `string.Format`, interpolation |
+| Enum equality (boxed via implicit `Convert`) | `Select` projecting into anonymous types or tuples |
+| `DateTime` equality / comparison (ISO-8601 ordering) | Custom method calls on your own types |
+| `Sum/Min/Max/Average` on child collections in `.Select` | `GroupBy` on multiple keys |
+| Single-key `GroupBy` | `Join`, `SelectMany`, `Distinct`, `Union`, `Except`, `Zip` |
+
+If your predicate needs something on the right column of this table, fall back to **raw SQL** via `Query<T>("...", parameters)` — but note that raw SQL is **not supported on LiteDB or IndexedDB**.
+
+## Provider-specific limitations
+
+Full matrix on [Provider Reference](/documentdb/providers/). The most consequential:
+
+| Provider | What's missing or different |
+|---|---|
+| **PostgreSQL** | `Upsert` is **shallow merge only**, not RFC 7396 deep merge. No spatial. No `Backup()`. |
+| **SQL Server** | Same shallow `Upsert`. `CreateIndexAsync` is broken (see above). Requires SQL Server **2025+** / Azure SQL with native `JSON` type. No spatial. No `Backup()`. |
+| **MySQL** | No spatial. No `Backup()`. |
+| **CosmosDB** | No `Backup()`. No `CreateIndexAsync` (tune indexing policy on the container). Cost model is RU-per-operation — full scans over unindexed paths get expensive fast. |
+| **LiteDB** | **All predicates evaluated in C# after a full load** of every document of that type. No raw SQL. No spatial. Fine for small datasets, painful for large ones. |
+| **IndexedDB** | Same client-side predicate evaluation as LiteDB. No raw SQL. No spatial. No `CreateIndexAsync`. Browser quota typically ~50 MB before prompting. Single-tab writer. |
+
+## Concurrency & transactions
+
+- **SQLite** is reader-many / writer-one. Two simultaneous writers serialize.
+- **LiteDB** is single-process: opening the same file from two processes fails.
+- **IndexedDB** is single-tab effectively — multi-tab writes can interleave non-deterministically.
+- The other server providers (Postgres / SQL Server / MySQL / Cosmos) support concurrent writers per their native semantics.
+- **Nested transactions** are not supported. Calling `RunInTransaction` inside a transaction reuses the outer transaction (no `SAVEPOINT`).
+- **Optimistic concurrency** (`MapVersionProperty`) checks the version on `Update` and `Upsert`-as-update only. It does not protect `SetProperty`, `RemoveProperty`, `ExecuteUpdate`, or `ExecuteDelete` — those are unchecked bulk operations.
+
+## Backup
+
+`Backup()` is only on the concrete store types: `SqliteDocumentStore`, `SqlCipherDocumentStore`, `LiteDbDocumentStore`. Not on `IDocumentStore`. Not on the server-database providers (use their native tooling: `pg_dump`, `BACKUP DATABASE`, `mysqldump`, etc.).
+
+## What about size?
+
+There is no built-in cap on document size, but each provider has practical limits:
+
+| Provider | Practical max single-document size |
+|---|---|
+| SQLite | ~1 GB (`SQLITE_MAX_LENGTH`, configurable but rarely worth it) |
+| PostgreSQL `JSONB` | 255 MB (toasted) |
+| SQL Server `JSON` | 2 GB (`max` size) |
+| MySQL `JSON` | 1 GB |
+| CosmosDB | 2 MB per document — **the hard one to plan around** |
+| LiteDB | 1 MB per document, 256 MB per page chain |
+| IndexedDB | Browser-dependent, typically tens of MB total quota |
+
+If you have documents approaching these, split them. The library does not page large blobs for you.

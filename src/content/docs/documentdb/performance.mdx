@@ -1,0 +1,150 @@
+---
+title: Performance
+---
+
+A schema-free document store lets you skip a lot of design work. The trade-off is that **query cost is paid at runtime**: every filter that is not backed by an index does JSON parsing per row. This page covers the levers you have to keep things fast, and the common ways queries get slow.
+
+## Index the properties you filter or sort on
+
+The single largest lever. A partial expression index drops a typical 1,000-document equality query from ~270 µs to ~8 µs — ~30× — by replacing per-row JSON extraction with a B-tree lookup.
+
+```csharp
+await store.CreateIndexAsync<User>(u => u.Email);
+await store.CreateIndexAsync<Order>(o => o.ShippingAddress.City);
+```
+
+Rule of thumb: any property you put in a `.Where(...)` predicate that runs more than occasionally, and any property you `.OrderBy(...)` on, deserves an index. Full per-provider DDL and the SQL Server known-issue caveat are in [Indexes](/documentdb/indexes/).
+
+### When indexes don't help
+
+| Pattern | Why it scans |
+|---|---|
+| `Where(u => u.Name.Contains("li"))` | `LIKE '%li%'` — leading wildcard defeats B-tree |
+| `Where(u => u.Name.EndsWith("son"))` | `LIKE '%son'` — same reason |
+| `Where(o => o.Lines.Any(l => l.Qty > 1))` | Has to expand `json_each` per row |
+| Case-insensitive comparisons | Functional index would need to match the case expression — not emitted automatically |
+| Predicate over an unmapped extra property | Index path must match the expression exactly |
+| **Any LINQ predicate on LiteDB or IndexedDB** | These providers always load and filter in C# — see [Provider Reference](/documentdb/providers/#litedb--indexeddb--predicates-run-client-side) |
+
+`StartsWith("Al")` **does** use an index — it translates to `LIKE 'Al%'`.
+
+### Write amplification
+
+Every index adds one B-tree write per `Insert` / `Update` / `Upsert` / `BatchInsert`. Five indexes ≈ 6× the write cost of an unindexed table. Index the things you query; don't index defensively.
+
+## Use `BatchInsert` for bulk loads
+
+`BatchInsert` is dramatically faster than a loop of `Insert` calls. It chunks the collection into **500-row multi-row `INSERT` statements** inside a single transaction with prepared command reuse. For PostgreSQL specifically, this matters more than anywhere else — round-trip cost dominates a per-row loop.
+
+CosmosDB chunks at **100** rows (TransactionalBatch hard limit). LiteDB uses `InsertBulk` in a single transaction.
+
+```csharp
+await store.BatchInsert(documents); // one transaction, atomic rollback on failure
+```
+
+## Pick the right materialization
+
+| Use | When |
+|---|---|
+| `.ToList()` | You need the full result set and it fits in memory comfortably. |
+| `.ToAsyncEnumerable()` | Result set is large or unbounded, you process items one at a time, and you do not interleave other store operations inside the loop. |
+| `.Select(...).ToList()` | You only need a few fields per row — projects at SQL level via `json_object`, skips full document deserialization. Often the biggest single win for read-heavy paths. |
+| `.Count()` / `.Any()` | You only need cardinality / existence. Always cheaper than `(await query.ToList()).Count`. |
+
+A projection over a 10-property document where you only need 2 properties saves both bytes-over-the-wire and per-row JSON parse cost.
+
+## Prefer surgical writes over read-modify-write
+
+| Instead of | Use | Why |
+|---|---|---|
+| `Get` → mutate → `Update` | `SetProperty<T>(id, x => x.Field, value)` | Skips deserialize + reserialize + full-document write |
+| Same, removing a field | `RemoveProperty<T>(id, x => x.Field)` | Native `json_remove` (or provider equivalent) |
+| Loop of `Update` calls over a filter | `Query<T>().Where(...).ExecuteUpdate(p, v)` | One server-side `UPDATE`, no round-trips |
+| Loop of `Remove` calls over a filter | `Query<T>().Where(...).ExecuteDelete()` | One server-side `DELETE` |
+
+`ExecuteUpdate` only handles one property per call. If you need to set several, prefer `Update` of the full document — or call `ExecuteUpdate` in sequence inside a `RunInTransaction`.
+
+## Table-per-type vs shared default table
+
+The default `documents` table puts every type behind a `WHERE TypeName = '...'` filter. With many types and many documents, that filter shows up in every query plan and every index becomes a partial index.
+
+Use `MapTypeToTable<T>(...)` for any type that:
+- Will accumulate large row counts, or
+- You query frequently, or
+- Has indexes you want to keep narrow.
+
+```csharp
+opts.MapTypeToTable<Order>("orders")        // hot, large
+    .MapTypeToTable<AuditLog>("audit_logs"); // append-heavy
+// User stays in the shared documents table — fine if low volume
+```
+
+When a type has its own table, the generated SQL omits the `TypeName` predicate (already implicit) and the index is a plain expression index, not a partial one. Slightly cheaper at the storage and plan level.
+
+## Streaming vs buffered
+
+`ToAsyncEnumerable()` is the right choice for large result sets, but the implementation holds the per-store semaphore for the lifetime of the enumeration. That means:
+
+```csharp
+await foreach (var u in store.Query<User>().ToAsyncEnumerable())
+{
+    // DO NOT call store.Insert / Update / Get / etc. here — they will block on the semaphore.
+    await ProcessExternal(u);
+}
+```
+
+If you need to write back, buffer the IDs first, exit the loop, then write:
+
+```csharp
+var idsToUpdate = new List<string>();
+await foreach (var u in store.Query<User>().Where(...).ToAsyncEnumerable())
+    idsToUpdate.Add(u.Id);
+foreach (var id in idsToUpdate)
+    await store.SetProperty<User>(id, u => u.Status, "Reviewed");
+```
+
+## Lazy table creation
+
+Tables (and their spatial sidecars) are created on **first use** of a type. The first operation that touches a mapped type runs DDL. If you have many types and start your app cold, you can warm the schema explicitly:
+
+```csharp
+// Touch each type once at startup so cold queries don't include DDL latency
+await store.Count<User>();
+await store.Count<Order>();
+```
+
+For most apps this is unnecessary — DDL runs once and is cached for the lifetime of the connection.
+
+## Transaction boundaries
+
+A `RunInTransaction` block commits once. A loop of `Insert` calls outside a transaction commits once per call. Fifty inserts wrapped in a transaction is roughly 50× faster than fifty unwrapped inserts on SQLite. Use `BatchInsert` when possible, `RunInTransaction` when you need mixed operations.
+
+```csharp
+await store.RunInTransaction(async tx =>
+{
+    await tx.Insert(parent);
+    await tx.BatchInsert(children);
+    await tx.SetProperty<Counter>("global", c => c.Total, total + 1);
+});
+```
+
+## Provider-specific performance notes
+
+| Provider | Considerations |
+|---|---|
+| **SQLite** | Single writer — concurrent writers serialize. Use WAL mode (default in this library outside the browser) for read-while-write. `PRAGMA journal_mode = WAL` is the largest single perf win for mixed read/write workloads. |
+| **PostgreSQL** | `JSONB` parses once on write, lookups are fast. Expression indexes work well. If you need containment queries (`@>`) outside the library, add a GIN index manually. |
+| **SQL Server** | Uses the native `JSON` storage type (2025+). Statistics over `JSON_VALUE` extractions can be improved with persisted computed columns — see provider doc. |
+| **MySQL** | JSON values are binary; functional indexes work as expected. Watch for collation surprises on `LIKE`. |
+| **CosmosDB** | Auto-indexes every path. RUs scale with **document size × paths returned**, not just count. Always project (`.Select(...)`) when you don't need the whole document, and partition (`/typeName`) is already tuned by the library. |
+| **LiteDB / IndexedDB** | Predicate push-down does not exist — all filtering is in C# after loading the entire type. Scale ceiling is "fits comfortably in memory". |
+
+## Logging to see what actually runs
+
+Set `DocumentStoreOptions.Logging` to capture every SQL statement. Useful while tuning — turn it off in production.
+
+```csharp
+opts.Logging = sql => Debug.WriteLine(sql);
+```
+
+If a query feels slow, the first step is to look at the emitted SQL and confirm the expected index name appears in the `EXPLAIN` output of that statement on your provider.

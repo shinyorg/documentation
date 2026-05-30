@@ -1,0 +1,194 @@
+---
+title: Provider Reference
+---
+
+The expression API is provider-agnostic — the same C# query compiles against every provider. What differs is the **SQL each provider emits**, the **storage type** of the JSON column, and a handful of **behavioral edge cases**. This page lays them out side-by-side so you can pick the right provider, predict generated SQL, and avoid provider-specific surprises.
+
+## Quick comparison
+
+| Capability | SQLite | SQLCipher | PostgreSQL | SQL Server | MySQL | CosmosDB | LiteDB | IndexedDB |
+|---|---|---|---|---|---|---|---|---|
+| Storage column type | `TEXT` | `TEXT` | `JSONB` | `JSON` (SQL Server 2025+ / Azure SQL) | `JSON` | native JSON (string `data` envelope) | `BsonDocument` | object store record |
+| `Query<T>(string sql, ...)` raw SQL | yes | yes | yes | yes | yes | yes (Cosmos SQL) | **no** | **no** |
+| `CreateIndexAsync<T>(x => x.Prop)` | yes | yes | yes | **emits broken DDL — see below** | yes | n/a (Cosmos auto-indexes) | n/a | n/a (schema-time only) |
+| Composite / multi-column index | no | no | no | no | no | n/a | n/a | n/a |
+| Predicate translated to SQL | yes | yes | yes | yes | yes | yes | **no — runs in C# after load** | **no — runs in C# after load** |
+| `Upsert` deep merge (RFC 7396) | yes (`json_patch`) | yes | **shallow only** (`jsonb` `\|\|`) | **shallow only** (hand-rolled `OPENJSON`) | yes (`JSON_MERGE_PATCH`) | yes (C# recursive merge) | yes (C# recursive merge) | yes (C# recursive merge) |
+| Spatial (`WithinRadius`, etc.) | yes (R*Tree sidecar) | yes | no | no | no | yes (native GeoJSON) | no | no |
+| Hot `Backup()` | yes | yes (encrypted) | no | no | no | no | yes | no |
+| Concurrent writers | reader-many / writer-one | same | yes | yes | yes | yes | single-process | single browser tab |
+| `BatchInsert` chunk size | 500 | 500 | 500 | 500 | 500 | 100 (Cosmos TransactionalBatch limit) | bulk insert in one tx | one IDB transaction |
+
+The JSON column is always named `Data` across every SQL provider. Companion columns are `Id`, `TypeName`, `CreatedAt`, `UpdatedAt`.
+
+## JSON syntax cheat-sheet
+
+The operations below all run inside the generated SQL — you never write these yourself with the LINQ builder. They matter when you write raw SQL via `Query<T>("...", parameters)` or when debugging via the `Logging` callback.
+
+### Extract a scalar property (`$.prop`)
+
+| Provider | Generated expression |
+|---|---|
+| SQLite / SQLCipher | `json_extract(Data, '$.prop')` |
+| PostgreSQL | `Data #>> '{prop}'` |
+| SQL Server | `JSON_VALUE(Data, '$.prop')` |
+| MySQL | `NULLIF(JSON_UNQUOTE(JSON_EXTRACT(Data, '$.prop')), 'null')` |
+| CosmosDB | `c.data.prop` |
+
+### Set a property in place (`SetProperty`)
+
+| Provider | Function |
+|---|---|
+| SQLite / SQLCipher | `json_set(Data, '$.prop', @value)` |
+| PostgreSQL | `jsonb_set(Data, '{prop}', to_jsonb(@value))` |
+| SQL Server | `JSON_MODIFY(Data, '$.prop', @value)` |
+| MySQL | `JSON_SET(Data, '$.prop', CAST(@value AS JSON))` |
+
+### Remove a property (`RemoveProperty`)
+
+| Provider | Function |
+|---|---|
+| SQLite / SQLCipher | `json_remove(Data, '$.prop')` |
+| PostgreSQL | `Data #- string_to_array('prop', ',')` |
+| SQL Server | `JSON_MODIFY(Data, '$.prop', NULL)` |
+| MySQL | `JSON_REMOVE(Data, '$.prop')` |
+
+### Iterate child collections (`Any` / `Count` / collection aggregates)
+
+| Provider | Mechanism |
+|---|---|
+| SQLite / SQLCipher | `json_each(Data, '$.lines')` |
+| PostgreSQL | `jsonb_array_elements(Data #> '{lines}')` |
+| SQL Server | `OPENJSON(Data, '$.lines')` |
+| MySQL | `JSON_TABLE(Data, '$.lines[*]' COLUMNS(value JSON PATH '$'))` |
+
+## `Upsert` merge-patch depth — read this
+
+`Upsert` is documented as RFC 7396 JSON Merge Patch (deep merge of objects, scalar/array replacement). That holds for **SQLite, MySQL, CosmosDB, LiteDB, and IndexedDB**. It does **not** hold for **PostgreSQL** or **SQL Server**, which only perform a **shallow top-level merge**.
+
+What this means in practice — given an existing document:
+
+```json
+{ "name": "Alice", "address": { "city": "Portland", "zip": "97201" } }
+```
+
+and an `Upsert` patch:
+
+```json
+{ "address": { "city": "Seattle" } }
+```
+
+| Provider | Result of `address` after upsert |
+|---|---|
+| SQLite / MySQL / CosmosDB / LiteDB / IndexedDB | `{ "city": "Seattle", "zip": "97201" }` (deep merge — zip preserved) |
+| PostgreSQL / SQL Server | `{ "city": "Seattle" }` (shallow merge — zip lost) |
+
+:::caution
+On PostgreSQL and SQL Server, **never** send a partial nested object to `Upsert` unless you intend to replace the whole sub-object. Either include all fields of the nested object, use `SetProperty` for individual nested fields, or use full `Update` to replace the document.
+:::
+
+## SQL Server `CreateIndexAsync` — known issue
+
+On SQL Server, `CreateIndexAsync<T>(x => x.SomeProperty)` currently emits an index on the `TypeName` column and **ignores the JSON path**. It does not create a useful index for property lookups. Track the repository issues for status; in the meantime, create the index manually:
+
+```sql
+-- Create a computed column for the JSON path you want to index
+ALTER TABLE documents
+  ADD NameIdx AS JSON_VALUE(Data, '$.name') PERSISTED;
+
+CREATE INDEX idx_documents_name ON documents (NameIdx)
+  WHERE TypeName = 'User';
+```
+
+The other SQL providers (SQLite, PostgreSQL, MySQL) emit working partial expression / functional indexes — see [Indexes](/documentdb/indexes/) for the exact DDL.
+
+## Storage type implications
+
+### PostgreSQL — `JSONB`, not `JSON`
+
+The provider creates the `Data` column as `JSONB`. This is the binary form: parsed once on write, stored without whitespace, key order not preserved. Lookups are fast and the column can be indexed with expression indexes (used by `CreateIndexAsync`). If you ever need GIN indexes (e.g. for `@>` containment queries from outside the library), add them yourself — the library does not.
+
+### SQL Server — native `JSON` type (2025+)
+
+The provider uses the new `JSON` storage type, not `nvarchar(max)`. This requires **SQL Server 2025 or later**, or **Azure SQL** with the JSON-type preview enabled. Earlier SQL Server versions will fail at table creation.
+
+### MySQL — `JSON` (and value unwrapping)
+
+MySQL's `JSON_EXTRACT` returns a JSON-typed value, not a SQL string — comparing it directly to a bound parameter would fail. The provider always wraps extraction in `NULLIF(JSON_UNQUOTE(...), 'null')` so a stored JSON null and a missing key both surface as SQL `NULL`. Generally invisible — relevant only when you write raw SQL.
+
+### CosmosDB — `data` is a stringified envelope
+
+The Cosmos document layout is:
+
+```json
+{
+  "id": "...",
+  "typeName": "User",
+  "data": "{\"name\":\"Alice\",...}",
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+Inside the SDK the `data` field is the serialized JSON of your document — accessed in Cosmos SQL as `c.data.name`. Partition key is `/typeName`. Cosmos auto-indexes every path by default; tune via the indexing policy on the container if cost matters.
+
+### LiteDB / IndexedDB — predicates run client-side
+
+These two providers do **not** translate LINQ predicates to a query language. They:
+
+1. Load all documents of the type (filtered only by `TypeName` / object-store name) into memory.
+2. Apply the compiled predicate in C#.
+3. Apply ordering, pagination, and projection in C#.
+
+For small datasets this is fine. For collections > a few thousand documents, expect linear scans on every query. There is no way to push a predicate down. If you need server-side filtering on a large dataset in Blazor WASM, use SQLite-in-WASM (see [IndexedDB notes](/documentdb/indexeddb/#sqlite-in-blazor-wasm)).
+
+## Raw SQL & parameter syntax
+
+`Query<T>(string whereClause, object? parameters)` and `QueryStream<T>(...)` are supported by every SQL provider plus CosmosDB. LiteDB and IndexedDB throw `NotSupportedException`.
+
+Parameter syntax in the `whereClause` you write:
+
+| Provider | Parameter prefix |
+|---|---|
+| SQLite, SQLCipher | `@name` |
+| PostgreSQL | `@name` (Npgsql rewrites to `$1` style internally) |
+| SQL Server | `@name` |
+| MySQL | `@name` |
+| CosmosDB | `@name` (Cosmos SQL native) |
+
+```csharp
+// Same C# call — provider rewrites the JSON extraction syntax under the hood
+var results = await store.Query<User>(
+    /* SQLite */    "json_extract(Data, '$.name') = @name",
+    /* Postgres */  // "Data #>> '{name}' = @name"
+    /* SQL Server */ // "JSON_VALUE(Data, '$.name') = @name"
+    new { name = "Alice" });
+```
+
+When porting raw SQL across providers, the WHERE-clause syntax is yours to translate — only the LINQ builder is provider-agnostic.
+
+## Identifier quoting & reserved words
+
+SQLite quotes table identifiers with `"` so a type named `Order` or `User` works as a mapped table. The other providers follow their native quoting rules; if you hit a reserved-word collision, prefer an explicit non-reserved name via `MapTypeToTable<T>("orders")`.
+
+## Behavioral differences worth knowing
+
+| Concern | What differs |
+|---|---|
+| `LIKE` case sensitivity | SQLite: ASCII case-insensitive by default. PostgreSQL: case-sensitive (use `ILIKE` if you need otherwise). SQL Server / MySQL: depends on column / database collation. |
+| Stored JSON null vs missing key | Distinguishable in SQLite, PostgreSQL, SQL Server. MySQL collapses both to `NULL` via the `NULLIF(...,'null')` wrapper. |
+| `jsonb` key ordering | PostgreSQL's `JSONB` does not preserve key insertion order. Affects byte-for-byte diffs of the stored blob (does not affect `GetDiff`, which works at the C# object level). |
+| Numeric coercion | SQLite is dynamically typed — a JSON `"42"` string compares equal to integer 42. Other providers do not coerce. |
+| Decimal precision | All providers serialize/deserialize via `System.Text.Json`, so `decimal` precision is preserved as JSON numbers — but Postgres `JSONB` re-parses, and very large numerics may round-trip through `double` in extracted scalars. Prefer `SetProperty` for exact-value updates. |
+
+## When to pick which provider
+
+| Use case | Recommendation |
+|---|---|
+| Mobile / desktop / single-process | **SQLite** (or **SQLCipher** if data must be encrypted at rest) |
+| ASP.NET app, owned database | **PostgreSQL** — JSONB indexability, mature concurrency |
+| Existing SQL Server estate, on SQL Server 2025+ | **SQL Server** — but be aware of the `CreateIndexAsync` known issue above |
+| Existing MySQL estate | **MySQL** — full feature parity except spatial |
+| Globally distributed, serverless / pay-per-RU | **CosmosDB** — native spatial, automatic indexing, but watch RU cost on unindexed paths |
+| Embedded, no native dependencies, Windows-friendly | **LiteDB** — client-side query evaluation, fine for small datasets |
+| Blazor WebAssembly, client-only persistence | **IndexedDB** — zero native deps; if you need predicate push-down on large data, switch to SQLite-in-WASM |

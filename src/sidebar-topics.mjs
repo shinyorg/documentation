@@ -435,6 +435,9 @@ export const sidebarTopics = [
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
           { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
+          { label: 'Provider Reference', link: 'documentdb/providers' },
+          { label: 'Performance', link: 'documentdb/performance' },
+          { label: 'Limitations', link: 'documentdb/limitations' },
           { label: 'Blazor Playground', link: '/playground/documentdb/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'documentdb/release-notes' }
         ]

@@ -22,18 +22,30 @@ await store.DropAllIndexesAsync<User>();
 
 `CreateIndexAsync` uses `IF NOT EXISTS`, so calling it multiple times is safe. Index names are deterministic (`idx_json_{typeName}_{jsonPath}`).
 
-### Generated SQL
+### Generated SQL per provider
 
-The generated SQL varies by provider. SQLite example:
+`CreateIndexAsync` emits a partial expression / functional index on each SQL provider — same C# call, different DDL.
+
+| Provider | Emitted DDL |
+|---|---|
+| SQLite / SQLCipher | `CREATE INDEX IF NOT EXISTS idx_json_User_name ON documents (json_extract(Data, '$.name')) WHERE TypeName = 'User';` |
+| PostgreSQL | `CREATE INDEX IF NOT EXISTS idx_json_User_name ON documents ((Data #>> '{name}')) WHERE TypeName = 'User';` |
+| MySQL | `CREATE INDEX idx_json_User_name ON documents ((CAST(JSON_EXTRACT(Data, '$.name') AS CHAR(255))));` |
+
+:::caution[SQL Server — known issue]
+On SQL Server, `CreateIndexAsync` currently emits an index on the `TypeName` column and **ignores the JSON path**. It does not create a useful index for property lookups. Create JSON indexes manually until this is fixed:
 
 ```sql
-CREATE INDEX IF NOT EXISTS idx_json_User_name
-ON documents (json_extract(Data, '$.name'))
-WHERE TypeName = 'User';
+ALTER TABLE documents
+  ADD NameIdx AS JSON_VALUE(Data, '$.name') PERSISTED;
+
+CREATE INDEX idx_documents_name ON documents (NameIdx)
+  WHERE TypeName = 'User';
 ```
+:::
 
 :::note
-When using [table-per-type mapping](/documentdb/#table-per-type-mapping), the index is created on the mapped table instead of `documents`.
+When using [table-per-type mapping](/documentdb/#table-per-type-mapping), the index is created on the mapped table and the `WHERE TypeName = '...'` clause is omitted — it's already implicit. The index becomes a plain expression index rather than a partial one.
 :::
 
 ### Performance impact
@@ -48,6 +60,29 @@ JSON property indexes dramatically speed up equality queries by letting the data
 | With index | 8.52 us |
 
 **~32x faster.** Indexes give the biggest wins on selective queries that return few results.
+
+### When indexes don't help
+
+Some predicates cannot use an expression index, even if one exists for the property. Either rewrite the query, accept the scan cost, or denormalize.
+
+| Pattern | Reason |
+|---|---|
+| `Where(u => u.Name.Contains("li"))` | Leading wildcard (`LIKE '%li%'`) — B-trees can't satisfy this. |
+| `Where(u => u.Name.EndsWith("son"))` | Same — `LIKE '%son'`. |
+| `Where(o => o.Lines.Any(l => l.Qty > 1))` | Requires expanding the child collection per row. Consider promoting the predicate's outcome into a top-level property (e.g. a denormalized `HasLargeLine` boolean) and indexing that. |
+| Case-insensitive matches | The functional index would need to match the case-folded expression, which is not emitted. |
+| `Where(... && unindexedExpr)` | Database may still pick the index, but only if the indexed predicate is selective enough. |
+| **All predicates on LiteDB and IndexedDB** | These providers do not push predicates down — see [Provider Reference](/documentdb/providers/#litedb--indexeddb--predicates-run-client-side). |
+
+`StartsWith("Al")` **does** use an index — it translates to `LIKE 'Al%'`, which a B-tree can satisfy with a range scan.
+
+### Composite / multi-column indexes
+
+Not supported. `CreateIndexAsync<T>(Expression<Func<T, object>>)` takes a **single property-access chain**. If you need a multi-column index, add it manually via raw DDL (provider-specific) — but most workloads do better with two separate single-column indexes plus letting the planner combine them.
+
+### Write amplification
+
+Every expression index adds a B-tree write to every `Insert` / `Update` / `Upsert` / `BatchInsert`. Five indexes ≈ 6× the write cost of an unindexed table. Index the properties you actually query; do not index defensively. See [Performance](/documentdb/performance/) for more.
 
 ## Transactions
 

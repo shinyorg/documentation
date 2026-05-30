@@ -252,3 +252,42 @@ The expression API is provider-agnostic. The SQL output below shows SQLite synta
 | `o.Lines.Count() > 1` | `json_array_length(Data, '$.lines') > 1` |
 | `o.Lines.Count(l => l.Qty > 2)` | `(SELECT COUNT(*) FROM json_each(...) WHERE ...)` |
 | `e.StartDate > cutoff` | `json_extract(Data, '$.startDate') > @p0` (ISO 8601) |
+
+## Unsupported expressions
+
+The expression visitor translates a subset of C#. Anything below throws `NotSupportedException` at query time — fall back to raw SQL via `Query<T>("...", parameters)` when you need them. (Raw SQL is **not** available on LiteDB or IndexedDB — see [Limitations](/documentdb/limitations/#queries).)
+
+| Pattern | Workaround |
+|---|---|
+| `u.Name.ToLower() == "alice"` | Lowercase in C# before the query: `var n = name.ToLower();` then compare exactly; or use raw SQL with `LOWER(...)`. |
+| `string.IsNullOrEmpty(u.Name)` | `u.Name == null \|\| u.Name == ""` |
+| `u.Name.Equals(other, StringComparison.OrdinalIgnoreCase)` | Raw SQL with `LOWER(...)`. |
+| `Math.Abs(u.Score) > 5` | Move computation out: `Where(u => u.Score > 5 \|\| u.Score < -5)`. |
+| `u.CreatedAt.AddDays(7) > DateTime.UtcNow` | Compute the cutoff in C# first: `var cutoff = DateTime.UtcNow.AddDays(-7); Where(u => u.CreatedAt > cutoff);`. |
+| `(int)u.Age == 25` (explicit cast) | Drop the cast — the type is already `int`. Boxing via `Convert` is fine; explicit casts to a different type are not. |
+| `Select(u => new { u.Name })` (anonymous type) | Use a named DTO: `Select(u => new UserName { Name = u.Name })`. |
+| `Select(u => (u.Name, u.Age))` (tuple) | Same — use a named DTO. |
+| `GroupBy(o => new { o.Status, o.Country })` (multi-key) | Single-key only. Concatenate or denormalize: `GroupBy(o => o.StatusCountryKey)`. |
+| `Join`, `SelectMany`, `Distinct`, `Union` | Not a relational store — embed the joined data on the document, or do the join in C# after two queries. |
+| `string.Format("{0}-{1}", a, b)`, interpolation | Build the string in C# before the predicate. |
+| Custom instance methods on your types | Inline the logic into the expression. The visitor only sees the methods listed in the supported table above. |
+
+## Query cost — performant vs slow patterns
+
+Same C# can produce wildly different SQL cost. A short field guide:
+
+| Pattern | Cost | Why |
+|---|---|---|
+| `Where(u => u.Email == x)` with index on `Email` | Fast (B-tree lookup) | Indexed equality. |
+| `Where(u => u.Email == x)` **without** index | Linear (full type scan + JSON parse per row) | Always create indexes for predicates you run often. |
+| `Where(u => u.Name.StartsWith("Al"))` with index | Fast (B-tree range scan) | `LIKE 'Al%'` uses the index. |
+| `Where(u => u.Name.Contains("li"))` | Linear, **even with an index** | `LIKE '%li%'` — leading wildcard defeats B-trees. |
+| `Where(u => u.Name.EndsWith("son"))` | Linear, even with an index | Same — `LIKE '%son'`. |
+| `Where(o => o.Lines.Any(l => l.Qty > 1))` | Linear, expands child array per row | If frequent, denormalize an indexable boolean property and filter on it. |
+| `.Count()` / `.Any()` instead of `.ToList().Count` | Always preferred | One scalar query vs materializing the full set. |
+| `.Select(u => new UserSummary { Name = u.Name })` | Cheaper than full deserialize | Builds the projection at SQL level — fewer bytes, no full document parse. |
+| `Query<T>().Where(...).ExecuteUpdate(p, v)` | One server-side `UPDATE` | Beats load-modify-save loop every time. |
+| `Query<T>().Where(...).ExecuteDelete()` | One server-side `DELETE` | Same. |
+| Any LINQ predicate on **LiteDB** or **IndexedDB** | Always linear in C# after a full load | These providers don't translate predicates. Use SQLite-in-WASM for Blazor when this matters. |
+
+For a deeper treatment — batch sizes, streaming semantics, transaction boundaries, provider-specific notes — see [Performance](/documentdb/performance/).
