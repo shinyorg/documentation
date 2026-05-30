@@ -74,6 +74,8 @@ This cancels the accept loop on Android and unpublishes the channel on Apple. Al
 |----------|-----|-------|
 | iOS / Mac Catalyst / macOS | `CBPeripheralManager.PublishL2CapChannel(encryptionRequired)` | The `secure` flag maps to encryption-required. The PSM is delivered through `DidPublishL2CapChannel`; each accepted connection comes through `DidOpenL2CapChannel`. |
 | Android | `BluetoothAdapter.ListenUsingL2capChannel` / `ListenUsingInsecureL2capChannel` | Requires API 29+. Throws `InvalidOperationException` on older versions. A background accept loop calls `onOpen` for each connection until the listener is disposed. |
+| Linux | `AF_BLUETOOTH` / `BTPROTO_L2CAP` / `SOCK_SEQPACKET` socket | The PSM is kernel-assigned from the LE dynamic range (≥ `0x80`) by passing `psm=0` to `bind()`. `secure=true` sets `BT_SECURITY_MEDIUM` via `setsockopt(SOL_BLUETOOTH, BT_SECURITY)`; `secure=false` sets `BT_SECURITY_LOW`. An accept loop on a dedicated `Task` invokes `onOpen` for each connection. L2CAP is independent of advertising and GATT on this platform — you can publish a PSM even though Linux GATT-server / LE-advertisement hosting is still a work in progress; centrals must learn the device address out-of-band (e.g. pre-paired via `bluetoothctl`). |
+| Blazor WASM / Windows | — | Not supported. Web Bluetooth does not expose L2CAP; WinRT has no public LE CoC surface. Windows hosting throws `NotSupportedException` from `OpenL2Cap`. |
 
 ## File Transfer
 

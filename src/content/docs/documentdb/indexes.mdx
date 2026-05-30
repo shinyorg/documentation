@@ -63,3 +63,47 @@ await store.RunInTransaction(async tx =>
 ```
 
 The `tx` parameter is a full `IDocumentStore`, so you can use any operation inside the transaction — queries, counts, removes, `SetProperty`, `RemoveProperty`, everything.
+
+## Unit of Work
+
+When you need to gather changes across multiple methods or services and commit them together, use `CreateUnitOfWork()`. It buffers `Add`/`Update`/`Remove` operations and applies them atomically inside a single `RunInTransaction` when you call `Commit()`.
+
+```csharp
+var uow = store.CreateUnitOfWork()
+    .Add(new User { Id = "u1", Name = "Alice" })
+    .Update(existingUser)
+    .Remove<User>("u2");
+
+await uow.Commit();
+// All three operations committed in a single transaction.
+// On success the queue is cleared automatically.
+```
+
+| Member | Purpose |
+|---|---|
+| `Add<T>(document)` | Queue an `Insert` |
+| `Update<T>(document)` | Queue a full-document `Update` (Id required) |
+| `Remove<T>(id)` | Queue a `Remove` by Id |
+| `Commit(ct)` | Apply all queued operations atomically, then clear |
+| `Clear()` | Discard the queue without executing |
+| `PendingCount` | Number of operations currently queued |
+
+**Error handling.** If `Commit()` fails the transaction is rolled back and the queue is **preserved**, so you can inspect or amend it and retry:
+
+```csharp
+try
+{
+    await uow.Commit();
+}
+catch (InvalidOperationException)
+{
+    // Nothing was written. uow.PendingCount still reflects the queued operations.
+    uow.Clear();
+}
+```
+
+**When to use it.** Prefer `RunInTransaction` for a tight self-contained block of operations. Prefer `CreateUnitOfWork()` when you need to thread a single transactional batch through multiple methods or services without passing an `IDocumentStore` around as the transaction context.
+
+:::note
+A `UnitOfWork` instance is not thread-safe. Use one per logical operation or per request scope.
+:::

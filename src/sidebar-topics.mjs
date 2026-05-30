@@ -401,6 +401,7 @@ export const sidebarTopics = [
           { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
+          { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },

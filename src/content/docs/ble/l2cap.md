@@ -94,6 +94,8 @@ using (var channel = await peripheral
 |----------|-----|-------|
 | iOS / Mac Catalyst / macOS | `CBPeripheral.OpenL2CapChannel` | The `secure` flag is ignored — security is determined by how the peripheral published the channel. |
 | Android | `BluetoothDevice.CreateL2capChannel` / `CreateInsecureL2capChannel` | Requires API 29+. Opening throws `InvalidOperationException` on older versions. The `secure` flag selects between the two APIs. |
+| Linux | `AF_BLUETOOTH` / `BTPROTO_L2CAP` / `SOCK_SEQPACKET` socket | BlueZ does not expose CoC over D-Bus, so the implementation opens the kernel socket directly. Peer BD-address and address type are read from `org.bluez.Device1.Address` / `AddressType`. `secure=true` sets `BT_SECURITY_MEDIUM` via `setsockopt(SOL_BLUETOOTH, BT_SECURITY)`; `secure=false` sets `BT_SECURITY_LOW`. LE dynamic PSMs (≥ `0x80`) do **not** require `CAP_NET_RAW` — unprivileged users can open channels. |
+| Blazor WASM / Windows | — | Not supported. Web Bluetooth does not expose L2CAP; WinRT has no public LE CoC surface. |
 
 ## File Transfer
 
