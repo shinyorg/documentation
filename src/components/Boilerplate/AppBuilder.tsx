@@ -1,4 +1,4 @@
-import { type ShinyComponent, ShinyComponents, ShinyCategories, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, ASPNET_ONLY_IDS, Data } from '../../consts';
+import { type ShinyComponent, ShinyComponents, ShinyCategories, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, ASPNET_ONLY_IDS, BLAZOR_ONLY_IDS, Data } from '../../consts';
 import { useState } from 'react';
 import NugetList from './Components/NugetList';
 import MauiProgram from './Components/MauiProgram';
@@ -29,7 +29,7 @@ const AppBuilder = () => {
   const hasMediator = Data.hasComponent('mediator', components);
 
   const availableComponents = isMaui
-    ? ShinyComponents.filter(c => !ASPNET_ONLY_IDS.includes(c.id))
+    ? ShinyComponents.filter(c => !ASPNET_ONLY_IDS.includes(c.id) && !BLAZOR_ONLY_IDS.includes(c.id))
     : mode === 'blazor'
       ? ShinyComponents.filter(c => BLAZOR_COMPATIBLE_IDS.includes(c.id))
       : ShinyComponents.filter(c => ASPNET_COMPATIBLE_IDS.includes(c.id));

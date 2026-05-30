@@ -11,8 +11,33 @@ const BlazorProgram = (props: Props) => {
     return Data.hasComponent(feature, props.components);
   };
 
-  let src = `using Microsoft.AspNetCore.Components.Web;
-using Microsoft.AspNetCore.Components.WebAssembly.Hosting;
+  // Source-generated registrations (localization, DI registry) land in the app's own
+  // namespace, so they need no using. Everything else maps to its library namespace.
+  const usings = new Set<string>([
+    'Microsoft.AspNetCore.Components.Web',
+    'Microsoft.AspNetCore.Components.WebAssembly.Hosting',
+  ]);
+  if (has('mediator')) usings.add('Shiny.Mediator');
+  if (has('stores')) usings.add('Shiny');
+  if (has('ble')) usings.add('Shiny');
+  if (has('jobs')) usings.add('Shiny');
+  if (has('gps')) usings.add('Shiny');
+  if (has('push')) {
+    usings.add('Shiny');
+    usings.add('Shiny.Push.Blazor');
+  }
+  if (has('documentdb')) {
+    usings.add('Shiny.DocumentDb');
+    usings.add('Shiny.DocumentDb.Sqlite');
+  }
+  if (has('documentdb-indexeddb')) {
+    usings.add('Shiny.DocumentDb');
+    usings.add('Shiny.DocumentDb.IndexedDb');
+  }
+
+  const usingBlock = [...usings].map(u => `using ${u};`).join('\n');
+
+  let src = `${usingBlock}
 
 namespace BlazorApp;
 
@@ -46,6 +71,12 @@ public class Program
         {
             opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
         });`;
+  }
+  if (has('documentdb-indexeddb')) {
+    src += `
+        // IndexedDB-backed document store - browser persistence, no native deps
+        builder.Services.AddSingleton(new IndexedDbDocumentStoreOptions { DatabaseName = "MyAppDb" });
+        builder.Services.AddSingleton<IDocumentStore, IndexedDbDocumentStore>();`;
   }
   if (has('di')) {
     src += `

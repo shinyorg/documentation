@@ -70,10 +70,11 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'aiconversation'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'aiconversation'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'webhost'];
+export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb'];
 
 export type AndroidConfig = {
     usesJobs?: boolean;
@@ -384,6 +385,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "additionalNugets": [
             { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "5.2.0" }
         ]
+    },
+    {
+        "id": "documentdb-indexeddb",
+        "nuget": "Shiny.DocumentDb.IndexedDb",
+        "blazorNuget": "Shiny.DocumentDb.IndexedDb",
+        "description": "Document DB (IndexedDB)",
+        "category": "storage",
+        "version": "5.2.0"
     },
     {
         "id": "reflector",

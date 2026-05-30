@@ -1,4 +1,4 @@
-import { Data, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, LINUX_COMPATIBLE_IDS, ShinyComponents } from '../../consts';
+import { Data, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, LINUX_COMPATIBLE_IDS, ASPNET_ONLY_IDS, BLAZOR_ONLY_IDS, ShinyComponents } from '../../consts';
 import { useState } from 'react';
 import NugetList from './Components/NugetList';
 import MauiProgram from './Components/MauiProgram';
@@ -30,7 +30,11 @@ const LibBuilder = (props: Props) => {
   const isBlazorCompatible = BLAZOR_COMPATIBLE_IDS.includes(props.componentName);
   const isAspNetCompatible = ASPNET_COMPATIBLE_IDS.includes(props.componentName);
   const isLinuxCompatible = LINUX_COMPATIBLE_IDS.includes(props.componentName);
-  const [mode, setMode] = useState<AppMode>('maui');
+  const isMauiCompatible = !ASPNET_ONLY_IDS.includes(props.componentName) && !BLAZOR_ONLY_IDS.includes(props.componentName);
+  const modeCount = [isMauiCompatible, isBlazorCompatible, isAspNetCompatible, isLinuxCompatible].filter(Boolean).length;
+  const [mode, setMode] = useState<AppMode>(
+    isMauiCompatible ? 'maui' : isBlazorCompatible ? 'blazor' : isAspNetCompatible ? 'aspnet' : 'linux'
+  );
 
   const isMaui = mode === 'maui';
   const showPlatformConfig = hasPlatformConfig(components);
@@ -147,14 +151,16 @@ const LibBuilder = (props: Props) => {
 
   return (
     <div className="app-builder">
-        {(isBlazorCompatible || isAspNetCompatible || isLinuxCompatible) && (
+        {modeCount > 1 && (
           <div className="app-builder__mode-toggle">
-            <button
-              className={`app-builder__mode-btn${mode === 'maui' ? ' app-builder__mode-btn--active' : ''}`}
-              onClick={() => setMode('maui')}
-            >
-              MAUI
-            </button>
+            {isMauiCompatible && (
+              <button
+                className={`app-builder__mode-btn${mode === 'maui' ? ' app-builder__mode-btn--active' : ''}`}
+                onClick={() => setMode('maui')}
+              >
+                MAUI
+              </button>
+            )}
             {isBlazorCompatible && (
               <button
                 className={`app-builder__mode-btn${mode === 'blazor' ? ' app-builder__mode-btn--active' : ''}`}

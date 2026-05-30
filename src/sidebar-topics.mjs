@@ -143,7 +143,6 @@ export const sidebarTopics = [
       {
         label: 'Other',
         items: [
-          { label: 'Stateful Services', link: 'other/statefulservices' },
           { label: 'Startup Services', link: 'other/startupservices' },
           { label: 'Lifecycle Hooks', link: 'other/lifecyclehooks' },
           { label: 'Android Foreground Service', link: 'other/androidforeground' },
@@ -186,6 +185,7 @@ export const sidebarTopics = [
           { label: 'BLE Manager', link: 'ble/manager' },
           { label: 'Peripheral', link: 'ble/peripheral' },
           { label: 'Services/Characteristics/Descriptors', link: 'ble/gatt' },
+          { label: 'L2CAP', link: 'ble/l2cap' },
           { label: 'Background Operations', link: 'ble/background' },
           { label: 'Best Practice/FAQ', link: 'ble/best-practices' },
           { label: 'Blazor Playground', link: '/playground/shiny/', attrs: { target: '_blank' } },
@@ -198,6 +198,7 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'blehosting/' },
           { label: 'GATT Service', link: 'blehosting/gatt' },
+          { label: 'L2CAP', link: 'blehosting/l2cap' },
           { label: 'Release Notes', link: 'blehosting/release-notes' }
         ]
       },

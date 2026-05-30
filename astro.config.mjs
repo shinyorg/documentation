@@ -142,7 +142,6 @@ export default defineConfig({
       '/client/permissions/': '/permissions/',
       '/client/permissions/android': '/permissions/android',
       '/client/permissions/ios': '/permissions/ios',
-      '/client/other/statefulservices': '/other/statefulservices',
       '/client/other/startupservices': '/other/startupservices',
       '/client/other/lifecyclehooks': '/other/lifecyclehooks',
       '/client/other/androidforeground': '/other/androidforeground',
