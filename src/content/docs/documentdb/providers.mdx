@@ -4,20 +4,36 @@ title: Provider Reference
 
 The expression API is provider-agnostic — the same C# query compiles against every provider. What differs is the **SQL each provider emits**, the **storage type** of the JSON column, and a handful of **behavioral edge cases**. This page lays them out side-by-side so you can pick the right provider, predict generated SQL, and avoid provider-specific surprises.
 
+For provider-specific install, setup, and feature notes see the per-provider pages:
+
+| Provider | Doc |
+|---|---|
+| SQLite | [SQLite](/documentdb/sqlite/) |
+| SQLCipher (encrypted SQLite) | [SQLCipher](/documentdb/sqlcipher/) |
+| PostgreSQL | [PostgreSQL](/documentdb/postgresql/) |
+| SQL Server | [SQL Server](/documentdb/sqlserver/) |
+| MySQL | [MySQL](/documentdb/mysql/) |
+| DuckDB | [DuckDB](/documentdb/duckdb/) |
+| Azure Cosmos DB | [Cosmos DB](/documentdb/cosmosdb/) |
+| MongoDB | [MongoDB](/documentdb/mongodb/) |
+| LiteDB | [LiteDB](/documentdb/litedb/) |
+| IndexedDB (Blazor WASM) | [IndexedDB](/documentdb/indexeddb/) |
+
 ## Quick comparison
 
-| Capability | SQLite | SQLCipher | PostgreSQL | SQL Server | MySQL | CosmosDB | LiteDB | IndexedDB |
-|---|---|---|---|---|---|---|---|---|
-| Storage column type | `TEXT` | `TEXT` | `JSONB` | `JSON` (SQL Server 2025+ / Azure SQL) | `JSON` | native JSON (string `data` envelope) | `BsonDocument` | object store record |
-| `Query<T>(string sql, ...)` raw SQL | yes | yes | yes | yes | yes | yes (Cosmos SQL) | **no** | **no** |
-| `CreateIndexAsync<T>(x => x.Prop)` | yes | yes | yes | **emits broken DDL — see below** | yes | n/a (Cosmos auto-indexes) | n/a | n/a (schema-time only) |
-| Composite / multi-column index | no | no | no | no | no | n/a | n/a | n/a |
-| Predicate translated to SQL | yes | yes | yes | yes | yes | yes | **no — runs in C# after load** | **no — runs in C# after load** |
-| `Upsert` deep merge (RFC 7396) | yes (`json_patch`) | yes | **shallow only** (`jsonb` `\|\|`) | **shallow only** (hand-rolled `OPENJSON`) | yes (`JSON_MERGE_PATCH`) | yes (C# recursive merge) | yes (C# recursive merge) | yes (C# recursive merge) |
-| Spatial (`WithinRadius`, etc.) | yes (R*Tree sidecar) | yes | no | no | no | yes (native GeoJSON) | no | no |
-| Hot `Backup()` | yes | yes (encrypted) | no | no | no | no | yes | no |
-| Concurrent writers | reader-many / writer-one | same | yes | yes | yes | yes | single-process | single browser tab |
-| `BatchInsert` chunk size | 500 | 500 | 500 | 500 | 500 | 100 (Cosmos TransactionalBatch limit) | bulk insert in one tx | one IDB transaction |
+| Capability | SQLite | SQLCipher | PostgreSQL | SQL Server | MySQL | DuckDB | CosmosDB | MongoDB | LiteDB | IndexedDB |
+|---|---|---|---|---|---|---|---|---|---|---|
+| Storage column type | `TEXT` | `TEXT` | `JSONB` | `JSON` (SQL Server 2025+ / Azure SQL) | `JSON` | `JSON` (DuckDB native) | native JSON (string `data` envelope) | `BsonDocument` | `BsonDocument` | object store record |
+| `Query<T>(string sql, ...)` raw SQL | yes | yes | yes | yes | yes | yes | yes (Cosmos SQL) | **no** | **no** | **no** |
+| `CreateIndexAsync<T>(x => x.Prop)` | yes | yes | yes | **emits broken DDL — see below** | yes | yes (functional index on `json_extract_string`) | n/a (Cosmos auto-indexes) | n/a (Mongo indexes manually) | n/a | n/a (schema-time only) |
+| Composite / multi-column index | no | no | no | no | no | no | n/a | n/a | n/a | n/a |
+| Predicate translated to SQL | yes | yes | yes | yes | yes | yes | yes | **partial — server-side filter + C# evaluation** | **no — runs in C# after load** | **no — runs in C# after load** |
+| `Upsert` deep merge (RFC 7396) | yes (`json_patch`) | yes | **shallow only** (`jsonb` `\|\|`) | **shallow only** (hand-rolled `OPENJSON`) | yes (`JSON_MERGE_PATCH`) | yes (`json_merge_patch`) | yes (C# recursive merge) | yes (C# recursive merge) | yes (C# recursive merge) | yes (C# recursive merge) |
+| Spatial (`WithinRadius`, etc.) | yes (R*Tree sidecar) | yes | no | no | no | no | yes (native GeoJSON) | no | no | no |
+| Hot `Backup()` | yes | yes (encrypted) | no | no | no | no | no | no | yes | no |
+| Concurrent writers | reader-many / writer-one | same | yes | yes | yes | reader-many / writer-one | yes | yes | single-process | single browser tab |
+| Transactions | native | native | native | native | native | native | compensating (track inserts, undo on failure) | compensating (replica-set required for native ACID) | bulk insert in one tx | one IDB transaction |
+| `BatchInsert` chunk size | 500 | 500 | 500 | 500 | 500 | 500 | 100 (Cosmos TransactionalBatch limit) | `InsertMany` (ordered) | bulk insert in one tx | one IDB transaction |
 
 The JSON column is always named `Data` across every SQL provider. Companion columns are `Id`, `TypeName`, `CreatedAt`, `UpdatedAt`.
 
@@ -33,7 +49,9 @@ The operations below all run inside the generated SQL — you never write these 
 | PostgreSQL | `Data #>> '{prop}'` |
 | SQL Server | `JSON_VALUE(Data, '$.prop')` |
 | MySQL | `NULLIF(JSON_UNQUOTE(JSON_EXTRACT(Data, '$.prop')), 'null')` |
+| DuckDB | `json_extract_string(Data, '$.prop')` |
 | CosmosDB | `c.data.prop` |
+| MongoDB | `data.prop` (translated to BSON field path) |
 
 ### Set a property in place (`SetProperty`)
 
@@ -43,6 +61,8 @@ The operations below all run inside the generated SQL — you never write these 
 | PostgreSQL | `jsonb_set(Data, '{prop}', to_jsonb(@value))` |
 | SQL Server | `JSON_MODIFY(Data, '$.prop', @value)` |
 | MySQL | `JSON_SET(Data, '$.prop', CAST(@value AS JSON))` |
+| DuckDB | `json_merge_patch(Data, '{"prop":@value}'::JSON)` (path folded into a synthetic merge patch) |
+| MongoDB | `$set: { "data.prop": @value }` |
 
 ### Remove a property (`RemoveProperty`)
 
@@ -52,6 +72,8 @@ The operations below all run inside the generated SQL — you never write these 
 | PostgreSQL | `Data #- string_to_array('prop', ',')` |
 | SQL Server | `JSON_MODIFY(Data, '$.prop', NULL)` |
 | MySQL | `JSON_REMOVE(Data, '$.prop')` |
+| DuckDB | `json_merge_patch(Data, '{"prop":null}'::JSON)` (RFC 7396 null = delete) |
+| MongoDB | `$unset: { "data.prop": 1 }` |
 
 ### Iterate child collections (`Any` / `Count` / collection aggregates)
 
@@ -61,10 +83,11 @@ The operations below all run inside the generated SQL — you never write these 
 | PostgreSQL | `jsonb_array_elements(Data #> '{lines}')` |
 | SQL Server | `OPENJSON(Data, '$.lines')` |
 | MySQL | `JSON_TABLE(Data, '$.lines[*]' COLUMNS(value JSON PATH '$'))` |
+| DuckDB | `unnest(CAST(json_extract(Data, '$.lines') AS JSON[]))` |
 
 ## `Upsert` merge-patch depth — read this
 
-`Upsert` is documented as RFC 7396 JSON Merge Patch (deep merge of objects, scalar/array replacement). That holds for **SQLite, MySQL, CosmosDB, LiteDB, and IndexedDB**. It does **not** hold for **PostgreSQL** or **SQL Server**, which only perform a **shallow top-level merge**.
+`Upsert` is documented as RFC 7396 JSON Merge Patch (deep merge of objects, scalar/array replacement). That holds for **SQLite, MySQL, DuckDB, CosmosDB, MongoDB, LiteDB, and IndexedDB**. It does **not** hold for **PostgreSQL** or **SQL Server**, which only perform a **shallow top-level merge**.
 
 What this means in practice — given an existing document:
 
@@ -80,7 +103,7 @@ and an `Upsert` patch:
 
 | Provider | Result of `address` after upsert |
 |---|---|
-| SQLite / MySQL / CosmosDB / LiteDB / IndexedDB | `{ "city": "Seattle", "zip": "97201" }` (deep merge — zip preserved) |
+| SQLite / MySQL / DuckDB / CosmosDB / MongoDB / LiteDB / IndexedDB | `{ "city": "Seattle", "zip": "97201" }` (deep merge — zip preserved) |
 | PostgreSQL / SQL Server | `{ "city": "Seattle" }` (shallow merge — zip lost) |
 
 :::caution
@@ -116,6 +139,14 @@ The provider uses the new `JSON` storage type, not `nvarchar(max)`. This require
 
 MySQL's `JSON_EXTRACT` returns a JSON-typed value, not a SQL string — comparing it directly to a bound parameter would fail. The provider always wraps extraction in `NULLIF(JSON_UNQUOTE(...), 'null')` so a stored JSON null and a missing key both surface as SQL `NULL`. Generally invisible — relevant only when you write raw SQL.
 
+### DuckDB — native `JSON` column
+
+DuckDB stores the `Data` column as its built-in `JSON` type (text-backed, parsed on read). The `json` extension is loaded automatically on every connection (`INSTALL json; LOAD json;`). DuckDB 0.10+ exposes `json_merge_patch` — `Upsert` uses it directly for true RFC 7396 deep merge with no read-merge-write round trip.
+
+DuckDB has no `json_set` / `json_remove`. `SetProperty` and `RemoveProperty` fold the JSON path into a synthetic merge-patch document on the server using `list_reduce(list_reverse(string_split(...)), ...)` — same RFC 7396 semantics, different SQL. Generally invisible — relevant only when you're reading the `Logging` callback.
+
+DuckDB is single-process / reader-many / writer-one (similar to SQLite). It is **not** a multi-user server — pick it for embedded analytical workloads, on-device reporting, or pipelines that ingest Parquet/CSV via DuckDB's native tooling alongside your document store.
+
 ### CosmosDB — `data` is a stringified envelope
 
 The Cosmos document layout is:
@@ -132,6 +163,27 @@ The Cosmos document layout is:
 
 Inside the SDK the `data` field is the serialized JSON of your document — accessed in Cosmos SQL as `c.data.name`. Partition key is `/typeName`. Cosmos auto-indexes every path by default; tune via the indexing policy on the container if cost matters.
 
+### MongoDB — BSON envelope + composite key
+
+The Mongo document layout mirrors the SQL envelope:
+
+```json
+{
+  "_id": "{TypeName}:{Id}",
+  "id": "...",
+  "typeName": "User",
+  "data": { "name": "Alice", "age": 25, "...": "..." },
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+`_id` is the composite Cosmos-style key — this guarantees uniqueness per type/Id pair across the shared `"documents"` collection (or any custom collection mapped via `MapTypeToCollection<T>()`). The `data` sub-document is a real BSON object (not a stringified envelope), so MongoDB queries, indexes, and aggregations can target nested fields natively.
+
+LINQ predicates are translated to a MongoDB `FilterDefinition` for the type/sort/skip/take phase. Complex sub-expressions outside the translated subset are evaluated in C# after a typed find. Raw SQL is not supported — pass LINQ.
+
+`RunInTransaction` uses a **compensating model** rather than a multi-document session: inserts are tracked and deleted on failure, matching the CosmosDB provider. To use true ACID transactions, run MongoDB in a replica set and lift the constraint in your fork. Updates and removes inside a `RunInTransaction` callback are **not** compensated — if you need rollback semantics for updates, wrap the operations in your own session.
+
 ### LiteDB / IndexedDB — predicates run client-side
 
 These two providers do **not** translate LINQ predicates to a query language. They:
@@ -144,7 +196,7 @@ For small datasets this is fine. For collections > a few thousand documents, exp
 
 ## Raw SQL & parameter syntax
 
-`Query<T>(string whereClause, object? parameters)` and `QueryStream<T>(...)` are supported by every SQL provider plus CosmosDB. LiteDB and IndexedDB throw `NotSupportedException`.
+`Query<T>(string whereClause, object? parameters)` and `QueryStream<T>(...)` are supported by every SQL provider (SQLite, SQLCipher, PostgreSQL, SQL Server, MySQL, DuckDB) plus CosmosDB. LiteDB, MongoDB, and IndexedDB throw `NotSupportedException` — use the LINQ-based `Query<T>()` overload instead.
 
 Parameter syntax in the `whereClause` you write:
 
@@ -154,6 +206,7 @@ Parameter syntax in the `whereClause` you write:
 | PostgreSQL | `@name` (Npgsql rewrites to `$1` style internally) |
 | SQL Server | `@name` |
 | MySQL | `@name` |
+| DuckDB | `@name` |
 | CosmosDB | `@name` (Cosmos SQL native) |
 
 ```csharp
@@ -189,6 +242,8 @@ SQLite quotes table identifiers with `"` so a type named `Order` or `User` works
 | ASP.NET app, owned database | **PostgreSQL** — JSONB indexability, mature concurrency |
 | Existing SQL Server estate, on SQL Server 2025+ | **SQL Server** — but be aware of the `CreateIndexAsync` known issue above |
 | Existing MySQL estate | **MySQL** — full feature parity except spatial |
+| Embedded analytics, on-device aggregates, Parquet/CSV ingest alongside docs | **DuckDB** — native `JSON` type, server-side `json_merge_patch`, columnar engine |
 | Globally distributed, serverless / pay-per-RU | **CosmosDB** — native spatial, automatic indexing, but watch RU cost on unindexed paths |
+| Existing MongoDB estate / document-native workloads | **MongoDB** — typed BSON storage, full nested-field indexing via Mongo tooling, compensating transactions |
 | Embedded, no native dependencies, Windows-friendly | **LiteDB** — client-side query evaluation, fine for small datasets |
 | Blazor WebAssembly, client-only persistence | **IndexedDB** — zero native deps; if you need predicate push-down on large data, switch to SQLite-in-WASM |

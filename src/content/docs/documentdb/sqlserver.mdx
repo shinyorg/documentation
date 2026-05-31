@@ -1,0 +1,124 @@
+---
+title: SQL Server
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.SqlServer` package provides a SQL Server / Azure SQL document store using [`Microsoft.Data.SqlClient`](https://www.nuget.org/packages/Microsoft.Data.SqlClient). It targets the **native `JSON` type** shipped in SQL Server 2025 and Azure SQL, not `nvarchar(max)`.
+
+<NugetBadge name="Shiny.DocumentDb.SqlServer" showLabel={true} />
+
+## When to Use
+
+- Existing SQL Server 2025+ estate or Azure SQL with the JSON-type preview enabled
+- Enterprise workloads needing transactional guarantees + JSON document storage in the same database
+
+:::caution
+Requires **SQL Server 2025 or later** (native `JSON` type). Earlier versions fail at table creation. If you must target SQL Server 2022 or earlier, fork the provider or use PostgreSQL instead.
+:::
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.SqlServer
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.SqlServer;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new SqlServerDatabaseProvider(
+           "Server=localhost;Database=mydb;Trusted_Connection=true;TrustServerCertificate=true;")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new SqlServerDatabaseProvider(
+           "Server=localhost;Database=mydb;Trusted_Connection=true;TrustServerCertificate=true;");
+   });
+   ```
+</Steps>
+
+## Storage Layout
+
+```sql
+CREATE TABLE [documents] (
+    Id        NVARCHAR(450) NOT NULL,
+    TypeName  NVARCHAR(450) NOT NULL,
+    Data      JSON          NOT NULL,
+    CreatedAt DATETIME2     NOT NULL,
+    UpdatedAt DATETIME2     NOT NULL,
+    CONSTRAINT PK_documents PRIMARY KEY (Id, TypeName)
+);
+```
+
+The `Data` column uses SQL Server's native `JSON` type. Property access translates to `JSON_VALUE(Data, '$.path')` for scalars and `JSON_QUERY(...)` for sub-objects.
+
+## Upsert (Shallow Merge — Known Limitation)
+
+SQL Server does not ship a native `JSON_MERGE_PATCH`. The provider implements `Upsert` using a row-locked **read-merge-write fallback in C#** with the documented RFC 7396 semantics:
+
+```sql
+SELECT Data FROM [documents] WITH (UPDLOCK, HOLDLOCK)
+    WHERE Id = @id AND TypeName = @typeName;
+-- merge in C# with recursive null stripping
+UPDATE [documents] SET Data = @merged, UpdatedAt = @now
+    WHERE Id = @id AND TypeName = @typeName;
+```
+
+Inside the same transaction, the row lock guarantees no interleaved writer wins between the read and the write. Deep merge semantics are preserved.
+
+:::note
+Prior to v5.2.2 the provider used a hand-rolled `OPENJSON … FULL OUTER JOIN` that performed a **shallow top-level merge** and silently clobbered nested objects. That code path is gone — current releases deep-merge correctly across PostgreSQL and SQL Server.
+:::
+
+## CreateIndexAsync
+
+`CreateIndexAsync<T>(x => x.Name)` now creates a **persisted computed column** plus a filtered index over it:
+
+```sql
+ALTER TABLE [documents]
+    ADD cc_idx_json_User_name AS JSON_VALUE(Data, '$.name') PERSISTED;
+
+CREATE INDEX idx_json_User_name
+    ON [documents] (cc_idx_json_User_name)
+    WHERE TypeName = N'User';
+```
+
+`DropIndexAsync` drops both the index and the backing computed column using the required `DROP INDEX … ON [documents]` form.
+
+:::note
+The original v5.0–v5.2.1 implementation emitted DDL that ignored the JSON path and indexed `TypeName` instead — producing useless indexes silently. Fixed in v5.2.2.
+:::
+
+## Raw SQL
+
+```csharp
+var results = await store.Query<User>(
+    "JSON_VALUE(Data, '$.name') = @name",
+    parameters: new { name = "Alice" });
+```
+
+## Limitations
+
+- **Requires SQL Server 2025+** for the native `JSON` type.
+- **No spatial** — SQL Server has native spatial types but the provider does not wrap them.
+- **No `Backup()`** — use `BACKUP DATABASE` from your operations tooling.
+- **Identifier collation** affects `LIKE` case sensitivity.
+
+## Notes
+
+- Identifiers quoted with `[ ]`.
+- Optimistic concurrency works via `MapVersionProperty` on `DocumentStoreOptions`.
+- `CreateIndexAsync` uses `IF NOT EXISTS` patterns so it is safe to call on every startup.

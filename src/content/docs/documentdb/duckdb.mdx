@@ -1,0 +1,157 @@
+---
+title: DuckDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.DuckDb` package provides an embedded analytical document store on top of [DuckDB](https://duckdb.org/). It plugs into the standard `IDatabaseProvider` pipeline alongside SQLite, SQL Server, MySQL, and PostgreSQL — so the same `DocumentStore`, the same `DocumentStoreOptions`, and the same LINQ query builder all work unchanged.
+
+<NugetBadge name="Shiny.DocumentDb.DuckDb" showLabel={true} />
+
+## When to Use
+
+- Embedded analytical workloads — columnar engine, vectorized execution
+- On-device reporting / aggregates over moderate-to-large datasets
+- Pipelines that ingest Parquet / CSV via DuckDB's native ingestion alongside your document store
+- Anywhere SQLite is "almost right" but you want faster scans and a real `JSON` column type
+
+DuckDB is **not** a multi-user server. It is single-process / reader-many / writer-one, similar to SQLite. Pick PostgreSQL or SQL Server for concurrent server workloads.
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.DuckDb
+```
+
+The package depends on `DuckDB.NET.Data.Full`, which bundles the native DuckDB binary for supported platforms.
+
+## Setup
+
+<Steps>
+1. Configure the database provider
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.DuckDb;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new DuckDbDatabaseProvider("Data Source=mydata.duckdb")
+   });
+   ```
+
+2. Register with dependency injection
+
+   Install `Shiny.DocumentDb.Extensions.DependencyInjection` and use the standard `AddDocumentStore`:
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new DuckDbDatabaseProvider("Data Source=mydata.duckdb");
+   });
+   ```
+
+3. Inject `IDocumentStore` and use the same fluent API as every other provider:
+
+   ```csharp
+   public class SalesReports(IDocumentStore store)
+   {
+       public Task<decimal> TotalRevenue(DateTime start, DateTime end) =>
+           store.Query<Order>()
+               .Where(o => o.PlacedAt >= start && o.PlacedAt < end)
+               .Sum(o => o.Total);
+   }
+   ```
+</Steps>
+
+On each new connection the provider runs `INSTALL json; LOAD json;` to make sure the `json` extension is available — no manual setup required.
+
+## Connection Strings
+
+DuckDB uses standard ADO.NET-style connection strings via `DuckDB.NET`:
+
+| Connection string | Description |
+|---|---|
+| `Data Source=mydata.duckdb` | File-backed database |
+| `Data Source=:memory:` | In-memory database (dropped on disposal) |
+| `Data Source=mydata.duckdb;Access Mode=READ_ONLY` | Read-only access |
+
+See the [DuckDB.NET documentation](https://duckdb.org/docs/api/csharp.html) for the full list of supported options.
+
+## Storage Layout
+
+DuckDB stores the document envelope as native `JSON`:
+
+```sql
+CREATE TABLE IF NOT EXISTS "documents" (
+    Id        VARCHAR     NOT NULL,
+    TypeName  VARCHAR     NOT NULL,
+    Data      JSON        NOT NULL,
+    CreatedAt TIMESTAMPTZ NOT NULL,
+    UpdatedAt TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (Id, TypeName)
+);
+```
+
+The `Data` column is DuckDB's built-in `JSON` type (text-backed, parsed on read). All standard library features — table-per-type mapping, custom Id properties, optimistic concurrency, indexes, projections, streaming — work the same as on SQLite.
+
+## SQL Differences vs SQLite
+
+DuckDB's JSON function set is similar to SQLite's but with a few differences the provider hides for you:
+
+| Operation | SQLite | DuckDB |
+|---|---|---|
+| Scalar extract | `json_extract(Data, '$.prop')` | `json_extract_string(Data, '$.prop')` |
+| Numeric extract | `CAST(json_extract(...) AS REAL)` | `CAST(json_extract_string(...) AS DOUBLE)` |
+| Set property | `json_set(Data, '$.prop', @value)` | `json_merge_patch(Data, '{"prop":@value}'::JSON)` (path folded into a synthetic merge patch) |
+| Remove property | `json_remove(Data, '$.prop')` | `json_merge_patch(Data, '{"prop":null}'::JSON)` (RFC 7396 null = delete) |
+| Iterate array | `json_each(Data, '$.lines')` | `unnest(CAST(json_extract(Data, '$.lines') AS JSON[]))` |
+| Deep merge (Upsert) | `json_patch(Data, @patch)` | `json_merge_patch(Data, @patch)` |
+| Array length | `json_array_length(Data, '$.lines')` | `json_array_length(Data, '$.lines')` |
+
+The LINQ-translated SQL emitted at runtime uses DuckDB's spelling automatically. When writing raw SQL through `Query<T>("...", parameters)`, use the DuckDB column.
+
+## Raw SQL
+
+DuckDB supports `Query<T>(string whereClause, object? parameters)` and `QueryStream<T>(...)` like the other SQL providers:
+
+```csharp
+var results = await store.Query<User>(
+    "json_extract_string(Data, '$.name') = @name",
+    parameters: new { name = "Alice" });
+```
+
+For portable code, prefer the LINQ builder — the expression visitor emits the right DuckDB SQL for you.
+
+## Indexes
+
+`CreateIndexAsync<T>(x => x.Prop)` creates a functional index over the extracted property:
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_json_User_name
+    ON "documents" (json_extract_string(Data, '$.name'));
+```
+
+DuckDB indexes are not partial — the `WHERE TypeName = '...'` filter clause used by the SQLite provider is omitted because DuckDB does not support filtered indexes. The selectivity comes from the column expression itself.
+
+## Upsert (RFC 7396 Deep Merge)
+
+DuckDB 0.10+ ships `json_merge_patch`, so `Upsert` runs entirely server-side with true RFC 7396 deep merge — no read-merge-write round trip. Setting a field to JSON `null` removes it from the document per the spec; the provider strips null properties recursively before sending the patch so unset nullable C# properties do not accidentally delete stored values.
+
+## Limitations
+
+- **Single-process / single-writer** — DuckDB allows many readers but one writer at a time. Not suitable for multi-user server workloads.
+- **No spatial** — DuckDB has a `spatial` extension, but `WithinRadius` / `WithinBoundingBox` / `NearestNeighbors` are not currently wired through this provider.
+- **No `Backup()`** — copy the database file directly (or use DuckDB's native `EXPORT DATABASE`) while no writer is holding the file.
+- **No composite indexes** — same as every other provider.
+
+## When to Pick DuckDB
+
+| Need | Pick DuckDB? |
+|---|---|
+| Embedded analytical aggregates | yes |
+| Mixing document writes with Parquet/CSV ingest | yes — DuckDB's native importers run beside the store |
+| On-device reporting in a single-process app | yes |
+| Multi-user write workload | no — use PostgreSQL or SQL Server |
+| Browser persistence | no — use IndexedDB or SQLite-in-WASM |
+| Encrypted-at-rest | no — use SQLCipher |

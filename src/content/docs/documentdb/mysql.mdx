@@ -1,0 +1,109 @@
+---
+title: MySQL
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.MySql` package provides a MySQL-backed document store using [`MySqlConnector`](https://www.nuget.org/packages/MySqlConnector). Documents are stored in MySQL's native `JSON` column type with full LINQ-to-SQL translation and JSON property indexes.
+
+<NugetBadge name="Shiny.DocumentDb.MySql" showLabel={true} />
+
+## When to Use
+
+- Existing MySQL or MariaDB estate
+- ASP.NET / server workloads using MySQL as primary storage
+- Full feature parity with the other SQL providers (except spatial and `Backup()`)
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.MySql
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.MySql;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new MySqlDatabaseProvider(
+           "Server=localhost;Database=mydb;User=root;Password=pass;")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new MySqlDatabaseProvider(
+           "Server=localhost;Database=mydb;User=root;Password=pass;");
+   });
+   ```
+</Steps>
+
+## Storage Layout
+
+```sql
+CREATE TABLE IF NOT EXISTS `documents` (
+    Id        VARCHAR(191) NOT NULL,
+    TypeName  VARCHAR(191) NOT NULL,
+    Data      JSON         NOT NULL,
+    CreatedAt DATETIME(6)  NOT NULL,
+    UpdatedAt DATETIME(6)  NOT NULL,
+    PRIMARY KEY (Id, TypeName)
+);
+```
+
+The `Data` column is MySQL's native `JSON` type. Property access translates to `NULLIF(JSON_UNQUOTE(JSON_EXTRACT(Data, '$.path')), 'null')` — the `NULLIF` wrapper collapses stored JSON `null` and missing keys to SQL `NULL` for consistent comparison semantics.
+
+## Upsert (RFC 7396 Deep Merge)
+
+MySQL exposes the native `JSON_MERGE_PATCH` function, so `Upsert` runs entirely server-side with true RFC 7396 deep merge semantics:
+
+```sql
+INSERT INTO `documents` (Id, TypeName, Data, CreatedAt, UpdatedAt)
+VALUES (@id, @typeName, @data, @now, @now)
+ON DUPLICATE KEY UPDATE
+    Data = JSON_MERGE_PATCH(Data, VALUES(Data)),
+    UpdatedAt = VALUES(UpdatedAt);
+```
+
+Null properties are stripped recursively before sending — unset nullable C# properties do not accidentally delete stored fields.
+
+## Indexes
+
+`CreateIndexAsync<T>(x => x.Prop)` emits a functional index on the extracted property:
+
+```sql
+CREATE INDEX idx_json_User_name
+    ON `documents` ((CAST(JSON_UNQUOTE(JSON_EXTRACT(Data, '$.name')) AS CHAR(191))))
+    WHERE TypeName = 'User';
+```
+
+`DropIndexAsync` issues the correct `DROP INDEX … ON `documents`` form (5.2.2 fix).
+
+## Raw SQL
+
+```csharp
+var results = await store.Query<User>(
+    "JSON_EXTRACT(Data, '$.name') = @name",
+    parameters: new { name = "Alice" });
+```
+
+## Limitations
+
+- **No spatial** — `WithinRadius`, `WithinBoundingBox`, `NearestNeighbors` throw `NotSupportedException`. MySQL has native spatial types but the provider does not wrap them.
+- **No `Backup()`** — use `mysqldump` or `mysql --single-transaction` from your operations tooling.
+- **Stored JSON null vs missing key** are collapsed to SQL `NULL` via the `NULLIF(...,'null')` wrapper. Distinguish them manually if needed.
+
+## Notes
+
+- Identifier quoting uses backticks (`` ` ``).
+- Optimistic concurrency works via `MapVersionProperty` on `DocumentStoreOptions`.
+- Server collation determines `LIKE` case sensitivity.

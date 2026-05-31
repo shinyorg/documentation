@@ -1,0 +1,132 @@
+---
+title: SQLite
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.Sqlite` package provides the default SQLite-backed document store. It is the recommended provider for mobile, desktop, embedded, and single-process scenarios — full LINQ-to-SQL translation, JSON indexes, spatial queries via R*Tree, hot backup, and a `ClearAllAsync` shortcut.
+
+<NugetBadge name="Shiny.DocumentDb.Sqlite" showLabel={true} />
+
+## When to Use
+
+- Mobile (.NET MAUI iOS/Android) and desktop apps
+- Single-process embedded storage
+- Local-first / offline-capable apps
+- Blazor WebAssembly when you need full SQL features (paired with `SQLitePCLRaw.bundle_wasm`)
+
+If you need encryption at rest, use [SQLCipher](/documentdb/sqlcipher/) instead. For browser persistence without a native binary, see [IndexedDB](/documentdb/indexeddb/).
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.Sqlite
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.Sqlite;
+
+   // Quick setup
+   var store = new SqliteDocumentStore("Data Source=mydata.db");
+
+   // Full options
+   var store = new SqliteDocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.Sqlite;
+
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
+   });
+   ```
+</Steps>
+
+## Storage Layout
+
+```sql
+CREATE TABLE IF NOT EXISTS "documents" (
+    Id        TEXT NOT NULL,
+    TypeName  TEXT NOT NULL,
+    Data      TEXT NOT NULL,
+    CreatedAt TEXT NOT NULL,
+    UpdatedAt TEXT NOT NULL,
+    PRIMARY KEY (Id, TypeName)
+);
+```
+
+The `Data` column stores raw JSON text. Property access translates to `json_extract(Data, '$.path')`. Deep `Upsert` runs server-side via SQLite's `json_patch()` (RFC 7396).
+
+## Backup
+
+`SqliteDocumentStore.Backup(path)` uses the SQLite Online Backup API — the store stays usable during the copy.
+
+```csharp
+var store = new SqliteDocumentStore("Data Source=mydata.db");
+await store.Backup("/path/to/backup.db");
+```
+
+Backup is **not** on the `IDocumentStore` interface — it lives on the concrete `SqliteDocumentStore` type. Marked `[UnsupportedOSPlatform("browser")]` so it produces a compiler warning when called from browser-targeted code.
+
+## Clear All
+
+`SqliteDocumentStore.ClearAllAsync()` deletes every document across every table, including spatial sidecar tables. Useful for tearing down test fixtures or signing a user out of a local-first app.
+
+```csharp
+var store = new SqliteDocumentStore("Data Source=mydata.db");
+await store.ClearAllAsync();
+```
+
+## Spatial Queries
+
+SQLite uses R*Tree virtual tables for `WithinRadius`, `WithinBoundingBox`, and `NearestNeighbors`. Sidecar tables are created and synced automatically on insert/update/upsert/remove/clear. Register the `GeoPoint` property at setup:
+
+```csharp
+var store = new SqliteDocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}.MapSpatialProperty<Restaurant>(r => r.Location));
+```
+
+See [Spatial Queries](/documentdb/spatial/) for the full API.
+
+## Blazor WebAssembly
+
+The SQLite provider is WASM-compatible when paired with `SQLitePCLRaw.bundle_wasm`:
+
+- **WAL pragma skipped** on `OperatingSystem.IsBrowser()`
+- **Spatial disabled** (R*Tree unavailable in WASM-compiled SQLite)
+- **Backup unsupported** in the browser
+- Use `Data Source=:memory:` or Emscripten OPFS-mounted paths
+
+For most WASM scenarios, the lighter [IndexedDB provider](/documentdb/indexeddb/) is recommended.
+
+## Indexes
+
+```csharp
+await store.CreateIndexAsync<User>(u => u.Name);
+// CREATE INDEX IF NOT EXISTS idx_json_User_name
+//   ON "documents" (json_extract(Data, '$.name'))
+//   WHERE TypeName = 'User';
+```
+
+Indexes are **partial** by type so multiple types sharing the same table do not pay for each other's indexes. See [Indexes & Transactions](/documentdb/indexes/).
+
+## Notes
+
+- Reader-many / writer-one concurrency model.
+- Identifiers are quoted with `"` — types named `Order`, `Group`, `User` work without collision.
+- `Upsert` is RFC 7396 deep merge via `json_patch`.
+- Raw SQL queries use `json_extract(Data, '$.path')`.

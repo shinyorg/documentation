@@ -1,0 +1,139 @@
+---
+title: LiteDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.LiteDb` package provides a [LiteDB](https://www.litedb.org/)-backed document store. LiteDB is a pure-managed, file-based NoSQL embedded database — no native dependencies, no install steps, works on every .NET-supported platform out of the box.
+
+<NugetBadge name="Shiny.DocumentDb.LiteDb" showLabel={true} />
+
+## When to Use
+
+- Embedded apps that want **zero native dependencies** (managed-only, AOT-friendlier deployments)
+- Small datasets (a few thousand documents) where client-side predicate evaluation is acceptable
+- Windows-only apps where SQLite native loading is awkward
+- Quick prototypes / sample apps
+
+For larger datasets or server-side predicate translation, prefer [SQLite](/documentdb/sqlite/) or a SQL provider.
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.LiteDb
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.LiteDb;
+
+   var store = new LiteDbDocumentStore(new LiteDbDocumentStoreOptions
+   {
+       ConnectionString = "Filename=mydata.db"
+   });
+   ```
+
+2. Dependency injection
+
+   LiteDB uses its own options class — register the store directly:
+
+   ```csharp
+   builder.Services.AddSingleton(new LiteDbDocumentStoreOptions
+   {
+       ConnectionString = "Filename=mydata.db"
+   }
+   .MapTypeToCollection<User>()
+   .MapTypeToCollection<Order>("orders"));
+
+   builder.Services.AddSingleton<IDocumentStore, LiteDbDocumentStore>();
+   ```
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ConnectionString` | `string` | (required) | LiteDB connection string. Use `Filename=path.db` for file-based storage or `Filename=:memory:` for in-memory |
+| `CollectionName` | `string` | `"documents"` | Default collection for unmapped types |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set to `false` for AOT safety |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback |
+
+## Collection-Per-Type Mapping
+
+```csharp
+new LiteDbDocumentStoreOptions
+{
+    ConnectionString = "Filename=mydata.db"
+}
+.MapTypeToCollection<User>()                              // auto-derived
+.MapTypeToCollection<Order>("orders")                     // explicit name
+.MapTypeToCollection<Sensor>("sensors", s => s.DeviceKey) // explicit name + custom Id
+```
+
+## Storage Layout
+
+Documents are stored as `BsonDocument` records inside LiteDB collections. Each document carries the same envelope fields as the SQL providers (`Id`, `TypeName`, `Data`, `CreatedAt`, `UpdatedAt`) — `Data` is a real `BsonDocument` sub-object, not a stringified blob.
+
+## Queries
+
+LiteDB does **not** translate LINQ predicates to a query language. The provider:
+
+1. Loads every document of the requested type into memory (filtered only by `TypeName` / collection)
+2. Applies the compiled predicate in C#
+3. Applies ordering, pagination, and projection in C#
+
+```csharp
+// Fine for small datasets
+var users = await store.Query<User>()
+    .Where(u => u.Age > 25)
+    .OrderBy(u => u.Name)
+    .Paginate(0, 50)
+    .ToList();
+```
+
+For datasets larger than a few thousand documents, expect linear scans on every query. There is no way to push a predicate down.
+
+## Backup
+
+`LiteDbDocumentStore.Backup(path)` copies the database to a file. Requires a **file-based connection string** with a `Filename` parameter (not available on `:memory:` stores).
+
+```csharp
+var store = new LiteDbDocumentStore(new LiteDbDocumentStoreOptions
+{
+    ConnectionString = "Filename=mydata.db"
+});
+await store.Backup("/path/to/backup.db");
+```
+
+Backup lives on the concrete `LiteDbDocumentStore` type, not on `IDocumentStore`.
+
+## Optimistic Concurrency
+
+`MapVersionProperty<T>` on `LiteDbDocumentStoreOptions` enables document-level version checks. Version is stored inside the BSON document — no schema changes required.
+
+```csharp
+new LiteDbDocumentStoreOptions
+{
+    ConnectionString = "Filename=mydata.db"
+}.MapVersionProperty<Order>(o => o.RowVersion);
+```
+
+## Limitations
+
+- **All predicates evaluated in C# after a full load** — fine for small datasets, painful for large ones.
+- **No raw SQL** — `Query<T>(string)` and `QueryStream<T>(string)` throw `NotSupportedException`.
+- **No spatial** — `WithinRadius` / `WithinBoundingBox` / `NearestNeighbors` throw `NotSupportedException`.
+- **No `CreateIndexAsync`** — LiteDB indexes are managed natively if needed.
+- **Single-process** — opening the same file from two processes fails.
+
+## Notes
+
+- Pure-managed binary — no native dependencies, no native loader required.
+- Optimistic concurrency works the same way as on the SQL providers.
+- `Upsert` deep-merges in C# with recursive null stripping (matches CosmosDB / MongoDB / IndexedDB semantics).

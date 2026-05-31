@@ -1,0 +1,168 @@
+---
+title: Azure Cosmos DB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.CosmosDb` package provides an Azure Cosmos DB document store using [`Microsoft.Azure.Cosmos`](https://www.nuget.org/packages/Microsoft.Azure.Cosmos). Documents are stored in a Cosmos container with the SQL API, with native GeoJSON spatial queries and automatic indexing.
+
+<NugetBadge name="Shiny.DocumentDb.CosmosDb" showLabel={true} />
+
+## When to Use
+
+- Globally distributed / multi-region workloads
+- Serverless or pay-per-RU pricing models
+- Apps that need **native spatial queries** (Cosmos `ST_DISTANCE` / `ST_WITHIN`)
+- Existing Azure-hosted .NET workloads using Cosmos for the rest of the data model
+
+Watch RU cost on unindexed paths — full scans get expensive fast.
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.CosmosDb
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.CosmosDb;
+
+   var store = new CosmosDbDocumentStore(new CosmosDbDocumentStoreOptions
+   {
+       ConnectionString = "AccountEndpoint=https://...;AccountKey=...",
+       DatabaseName = "mydb",
+       ContainerName = "documents"
+   });
+   ```
+
+2. Dependency injection
+
+   Cosmos DB uses its own options class — register the store directly:
+
+   ```csharp
+   services.AddSingleton(new CosmosDbDocumentStoreOptions
+   {
+       ConnectionString = "AccountEndpoint=https://...;AccountKey=...",
+       DatabaseName = "mydb",
+       ContainerName = "documents",
+       DefaultThroughput = 400
+   }
+   .MapTypeToContainer<User>()
+   .MapTypeToContainer<Order>("orders")
+   .MapSpatialProperty<Restaurant>(r => r.Location));
+
+   services.AddSingleton<IDocumentStore, CosmosDbDocumentStore>();
+   ```
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ConnectionString` | `string` | (required) | Cosmos connection string. Ignored when `CosmosClient` is provided |
+| `DatabaseName` | `string` | (required) | Name of the Cosmos database |
+| `ContainerName` | `string` | `"documents"` | Default container for unmapped types |
+| `CosmosClient` | `CosmosClient?` | `null` | Optional pre-configured client. When set, the provider does not own its lifetime |
+| `DefaultThroughput` | `int` | `400` | Throughput (RU/s) provisioned for auto-created containers |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set to `false` for AOT safety |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback (Cosmos SQL queries) |
+
+## Container-Per-Type Mapping
+
+```csharp
+new CosmosDbDocumentStoreOptions
+{
+    ConnectionString = "AccountEndpoint=https://...;AccountKey=...",
+    DatabaseName = "mydb"
+}
+.MapTypeToContainer<User>()                              // auto-derived name
+.MapTypeToContainer<Order>("orders")                     // explicit name
+.MapTypeToContainer<Sensor>("sensors", s => s.DeviceKey) // explicit name + custom Id
+```
+
+Containers are lazily provisioned on first use with the configured `DefaultThroughput`.
+
+## Storage Layout
+
+```json
+{
+  "id": "abc123",
+  "typeName": "User",
+  "data": "{\"name\":\"Alice\",\"age\":25}",
+  "createdAt": "2026-05-31T...",
+  "updatedAt": "2026-05-31T..."
+}
+```
+
+- The Cosmos `id` field is the document Id.
+- Partition key is `/typeName`.
+- `data` is the serialized JSON of your document — accessed in Cosmos SQL as `c.data.name`.
+
+## Queries
+
+LINQ predicates translate to Cosmos SQL:
+
+```csharp
+var results = await store.Query<User>()
+    .Where(u => u.Age >= 18 && u.Status == "Active")
+    .OrderBy(u => u.Name)
+    .Paginate(0, 50)
+    .ToList();
+```
+
+Raw Cosmos SQL is also supported:
+
+```csharp
+var results = await store.Query<User>(
+    "c.data.name = @name",
+    parameters: new { name = "Alice" });
+```
+
+## Spatial Queries
+
+Cosmos has **native GeoJSON spatial support** — the provider wires it directly through `WithinRadius`, `WithinBoundingBox`, and `NearestNeighbors`:
+
+```csharp
+var opts = new CosmosDbDocumentStoreOptions
+{
+    ConnectionString = "AccountEndpoint=https://...;AccountKey=...",
+    DatabaseName = "mydb"
+}.MapSpatialProperty<Restaurant>(r => r.Location);
+
+var store = new CosmosDbDocumentStore(opts);
+
+var nearby = await store.WithinRadius<Restaurant>(
+    new GeoPoint(45.5231, -122.6765),
+    radiusMeters: 5000);
+```
+
+The provider adds the spatial index policy to the container automatically. Queries use `ST_DISTANCE` and `ST_WITHIN` server-side.
+
+See [Spatial Queries](/documentdb/spatial/) for the full API.
+
+## Transactions
+
+Cosmos transactions are scoped to a single partition key (`/typeName`). The provider implements `RunInTransaction` using a **compensating model**: inserts performed inside the callback are tracked and deleted on failure. Updates and removes inside the callback are not compensated.
+
+For Cosmos's native `TransactionalBatch`, the provider chunks `BatchInsert<T>` into 100-item batches (the Cosmos limit).
+
+## Limitations
+
+- **2 MB hard limit per document** — plan accordingly.
+- **No `Backup()`** — use Cosmos point-in-time restore from the Azure portal.
+- **No `CreateIndexAsync`** — Cosmos auto-indexes every path by default; tune via the indexing policy on the container if cost matters.
+- **`BatchInsert` chunked at 100** documents per `TransactionalBatch` call.
+- **Compensating transactions** — only inserts roll back automatically.
+- **RU cost** — every unindexed-path scan burns RUs. Watch your bill.
+
+## Notes
+
+- Optimistic concurrency works via `MapVersionProperty` on `CosmosDbDocumentStoreOptions`.
+- `Upsert` deep-merges in C# with recursive null stripping (RFC 7396 semantics).
+- Set `CosmosClient` explicitly to share a pooled client across multiple stores or to pre-configure retry / TLS / consistency-level settings.

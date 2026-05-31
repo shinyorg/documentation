@@ -1,0 +1,123 @@
+---
+title: PostgreSQL
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.PostgreSql` package provides a PostgreSQL-backed document store using [`Npgsql`](https://www.nuget.org/packages/Npgsql). Documents are stored in a `JSONB` column with full LINQ-to-SQL translation, partial expression indexes, and Postgres-native concurrency.
+
+<NugetBadge name="Shiny.DocumentDb.PostgreSql" showLabel={true} />
+
+## When to Use
+
+- ASP.NET / server workloads with PostgreSQL as primary storage
+- Document workloads where you want `JSONB` indexability, mature concurrency, and a real SQL surface for cross-document reporting
+- Multi-tenant SaaS where you want a single robust DB engine across documents and relational tables
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.PostgreSql
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.PostgreSql;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new PostgreSqlDatabaseProvider(
+           "Host=localhost;Database=mydb;Username=postgres;Password=pass;")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new PostgreSqlDatabaseProvider(
+           "Host=localhost;Database=mydb;Username=postgres;Password=pass;");
+   });
+   ```
+</Steps>
+
+## Storage Layout
+
+```sql
+CREATE TABLE IF NOT EXISTS "documents" (
+    "Id"        text         NOT NULL,
+    "TypeName"  text         NOT NULL,
+    "Data"      jsonb        NOT NULL,
+    "CreatedAt" timestamptz  NOT NULL,
+    "UpdatedAt" timestamptz  NOT NULL,
+    PRIMARY KEY ("Id", "TypeName")
+);
+```
+
+The `Data` column uses `JSONB`, the binary form — parsed once on write, stored without whitespace, key insertion order **not** preserved. Lookups are fast; expression indexes use `JSONB`-aware operators.
+
+## Upsert (Shallow Merge — Known Limitation)
+
+PostgreSQL does not ship a native RFC 7396 `JSON_MERGE_PATCH`. The `||` concat operator on `jsonb` is **shallow only** (top-level keys). The provider implements `Upsert` using a row-locked **read-merge-write fallback in C#**:
+
+```sql
+SELECT "Data" FROM "documents"
+    WHERE "Id" = @id AND "TypeName" = @typeName
+    FOR UPDATE;
+-- merge in C# with recursive null stripping
+UPDATE "documents" SET "Data" = @merged, "UpdatedAt" = @now
+    WHERE "Id" = @id AND "TypeName" = @typeName;
+```
+
+The `FOR UPDATE` lock serialises concurrent upserts to the same document within a transaction. Deep merge semantics are preserved (v5.2.2 fix — see [release notes](/documentdb/release-notes/)).
+
+## Property Access
+
+| Operation | SQL |
+|---|---|
+| Scalar extract (`o.Status`) | `"Data" #>> '{status}'` |
+| Sub-object extract | `"Data" #> '{address}'` |
+| `SetProperty` | `jsonb_set("Data", '{prop}', to_jsonb(@value))` |
+| `RemoveProperty` | `"Data" #- string_to_array('prop', ',')` |
+| `Any` / `Count` over child collections | `jsonb_array_elements("Data" #> '{lines}')` |
+
+## Indexes
+
+`CreateIndexAsync<T>(x => x.Name)` emits an expression index:
+
+```sql
+CREATE INDEX IF NOT EXISTS idx_json_User_name
+    ON "documents" (("Data" #>> '{name}'))
+    WHERE "TypeName" = 'User';
+```
+
+For containment / membership queries from outside the library (e.g. `@>`), add GIN indexes yourself — the library does not.
+
+## Raw SQL
+
+```csharp
+var results = await store.Query<User>(
+    "\"Data\" #>> '{name}' = @name",
+    parameters: new { name = "Alice" });
+```
+
+Npgsql rewrites `@name` to `$1`-style parameters internally.
+
+## Limitations
+
+- **No spatial** — PostGIS exists but the provider does not wire it through.
+- **No `Backup()`** — use `pg_dump` from your operations tooling.
+- **`LIKE` is case-sensitive** by default. Use `ILIKE` if you need case-insensitive raw-SQL matches.
+- **`JSONB` does not preserve key insertion order** — affects byte-for-byte diffs of the stored blob (does not affect `GetDiff`, which works at the C# object level).
+
+## Notes
+
+- Identifiers and column names are double-quoted (Postgres folds unquoted identifiers to lowercase).
+- Optimistic concurrency works via `MapVersionProperty` on `DocumentStoreOptions`.
+- Decimal values round-trip through `System.Text.Json` → `JSONB` parsing; very large numerics may be returned as `double` via JSON path extraction. Prefer `SetProperty` for exact-value updates.

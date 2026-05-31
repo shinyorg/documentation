@@ -1,0 +1,228 @@
+---
+title: MongoDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.MongoDb` package provides a MongoDB-backed document store. It implements the full `IDocumentStore` interface on top of [`MongoDB.Driver`](https://www.nuget.org/packages/MongoDB.Driver), storing each document as a typed BSON envelope (`_id`, `id`, `typeName`, `data`, `createdAt`, `updatedAt`) inside a configurable collection.
+
+<NugetBadge name="Shiny.DocumentDb.MongoDb" showLabel={true} />
+
+## When to Use
+
+- Existing MongoDB estate or replica set you want to reuse for application document storage
+- Workloads that benefit from BSON-native nested-field indexes managed via Mongo tooling
+- Teams that already understand Mongo's operational model (replica sets, sharding, change streams) and want to keep that surface area
+
+If you need full ACID transactions across multiple documents, run MongoDB as a replica set. Single-node deployments fall back to the provider's compensating-rollback model — see [Transactions](#transactions).
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.MongoDb
+```
+
+## Setup
+
+<Steps>
+1. Configure the store
+
+   ```csharp
+   using Shiny.DocumentDb.MongoDb;
+
+   var store = new MongoDbDocumentStore(new MongoDbDocumentStoreOptions
+   {
+       ConnectionString = "mongodb://localhost:27017",
+       DatabaseName = "mydb"
+   });
+   ```
+
+2. Register with dependency injection
+
+   MongoDB uses its own options class, so register the store directly:
+
+   ```csharp
+   services.AddSingleton(new MongoDbDocumentStoreOptions
+   {
+       ConnectionString = "mongodb://localhost:27017",
+       DatabaseName = "mydb"
+   }
+   .MapTypeToCollection<User>()
+   .MapTypeToCollection<Order>("orders")
+   .MapVersionProperty<Order>(o => o.RowVersion));
+
+   services.AddSingleton<IDocumentStore, MongoDbDocumentStore>();
+   ```
+
+3. Inject and use `IDocumentStore` like any other provider:
+
+   ```csharp
+   public class OrderService(IDocumentStore store)
+   {
+       public Task<IReadOnlyList<Order>> GetShippedOrders()
+           => store.Query<Order>()
+               .Where(o => o.Status == "Shipped")
+               .OrderByDescending(o => o.CreatedAt)
+               .Paginate(0, 50)
+               .ToList();
+   }
+   ```
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ConnectionString` | `string` | (required) | MongoDB connection string. Ignored when `MongoClient` is provided |
+| `DatabaseName` | `string` | (required) | Name of the MongoDB database |
+| `MongoClient` | `IMongoClient?` | `null` | Optional pre-configured client. When set, the provider does not own its lifetime |
+| `CollectionName` | `string` | `"documents"` | Default collection for unmapped types |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored (`ShortName` or `FullName`) |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, all methods auto-resolve type info |
+| `UseReflectionFallback` | `bool` | `true` | When `false`, throws `InvalidOperationException` if a type can't be resolved from the configured `TypeInfoResolver` instead of falling back to reflection. Recommended for AOT |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback invoked on each operation |
+
+## Collection-Per-Type Mapping
+
+By default every document type shares the `"documents"` collection (or whatever `CollectionName` is set to). Use `MapTypeToCollection<T>()` to give a type its own dedicated collection. Two types cannot map to the same collection name — registration throws `ArgumentException`.
+
+```csharp
+new MongoDbDocumentStoreOptions
+{
+    ConnectionString = "mongodb://localhost:27017",
+    DatabaseName = "mydb",
+    CollectionName = "docs" // override the default shared collection name
+}
+.MapTypeToCollection<User>()                              // auto-derived ("User")
+.MapTypeToCollection<Order>("orders")                     // explicit name
+.MapTypeToCollection<Sensor>("sensors", s => s.DeviceKey) // explicit name + custom Id
+.MapTypeToCollection<Tenant>(t => t.TenantCode);          // auto-derived + custom Id
+```
+
+### MapTypeToCollection overloads
+
+| Overload | Description |
+|---|---|
+| `MapTypeToCollection<T>()` | Auto-derive collection name from type name |
+| `MapTypeToCollection<T>(string collectionName)` | Explicit collection name |
+| `MapTypeToCollection<T>(Expression<Func<T, object>> idProperty)` | Auto-derive name + custom Id |
+| `MapTypeToCollection<T>(string collectionName, Expression<Func<T, object>> idProperty)` | Explicit name + custom Id |
+
+All overloads return `MongoDbDocumentStoreOptions` for fluent chaining.
+
+## Storage Layout
+
+Each document is stored inside a typed BSON envelope:
+
+```json
+{
+  "_id": "User:abc123",
+  "id": "abc123",
+  "typeName": "User",
+  "data": { "name": "Alice", "age": 25 },
+  "createdAt": "2026-05-31T...",
+  "updatedAt": "2026-05-31T..."
+}
+```
+
+- `_id` is the composite `{TypeName}:{Id}` key, guaranteeing uniqueness per type within a shared collection.
+- `data` is a real BSON sub-document, so MongoDB indexes and aggregations can target nested fields directly.
+- Field names are stable across releases — safe to inspect from outside the library if you need ad-hoc queries.
+
+## Queries
+
+The MongoDB provider supports the standard fluent query API:
+
+```csharp
+// Filtering, sorting, paging
+var page = await store.Query<User>()
+    .Where(u => u.Age >= 18 && u.Status == "Active")
+    .OrderByDescending(u => u.CreatedAt)
+    .Paginate(0, 50)
+    .ToList();
+
+// Counting
+var count = await store.Query<User>().Where(u => u.Age > 25).Count();
+
+// Bulk delete / update
+int removed = await store.Query<User>().Where(u => u.IsArchived).ExecuteDelete();
+int updated = await store.Query<User>()
+    .Where(u => u.Status == "Pending")
+    .ExecuteUpdate(u => u.Status, "Inactive");
+```
+
+Predicates are translated into a MongoDB `FilterDefinition` for the typed query phase; any sub-expressions outside the translated subset fall back to client-side evaluation after a typed find. For the full grammar see [Querying](/documentdb/querying/) and [Provider Reference](/documentdb/providers/).
+
+### Not Supported
+
+- **Raw SQL** — `Query<T>(string whereClause)` and `QueryStream<T>(string whereClause)` throw `NotSupportedException`. Use the LINQ-based `Query<T>()` overload.
+- **Spatial queries** — MongoDB has native geospatial support, but `WithinRadius` / `WithinBoundingBox` / `NearestNeighbors` are not currently exposed on this provider.
+- **`CreateIndexAsync`** — manage indexes via MongoDB tooling or `IMongoCollection<BsonDocument>.Indexes.CreateOne(...)`. The provider does not generate index DDL.
+
+## Transactions
+
+```csharp
+await store.RunInTransaction(async tx =>
+{
+    await tx.Insert(new Order { Id = "ord-1", Status = "Pending" });
+    await tx.Insert(new Payment { Id = "pay-1", OrderId = "ord-1" });
+});
+```
+
+Single-node MongoDB cannot run native ACID multi-document transactions. To keep behaviour predictable in any deployment, the provider implements a **compensating model**:
+
+- Inserts performed inside the callback are tracked and **deleted on failure**.
+- Updates and removes inside the callback are **not** compensated — if you need rollback for those, run MongoDB as a replica set and wrap operations in your own `IClientSessionHandle`.
+
+This matches the CosmosDB provider's behaviour, so the same caveats apply.
+
+## Optimistic Concurrency
+
+`MapVersionProperty<T>` on `MongoDbDocumentStoreOptions` enables document-level version checks. The version is stored inside the BSON `data` sub-document — no schema changes required.
+
+```csharp
+new MongoDbDocumentStoreOptions
+{
+    ConnectionString = "mongodb://localhost:27017",
+    DatabaseName = "mydb"
+}
+.MapVersionProperty<Order>(o => o.RowVersion);
+```
+
+`Insert` sets the version to `1`. `Update` and `Upsert`-as-update check the expected version against the stored value and throw `ConcurrencyException` on mismatch. See [CRUD operations](/documentdb/crud/) for the full semantics.
+
+## Shared Client / Pooling
+
+`IMongoClient` is process-wide and internally pooled by the driver. To share a client across multiple stores (or pre-configure TLS, credentials, retries, etc.), set `MongoClient` explicitly:
+
+```csharp
+var client = new MongoClient(MongoClientSettings.FromConnectionString("mongodb://..."));
+
+services.AddSingleton<IMongoClient>(client);
+
+services.AddKeyedSingleton<IDocumentStore>("users", (sp, _) =>
+    new MongoDbDocumentStore(new MongoDbDocumentStoreOptions
+    {
+        MongoClient = client,
+        DatabaseName = "users"
+    }));
+
+services.AddKeyedSingleton<IDocumentStore>("orders", (sp, _) =>
+    new MongoDbDocumentStore(new MongoDbDocumentStoreOptions
+    {
+        MongoClient = client,
+        DatabaseName = "orders"
+    }));
+```
+
+When `MongoClient` is set the provider treats it as borrowed and **does not** dispose it.
+
+## Differences from Other Providers
+
+See [Provider Reference](/documentdb/providers/) for the full matrix. Key MongoDB-specific notes:
+
+- `Query<T>(string)` — not supported
+- Transactions — compensating (single-node) or wrap in your own session (replica set)
+- Indexes — manage with native MongoDB tooling; `CreateIndexAsync` is not exposed
+- Storage — BSON envelope under `_id = "{TypeName}:{Id}"`, `data` is a real BSON sub-document
+- Deep `Upsert` — RFC 7396 merge implemented in C# with recursive null stripping
