@@ -342,6 +342,13 @@ export default defineConfig({
               dismissable: false
             },          
             {
+              id: 'docdb-v6',
+              content: 'Document DB v6: More New Providers, Change Tracking, Global Query Filters, & Vector Support!',
+              variant: 'tip',
+              link: { text: 'Feed The Machine Here', href: '/documentdb/' },
+              dismissable: false
+            },
+            {
               id: 'mauishell-60',
               content: 'Shiny.Maui.Shell v6 support for AI routing tools',
               variant: 'tip',
@@ -353,13 +360,6 @@ export default defineConfig({
               content: 'Mediator 6.4: AI Tool Generation!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
-              dismissable: false
-            },
-            {
-              id: 'docdb-v6',
-              content: 'Document DB v6: More New Providers, Change Tracking, & Global Query Filters!',
-              variant: 'tip',
-              link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false
             },
             {

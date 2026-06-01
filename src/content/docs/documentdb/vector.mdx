@@ -1,0 +1,289 @@
+---
+title: Vector / ANN Search
+---
+
+Vector queries let you find documents by **embedding similarity** — the nearest k documents to a query vector under a configurable distance metric. The library exposes a single `NearestVectors` API that runs on top of each provider's native ANN engine: `pgvector` on PostgreSQL, the `VECTOR` type on SQL Server 2025, DiskANN on CosmosDB, Atlas `$vectorSearch` on MongoDB, the `vss` extension on DuckDB, and `sqlite-vec` on SQLite. LiteDB, IndexedDB, and MySQL throw `NotSupportedException` because they have no comparable engine.
+
+The shape mirrors the spatial API: register a property with `MapVectorProperty<T>(...)`, then query with `store.Query<T>().NearestVectors(queryEmbedding, k: 10)`.
+
+## Vector Types
+
+### Embedding storage
+
+The vector lives on the document as a `ReadOnlyMemory<float>` — the same shape `Microsoft.Extensions.AI.Embedding<float>.Vector` returns. `System.Text.Json` round-trips it as a JSON array out of the box.
+
+```csharp
+public class Document
+{
+    public Guid Id { get; set; }
+    public string Content { get; set; } = "";
+    public ReadOnlyMemory<float> Embedding { get; set; }
+}
+```
+
+### VectorDistance
+
+The supported distance / similarity metrics.
+
+```csharp
+public enum VectorDistance
+{
+    Cosine,       // distance in [0, 2]; lower = closer
+    Euclidean,    // L2 distance; lower = closer
+    DotProduct,   // raw inner product; higher = closer
+    Hamming       // bit-vector distance (pgvector only)
+}
+```
+
+### VectorIndexKind
+
+The ANN index strategy the provider should provision.
+
+```csharp
+public enum VectorIndexKind
+{
+    None,            // flat scan
+    Flat,            // explicit flat index where the provider distinguishes
+    Hnsw,            // pgvector, DuckDB vss, Atlas — default
+    Ivf,             // pgvector ivfflat
+    DiskAnn,         // SQL Server 2025, CosmosDB
+    QuantizedFlat    // CosmosDB
+}
+```
+
+### VectorResult\<T\>
+
+Wraps a document with its computed similarity score.
+
+```csharp
+public class VectorResult<T> where T : class
+{
+    public required T Document { get; init; }
+    public float Score { get; init; }
+}
+```
+
+**Score semantics** are stable across providers:
+
+| Metric | Surfaced as | Direction |
+|---|---|---|
+| Cosine | Distance in `[0, 2]` | Lower = closer |
+| Euclidean | L2 distance | Lower = closer |
+| DotProduct | Raw inner product | Higher = closer (negated internally on engines that don't sort that way, so `ORDER BY score ASC` always means "nearest first") |
+| Hamming | Bit count | Lower = closer |
+
+## Configuration
+
+Register the embedding property with `MapVectorProperty<T>`. The mapping captures the dimension, metric, index kind, and tuning options.
+
+```csharp
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+    {
+        EnableVectorExtension = true     // load sqlite-vec on every connection
+    }
+}.MapVectorProperty<Document>(
+    d => d.Embedding,
+    dimensions: 1536,
+    metric: VectorDistance.Cosine,
+    indexKind: VectorIndexKind.Hnsw));
+```
+
+:::tip[AOT-safe overload]
+For full AOT/trimming safety, use the delegate overload which avoids expression compilation:
+
+```csharp
+opts.MapVectorProperty<Document>(
+    "Embedding",
+    d => d.Embedding,
+    (d, v) => d.Embedding = v,
+    dimensions: 1536,
+    metric: VectorDistance.Cosine);
+```
+:::
+
+You can map multiple types — each gets its own sidecar storage and index parameters:
+
+```csharp
+opts.MapVectorProperty<Memo>(m => m.Embedding, dimensions: 1536)
+    .MapVectorProperty<ProductDescription>(p => p.Embedding,
+        dimensions: 384,
+        metric: VectorDistance.DotProduct);
+```
+
+### Provider-specific options (`CosmosDbDocumentStoreOptions`, `MongoDbDocumentStoreOptions`)
+
+Cosmos and Mongo carry their own option classes (no shared base with `DocumentStoreOptions`). Each exposes the same `MapVectorProperty<T>` overloads with the provider-appropriate default for `indexKind`:
+
+```csharp
+var cosmos = new CosmosDbDocumentStore(new CosmosDbDocumentStoreOptions
+{
+    ConnectionString = "AccountEndpoint=...;AccountKey=...",
+    DatabaseName = "mydb"
+}.MapVectorProperty<Document>(d => d.Embedding,
+    dimensions: 1536,
+    indexKind: VectorIndexKind.DiskAnn));
+```
+
+## Checking Provider Support
+
+```csharp
+if (store.SupportsVector)
+{
+    var hits = await store.NearestVectors<Document>(queryEmbedding, k: 10);
+}
+```
+
+| Provider | `SupportsVector` |
+|---|---|
+| PostgreSQL (pgvector) | `true` |
+| SQL Server 2025 | `true` |
+| DuckDB (vss extension) | `true` |
+| CosmosDB | `true` (when vector properties are mapped) |
+| MongoDB (Atlas Vector Search) | `true` (when vector properties are mapped) |
+| SQLite (sqlite-vec) | `true` (when `EnableVectorExtension = true`) |
+| SQLCipher | `true` (inherits SQLite vec0 support) |
+| LiteDB | `false` |
+| IndexedDB | `false` |
+| MySQL | `false` |
+
+## Queries
+
+### NearestVectors (fluent)
+
+The preferred entry point. `Where(...)` predicates pre-filter where the provider supports it; `OrderBy` / `Paginate` / `GroupBy` are ignored (use `k` to bound the result count).
+
+```csharp
+var hits = await store.Query<Document>()
+    .Where(d => d.Tenant == tenantId)
+    .NearestVectors(queryEmbedding, k: 10);
+
+foreach (var hit in hits)
+    Console.WriteLine($"{hit.Score:F4}  {hit.Document.Content}");
+```
+
+### NearestVectors (low-level on `IDocumentStore`)
+
+Same call without the fluent builder — useful when the filter is `null` or you're not in a query chain.
+
+```csharp
+var hits = await store.NearestVectors<Document>(queryEmbedding, k: 10);
+
+// With an optional filter
+var scopedHits = await store.NearestVectors<Document>(
+    queryEmbedding, k: 10,
+    filter: d => d.Status == "Active");
+```
+
+### Filter semantics
+
+The contract is "matches the `Where` predicates AND is in the top-k nearest". The order of operations is provider-dependent and documented per backend below.
+
+- **CosmosDB, pgvector, SQL Server, Atlas, DuckDB** — pre-filter inside the ANN search. Result count == k unless fewer documents match.
+- **SQLite (sqlite-vec)** — ANN candidates are produced first, then the predicate is applied. The library pulls `k * sqlite.postFilterMultiplier` candidates so the post-filter doesn't starve the result set (default multiplier 4).
+
+## Auto-embed on Insert
+
+Wire `Microsoft.Extensions.AI.IEmbeddingGenerator<string, Embedding<float>>` so the vector is populated automatically when a text property is set. The hook fires inside `Insert`, `BatchInsert`, and `Upsert` before the document is serialized.
+
+```csharp
+using Shiny.DocumentDb.Extensions.AI;
+
+var generator = /* resolved from DI, e.g. AddOpenAIClient(...).AddEmbeddingGenerator(...) */;
+
+opts.MapVectorProperty<Document>(d => d.Embedding, dimensions: 1536)
+    .AutoEmbedOnInsert<Document>(
+        generator,
+        sourceSelector: d => d.Content,
+        targetSetter: (d, vec) => d.Embedding = vec,
+        targetGetter: d => d.Embedding);   // optional — skip when vector already set
+
+await store.Insert(new Document { Content = "hello world" });
+// document.Embedding is now populated.
+```
+
+**Skip rules:**
+- If `sourceSelector` returns `null` or `""`, the hook is a no-op (the vector stays at default).
+- If `targetGetter` is provided and the existing vector is non-empty, the hook is a no-op — explicit writes win.
+
+If `IEmbeddingGenerator` isn't available at runtime (the hook captured `null`), the first `Insert` throws `InvalidOperationException` with a clear message instead of silently writing an empty vector.
+
+## Tuning
+
+`VectorIndexOptions` exposes the common ANN knobs plus a `ProviderHints` dictionary for the long tail.
+
+```csharp
+opts.MapVectorProperty<Document>(
+    d => d.Embedding,
+    dimensions: 1536,
+    metric: VectorDistance.Cosine,
+    indexKind: VectorIndexKind.Hnsw,
+    configureIndex: i =>
+    {
+        i.HnswM = 16;
+        i.HnswEfConstruction = 64;
+        i.HnswEfSearch = 40;
+        i.IvfLists = 100;
+        i.ProviderHints["sqlite.postFilterMultiplier"] = 8;
+        i.ProviderHints["atlas.indexName"] = "my-vec-index";
+        i.ProviderHints["atlas.numCandidates"] = 200;
+    });
+```
+
+Recognized hints:
+
+| Hint | Type | Provider | Default |
+|---|---|---|---|
+| `sqlite.postFilterMultiplier` | int | SQLite | 4 |
+| `atlas.indexName` | string | MongoDB Atlas | `vector_index_{type}` |
+| `atlas.numCandidates` | int | MongoDB Atlas | `10 * k` |
+
+Unknown keys are silently ignored per provider.
+
+## How It Works
+
+### PostgreSQL — `pgvector` sidecar table
+
+`CREATE EXTENSION IF NOT EXISTS vector` runs idempotently on every connection. Each `(documents-table, document-type)` pair gets its own sidecar table with a `vector(n)` column and an HNSW or IVF index when configured.
+
+- Operators used per metric: `<=>` (cosine), `<->` (L2), `<#>` (negative inner product), `<+>` (Hamming).
+- Pre-filter via `JOIN` against the documents table — your `Where(...)` clause is translated to SQL and runs at the planner level alongside the ANN ordering.
+- Per-query `SET LOCAL hnsw.ef_search` is emitted when `VectorIndexOptions.HnswEfSearch` is set.
+
+### SQL Server 2025 — native `VECTOR(n)`
+
+Sidecar table with a `VECTOR(n)` column. `VECTOR_DISTANCE('cosine' | 'euclidean' | 'dot', col, @v)` powers the ranking, and `CREATE VECTOR INDEX ... WITH (METRIC = ..., TYPE = DISKANN)` is attempted under a `TRY/CATCH` so older SQL Server versions degrade to sequential scan rather than failing table init. Hamming throws.
+
+### CosmosDB — embedding policy + `VectorDistance()`
+
+The container's `VectorEmbeddingPolicy` and `IndexingPolicy.VectorIndexes` are configured on first touch from the mapped properties. The query is a standard Cosmos SQL `SELECT TOP @k ... ORDER BY VectorDistance(...)` with the score returned as a projection. Pre-filter via your `Where(...)` predicate translated by the existing Cosmos expression visitor.
+
+### MongoDB — `$vectorSearch` aggregation (Atlas only)
+
+The query is built as a two-stage aggregation: `$vectorSearch` with `path`, `queryVector`, `numCandidates`, `limit`, and a `filter` clause for the type-name match, then `$project` to surface the document body and the `vectorSearchScore` meta.
+
+Atlas requires a pre-existing vector search index. Use `atlas.indexName` to point at an existing index (default convention is `vector_index_{type}`). On-prem MongoDB throws `NotSupportedException` with a clear message — `$vectorSearch` is an Atlas feature.
+
+### DuckDB — `vss` extension
+
+The `vss` extension is auto-loaded on every connection alongside `json`. The sidecar table stores `FLOAT[N]` arrays, optionally indexed with HNSW. Distance functions: `array_cosine_distance`, `array_distance` (L2), `array_inner_product` (negated for `ORDER BY ASC` semantics). HNSW persistence on file-backed DBs uses the `hnsw_enable_experimental_persistence` flag.
+
+### SQLite — `sqlite-vec` virtual table
+
+Two sidecar tables per type — a `vec0` virtual table and an integer-rowid map (vec0 indexes only integer rowids, mirroring the R*Tree spatial pattern). The `sqlite-vec` extension is loaded on every connection via `SqliteConnection.LoadExtension(VectorExtensionPath)`.
+
+- Extension loading is **opt-in** via `SqliteDatabaseProvider.EnableVectorExtension = true`. The user must ship the native binary; the loader searches the standard OS paths and the app directory.
+- vec0 has no HNSW — searches are flat-scan. When a `Where(...)` filter is in play, the library asks vec0 for `k * postFilterMultiplier` candidates and then filters in the JOIN.
+
+### CRUD sync
+
+| Operation | Vector sync |
+|---|---|
+| Insert / Update / Upsert | Extracts the mapped vector and upserts into the sidecar |
+| BatchInsert | Vector upserts run inside the same transaction so a vector write failure rolls the batch back |
+| Remove | Deletes the sidecar row |
+| Clear | Truncates the sidecar for the type |
+| `RunInTransaction` (v6) | Vector queries inside a transaction throw `NotSupportedException` — run them against the outer store |
+
+A vector field that's left at default (zero-length `ReadOnlyMemory<float>`) is skipped on the write path — the document is stored without an embedding. Dimension mismatches throw `ArgumentException` with the document Id and expected/actual dimension so the failure is easy to diagnose.

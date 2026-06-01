@@ -411,6 +411,12 @@ export const sidebarTopics = [
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
         ]
       },
+      {
+        label: 'Desktop',
+        items:[
+          { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
+        ]
+      },
       { label: 'Blazor Playground', link: '/playground/controls/', attrs: { target: '_blank' } },
       { label: 'Release Notes', link: 'controls/release-notes' }
     ]
@@ -434,6 +440,7 @@ export const sidebarTopics = [
           { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
           { label: 'Query Filters', link: 'documentdb/query-filters' },
           { label: 'Spatial', link: 'documentdb/spatial' },
+          { label: 'Vector / ANN Search', link: 'documentdb/vector' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           {
             label: 'Providers',

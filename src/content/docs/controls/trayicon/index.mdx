@@ -1,0 +1,201 @@
+---
+title: Tray Icon
+description: Cross-platform system tray / status-bar / menu-bar icon for .NET MAUI desktop apps — Windows, macOS AppKit, MacCatalyst, and Linux
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+A cross-platform system tray / status-bar / menu-bar icon for .NET MAUI desktop apps. Set an icon, attach a context menu, listen to clicks. The same MAUI code lights up the right native API on each platform:
+
+- **Windows** — `Shell_NotifyIcon` (Win32) with a hidden message-only window for click routing
+- **macOS (AppKit)** — `NSStatusBar.SystemStatusBar` via the native `net10.0-macos` bindings
+- **MacCatalyst** — bridges to AppKit at runtime through the Objective-C runtime
+- **Linux** — `libayatana-appindicator3` + GTK 3 (requires the system package to be installed)
+
+This ships as a **separate package** — `Shiny.Maui.Controls.TrayIcon` — because the tray-icon TFM matrix is desktop-only and pulls in platform targets the main controls package does not.
+
+There is no Blazor equivalent: a tray icon is a desktop OS concept.
+
+- <NugetDownloads name="Shiny.Maui.Controls.TrayIcon" />
+
+<PlatformSupport frameworks={["maui"]} os={["windows", "macos", "linux"]} />
+
+## Features
+
+- One API across Windows, macOS AppKit, MacCatalyst, and Linux
+- Fluent menu builder with items, check items, separators, and submenus
+- Mutate any menu item property (`Label`, `IsEnabled`, `IsVisible`, check state) and the native menu rebuilds automatically
+- Primary / secondary / double-click events with screen coordinates
+- Tooltip, optional title/label (macOS/Linux), runtime show/hide
+- macOS template-image flag for automatic light/dark menu bar tinting
+- PNG bytes work on every platform — Windows transparently wraps them in an ICO container
+- AOT-compatible: P/Invoke + `[UnmanagedCallersOnly]` trampolines, no reflection
+
+## Setup
+
+```bash
+dotnet add package Shiny.Maui.Controls.TrayIcon
+```
+
+In `MauiProgram.cs`:
+
+```csharp
+using Shiny;
+
+var builder = MauiApp.CreateBuilder();
+builder
+    .UseMauiApp<App>()
+    .UseTrayIcon();
+```
+
+`UseTrayIcon()` registers `ITrayIconFactory` as a singleton and picks the correct per-platform implementation automatically. On platforms with no tray concept (Android, iOS), `factory.Create()` throws `PlatformNotSupportedException`, so guard with `OperatingSystem.IsWindows() || OperatingSystem.IsMacCatalyst() || OperatingSystem.IsMacOS() || OperatingSystem.IsLinux()` if the same MAUI app runs on mobile.
+
+## Quick Start
+
+Resolve `ITrayIconFactory` from DI, then create as many icons as you need. Always `Dispose()` when you're done.
+
+```csharp
+public class MyTrayHost(ITrayIconFactory factory)
+{
+    ITrayIcon? icon;
+
+    public void Start()
+    {
+        this.icon = factory.Create();
+        this.icon.Tooltip = "My App";
+        this.icon.IsTemplateImage = true; // macOS auto-tint
+        this.icon.SetIcon(() => FileSystem.OpenAppPackageFileAsync("trayicon.png").Result);
+
+        this.icon.SetMenu(TrayMenu.Build(b => b
+            .Item("Show window", () => ShowMainWindow())
+            .Check("Notifications", true, on => SetNotifications(on))
+            .Separator()
+            .Submenu("Status", s => s
+                .Item("Available", () => SetStatus(Status.Available))
+                .Item("Busy",      () => SetStatus(Status.Busy))
+                .Item("Away",      () => SetStatus(Status.Away)))
+            .Separator()
+            .Item("Quit", () => Application.Current!.Quit())));
+
+        this.icon.PrimaryClick   += (_, _) => ShowMainWindow();
+        this.icon.DoubleClick    += (_, _) => OpenSettings();
+    }
+
+    public void Stop() => this.icon?.Dispose();
+}
+```
+
+Pass a `Func<Stream>` (not a `Stream` directly) so the handler can re-read the icon for DPI or theme changes.
+
+## Building Menus
+
+`TrayMenu.Build(b => …)` is the recommended way to construct menus. The underlying `TrayMenu` is an `ObservableCollection`, so you can also build it imperatively and mutate it at any time — the platform handler subscribes to changes and rebuilds the native menu automatically.
+
+```csharp
+var pauseSync = new TrayMenuItem("Pause sync", () => Pause());
+
+var menu = new TrayMenu();
+menu.Items.Add(pauseSync);
+menu.Items.Add(new TraySeparator());
+menu.Items.Add(new TrayMenuItem("Quit", () => Application.Current!.Quit()));
+
+icon.SetMenu(menu);
+
+// Later — these mutations rebuild the menu automatically:
+pauseSync.Label = "Resume sync";
+pauseSync.IsEnabled = !syncing;
+```
+
+### Menu item types
+
+| Type | Builder method | Notes |
+|---|---|---|
+| `TrayMenuItem` | `.Item(label, action)` | Standard clickable item. Optional `Accelerator` string for the displayed shortcut hint |
+| `TrayCheckMenuItem` | `.Check(label, isChecked, toggled)` | Renders a check state. Toggled callback receives the new value |
+| `TraySeparator` | `.Separator()` | Visual separator |
+| `TraySubmenu` | `.Submenu(label, builder)` | Nested menu — same fluent API |
+
+All items expose `IsEnabled`, `IsVisible`, and `Label`. `Accelerator` on `TrayMenuItem` is a best-effort display hint — actual key dispatching is the OS's responsibility.
+
+## ITrayIcon API
+
+| Member | Description |
+|---|---|
+| `SetIcon(Func<Stream>)` | Set the icon from a stream factory. PNG or ICO bytes both work — Windows auto-wraps PNG as ICO |
+| `Tooltip` | Hover tooltip (Windows / macOS) or accessible description (Linux) |
+| `Title` | Optional text label shown beside or instead of the icon on macOS and Linux. Ignored on Windows |
+| `IsVisible` | Show or hide without disposing |
+| `IsTemplateImage` | macOS only — when `true`, the icon is a template image and auto-tints for the light/dark menu bar. Supply a flat black-on-transparent PNG |
+| `SetMenu(TrayMenu)` | Assign or replace the context menu |
+| `ShowMenu()` | Programmatically open the menu — useful from a `PrimaryClick` handler on Windows |
+| `PrimaryClick` | Left-click. On macOS, primary-click already opens the menu when one is assigned |
+| `SecondaryClick` | Right-click / control-click |
+| `DoubleClick` | Windows + macOS only — Linux has no double-click signal |
+| `Dispose()` | Removes the tray icon and frees native resources |
+
+`TrayClickEventArgs` carries `X` / `Y` screen coordinates (best-effort across platforms).
+
+## Platform Notes
+
+### Windows
+
+- Uses Win32 `Shell_NotifyIcon` directly with a hidden message-only window for `WM_TRAYICON` callbacks.
+- Right-click opens the menu via `TrackPopupMenuEx`.
+- PNG bytes you pass to `SetIcon` are wrapped in a Vista-style ICO container at runtime so you don't need a separate `.ico` file.
+- **Windows 11** hides new tray icons in the overflow flyout by default. Users have to drag yours into the always-visible area — document this for your users.
+- Always call `Dispose()` on app shutdown. Orphaned tray icons can persist in the Windows tray until reboot.
+
+### macOS (AppKit)
+
+- Native macOS app target (`net10.0-macos`) using `NSStatusBar.SystemStatusBar.CreateStatusItem`.
+- Click events route through `NSStatusItem.Button.Activated`. Left vs right is distinguished by inspecting `NSApplication.SharedApplication.CurrentEvent`.
+- On macOS, **primary (left) click opens the menu** when one is assigned. To get a left-click event handler that doesn't open the menu, don't call `SetMenu` and use `ShowMenu()` from within your handler instead.
+- For a "menu bar app" (no Dock icon), add `LSUIElement = true` to your app's `Info.plist`.
+
+### MacCatalyst
+
+- Catalyst is UIKit and has no `NSStatusItem`. The implementation `dlopen`s `/System/Library/Frameworks/AppKit.framework/AppKit` at runtime and goes through `objc_msgSend`.
+- Menu callbacks ride a runtime-allocated `NSObject` subclass (`ShinyTrayCB`) with `[UnmanagedCallersOnly]` trampolines — fully AOT-compatible.
+- Hardened sandboxes that disallow loading AppKit will reject the `dlopen`. Normal Catalyst apps work fine.
+
+### Linux
+
+- Hard dependency on `libayatana-appindicator3.so.1` and `libgtk-3.so.0`. Install via your distro:
+  - Debian/Ubuntu: `apt install libayatana-appindicator3-1 libgtk-3-0`
+  - Fedora: `dnf install libayatana-appindicator-gtk3 gtk3`
+  - Arch: `pacman -S libayatana-appindicator gtk3`
+- GNOME 40+ users need the **AppIndicator extension** installed (KDE works out of the box).
+- The first tray icon initializes GTK (`gtk_init_check`); subsequent icons reuse it.
+- The app-indicator API takes a file path, so the icon PNG is written to a temp file.
+
+## Template Images on macOS
+
+`IsTemplateImage = true` tells AppKit that the image is a template — it ignores the image's colors and re-renders it in the system menu bar tint (black on light bars, white on dark bars, with selection highlighting). Pass a **flat black-on-transparent PNG** for this to look right. For non-template icons (full-color logos), leave it `false`.
+
+```csharp
+icon.IsTemplateImage = true;
+icon.SetIcon(() => OpenStream("templates/menubar-icon.png"));
+```
+
+## Disposal
+
+Tray icons live for the lifetime of your process by default. Always dispose them explicitly when you're done — typically when the app is quitting, or when the user toggles the tray feature off.
+
+```csharp
+public void OnAppShutdown()
+{
+    this.icon?.Dispose();
+}
+```
+
+Forgetting to dispose can leave a ghost icon in the Windows tray that hangs around until the user hovers over it or signs out.
+
+## Not Implemented (Yet)
+
+Out of scope for the initial release:
+
+- Per-menu-item icons
+- Balloon / toast notifications from the tray (use `Shiny.Maui.Controls.Toast` or platform notifications instead)
+- Badge / overlay numbers on the tray icon
+- Animated icon ticking (compose it in caller code by calling `SetIcon` on a timer)
+- Hardware keyboard accelerator dispatch — `Accelerator` strings are display hints only
