@@ -356,8 +356,8 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'docdb-v5',
-              content: 'Document DB v5: New Providers, Versioning, Spatial, Multi-Tenancy, & Multi-DB Support',
+              id: 'docdb-v6',
+              content: 'Document DB v6: More New Providers, Change Tracking, & Global Query Filters!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false

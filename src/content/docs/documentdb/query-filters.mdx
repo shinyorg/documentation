@@ -1,0 +1,81 @@
+---
+title: Global Query Filters
+---
+
+Register a predicate that's automatically AND-applied to every query of `T` — the same shape as Entity Framework Core's `HasQueryFilter`. Use it for soft-delete, row-level security, or any "active only" scope that should be transparent to consumer code.
+
+## Registration
+
+```csharp
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}
+.AddQueryFilter<User>(u => !u.IsDeleted)                          // unnamed
+.AddQueryFilter<Order>("tenant", o => o.TenantId == ctx.Current)  // named
+.AddQueryFilter<Order>("status", o => o.Status != "Archived"));
+```
+
+`AddQueryFilter<T>` is available on `DocumentStoreOptions` (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, DuckDB) and on the provider-specific options classes for `LiteDbDocumentStore`, `CosmosDbDocumentStore`, `MongoDbDocumentStore`, and `IndexedDbDocumentStore`.
+
+Multiple filters compose with AND. User-supplied `.Where(...)` predicates are AND'd on top.
+
+## Filtered vs unfiltered paths
+
+| Path | Filtered? |
+|---|---|
+| `Query<T>()` and every terminal (`ToList`, `ToAsyncEnumerable`, `Count`, `Any`, `Max`/`Min`/`Sum`/`Average`, `ExecuteUpdate`, `ExecuteDelete`) | Yes |
+| `query.NotifyOnChange()` per-query change monitoring | Yes — only changes whose document matches the filter are emitted |
+| `Get<T>(id)` / `GetDiff<T>(id, ...)` | Yes — returns `null` when the stored document fails the filter |
+| `Update<T>` | Yes — throws "not found" when the stored document fails the filter |
+| `SetProperty<T>` / `RemoveProperty<T>` | Yes — returns `false` when the stored document fails the filter |
+| `Remove<T>(id)` | Yes — returns `false` (no-op) when the stored document fails the filter |
+| `Clear<T>()` | Yes — only matching documents are deleted |
+| `Count<T>(rawSql)` | Yes |
+| **`Insert<T>` / `BatchInsert<T>`** | **No** — inserts always succeed (matches EF Core) |
+| **`Upsert<T>`** | **No** — Upsert bypasses filters; use `Get` + `Update` if you need filter enforcement on the update path |
+| **`Query<T>(rawSql)` / `QueryStream<T>(rawSql)`** | **No** — raw SQL is yours to write (matches EF Core's `FromSqlRaw`) |
+
+## Opting out per query
+
+```csharp
+// Disable every filter on this query
+var allUsers = await store.Query<User>().IgnoreQueryFilters().ToList();
+
+// Disable specific named filters; others still apply
+var anyTenant = await store.Query<Order>().IgnoreQueryFilters("tenant").ToList();
+
+// Multiple names
+var dump = await store.Query<Order>().IgnoreQueryFilters("tenant", "status").ToList();
+```
+
+:::caution[Call before `Select(...)`]
+`IgnoreQueryFilters` must be called on the source query, **before** `Select(...)`. Calling it on a projected query throws `InvalidOperationException`.
+:::
+
+## Captured variables re-read per query
+
+Filters are translated on every query, so closures pick up the current value automatically:
+
+```csharp
+var ctx = new TenantContext();
+options.AddQueryFilter<Order>("tenant", o => o.TenantId == ctx.Current);
+
+ctx.Current = "acme";
+await store.Query<Order>().ToList(); // filters by acme
+
+ctx.Current = "globex";
+await store.Query<Order>().ToList(); // re-translated, filters by globex
+```
+
+This makes filters a natural building block for per-request multi-tenancy without rebuilding the store.
+
+## Caveats
+
+- **`JsonTypeInfo<T>` is required** when filters are registered on SQL providers — the filter is translated by the same expression visitor as `Where`. Configure a `JsonSerializerContext` via `DocumentStoreOptions.JsonSerializerOptions`, or pass `JsonTypeInfo<T>` to call sites that take it. Without one, the first filtered call throws `InvalidOperationException`.
+- **Insert bypasses filters by design.** A user who inserts a `User { IsDeleted = true }` will have a row that's immediately invisible to subsequent queries — match EF Core's behavior. Catch this at the API layer if it matters.
+- **Spatial sidecar tables** are aware of single-row Remove (skipped when the filter rejects) but `Clear<T>()` with active filters skips the spatial clear entirely to avoid over-deleting. If you mix soft-delete with spatial indexing, prefer `Update` (setting the deleted flag) over `Remove`.
+
+## Relationship to `TenantIdAccessor`
+
+`TenantIdAccessor` on `DocumentStoreOptions` is a built-in special case of a query filter — it's wired into the SQL layer directly (adds a `TenantId` column and filters every read/write by it). Query filters are a generalisation: they translate arbitrary LINQ predicates and apply them at the query level. You can use both side-by-side; query filters cover everything tenancy does not, including soft-delete and row-level scopes inside a single tenant.
