@@ -31,17 +31,10 @@ await store.DropAllIndexesAsync<User>();
 | SQLite / SQLCipher | `CREATE INDEX IF NOT EXISTS idx_json_User_name ON documents (json_extract(Data, '$.name')) WHERE TypeName = 'User';` |
 | PostgreSQL | `CREATE INDEX IF NOT EXISTS idx_json_User_name ON documents ((Data #>> '{name}')) WHERE TypeName = 'User';` |
 | MySQL | `CREATE INDEX idx_json_User_name ON documents ((CAST(JSON_EXTRACT(Data, '$.name') AS CHAR(255))));` |
+| SQL Server | `ALTER TABLE [documents] ADD cc_idx_json_User_name AS CAST(JSON_VALUE(Data, '$.name') AS NVARCHAR(450)); CREATE INDEX idx_json_User_name ON [documents] (cc_idx_json_User_name) WHERE TypeName = N'User';` |
 
-:::caution[SQL Server — known issue]
-On SQL Server, `CreateIndexAsync` currently emits an index on the `TypeName` column and **ignores the JSON path**. It does not create a useful index for property lookups. Create JSON indexes manually until this is fixed:
-
-```sql
-ALTER TABLE documents
-  ADD NameIdx AS JSON_VALUE(Data, '$.name') PERSISTED;
-
-CREATE INDEX idx_documents_name ON documents (NameIdx)
-  WHERE TypeName = 'User';
-```
+:::note
+SQL Server cannot index a `JSON_VALUE` expression directly, so the provider adds a `PERSISTED` computed column (`cc_{indexName}`) and indexes that. `DropIndexAsync` removes both the index and the computed column.
 :::
 
 :::note
@@ -78,7 +71,27 @@ Some predicates cannot use an expression index, even if one exists for the prope
 
 ### Composite / multi-column indexes
 
-Not supported. `CreateIndexAsync<T>(Expression<Func<T, object>>)` takes a **single property-access chain**. If you need a multi-column index, add it manually via raw DDL (provider-specific) — but most workloads do better with two separate single-column indexes plus letting the planner combine them.
+Pass multiple property-access expressions to index over several JSON paths in a single B-tree:
+
+```csharp
+// Composite index on (Country, Age) for User
+await store.CreateIndexAsync(ctx.User, u => u.Country, u => u.Age);
+
+// Drop the same composite by repeating the key in order
+await store.DropIndexAsync(ctx.User, u => u.Country, u => u.Age);
+```
+
+Composite indexes use the naming convention `idx_json_{typeName}__{path1}__{path2}…` (paths joined with double underscore) and follow standard B-tree leftmost-prefix rules: a query filtering only on `Country` can still use the composite, but one filtering only on `Age` cannot.
+
+| Provider | Emitted DDL |
+|---|---|
+| SQLite / SQLCipher | `CREATE INDEX IF NOT EXISTS idx_json_User__country__age ON documents (json_extract(Data, '$.country'), json_extract(Data, '$.age')) WHERE TypeName = 'User';` |
+| PostgreSQL | `CREATE INDEX IF NOT EXISTS idx_json_User__country__age ON "documents" ((Data #>> '{country}'), (Data #>> '{age}')) WHERE TypeName = 'User';` |
+| MySQL | `CREATE INDEX idx_json_User__country__age ON \`documents\` ((CAST(JSON_EXTRACT(Data, '$.country') AS CHAR(255))), (CAST(JSON_EXTRACT(Data, '$.age') AS CHAR(255))));` |
+| DuckDB | `CREATE INDEX IF NOT EXISTS idx_json_User__country__age ON "documents" (json_extract_string(Data, '$.country'), json_extract_string(Data, '$.age'));` |
+| SQL Server | One `PERSISTED` computed column per path (`cc_{indexName}_0`, `cc_{indexName}_1`, …), then a single `CREATE INDEX` over all of them filtered by `TypeName`. `DropIndexAsync` discovers the backing columns via `sys.index_columns` and removes them after the index. |
+
+If most of your workloads filter on just one of the columns, prefer two single-column indexes and let the planner combine — composite indexes earn their keep when you consistently filter (or sort) on the leftmost prefix.
 
 ### Write amplification
 

@@ -25,8 +25,8 @@ For provider-specific install, setup, and feature notes see the per-provider pag
 |---|---|---|---|---|---|---|---|---|---|---|
 | Storage column type | `TEXT` | `TEXT` | `JSONB` | `JSON` (SQL Server 2025+ / Azure SQL) | `JSON` | `JSON` (DuckDB native) | native JSON (string `data` envelope) | `BsonDocument` | `BsonDocument` | object store record |
 | `Query<T>(string sql, ...)` raw SQL | yes | yes | yes | yes | yes | yes | yes (Cosmos SQL) | **no** | **no** | **no** |
-| `CreateIndexAsync<T>(x => x.Prop)` | yes | yes | yes | **emits broken DDL — see below** | yes | yes (functional index on `json_extract_string`) | n/a (Cosmos auto-indexes) | n/a (Mongo indexes manually) | n/a | n/a (schema-time only) |
-| Composite / multi-column index | no | no | no | no | no | no | n/a | n/a | n/a | n/a |
+| `CreateIndexAsync<T>(x => x.Prop)` | yes | yes | yes | yes (persisted computed column + filtered index) | yes | yes (functional index on `json_extract_string`) | n/a (Cosmos auto-indexes) | n/a (Mongo indexes manually) | n/a | n/a (schema-time only) |
+| Composite / multi-column index | yes | yes | yes | yes (persisted computed columns + composite index) | yes | yes | n/a (Cosmos auto-indexes) | n/a (Mongo indexes manually) | n/a | n/a (schema-time only) |
 | Predicate translated to SQL | yes | yes | yes | yes | yes | yes | yes | **partial — server-side filter + C# evaluation** | **no — runs in C# after load** | **no — runs in C# after load** |
 | `Upsert` deep merge (RFC 7396) | yes (`json_patch`) | yes | **shallow only** (`jsonb` `\|\|`) | **shallow only** (hand-rolled `OPENJSON`) | yes (`JSON_MERGE_PATCH`) | yes (`json_merge_patch`) | yes (C# recursive merge) | yes (C# recursive merge) | yes (C# recursive merge) | yes (C# recursive merge) |
 | Spatial (`WithinRadius`, etc.) | yes (R*Tree sidecar) | yes | no | no | no | no | yes (native GeoJSON) | no | no | no |
@@ -110,20 +110,20 @@ and an `Upsert` patch:
 On PostgreSQL and SQL Server, **never** send a partial nested object to `Upsert` unless you intend to replace the whole sub-object. Either include all fields of the nested object, use `SetProperty` for individual nested fields, or use full `Update` to replace the document.
 :::
 
-## SQL Server `CreateIndexAsync` — known issue
+## SQL Server `CreateIndexAsync`
 
-On SQL Server, `CreateIndexAsync<T>(x => x.SomeProperty)` currently emits an index on the `TypeName` column and **ignores the JSON path**. It does not create a useful index for property lookups. Track the repository issues for status; in the meantime, create the index manually:
+SQL Server cannot index a `JSON_VALUE` expression directly, so `CreateIndexAsync<T>(x => x.SomeProperty)` adds a `PERSISTED` computed column and builds a filtered index on it:
 
 ```sql
--- Create a computed column for the JSON path you want to index
-ALTER TABLE documents
-  ADD NameIdx AS JSON_VALUE(Data, '$.name') PERSISTED;
+ALTER TABLE [documents]
+    ADD cc_idx_json_User_name AS CAST(JSON_VALUE(Data, '$.name') AS NVARCHAR(450));
 
-CREATE INDEX idx_documents_name ON documents (NameIdx)
-  WHERE TypeName = 'User';
+CREATE INDEX idx_json_User_name
+    ON [documents] (cc_idx_json_User_name)
+    WHERE TypeName = N'User';
 ```
 
-The other SQL providers (SQLite, PostgreSQL, MySQL) emit working partial expression / functional indexes — see [Indexes](/documentdb/indexes/) for the exact DDL.
+`DropIndexAsync` drops both the index and the backing computed column. The other SQL providers (SQLite, PostgreSQL, MySQL) emit partial expression / functional indexes — see [Indexes](/documentdb/indexes/) for the exact DDL.
 
 ## Storage type implications
 
@@ -240,7 +240,7 @@ SQLite quotes table identifiers with `"` so a type named `Order` or `User` works
 |---|---|
 | Mobile / desktop / single-process | **SQLite** (or **SQLCipher** if data must be encrypted at rest) |
 | ASP.NET app, owned database | **PostgreSQL** — JSONB indexability, mature concurrency |
-| Existing SQL Server estate, on SQL Server 2025+ | **SQL Server** — but be aware of the `CreateIndexAsync` known issue above |
+| Existing SQL Server estate, on SQL Server 2025+ | **SQL Server** — full feature parity except spatial and hot `Backup()` |
 | Existing MySQL estate | **MySQL** — full feature parity except spatial |
 | Embedded analytics, on-device aggregates, Parquet/CSV ingest alongside docs | **DuckDB** — native `JSON` type, server-side `json_merge_patch`, columnar engine |
 | Globally distributed, serverless / pay-per-RU | **CosmosDB** — native spatial, automatic indexing, but watch RU cost on unindexed paths |
