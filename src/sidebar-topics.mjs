@@ -431,6 +431,7 @@ export const sidebarTopics = [
           { label: 'Projections & Streaming', link: 'documentdb/projections' },
           { label: 'Aggregates', link: 'documentdb/aggregates' },
           { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
+          { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
           { label: 'Spatial', link: 'documentdb/spatial' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           {

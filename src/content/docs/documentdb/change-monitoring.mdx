@@ -1,0 +1,150 @@
+---
+title: Change Monitoring
+---
+
+Document DB exposes two complementary change-notification surfaces:
+
+| Capability | When to use |
+|---|---|
+| **`IObservableDocumentStore`** — in-process | React to writes performed through *this* store instance. Drive reactive UI from your own writes. Buffered inside transactions and emitted on commit. |
+| **`IChangeFeedDocumentStore`** — native change feed | Observe writes from *any* writer (other processes, other connections, other store instances). Backed by the database's own mechanism. |
+
+Both surface a `DocumentChange<T>` envelope describing what happened.
+
+## DocumentChange&lt;T&gt;
+
+| Property | Description |
+|---|---|
+| `ChangeType` | `Inserted`, `Updated`, `Removed`, or `Cleared` |
+| `Id` | The affected document Id. Empty for `Cleared` (affects every document of the type). |
+| `Document` | Populated for `Inserted` and full-document `Updated` paths. `null` for `Removed`, `Cleared`, `SetProperty`, and `RemoveProperty` (those paths do not materialize the document). |
+
+## In-process change monitoring
+
+Implemented by `DocumentStore` (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL) and `LiteDbDocumentStore`. Cosmos DB, MongoDB, IndexedDB, and DuckDB do not implement it — calling `NotifyOnChange` on those stores throws `NotSupportedException`.
+
+### Subscribe to all changes for a type
+
+```csharp
+using var cts = new CancellationTokenSource();
+
+_ = Task.Run(async () =>
+{
+    await foreach (var change in store.NotifyOnChange<User>(cts.Token))
+    {
+        Console.WriteLine($"{change.ChangeType} {change.Id} {change.Document?.Name}");
+    }
+});
+
+await store.Insert(new User { Id = "u1", Name = "Alice", Age = 25 });
+await store.Update(new User { Id = "u1", Name = "Alice", Age = 26 });
+await store.Remove<User>("u1");
+
+cts.Cancel();
+```
+
+`NotifyOnChange<T>` is a hot stream — subscribers only receive changes that occur after the `await foreach` starts iterating. Each subscriber gets its own underlying channel; multiple subscribers do not contend.
+
+### Watch a single document
+
+```csharp
+var observable = (IObservableDocumentStore)store;
+
+await foreach (var change in observable.WhenDocumentChanged<Order>("ord-1", ct))
+{
+    UpdateUi(change);
+}
+```
+
+`Cleared` events are passed through (they affect every document of the type, including the one you are watching).
+
+### Per-query monitoring
+
+Every fluent query exposes `.NotifyOnChange(ct)`. The change stream is filtered by the query's `Where` predicates — only changes whose document matches every predicate are emitted. `OrderBy`, `Paginate`, and `GroupBy` are ignored (they affect result shape, not membership).
+
+```csharp
+var pending = store.Query<Order>().Where(o => o.Status == "Pending");
+
+await foreach (var change in pending.NotifyOnChange(ct))
+{
+    // Only fires when an Order with Status == "Pending" is inserted or updated.
+}
+```
+
+:::caution[Property-level paths pass through unfiltered]
+`SetProperty`, `RemoveProperty`, `Remove`, and `Clear` do not materialize the full document, so `DocumentChange<T>.Document` is `null`. The per-query filter cannot test membership against a null document, so it lets these events through unconditionally. Re-query in your handler if you need to know whether the document still matches.
+:::
+
+`NotifyOnChange` is not supported after `Select(...)` — call it on the source-typed query, or use `IObservableDocumentStore.NotifyOnChange<T>` and project in the consumer.
+
+### Transaction buffering
+
+Changes performed inside `RunInTransaction` are buffered and emitted only after the transaction commits. A rollback discards them — no event is ever delivered:
+
+```csharp
+await store.RunInTransaction(async tx =>
+{
+    await tx.Insert(new User { Id = "u1", Name = "Alice" });
+    await tx.Insert(new User { Id = "u2", Name = "Bob" });
+    // Subscribers see nothing yet.
+});
+// Subscribers receive both Inserted events here, in order.
+```
+
+### Cancellation and unsubscribe
+
+Cancel the `CancellationToken` passed to `NotifyOnChange`, or break out of the `await foreach`. The underlying channel is unregistered automatically when the iterator exits.
+
+## Native change feeds
+
+`IChangeFeedDocumentStore.SubscribeChanges<T>` observes the underlying data itself — including changes from other processes, other connections, and other store instances. Backed by each database's native mechanism:
+
+| Provider | Mechanism |
+|---|---|
+| **PostgreSQL** | `LISTEN` / `NOTIFY` with row-level triggers (true push) |
+| **SQL Server** | Change Tracking, optionally with `SqlDependency` query notifications for low-latency wake-ups (configure via `SqlServerChangeFeedOptions`) |
+| **Cosmos DB** | Native Change Feed API (with a lease container) |
+
+Provisioning — triggers, enabling Change Tracking — is automatic and idempotent. SQLite, LiteDB, IndexedDB, MySQL, and DuckDB throw `NotSupportedException`.
+
+```csharp
+await using var sub = await store.SubscribeChanges<User>(async (change, ct) =>
+{
+    Console.WriteLine($"{change.ChangeType} {change.Id}");
+});
+
+// Subscription runs until `sub` is disposed.
+```
+
+### SQL Server: query notifications
+
+By default the SQL Server change feed polls Change Tracking on a configurable interval. Enable `SqlDependency`-driven query notifications for push-style wake-ups:
+
+```csharp
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqlServerDatabaseProvider(
+        connectionString,
+        changeFeedOptions: new SqlServerChangeFeedOptions
+        {
+            UseQueryNotifications = true,
+            PollingInterval = TimeSpan.FromSeconds(15) // fallback when notifications are unavailable
+        })
+});
+```
+
+### Cosmos DB: lease container
+
+The Cosmos DB change feed requires a lease container; the provider creates one automatically inside the configured database when needed.
+
+## In-process vs native change feeds
+
+| | In-process (`NotifyOnChange`) | Native (`SubscribeChanges`) |
+|---|---|---|
+| **Sees** | Writes through *this* store instance | All writers to the database |
+| **Backed by** | In-memory `Channel<T>` fan-out | Database-native (LISTEN/NOTIFY, CT, Change Feed) |
+| **Setup cost** | Zero | Provisions triggers / change tracking lazily |
+| **Stops on** | Cancel token / break the `await foreach` | Dispose the `IAsyncDisposable` handle |
+| **Buffering inside `RunInTransaction`** | Yes — emitted on commit | N/A (server-side mechanism) |
+| **Per-query filtering** | Yes (`query.NotifyOnChange()`) | No — handler runs on every change |
+| **Supported providers** | SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, LiteDB | PostgreSQL, SQL Server, Cosmos DB |

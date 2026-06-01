@@ -42,7 +42,7 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Ordering** — `.OrderBy(u => u.Age)` and `.OrderByDescending(u => u.Name)` on the fluent query builder
 - **Pagination** — `.Paginate(offset, take)` translates to SQL `LIMIT`/`OFFSET`
 - **Table-per-type mapping** — `MapTypeToTable<T>()` gives a document type its own dedicated table. Unmapped types share a configurable default table
-- **Custom Id properties** — `MapTypeToTable<T>("table", x => x.MyProp)` uses an alternate property as the document Id
+- **Custom Id properties** — `MapTypeToTable<T>("table", x => x.MyProp)` to combine with a dedicated table, or `MapIdProperty<T>(x => x.MyProp)` to override the Id while keeping the type in the default shared table
 - **Document diffing** — `GetDiff` compares a modified object against the stored document and returns an RFC 6902 `JsonPatchDocument<T>` with deep nested-object diffing
 - **Surgical field updates** — `SetProperty` updates a single JSON field without deserialization. `RemoveProperty` strips a field. Both support nested paths
 - **Typed Id lookups** — `Get`, `Remove`, `SetProperty`, and `RemoveProperty` accept the Id as `object` so you can pass a `Guid`, `int`, `long`, or `string` directly. Unsupported types throw `ArgumentException`
@@ -55,6 +55,8 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Clear all** — `SqliteDocumentStore.ClearAllAsync()` deletes all documents across all tables including spatial sidecar data
 - **SQLCipher encryption** — separate `Shiny.DocumentDb.Sqlite.SqlCipher` package with AES-256 encryption, password-aware backup, and `RekeyAsync` to change the encryption key
 - **Multi-tenancy** — two isolation strategies: **shared-table** (single database with automatic `TenantId` column filtering) and **tenant-per-database** (separate database per tenant via lazy factory). Both resolve the current tenant via a user-implemented `ITenantResolver`. Consumer code is unchanged — tenant isolation is applied transparently
+- **Change monitoring** — consume an `IAsyncEnumerable<DocumentChange<T>>` of insert/update/remove/clear events with `await foreach (var c in store.NotifyOnChange<User>(ct))`. Filter to a single document with `WhenDocumentChanged<T>(id)` or to the result set of a fluent query with `query.NotifyOnChange()`. Buffered inside `RunInTransaction` and emitted on commit. [Learn more](/documentdb/change-monitoring/)
+- **Native change feeds** — `IChangeFeedDocumentStore.SubscribeChanges<T>` observes all writers via the database's own mechanism: **PostgreSQL** `LISTEN`/`NOTIFY` triggers, **SQL Server** Change Tracking (optionally with `SqlDependency` query notifications), and **Cosmos DB** native Change Feed. Provisioning is automatic and idempotent
 - **AI tool integration** — `Shiny.DocumentDb.Extensions.AI` exposes document types as `Microsoft.Extensions.AI` tool functions for LLM agents. Per-type capability flags (`ReadOnly`, `All`), structured filter expressions, field visibility control, and page size caps. [Learn more](/documentdb/ai-tools/)
 
 ## Setup
@@ -353,19 +355,22 @@ var store = new DocumentStore(new DocumentStoreOptions
 
 #### Custom Id property
 
-By default every document type must have a property named `Id`. When mapping a type to a table, you can also specify a custom Id property via an expression. Custom Id requires a table mapping.
+By default every document type must have a property named `Id`. Override that with a custom property using either `MapTypeToTable<T>(...)` (combined with a dedicated table) or `MapIdProperty<T>(...)` (the type stays in the default shared table). The two are independent — use either, both, or neither.
 
 ```csharp
 var store = new DocumentStore(new DocumentStoreOptions
 {
     DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
 }
+// Dedicated table + custom Id
 .MapTypeToTable<Sensor>("sensors", s => s.DeviceKey)      // Guid DeviceKey as Id
 .MapTypeToTable<Tenant>("tenants", t => t.TenantCode)     // string TenantCode as Id
+// Default shared table + custom Id
+.MapIdProperty<BlogPost>(p => p.Slug)                     // string Slug as Id
 );
 ```
 
-#### MapTypeToTable overloads
+#### MapTypeToTable and MapIdProperty overloads
 
 | Overload | Description |
 |----------|-------------|
@@ -373,6 +378,8 @@ var store = new DocumentStore(new DocumentStoreOptions
 | `MapTypeToTable<T>(string tableName)` | Explicit table name |
 | `MapTypeToTable<T>(Expression<Func<T, object>> idProperty)` | Auto-derive table + custom Id |
 | `MapTypeToTable<T>(string tableName, Expression<Func<T, object>> idProperty)` | Explicit table + custom Id |
+| `MapIdProperty<T>(Expression<Func<T, object>> idProperty)` | Custom Id only — type stays in the default shared table |
+| `MapIdProperty<T>(string propertyName)` | AOT-safe string overload |
 
 All overloads return `DocumentStoreOptions` for fluent chaining. Duplicate table names throw `InvalidOperationException`.
 
