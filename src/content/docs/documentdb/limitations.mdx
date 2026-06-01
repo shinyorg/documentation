@@ -22,7 +22,7 @@ DocumentDB is a **document store**, not a relational ORM. A few things follow fr
 - **Two types cannot map to the same custom table.** Throws `InvalidOperationException` at registration.
 - **`SetProperty` is scalar-only.** Supported value types: `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`, `null`. To replace a nested object or collection, use `Update` (full replacement) or `Upsert` (merge — see provider note below).
 - **`UnitOfWork` is not thread-safe.** Use one instance per logical operation / request scope.
-- **Streaming methods hold the internal semaphore** for the duration of enumeration. Do not interleave other store operations inside the same `await foreach`.
+- **Streaming methods on shared-connection providers hold the internal semaphore** for the duration of enumeration. Do not interleave other store operations inside the same `await foreach` against SQLite, SQLCipher, or DuckDB stores. Server SQL providers (Postgres / MySQL / SQL Server) open the streaming connection from the driver pool and do not block other callers.
 
 ## Indexing
 
@@ -68,10 +68,11 @@ Full matrix on [Provider Reference](/documentdb/providers/). The most consequent
 
 ## Concurrency & transactions
 
-- **SQLite** is reader-many / writer-one. Two simultaneous writers serialize.
+- **SQLite / DuckDB** stores keep a single long-lived connection and serialize every operation through a `SemaphoreSlim` — embedded engines lock the whole database on writes, so multi-flighting buys nothing. Two simultaneous callers queue.
+- **Postgres / MySQL / SQL Server** stores open a fresh `DbConnection` per operation and let the ADO.NET driver pool multiplex callers. A single store instance is safe to share across threads and operations execute concurrently up to the pool size.
 - **LiteDB** is single-process: opening the same file from two processes fails.
-- **IndexedDB** is single-tab effectively — multi-tab writes can interleave non-deterministically.
-- The other server providers (Postgres / SQL Server / MySQL / Cosmos) support concurrent writers per their native semantics.
+- **IndexedDB** is effectively single-tab — multi-tab writes can interleave non-deterministically.
+- **CosmosDB / MongoDB** use their respective documented thread-safe clients (`CosmosClient`, `IMongoClient`) and pool internally.
 - **Nested transactions** are not supported. Calling `RunInTransaction` inside a transaction reuses the outer transaction (no `SAVEPOINT`).
 - **Optimistic concurrency** (`MapVersionProperty`) checks the version on `Update` and `Upsert`-as-update only. It does not protect `SetProperty`, `RemoveProperty`, `ExecuteUpdate`, or `ExecuteDelete` — those are unchecked bulk operations.
 

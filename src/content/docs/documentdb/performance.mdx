@@ -83,12 +83,16 @@ When a type has its own table, the generated SQL omits the `TypeName` predicate 
 
 ## Streaming vs buffered
 
-`ToAsyncEnumerable()` is the right choice for large result sets, but the implementation holds the per-store semaphore for the lifetime of the enumeration. That means:
+`ToAsyncEnumerable()` is the right choice for large result sets. On shared-connection providers (SQLite, SQLCipher, DuckDB) the implementation holds the per-store semaphore for the lifetime of the enumeration; on pooled providers (Postgres, MySQL, SQL Server) the streaming reader holds one connection out of the pool but does not block other callers on the same store instance. The safe rule across providers:
 
 ```csharp
 await foreach (var u in store.Query<User>().ToAsyncEnumerable())
 {
-    // DO NOT call store.Insert / Update / Get / etc. here — they will block on the semaphore.
+    // SQLite / DuckDB: DO NOT call store.Insert / Update / Get / etc. here — they
+    // will block on the semaphore until the enumeration completes.
+    // Postgres / MySQL / SQL Server: other ops execute concurrently against
+    // other pool connections, but interleaving writes can still surprise consumers
+    // that assume a stable snapshot.
     await ProcessExternal(u);
 }
 ```
@@ -132,10 +136,11 @@ await store.RunInTransaction(async tx =>
 
 | Provider | Considerations |
 |---|---|
-| **SQLite** | Single writer — concurrent writers serialize. Use WAL mode (default in this library outside the browser) for read-while-write. `PRAGMA journal_mode = WAL` is the largest single perf win for mixed read/write workloads. |
-| **PostgreSQL** | `JSONB` parses once on write, lookups are fast. Expression indexes work well. If you need containment queries (`@>`) outside the library, add a GIN index manually. |
-| **SQL Server** | Uses the native `JSON` storage type (2025+). Statistics over `JSON_VALUE` extractions can be improved with persisted computed columns — see provider doc. |
-| **MySQL** | JSON values are binary; functional indexes work as expected. Watch for collation surprises on `LIKE`. |
+| **SQLite** | Single writer — concurrent writers serialize through the store's semaphore (and SQLite's own DB lock). Use WAL mode (default in this library outside the browser) for read-while-write. `PRAGMA journal_mode = WAL` is the largest single perf win for mixed read/write workloads. |
+| **DuckDB** | Embedded engine; same shared-connection + semaphore model as SQLite. Tune for read-mostly analytical workloads — concurrent writers queue. |
+| **PostgreSQL** | Per-op connections via Npgsql's pool — a single store instance executes operations concurrently up to the pool size. `JSONB` parses once on write, lookups are fast. Expression indexes work well. If you need containment queries (`@>`) outside the library, add a GIN index manually. |
+| **SQL Server** | Per-op connections via the SqlClient pool — concurrent operations on a single store. Uses the native `JSON` storage type (2025+). Statistics over `JSON_VALUE` extractions can be improved with persisted computed columns — see provider doc. |
+| **MySQL** | Per-op connections via MySqlConnector's pool — concurrent operations on a single store. JSON values are binary; functional indexes work as expected. Watch for collation surprises on `LIKE`. |
 | **CosmosDB** | Auto-indexes every path. RUs scale with **document size × paths returned**, not just count. Always project (`.Select(...)`) when you don't need the whole document, and partition (`/typeName`) is already tuned by the library. |
 | **LiteDB / IndexedDB** | Predicate push-down does not exist — all filtering is in C# after loading the entire type. Scale ceiling is "fits comfortably in memory". |
 
