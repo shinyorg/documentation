@@ -24,6 +24,11 @@ There is no Blazor equivalent: a tray icon is a desktop OS concept.
 
 - One API across Windows, macOS AppKit, MacCatalyst, and Linux
 - Fluent menu builder with items, check items, separators, and submenus
+- **Per-menu-item icons** (`TrayMenuItem.Icon`) — a `Func<Stream>` per item, native rendering on all four platforms
+- **Keyboard accelerator dispatch** — `TrayMenuItem.Accelerator` (e.g. `"Ctrl+S"`) is registered with the OS so the shortcut actually fires
+- **Badge / overlay numbers** (`Badge` property) — composited onto the icon on Windows, displayed beside the icon on macOS / Linux
+- **Balloon / toast notifications** (`ShowNotification(title, message)`) — Windows `NIF_INFO`, macOS / Catalyst `NSUserNotificationCenter`, Linux `libnotify`
+- **Animated icons** (`StartAnimation` / `StopAnimation`) — cycle a list of frame stream factories on a built-in timer
 - Mutate any menu item property (`Label`, `IsEnabled`, `IsVisible`, check state) and the native menu rebuilds automatically
 - Primary / secondary / double-click events with screen coordinates
 - Tooltip, optional title/label (macOS/Linux), runtime show/hide
@@ -67,7 +72,11 @@ public class MyTrayHost(ITrayIconFactory factory)
         this.icon.SetIcon(() => FileSystem.OpenAppPackageFileAsync("trayicon.png").Result);
 
         this.icon.SetMenu(TrayMenu.Build(b => b
-            .Item("Show window", () => ShowMainWindow())
+            .Item(new TrayMenuItem("Show window", ShowMainWindow)
+            {
+                Accelerator = "Ctrl+Shift+W",
+                Icon = () => FileSystem.OpenAppPackageFileAsync("show.png").Result
+            })
             .Check("Notifications", true, on => SetNotifications(on))
             .Separator()
             .Submenu("Status", s => s
@@ -75,10 +84,16 @@ public class MyTrayHost(ITrayIconFactory factory)
                 .Item("Busy",      () => SetStatus(Status.Busy))
                 .Item("Away",      () => SetStatus(Status.Away)))
             .Separator()
-            .Item("Quit", () => Application.Current!.Quit())));
+            .Item(new TrayMenuItem("Quit", () => Application.Current!.Quit())
+            {
+                Accelerator = "Ctrl+Q"
+            })));
 
-        this.icon.PrimaryClick   += (_, _) => ShowMainWindow();
-        this.icon.DoubleClick    += (_, _) => OpenSettings();
+        this.icon.PrimaryClick += (_, _) => ShowMainWindow();
+        this.icon.DoubleClick  += (_, _) => OpenSettings();
+
+        this.icon.Badge = "3";                                  // overlay on Windows, beside icon on macOS/Linux
+        this.icon.ShowNotification("Online", "Sync resumed.");  // OS-level balloon / toast
     }
 
     public void Stop() => this.icon?.Dispose();
@@ -110,12 +125,48 @@ pauseSync.IsEnabled = !syncing;
 
 | Type | Builder method | Notes |
 |---|---|---|
-| `TrayMenuItem` | `.Item(label, action)` | Standard clickable item. Optional `Accelerator` string for the displayed shortcut hint |
+| `TrayMenuItem` | `.Item(label, action)` or `.Item(TrayMenuItem)` | Standard clickable item. Optional `Icon` (`Func<Stream>`) and `Accelerator` |
 | `TrayCheckMenuItem` | `.Check(label, isChecked, toggled)` | Renders a check state. Toggled callback receives the new value |
 | `TraySeparator` | `.Separator()` | Visual separator |
 | `TraySubmenu` | `.Submenu(label, builder)` | Nested menu — same fluent API |
 
-All items expose `IsEnabled`, `IsVisible`, and `Label`. `Accelerator` on `TrayMenuItem` is a best-effort display hint — actual key dispatching is the OS's responsibility.
+All items expose `IsEnabled`, `IsVisible`, and `Label`. `TrayMenuItem` additionally exposes `Icon` and `Accelerator` — see the sections below for native behaviour.
+
+### Per-menu-item icons
+
+Set `TrayMenuItem.Icon` to a stream factory returning a PNG. The factory is invoked each time the menu rebuilds, so it must produce a fresh stream on every call.
+
+```csharp
+new TrayMenuItem("Refresh", Refresh)
+{
+    Icon = () => FileSystem.OpenAppPackageFileAsync("refresh.png").Result
+}
+```
+
+| Platform | Mechanism |
+|---|---|
+| Windows | `SetMenuItemInfoW` + 32bpp pre-multiplied alpha HBITMAP (auto-sized to `SM_CXMENUCHECK`) |
+| macOS | `NSMenuItem.Image` (16×16, respects template-image semantics) |
+| MacCatalyst | Same as macOS via `objc_msgSend setImage:` + `setSize:` |
+| Linux | `gtk_image_menu_item_*` — deprecated in GTK 3.10 but still functional. Some GNOME hosts hide menu-item icons by policy |
+
+### Hardware keyboard accelerator dispatch
+
+`Accelerator` is parsed by the shared `TrayAccelerator` record and used both as the visible hint *and* the dispatch wiring. Modifier tokens (case-insensitive, `+` separated): `Ctrl`/`Control`, `Alt`/`Option`/`Opt`, `Shift`, `Cmd`/`Command`/`Meta`/`Win`/`Super`. The key is a single letter/digit, `F1..F24`, or one of: `Esc`, `Enter`/`Return`, `Tab`, `Space`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown`, `Left`, `Up`, `Right`, `Down`.
+
+```csharp
+var parsed = TrayAccelerator.Parse("Ctrl+Shift+P");
+// parsed.Modifiers => Control | Shift, parsed.Key => "P"
+```
+
+| Platform | Mechanism | Scope |
+|---|---|---|
+| Windows | `RegisterHotKey` on the tray's hidden message-only window, dispatched via `WM_HOTKEY` | Global system hotkey while the process is running |
+| macOS (AppKit) | `NSMenuItem.KeyEquivalent` + `KeyEquivalentModifierMask` | App-wide while foreground |
+| MacCatalyst | Same as AppKit via `objc_msgSend` | App-wide while foreground |
+| Linux | `gtk_widget_add_accelerator` on a `GtkAccelGroup` attached to the menu | Best-effort — fires while the indicator menu is open or focused |
+
+Unparseable or unregisterable accelerators (unknown key name, modifier-only string, OS-level collision) silently fall back to display-hint-only behaviour.
 
 ## ITrayIcon API
 
@@ -124,16 +175,60 @@ All items expose `IsEnabled`, `IsVisible`, and `Label`. `Accelerator` on `TrayMe
 | `SetIcon(Func<Stream>)` | Set the icon from a stream factory. PNG or ICO bytes both work — Windows auto-wraps PNG as ICO |
 | `Tooltip` | Hover tooltip (Windows / macOS) or accessible description (Linux) |
 | `Title` | Optional text label shown beside or instead of the icon on macOS and Linux. Ignored on Windows |
+| `Badge` | Optional string composited onto the icon (Windows) or shown beside it (macOS / Linux). Set to `null` to clear |
 | `IsVisible` | Show or hide without disposing |
 | `IsTemplateImage` | macOS only — when `true`, the icon is a template image and auto-tints for the light/dark menu bar. Supply a flat black-on-transparent PNG |
 | `SetMenu(TrayMenu)` | Assign or replace the context menu |
 | `ShowMenu()` | Programmatically open the menu — useful from a `PrimaryClick` handler on Windows |
+| `ShowNotification(title, message)` | Best-effort OS-level balloon / toast (Windows `NIF_INFO`, macOS / Catalyst `NSUserNotificationCenter`, Linux `libnotify`). For in-app toasts inside your MAUI UI use `Shiny.Maui.Controls.Toast` instead |
+| `StartAnimation(IReadOnlyList<Func<Stream>>, TimeSpan)` | Cycle the supplied frames on a shared `System.Threading.Timer`. Calling again replaces the running animation |
+| `StopAnimation()` | Stop the active animation and restore the last static icon |
+| `IsAnimating` | `true` while an animation is running |
 | `PrimaryClick` | Left-click. On macOS, primary-click already opens the menu when one is assigned |
 | `SecondaryClick` | Right-click / control-click |
 | `DoubleClick` | Windows + macOS only — Linux has no double-click signal |
 | `Dispose()` | Removes the tray icon and frees native resources |
 
 `TrayClickEventArgs` carries `X` / `Y` screen coordinates (best-effort across platforms).
+
+## Badge / overlay numbers
+
+```csharp
+icon.Badge = unread.ToString();   // "3" overlay on Windows; "3" beside icon on macOS/Linux
+icon.Badge = null;                // clear
+```
+
+- **Windows:** the current icon is re-rendered with a rounded red pill containing the badge text in the bottom-right corner. Long strings (more than 3 chars) are truncated to `"xx+"`. Compositing uses `System.Drawing.Common`, pulled in only for the Windows TFM.
+- **macOS / MacCatalyst:** the badge string is appended to the status button title (combined with `Title` if both are set).
+- **Linux:** the badge is set on `app_indicator_set_label` alongside `Title`.
+
+## Balloon / toast notifications
+
+```csharp
+icon.ShowNotification("Sync complete", "Uploaded 12 files.");
+```
+
+This is a *system-level* notification — Action Center on Windows, Notification Center on macOS, the desktop notifier daemon on Linux. For richer in-app toasts living inside your MAUI window, use [`Shiny.Maui.Controls.Toast`](/controls/toast/) instead.
+
+On Linux, `ShowNotification` lazily initializes `libnotify` on first call. If the library is missing, the call silently no-ops.
+
+## Animated icon ticking
+
+```csharp
+var frames = new Func<Stream>[]
+{
+    () => FileSystem.OpenAppPackageFileAsync("spin-0.png").Result,
+    () => FileSystem.OpenAppPackageFileAsync("spin-1.png").Result,
+    () => FileSystem.OpenAppPackageFileAsync("spin-2.png").Result,
+    () => FileSystem.OpenAppPackageFileAsync("spin-3.png").Result
+};
+
+icon.StartAnimation(frames, TimeSpan.FromMilliseconds(150));
+// later
+icon.StopAnimation(); // restores the last static icon set via SetIcon
+```
+
+The timer is owned internally and is disposed automatically on `Dispose()`.
 
 ## Platform Notes
 
@@ -142,6 +237,8 @@ All items expose `IsEnabled`, `IsVisible`, and `Label`. `Accelerator` on `TrayMe
 - Uses Win32 `Shell_NotifyIcon` directly with a hidden message-only window for `WM_TRAYICON` callbacks.
 - Right-click opens the menu via `TrackPopupMenuEx`.
 - PNG bytes you pass to `SetIcon` are wrapped in a Vista-style ICO container at runtime so you don't need a separate `.ico` file.
+- Badge composition and menu-item-icon HBITMAP conversion use `System.Drawing.Common`, declared as a Windows-only `PackageReference` — no cost for other TFMs.
+- Accelerator dispatch uses `RegisterHotKey` against the host message window: hotkeys are *process-global* while your app is running.
 - **Windows 11** hides new tray icons in the overflow flyout by default. Users have to drag yours into the always-visible area — document this for your users.
 - Always call `Dispose()` on app shutdown. Orphaned tray icons can persist in the Windows tray until reboot.
 
@@ -151,12 +248,15 @@ All items expose `IsEnabled`, `IsVisible`, and `Label`. `Accelerator` on `TrayMe
 - Click events route through `NSStatusItem.Button.Activated`. Left vs right is distinguished by inspecting `NSApplication.SharedApplication.CurrentEvent`.
 - On macOS, **primary (left) click opens the menu** when one is assigned. To get a left-click event handler that doesn't open the menu, don't call `SetMenu` and use `ShowMenu()` from within your handler instead.
 - For a "menu bar app" (no Dock icon), add `LSUIElement = true` to your app's `Info.plist`.
+- `ShowNotification` uses `NSUserNotificationCenter` (the older API, still supported through current macOS).
+- Accelerator dispatch is the native `KeyEquivalent` + modifier mask path — AppKit handles it while the app is foreground.
 
 ### MacCatalyst
 
 - Catalyst is UIKit and has no `NSStatusItem`. The implementation `dlopen`s `/System/Library/Frameworks/AppKit.framework/AppKit` at runtime and goes through `objc_msgSend`.
 - Menu callbacks ride a runtime-allocated `NSObject` subclass (`ShinyTrayCB`) with `[UnmanagedCallersOnly]` trampolines — fully AOT-compatible.
 - Hardened sandboxes that disallow loading AppKit will reject the `dlopen`. Normal Catalyst apps work fine.
+- All AppKit features (menu item icons, badges, notifications, accelerators) route through the same `objc_msgSend` bridge.
 
 ### Linux
 
@@ -166,7 +266,9 @@ All items expose `IsEnabled`, `IsVisible`, and `Label`. `Accelerator` on `TrayMe
   - Arch: `pacman -S libayatana-appindicator gtk3`
 - GNOME 40+ users need the **AppIndicator extension** installed (KDE works out of the box).
 - The first tray icon initializes GTK (`gtk_init_check`); subsequent icons reuse it.
-- The app-indicator API takes a file path, so the icon PNG is written to a temp file.
+- The app-indicator API takes a file path, so the icon PNG is written to a temp file. Menu-item icons follow the same pattern, each in their own temp file that gets cleaned on menu rebuild and disposal.
+- `ShowNotification` uses `libnotify` — install `libnotify4` if it's not already present. The call no-ops gracefully if missing.
+- Truly global hotkeys require `libkeybinder` which this library does not bind. The built-in `gtk_widget_add_accelerator` path is best-effort and only reliable while the indicator menu is open or focused.
 
 ## Template Images on macOS
 
@@ -190,12 +292,6 @@ public void OnAppShutdown()
 
 Forgetting to dispose can leave a ghost icon in the Windows tray that hangs around until the user hovers over it or signs out.
 
-## Not Implemented (Yet)
+## Related
 
-Out of scope for the initial release:
-
-- Per-menu-item icons
-- Balloon / toast notifications from the tray (use `Shiny.Maui.Controls.Toast` or platform notifications instead)
-- Badge / overlay numbers on the tray icon
-- Animated icon ticking (compose it in caller code by calling `SetIcon` on a timer)
-- Hardware keyboard accelerator dispatch — `Accelerator` strings are display hints only
+- Use [`Shiny.Maui.Controls.Toast`](/controls/toast/) when you want a rich in-app toast inside your MAUI window rather than the OS notification surface.
