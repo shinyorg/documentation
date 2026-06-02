@@ -1,0 +1,256 @@
+---
+title: "Shiny.DocumentDb v6 — Vectors, Filters, Composite Indexes & Real Pooling"
+date: 2026-06-01
+authors:
+  - allanritchie
+tags:
+  - documentdb
+  - release
+  - AI
+  - vector
+excerpt: "v6 adds cross-provider vector / ANN search, EF-style global query filters, composite JSON indexes, multi-connection server pooling, and per-query change monitoring — all without changing the schema-free, AOT-safe shape of the API."
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.DocumentDb" showLabel={true} />
+
+`Shiny.DocumentDb` v6 is out.  Same one-line `services.AddDocumentStore(...)`, same zero-schema document model, same AOT story — but the v6 release lands five features that have been on the wish list since v3:
+
+- **Vector / ANN search** that translates to the native engine on every provider (pgvector, SQL Server 2025 `VECTOR_DISTANCE`, Cosmos DiskANN, Mongo Atlas `$vectorSearch`, DuckDB `vss`, `sqlite-vec`).
+- **Global query filters** — `AddQueryFilter<T>(u => !u.IsDeleted)` and they apply to *every* read, single-doc fetch, bulk operation, and change-stream subscription. Same shape as EF Core's `HasQueryFilter`.
+- **Composite (multi-column) JSON indexes** — `CreateIndexAsync<T>(ctx.User, u => u.LastName, u => u.FirstName)` on every relational provider.
+- **Real connection pooling on server SQL** — PostgreSQL, MySQL, and SQL Server stop serializing through a per-store semaphore and start using the ADO.NET driver's pool. One `DocumentStore` instance can now actually serve a web app.
+- **Per-query change monitoring** — `.NotifyOnChange()` on any fluent query, filtered by the query's `Where` predicates.
+
+The full changelog is on the [release notes](/documentdb/release-notes/) page. This post walks through the headliners.
+
+---
+
+## Vector / ANN Search
+
+Embedding-search has been the most requested feature since the AI tools shipped in v4. v6 closes that gap.
+
+Register an embedding property and query by similarity:
+
+```csharp
+public class Document
+{
+    public Guid Id { get; set; }
+    public string Content { get; set; } = "";
+    public ReadOnlyMemory<float> Embedding { get; set; }
+}
+
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+    {
+        EnableVectorExtension = true   // loads sqlite-vec on every connection
+    }
+}.MapVectorProperty<Document>(
+    d => d.Embedding,
+    dimensions: 1536,
+    metric: VectorDistance.Cosine,
+    indexKind: VectorIndexKind.Hnsw));
+
+var hits = await store.Query<Document>()
+    .Where(d => d.Content.Contains("invoice"))   // pre-filter where supported
+    .NearestVectors(queryEmbedding, k: 10);
+
+foreach (var hit in hits)
+    Console.WriteLine($"{hit.Score:F4}  {hit.Document.Content}");
+```
+
+The vector type is `ReadOnlyMemory<float>` everywhere — same shape as `Microsoft.Extensions.AI.Embedding<float>.Vector`, JSON-round-trips through `System.Text.Json` without a custom converter, and avoids an `float[]` allocation on every read.
+
+### Provider matrix
+
+| Provider | Storage | Index | Filter |
+|---|---|---|---|
+| **PostgreSQL** | `pgvector` sidecar | HNSW, IVF | Pre-filter via JOIN |
+| **SQL Server 2025** | Native `VECTOR(n)` sidecar | DiskANN | Pre-filter via JOIN |
+| **Cosmos DB** | Embedded in document JSON | DiskANN, QuantizedFlat, Flat | `WHERE` + `ORDER BY VectorDistance(...)` |
+| **MongoDB (Atlas)** | `$vectorSearch` aggregation | HNSW (Atlas-managed) | Filter inside `$vectorSearch` |
+| **DuckDB** | `vss` sidecar | HNSW | Pre-filter via JOIN |
+| **SQLite** | `sqlite-vec` virtual table | None (flat scan) | Post-filter join back |
+| **MySQL / LiteDB / IndexedDB** | — | — | Throws `NotSupportedException` |
+
+`Cosine` / `Euclidean` / `DotProduct` are available everywhere; `Hamming` is pgvector-only. Cosine distance is always surfaced as `[0, 2]` regardless of which way the underlying engine likes to count, so `ORDER BY score ASC` works the same way on every provider.
+
+### Auto-embed on insert
+
+If you don't want to call `IEmbeddingGenerator` by hand on every write, `Shiny.DocumentDb.Extensions.AI` ships an `AutoEmbedOnInsert<T>` helper that hooks the new `OnBeforeInsert<T>` pipeline:
+
+```csharp
+using Shiny.DocumentDb.Extensions.AI;
+
+opts.MapVectorProperty<Document>(d => d.Embedding, dimensions: 1536)
+    .AutoEmbedOnInsert<Document>(
+        embeddingGenerator,
+        sourceSelector: d => d.Content,
+        targetSetter: (d, vec) => d.Embedding = vec,
+        targetGetter: d => d.Embedding);   // skip when already set
+
+await store.Insert(new Document { Content = "hello world" });
+// Embedding is populated automatically before the row hits the wire.
+```
+
+It runs on `Insert`, `BatchInsert`, and `Upsert`, skips when the source is null/empty, and skips when the target already holds a non-default vector so explicit writes always win.
+
+### Tuning knobs
+
+`VectorIndexOptions` gives you strongly-typed HNSW (`M`, `EfConstruction`, `EfSearch`) and IVF (`Lists`) settings plus a `ProviderHints` dictionary for the long tail (`sqlite.postFilterMultiplier`, `atlas.indexName`, `atlas.numCandidates`).
+
+Full design notes are in the [Vector docs](/documentdb/vector/).
+
+---
+
+## Global Query Filters
+
+If you have shipped anything on Entity Framework Core, you have written this:
+
+```csharp
+modelBuilder.Entity<User>().HasQueryFilter(u => !u.IsDeleted);
+```
+
+`Shiny.DocumentDb` v6 gets the same surface:
+
+```csharp
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+}
+.AddQueryFilter<User>(u => !u.IsDeleted)                         // unnamed
+.AddQueryFilter<Order>("tenant", o => o.TenantId == ctx.Current) // named
+.AddQueryFilter<Order>("status", o => o.Status != "Archived"));
+```
+
+Filters AND together; the user's `Where` is AND'd on top. Captured variables (`ctx.Current`) are re-read on every translation, so per-request tenant scopes work without rebuilding the store.
+
+### What gets filtered
+
+The interesting decision is what *isn't* filtered. v6 follows EF Core: every read path enforces the filter, but inserts and raw SQL stay free.
+
+| Path | Filtered? |
+|---|---|
+| `Query<T>()` + every terminal (`ToList`, `Count`, `ExecuteUpdate`, …) | Yes |
+| `query.NotifyOnChange()` | Yes — only matching documents emit |
+| `Get<T>(id)` / `GetDiff<T>(id, ...)` | Yes — returns `null` if filter fails |
+| `Update<T>` | Yes — throws "not found" if filter fails |
+| `SetProperty<T>` / `RemoveProperty<T>` / `Remove<T>(id)` / `Clear<T>()` | Yes |
+| `Insert<T>` / `BatchInsert<T>` / `Upsert<T>` | **No** — matches EF Core |
+| `Query<T>(rawSql)` / `QueryStream<T>(rawSql)` | **No** — your SQL, your call |
+
+Per-query opt-out matches EF Core too:
+
+```csharp
+// Disable all filters
+var allUsers = await store.Query<User>().IgnoreQueryFilters().ToList();
+
+// Disable a specific named filter (others still apply)
+var anyTenant = await store.Query<Order>().IgnoreQueryFilters("tenant").ToList();
+```
+
+This works on every provider that has a real query translator: relational SQL (`DocumentStore`), `LiteDbDocumentStore`, `CosmosDbDocumentStore`, `MongoDbDocumentStore`, and `IndexedDbDocumentStore`.
+
+Full reference: [Global Query Filters](/documentdb/query-filters/).
+
+---
+
+## Composite JSON Indexes
+
+`CreateIndexAsync<T>` has accepted a single expression since v3. v6 adds a multi-expression overload:
+
+```csharp
+// Single-column (unchanged)
+await store.CreateIndexAsync<User>(u => u.Name, ctx.User);
+
+// Composite — one B-tree over multiple JSON paths
+await store.CreateIndexAsync(
+    ctx.User,
+    u => u.LastName,
+    u => u.FirstName);
+```
+
+The composite index name is built by joining the resolved paths with `__`, so `ix_User_LastName__FirstName` is the resulting object on disk. Drop the composite index with the matching overload:
+
+```csharp
+await store.DropIndexAsync(ctx.User, u => u.LastName, u => u.FirstName);
+```
+
+How each provider implements it:
+
+- **SQLite / SQLCipher / PostgreSQL / MySQL / DuckDB** — one composite index with one `json_extract` (or provider equivalent) expression per path. Single statement, single index object.
+- **SQL Server** — JSON expression indexes need `PERSISTED` computed columns. v6 creates one column per path (`cc_{indexName}_0`, `cc_{indexName}_1`, …) and indexes them all. The drop path discovers the backing computed columns from `sys.index_columns`, so single- and multi-column indexes drop through the same code path with no special-case logic.
+
+Existing single-path index names are preserved bit-for-bit, so v5 indexes survive an upgrade without an `OBJECT_DROP_FAILED` somewhere in production.
+
+---
+
+## Real Connection Pooling on Server SQL
+
+v5 was honest about its limit: a single `DocumentStore` instance serialized every operation through one semaphore around one long-lived connection. Fine for a phone, miserable for a server.
+
+v6 splits behaviour along the provider:
+
+- **PostgreSQL, MySQL, SQL Server** — open a connection per operation. The ADO.NET driver's pool multiplexes callers. One store, many concurrent calls, no in-process queueing.
+- **SQLite, SQLCipher, DuckDB** — embedded engines that take a database-wide write lock. These keep the v5 model: one long-lived connection, one per-store semaphore. The provider declares which mode it wants via `IDatabaseProvider.RequiresSingleConnection`.
+
+`RunInTransaction` pins one connection for the duration of the user callback regardless of provider, so every nested operation shares the transaction.
+
+Table init is now backed by a `ConcurrentDictionary<string, Lazy<Task>>` — first-touch DDL runs exactly once per table even under concurrent first calls. No more "is the schema there yet?" races on cold start.
+
+A small but important consequence for streaming: on the pooled providers, `await foreach (... in store.Query<T>().ToAsyncEnumerable())` holds one connection out of the pool for the lifetime of the iterator instead of holding the whole store. Other callers don't block. On the embedded engines, behaviour is unchanged — finish the enumeration before issuing another store call.
+
+---
+
+## Per-Query Change Monitoring
+
+`IObservableDocumentStore` shipped in v5.3 with a global, type-scoped stream of `DocumentChange<T>`. v6 adds a query-scoped overload — every fluent query now exposes a `.NotifyOnChange()` that filters the change feed by the query's own `Where` predicates:
+
+```csharp
+var pending = store.Query<Order>().Where(o => o.Status == "Pending");
+
+await foreach (var change in pending.NotifyOnChange(ct))
+{
+    // Only fires when an Order matching Status == "Pending" is inserted or updated.
+    UpdateUi(change);
+}
+```
+
+`OrderBy`, `Paginate`, and `GroupBy` are ignored because they change result shape, not membership. Calling `Select(...)` first throws — projecting away the document body breaks the filter.
+
+`SetProperty`, `RemoveProperty`, `Remove`, and `Clear` don't carry the full document, so `DocumentChange<T>.Document` is `null` for those events. The per-query filter passes them through unconditionally so the consumer can re-query and decide for itself whether the document still matches.
+
+Combined with the new global query filters and the existing `IChangeFeedDocumentStore` (cross-process change feeds backed by PostgreSQL `LISTEN`/`NOTIFY`, SQL Server Change Tracking, and Cosmos DB Change Feed), change observation is now end-to-end coherent: every read goes through the same filter; every change subscription sees only the changes that match.
+
+---
+
+## Other Notable v6 Items
+
+A few smaller things that show up in the [release notes](/documentdb/release-notes/) but didn't get their own section:
+
+- **`MapIdProperty<T>(...)`** — standalone Id-property override that no longer requires `MapTypeToTable`. Use it when the Id is named `Slug` or `DeviceKey` but you still want the type stored in the default shared table.
+- **`OnBeforeInsert<T>`** — async pre-write hook on `DocumentStoreOptions`. `AutoEmbedOnInsert<T>` is the headline consumer but it's a general "compute derived fields" extension point.
+- **`SupportsVector`** on `IDocumentStore` and `IDatabaseProvider`, matching the existing `SupportsSpatial`.
+- PostgreSQL optimistic concurrency fix — the version check now extracts as a typed int (`::BIGINT`), no more `42883: operator does not exist`.
+- PostgreSQL and DuckDB multi-tenancy fix — the `CAST(@data AS JSONB)` / `CAST(@data AS JSON)` envelopes no longer break the tenant-column rewrite.
+
+---
+
+## Upgrading
+
+v6 is API-compatible with v5 in every place that matters. The semaphore on the server-SQL providers is gone — if you relied on it to serialize writes from one store instance, you'll want to switch to `RunInTransaction` for that semantics. Everything else is purely additive.
+
+```bash
+dotnet add package Shiny.DocumentDb.PostgreSql --version 6.0.0
+dotnet add package Shiny.DocumentDb.Sqlite     --version 6.0.0
+dotnet add package Shiny.DocumentDb.SqlServer  --version 6.0.0
+# etc.
+```
+
+- [Full release notes](/documentdb/release-notes/)
+- [Vector search](/documentdb/vector/)
+- [Global query filters](/documentdb/query-filters/)
+- [Change monitoring](/documentdb/change-monitoring/)
+- [GitHub](https://github.com/shinyorg/DocumentDb)
