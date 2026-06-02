@@ -11,8 +11,8 @@ The fluent query builder is the primary way to query documents. Start with `stor
 | Method | Description |
 |---|---|
 | `.Where(predicate)` | Filter by LINQ expression. Multiple calls combine with AND. |
-| `.OrderBy(selector)` | Sort ascending by property. |
-| `.OrderByDescending(selector)` | Sort descending by property. |
+| `.OrderBy(selector)` / `.OrderByDescending(selector)` | Sort by property (expression). |
+| `.OrderBy(name, jsonTypeInfo)` / `.OrderByDescending(name, jsonTypeInfo)` | Sort by property name (string) — AOT-safe via `JsonTypeInfo<T>`. Supports dotted paths. |
 | `.GroupBy(selector)` | Group by property (for aggregate projections with `Sql.*` markers). |
 | `.Paginate(offset, take)` | Limit results with SQL `LIMIT`/`OFFSET`. |
 | `.Select(selector, resultTypeInfo?)` | Project into a different shape via JSON object construction. |
@@ -31,6 +31,7 @@ The fluent query builder is the primary way to query documents. Start with `stor
 | `.Min(selector)` | `Task<TValue>` | Minimum value of a property. |
 | `.Sum(selector)` | `Task<TValue>` | Sum of a property. |
 | `.Average(selector)` | `Task<double>` | Average of a property. |
+| `.PageResult(page, pageSize, zeroBased?)` | `Task<PagedResults<T>>` | Run the query and return records + total count in one call. 1-based by default. |
 
 ## Expression-based queries
 
@@ -122,7 +123,44 @@ ORDER BY json_extract(Data, '$.age') ASC;
 The table name `documents` is the default. When using [table-per-type mapping](/documentdb/#table-per-type-mapping), the query targets the mapped table and the `TypeName` filter is omitted for dedicated tables. The generated SQL varies by provider — each provider uses its own JSON extraction syntax.
 :::
 
+### String-based OrderBy (dynamic sort)
+
+When the sort column is chosen at runtime (e.g. a user clicks a column header), use the string-based overloads. They resolve the property through `JsonTypeInfo<T>` — no runtime reflection on `T`, so they are AOT-safe.
+
+```csharp
+// Sort by CLR property name
+var results = await store.Query<User>()
+    .OrderBy("Name", ctx.User)
+    .ToList();
+
+// Or by JSON property name (matches the naming policy on JsonSerializerOptions)
+var results = await store.Query<User>()
+    .OrderBy("name", ctx.User)
+    .ToList();
+
+// Descending overload
+var results = await store.Query<User>()
+    .OrderByDescending("Age", ctx.User)
+    .ToList();
+
+// Nested path
+var orders = await store.Query<Order>()
+    .OrderBy("ShippingAddress.City", ctx.Order)
+    .ToList();
+
+// Driven by external input (e.g. an API query string)
+var sortColumn = request.Query["sort"];  // "name", "age", etc.
+var results = await store.Query<User>()
+    .Where(u => u.Active)
+    .OrderBy(sortColumn, ctx.User)
+    .ToList();
+```
+
+Matching rules: case-insensitive against either the CLR property name or the JSON property name (after naming policy). Dotted segments traverse nested types — each nested type must also be registered in your `JsonSerializerContext`. Throws `ArgumentException` if a segment doesn't resolve.
+
 ## Pagination
+
+### `.Paginate(offset, take)`
 
 `Paginate(offset, take)` appends pagination to the generated SQL. It is a builder method that does not execute the query — it stores state until a terminal method is called.
 
@@ -162,6 +200,39 @@ await foreach (var user in store.Query<User>()
     Console.WriteLine(user.Name);
 }
 ```
+
+### `.PageResult(page, pageSize)` — records + total count
+
+`PageResult` is a terminal extension that runs the query and returns a `PagedResults<T>` envelope containing the page records *and* the total count across all pages — the typical shape for paged REST/UI responses.
+
+```csharp
+public record PagedResults<T>(
+    IEnumerable<T> Records,
+    int TotalCount,
+    int Page,
+    int PageSize
+);
+```
+
+```csharp
+// 1-based by default — page 1 is the first page
+var result = await store.Query<User>()
+    .Where(u => u.Active)
+    .OrderBy(u => u.Name)
+    .PageResult(page: 1, pageSize: 20);
+
+Console.WriteLine($"Page {result.Page} of ~{Math.Ceiling((double)result.TotalCount / result.PageSize)}");
+foreach (var user in result.Records) { ... }
+
+// Zero-based opt-in — page 0 is the first page
+var result = await store.Query<User>()
+    .OrderBy(u => u.Name)
+    .PageResult(page: 0, pageSize: 20, zeroBased: true);
+```
+
+- `TotalCount` reflects the current `Where` predicates (and any [global query filters](/documentdb/query-filters/)) — pagination state is ignored when counting, so the total spans all pages, not just the returned slice.
+- Any prior `.Paginate(...)` call on the query is overridden by `PageResult`.
+- Validation: `pageSize` must be greater than zero; `page` must be `>= 1` (or `>= 0` when `zeroBased: true`). Otherwise throws `ArgumentOutOfRangeException`.
 
 ## Bulk delete with ExecuteDelete
 
