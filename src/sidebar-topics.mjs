@@ -26,6 +26,7 @@ export const sidebarTopics = [
       { label: 'AI Skills', link: 'foundation/ai-skills' },
       {
         label: 'Blazor Playground',
+        homenavLink: '/playground/',
         items: [
           { label: 'AI Conversation', link: 'https://shinyorg.github.io/aiconversation/', attrs: { target: '_blank' } },
           { label: 'Controls',        link: 'https://shinyorg.github.io/controls/',       attrs: { target: '_blank' } },
@@ -652,6 +653,7 @@ export const sidebarTopics = [
 export function cleanTopicsForStarlight(topics) {
   return JSON.parse(JSON.stringify(topics, (key, value) => {
     if (key === 'jumpTo') return undefined;
+    if (key === 'homenavLink') return undefined;
     return value;
   }));
 }
