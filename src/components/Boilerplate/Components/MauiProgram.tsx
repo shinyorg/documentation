@@ -104,6 +104,12 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.UseShinyControls();`;
   }
+  if (has('trayicon')) {
+    src += `
+      // Desktop only — Android / iOS throw PlatformNotSupportedException on factory.Create()
+      builder.UseTrayIcon();`;
+  }
+  // Barcodes (Shiny.Maui.Controls.Barcodes) is view-only — no DI registration required.
   if (has('stores')) {
     src += `
       builder.Services.AddShinyStores();`;

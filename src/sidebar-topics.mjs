@@ -373,6 +373,7 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor' },
         ]
       },
+      { label: 'Barcodes & QR Codes', link: 'controls/barcodes/', jumpTo: true },
       {
         label: 'TreeView',
         jumpTo: true,
@@ -406,6 +407,7 @@ export const sidebarTopics = [
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
+          { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
           { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
           { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },

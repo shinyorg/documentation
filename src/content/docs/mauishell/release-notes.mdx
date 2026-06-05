@@ -4,6 +4,40 @@ tableOfContents: true
 ---
 import RN from '/src/components/ReleaseNote.astro';
 
+## v6.2.0 - June 4, 2026
+
+<RN type="fix">**`NavigateTo<TViewModel>(relativeNavigation: false)` no longer races against `Shell.OnNavigated` / `Application.PageAppearing`** — on Android, absolute navigation between `<ShellContent>`-declared routes (e.g. `StartupView` → `LoginView` triggered from inside `IPageLifecycleAware.OnAppearing`) could complete the `Shell.GoToAsync` awaiter *before* Shell's `CurrentItem` chain reflected the new section, so `Shell.Current.CurrentPage` returned `null` (or the stale previous page) and *before* any of `ShinyShell.OnNavigated`, `Application.PageAppearing`, or `ShinyRouteFactory.GetOrCreate` had run. The navigator now resolves and configures the viewmodel synchronously up front, pins the instance on the configurator, fires `GoToAsync`, and returns. It no longer probes `CurrentPage` after the await — the pinned viewmodel + apply-site model handles the timing on whatever schedule Shell decides to raise its events.</RN>
+<RN type="enhancement" breaking={true}>**`ShellNavigationConfigurator` API changed** — the queue now holds pre-resolved viewmodel instances instead of `Action<T>` callbacks. `Enqueue<T>(Action<T>)` and `TryApply(object)` are replaced with `EnqueueResolved<T>(T instance, Action<T>? configure = null)`, the non-generic `EnqueueResolved(Type, object)` (for `INavigationBuilder`), and `TryConsume(Type)`. Configure callbacks now run synchronously inside `EnqueueResolved` *before* enqueue, so every downstream hook (`OnAppearing`, `INotifyPropertyChanged` subscribers) observes a fully initialised viewmodel. The configurator lives in `Shiny.Infrastructure` and was always documented as internal-use, so most consumers will not be affected.</RN>
+<RN type="enhancement">**Apply sites are now consume-then-fallback** — `ShinyRouteFactory.GetOrCreate`, `ShinyShell.OnNavigated`, and `ShinyShellNavigator.AppOnPageAppearing` first call `ShellNavigationConfigurator.TryConsume(viewModelType)` and only fall back to `IServiceProvider.GetService` when no pinned instance exists (the initial-page case). Whichever site fires first wins; the others see `BindingContext is TViewModel` already true and skip re-assignment. No duplicate transient viewmodel instances are created across the apply sites.</RN>
+<RN type="enhancement">**`INavigationBuilder.Navigate` pre-resolves every typed segment** — each `Add<TViewModel>(configure)` segment is now resolved, configured, and pinned before `Shell.GoToAsync` runs. The previous `NavigationStack` walk after the await — which raced against `PageAppearing` on Android the same way `NavigateTo<TVm>` did — has been removed; the apply sites consume the pinned instances in FIFO + type order matching the order Shell realises each segment's page.</RN>
+<RN type="enhancement">**Pinned subscriptions roll back only on navigation failure** — both `NavigateTo<TViewModel>` and `INavigationBuilder.Navigate` now dispose pinned configurator entries only when `Shell.GoToAsync` throws (e.g., unknown route). On success the entries remain pinned until consumed by an apply site, because the apply sites typically run on the next dispatcher tick on Android — releasing the entries immediately after the await would force a fallback DI resolve and discard the configured instance.</RN>
+
+### Migration from v6.1.2
+
+If you don't reference `Shiny.Infrastructure.ShellNavigationConfigurator` directly, **no code changes are required** — the fix is transparent. Existing `NavigateTo<TViewModel>(configure)` and `INavigationBuilder.Add<T>(configure)` calls continue to compile and behave the same, with the only observable change being that the configure callback now runs before any `IPageLifecycleAware.OnAppearing` hook instead of racing against it on certain platforms.
+
+If you do call the configurator directly (rare — it was always intended as a navigator-private helper), the migration is mechanical:
+
+```csharp
+// Before (v6.1.x) — queue a configure callback, applied later by an apply site
+using var sub = configurator.Enqueue<DetailViewModel>(vm => vm.ItemId = 42);
+// (something else resolves the VM from DI and the configurator applies it)
+configurator.TryApply(resolvedVm);
+
+// After (v6.2) — pre-resolve and configure, pin the instance
+var vm = services.GetRequiredService<DetailViewModel>();
+using var sub = configurator.EnqueueResolved(vm, x => x.ItemId = 42);
+// apply sites call configurator.TryConsume(typeof(DetailViewModel)) and get `vm`
+```
+
+### Why this fix is structural rather than a guarded retry
+
+v6.1 closed the original "navigator hangs waiting for `ShinyRouteFactory.PageResolved`" race by reading `Shell.Current.CurrentPage.BindingContext` directly after `GoToAsync` returns. That worked for registered routes (where `ShinyRouteFactory.GetOrCreate` sets `BindingContext` synchronously inside page construction) and *usually* worked for `ShellContent`-declared routes (where `ShinyShell.OnNavigated` sets it during the navigation). The remaining failure mode was a timing window on Android cross-Section absolute navigation, where Shell's awaiter resolved before *any* Navigated event or PageAppearing event fired, leaving the new page with a `null` `BindingContext` at the exact moment the navigator looked.
+
+A pure defensive fallback (resolve from DI and bind if null after the await) would close *that specific symptom* but would leave three independent resolution paths competing under variable platform timing — a family of bugs waiting for the next MAUI Shell lifecycle adjustment to surface a new variant, and a guarantee of duplicate viewmodel instances any time two paths raced in opposite orders.
+
+v6.2 collapses the three paths into one. The viewmodel is resolved exactly once, in the navigator, before navigation starts. It's pinned on the configurator so whichever apply site fires first consumes it. The navigator then fires `GoToAsync` and returns — it deliberately does *not* probe `Shell.Current.CurrentPage` afterwards, because Shell's eventing and `CurrentItem` chain are platform-scheduled and racing them in the navigator was the original bug. The apply sites bind the pinned instance whenever Shell raises their event, on whatever dispatcher tick that lands on. One instance, one assignment, regardless of platform timing.
+
 ## v6.1.2 - June 3, 2026
 
 <RN type="fix">**`UseDialogs<TDialog>` is now NativeAOT/trim-safe** — the generic type parameter on `ShinyAppBuilder.UseDialogs<TDialog>()` was missing `[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicConstructors)]`, so iOS NativeAOT release builds (`<PublishAot>true</PublishAot>`) trimmed the dialog implementation's constructor. At startup, DI would throw `InvalidOperationException: A suitable constructor for type '<YourDialogs>' could not be located.` This affected any custom `IDialogs` implementation registered via `UseDialogs<T>()`, most visibly `Shiny.Maui.Shell.UxDiversDialogs` since it ships a non-default constructor (`IMainThread`). The annotation now matches the one already present on `Add<TPage, TViewModel>`, so the trimmer preserves all public constructors of `TDialog`</RN>

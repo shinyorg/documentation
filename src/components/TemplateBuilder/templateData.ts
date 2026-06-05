@@ -348,6 +348,12 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'mermaiddiagrams', label: 'Shiny Mermaid Diagrams', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Native Mermaid flowchart rendering (no WebView) https://shinylib.net/controls/mermaid-diagrams/' },
+    { id: 'shinybarcodes', label: 'Shiny Barcodes & QR Codes', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Pure-managed 1D/2D barcode & QR code renderer (ZXing.Net, no SkiaSharp) https://shinylib.net/controls/barcodes/' },
+    { id: 'shinytrayicon', label: 'Shiny Tray Icon (Desktop)', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Cross-platform system tray / status-bar icon for MAUI desktop (Windows, macOS, MacCatalyst, Linux) https://shinylib.net/controls/trayicon/' },
     { id: 'uxdivers', label: 'UX Divers Dialogs', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyShell,
         description: 'Popups IDialogs implementation for Shiny MAUI Shell https://github.com/shinyorg/mauishell',
@@ -608,6 +614,9 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'mermaiddiagrams', label: 'Shiny Mermaid Diagrams', type: 'bool', defaultValue: false, category: 'components',
         version: VERSIONS.shinyControls,
         description: 'Mermaid flowchart rendering https://shinylib.net/controls/mermaid-diagrams/' },
+    { id: 'shinybarcodes', label: 'Shiny Barcodes & QR Codes', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Pure-managed 1D/2D barcode & QR code renderer (SVG or PNG data-URI) https://shinylib.net/controls/barcodes/' },
 ];
 
 function computeBlazorSymbols(state: TemplateState): Record<string, boolean | string> {

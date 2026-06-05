@@ -70,7 +70,7 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'aiconversation'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'aiconversation'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'webhost'];
@@ -316,6 +316,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.MermaidDiagrams",
         "blazorNuget": "Shiny.Blazor.Controls.MermaidDiagrams",
         "description": "Mermaid Diagrams",
+        "category": "controls",
+        "version": "1.0.1-beta-0092"
+    },
+    {
+        "id": "barcodes",
+        "nuget": "Shiny.Maui.Controls.Barcodes",
+        "blazorNuget": "Shiny.Blazor.Controls.Barcodes",
+        "description": "Barcodes & QR Codes",
+        "category": "controls",
+        "version": "1.0.1-beta-0092"
+    },
+    {
+        "id": "trayicon",
+        "nuget": "Shiny.Maui.Controls.TrayIcon",
+        "description": "Tray Icon (Desktop)",
         "category": "controls",
         "version": "1.0.1-beta-0092"
     },
