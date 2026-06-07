@@ -54,6 +54,46 @@ Each library demo lives in its own sibling repo and deploys to its own GitHub Pa
 
 Each demo is deployed by its own `.github/workflows/deploy-blazor-sample.yml` in the sibling repo: triggers on push to that repo's active branch (paths-scoped to the sample + relevant src), publishes the WASM app, rewrites `<base href>` to `/<repo-name>/`, and uploads to GitHub Pages.
 
+## Comments (giscus)
+
+Blog posts get a [giscus](https://giscus.app) comment widget rendered after the article body. Any docs page can opt in by adding `comments: true` to its frontmatter.
+
+The widget is wired through three pieces:
+
+- `giscusConfig` in `astro.config.mjs` — repo, repo-id, category, category-id, etc., exposed to components via `import.meta.env.GISCUS`.
+- `src/components/Giscus.astro` — loads `giscus.app/client.js` and syncs the iframe theme with Starlight's light/dark toggle.
+- `src/components/MarkdownContent.astro` — Starlight override that injects `<Giscus />` after page content when the entry lives under `blog/` or has `comments: true`.
+
+### First-time setup
+
+1. **Install the giscus GitHub App** on the `shinyorg/documentation` repo: <https://github.com/apps/giscus>. Grant it access to that repo only.
+2. **Enable Discussions** on the repo: Settings → General → Features → check **Discussions**.
+3. **Create (or pick) a Discussion category** for comments. The default `Announcements` works, but a dedicated `Comments` category with the **Announcement** format is recommended so only maintainers can start threads (giscus creates them on demand).
+4. Visit <https://giscus.app>, fill in:
+   - **Repository**: `shinyorg/documentation`
+   - **Page ↔ Discussions Mapping**: `pathname` (matches the default in `astro.config.mjs`)
+   - **Discussion Category**: the one created above
+5. Scroll to the **Enable giscus** snippet at the bottom of giscus.app and copy the four `data-*` values:
+   - `data-repo-id` → `giscusConfig.repoId`
+   - `data-category` → `giscusConfig.category`
+   - `data-category-id` → `giscusConfig.categoryId`
+   - (`data-repo` should already match)
+6. Paste them into `giscusConfig` in `astro.config.mjs`, replacing the `REPLACE_WITH_*` placeholders.
+7. `npm run build && npm run preview`, open any blog post, and confirm the widget loads.
+
+### Enabling comments on a docs page
+
+Add `comments: true` to the page's frontmatter:
+
+```yaml
+---
+title: My page
+comments: true
+---
+```
+
+The `comments` field is declared on the docs schema in `src/content.config.ts`, so unknown-field warnings won't fire.
+
 ## CI/CD
 
 `.github/workflows/deploy.yml`:

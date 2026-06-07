@@ -1,0 +1,298 @@
+---
+title: Docking
+description: Visual-Studio-style window docking for .NET MAUI desktop and Blazor — dockable tool windows, tabbed groups, splitters, auto-hide rails, and tear-off floating windows
+---
+import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+A Visual-Studio-style window-docking system for desktop apps. Drop a host into a page, register your panels by stable string IDs, and the layout takes care of dockable tool windows, tabbed groups, draggable splitters, auto-hide rails, and tear-off floating windows that survive across launches.
+
+Two packages ship the same shape:
+
+- **`Shiny.Maui.Controls.Desktop`** — MAUI desktop (Windows + macOS AppKit + MacCatalyst + Linux GTK). Combined with [Tray Icon](/controls/trayicon/) in the same package since both share the desktop TFM matrix.
+- **`Shiny.Blazor.Controls.Docking`** — Blazor (browser today; Blazor Server / `BlazorWebView` once the contracts stabilize).
+
+Mobile (iOS / Android) is intentionally out of scope.
+
+- <NugetDownloads name="Shiny.Maui.Controls.Desktop" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Docking" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} os={["windows", "macos", "linux"]} />
+
+<LibBuilder componentName="docking" client:load />
+
+## v0.1 status
+
+v0.1 ships the **public surface** — schema, contracts, registration, and a `DockHostView` / `<DockHost />` skeleton you can drop into a page today. Visual drag-drop, splitter rendering, auto-hide rails, and floating windows arrive in subsequent releases:
+
+| Phase | Lands |
+|---|---|
+| **v0.1** (current) | Schema (`DockRoot`, `DockWindowState`, `DockSplit`, `DockGroup`, `DockTab`), contracts (`IDockHost`, `IDockableContentFactory`, `IDockLayoutStore`, `IDockLayoutMigrator`, `IDockEvents`, `IDockCommandScope`), `DockHostView` / `<DockHost />` skeleton, `AddDockPanel<T>("id")` registration |
+| v0.2 | `DockDragCoordinator` (single-window), VS-style diamond drop indicator, tab tear-off + merge between groups, document-area vs tool-area enforcement, tab overflow (scroll + chevron), diagnostic overlay (Ctrl+Shift+D) |
+| v0.3 | `AutoHideRail` (left/right/top/bottom), pin/unpin animation, `IDockLayoutStore` reference JSON round-trip, schema migrations, workspace perspectives (named layout presets) |
+| v0.4 | `IFloatingDockWindow` + per-platform implementations — Windows / AppKit / GTK4 tear-off, cross-window drag via mouse-down capture (no global hooks, no Accessibility entitlement on macOS), per-monitor DPI on Windows, z-order persistence |
+| v0.5 | Layout locking, reset-to-default, drop-from-external (OS file drop), tab pinning, telemetry surface stable — 1.0 candidate |
+
+Write to the v0.1 public surface today and your code will keep working as the rendering lights up underneath.
+
+## Setup (.NET MAUI)
+
+```bash
+dotnet add package Shiny.Maui.Controls.Desktop
+```
+
+In `MauiProgram.cs`:
+
+```csharp
+using Shiny;
+using MyApp.Panels;   // SolutionExplorerPanel, OutputPanel — your dockable views
+
+var builder = MauiApp.CreateBuilder();
+builder
+    .UseMauiApp<App>()
+    .UseShinyDocking()
+    .AddDockPanel<SolutionExplorerPanel>("solution-explorer")
+    .AddDockPanel<OutputPanel>("output");
+```
+
+Each `AddDockPanel<TView>("id")` call registers `TView` as a transient service and an `IDockableContentFactory` keyed to your stable string ID. Persisted layouts reference panels by that ID, so you can rename the C# class without breaking saved layouts.
+
+Attach the host inside any existing `ContentPage` — `DockHostView` is a `ContentView`, not a `ContentPage` subclass. You keep full control of your Shell / page architecture:
+
+```xml
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:docking="clr-namespace:Shiny.Maui.Controls.Desktop.Docking;assembly=Shiny.Maui.Controls.Desktop"
+             x:Class="MyApp.DockingShellPage"
+             Title="IDE">
+    <docking:DockHostView InitialLayout="{Binding StartupLayout}" />
+</ContentPage>
+```
+
+A dockable panel is just a regular `View`:
+
+```csharp
+public sealed class SolutionExplorerPanel : ContentView
+{
+    public SolutionExplorerPanel(/* inject anything you need */)
+    {
+        Content = new VerticalStackLayout
+        {
+            Padding = 12,
+            Children = { new Label { Text = "Solution Explorer" } }
+        };
+    }
+}
+```
+
+## Setup (Blazor)
+
+```bash
+dotnet add package Shiny.Blazor.Controls.Docking
+```
+
+`Program.cs`:
+
+```csharp
+using Shiny.Blazor.Controls.Docking;
+
+builder.Services
+    .AddShinyDocking()
+    .AddDockPanel<SolutionExplorerPanel>("solution-explorer")
+    .AddDockPanel<OutputPanel>("output");
+```
+
+`_Imports.razor`:
+
+```razor
+@using Shiny.Blazor.Controls.Docking
+```
+
+Any razor page:
+
+```razor
+<DockHost />
+```
+
+Each panel is a regular Razor component. v1 supports in-app floating only; popping panels out into separate browser windows is roadmap (will use `SharedWorker` for cross-window coordination — `BroadcastChannel` cannot teleport component instances between Blazor runtime instances).
+
+## Layout Schema
+
+A POCO tree with a source-generated `System.Text.Json` context (AOT-safe). Round-trip with `DockSerialization.Serialize(root)` and `DockSerialization.Deserialize(json)`.
+
+```
+DockRoot
+├── int SchemaVersion + int MinReadableVersion
+├── DockWindowState MainWindow
+└── List<DockWindowState> FloatingWindows         (order = z-order)
+
+DockWindowState
+├── DockRect? Bounds                              (screen-coord rectangle — desktop only)
+├── bool IsMaximized + bool IsFullScreen
+├── DockNode DocumentArea                         (structurally distinct document well)
+├── DockNode? LeftRail + TopRail + RightRail + BottomRail
+└── string? ActivePanelId                         (for focus restoration on load)
+
+DockNode = DockSplit | DockGroup | DockEmpty       (polymorphic, $kind discriminator)
+DockSplit  { Orientation, Ratio (0..1), First, Second }
+DockGroup  { GroupId, List<DockTab> Tabs, int ActiveTabIndex, List<int> FocusHistory (MRU) }
+DockEmpty  { }
+
+DockTab    { PanelTypeId, PanelInstanceId, bool IsPinned }
+```
+
+Schema versioning is built in from day one: bump `SchemaVersion`, register an `IDockLayoutMigrator` for each step, and stored layouts migrate forward as your app upgrades. Unknown `PanelTypeId`s on load land in a **missing-panels tray** rather than silently dropping — so a removed feature gracefully degrades instead of corrupting the layout.
+
+## Contracts
+
+### `IDockHost`
+
+Per-window controller exposed by `DockHostView` / `<DockHost />`.
+
+```csharp
+public interface IDockHost
+{
+    bool IsLocked { get; set; }                    // layout read-only mode (kiosk / demos)
+    IDockEvents Events { get; }
+    IDockCommandScope CommandScope { get; }
+
+    Task LoadAsync(DockRoot root, CancellationToken ct = default);
+    DockRoot Snapshot();
+
+    Task ShowPanelAsync(string panelTypeId, DockArea preferredArea = DockArea.Left, CancellationToken ct = default);
+    Task HidePanelAsync(string panelInstanceId, CancellationToken ct = default);
+    Task ActivatePanelAsync(string panelInstanceId, CancellationToken ct = default);
+    Task ResetLayoutAsync(CancellationToken ct = default);
+}
+```
+
+### `IDockableContentFactory`
+
+Registered by `AddDockPanel<T>("id")` — resolves the stable string ID to a `View` (MAUI) or `RenderFragment` (Blazor).
+
+```csharp
+public interface IDockableContentFactory
+{
+    string PanelTypeId { get; }
+    Task<View> CreateAsync(string instanceId, CancellationToken ct = default);
+}
+```
+
+### `IDockableContent`
+
+Optional interface your panel content can implement to participate in disposal, focus, and pointer hand-off semantics.
+
+```csharp
+public interface IDockableContent
+{
+    string Title { get; }
+    object? Icon { get; }
+    bool CanClose { get; }
+    bool CanFloat { get; }
+    void OnActivated();
+    void OnDeactivated();
+
+    // Embedded editors return true to claim pointer-down events — prevents the dock
+    // system from starting a tab drag during caret-drag inside a text editor.
+    bool WantsPointerDown(double x, double y);
+}
+```
+
+### `IDockLayoutStore` (bring-your-own)
+
+Persistence is consumer-supplied — no default implementation ships. Two minimal patterns:
+
+```csharp
+// File-backed
+public sealed class FileDockLayoutStore(string path) : IDockLayoutStore
+{
+    public int SaveDebounceMs => 500;
+
+    public async Task<DockRoot?> LoadAsync(CancellationToken ct = default)
+        => File.Exists(path) ? DockSerialization.Deserialize(await File.ReadAllTextAsync(path, ct)) : null;
+
+    public Task SaveAsync(DockRoot root, CancellationToken ct = default)
+        => File.WriteAllTextAsync(path, DockSerialization.Serialize(root), ct);
+}
+
+// Shiny.Stores-backed (works on every host)
+public sealed class ShinyStoreDockLayoutStore(IKeyValueStore store) : IDockLayoutStore
+{
+    public int SaveDebounceMs => 500;
+
+    public Task<DockRoot?> LoadAsync(CancellationToken ct = default)
+        => Task.FromResult(store.Get<string?>("docking.layout") is { } json
+            ? DockSerialization.Deserialize(json) : null);
+
+    public Task SaveAsync(DockRoot root, CancellationToken ct = default)
+    {
+        store.Set("docking.layout", DockSerialization.Serialize(root));
+        return Task.CompletedTask;
+    }
+}
+```
+
+### `IDockLayoutMigrator`
+
+Forward-only schema migrations. Register one per version step — chained automatically.
+
+```csharp
+public interface IDockLayoutMigrator
+{
+    int FromVersion { get; }
+    int ToVersion { get; }
+    DockRoot Migrate(DockRoot input);
+}
+```
+
+### `IDockEvents`
+
+Observability surface — wire into telemetry, undo stacks, or autosave debouncing.
+
+```csharp
+public interface IDockEvents
+{
+    event EventHandler<LayoutChangedEventArgs>? LayoutChanged;
+    event EventHandler<PanelActivatedEventArgs>? PanelActivated;
+    event EventHandler<DockDragEventArgs>? DragStarted;
+    event EventHandler<DockDragEventArgs>? DragCompleted;
+    event EventHandler<DockDragEventArgs>? DragCancelled;
+}
+```
+
+### `IDockCommandScope`
+
+Scopes global accelerators (Ctrl+W close tab, Ctrl+Tab MRU, Ctrl+Alt+PgUp/Dn group navigation) to the dock surface so they only fire when keyboard focus is inside it.
+
+```csharp
+public interface IDockCommandScope
+{
+    bool IsInScope { get; }
+    string? ActiveGroupId { get; }
+    string? ActivePanelInstanceId { get; }
+}
+```
+
+## Disposal contract
+
+When a panel is closed, the host disposes the content if it implements `IDisposable`. Tearing off to a floating window or moving between groups in the same window does **not** dispose — the same view instance is moved. This is intentional and documented because retrofitting "recreated" → "preserved" would break every panel implementation, and consumers will rely on whichever behavior ships first.
+
+## Theming
+
+MAUI: `ResourceDictionary` keys (`DockTabBackgroundBrush`, `DockGroupSeparatorBrush`, …) — names locked before styling lands so consumer code stays stable.
+
+Blazor: CSS custom properties (`--shiny-dock-host-bg`, `--shiny-dock-placeholder-fg`, …) — override on a parent or on `<DockHost>` itself.
+
+Animation duration is a theme token, not a constant — reduced-motion / accessibility consumers can flatten to zero without recompiling.
+
+## Architectural Notes
+
+- **macOS tear-off** uses native AppKit (`net10.0-macos`) `NSPanel` at `NSWindowLevel.Floating`. MacCatalyst stays in-app-only in v1 (Catalyst can't do borderless click-through windows for the drag ghost).
+- **Cross-window drag** uses mouse-down implicit capture, **not** global mouse hooks. This sidesteps the macOS Accessibility entitlement entirely, so the library works under sandboxed / Mac App Store distribution.
+- **Floating window z-order** is persisted as part of the schema — the floating-windows list is ordered.
+- **Document area vs tool area** is a schema-level partition rather than a per-panel flag, so document-well focus rules and tab behavior don't leak into every consumer.
+
+## Related
+
+- [Tray Icon](/controls/trayicon/) — ships in the same `Shiny.Maui.Controls.Desktop` package
+- [FloatingPanel](/controls/floatingpanel/) — a mobile-shaped bottom/top sheet for MAUI; distinct from desktop docking auto-hide rails

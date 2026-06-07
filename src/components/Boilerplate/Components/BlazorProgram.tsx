@@ -61,6 +61,11 @@ public class Program
     src += `
         builder.Services.AddShinyStores();`;
   }
+  if (has('docking')) {
+    src += `
+        // Visual-Studio-style docking host — register dockable components with .AddDockPanel<TComponent>("panel-id")
+        builder.Services.AddShinyDocking();`;
+  }
   if (has('localization')) {
     src += `
         builder.Services.AddStronglyTypedLocalizations();`;

@@ -109,6 +109,11 @@ const MauiProgram = (props: Props) => {
       // Desktop only — Android / iOS throw PlatformNotSupportedException on factory.Create()
       builder.UseTrayIcon();`;
   }
+  if (has('docking')) {
+    src += `
+      // Desktop docking host — register dockable panels with .AddDockPanel<TView>("panel-id")
+      builder.UseShinyDocking();`;
+  }
   // Barcodes (Shiny.Maui.Controls.Barcodes) is view-only — no DI registration required.
   if (has('stores')) {
     src += `

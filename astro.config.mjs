@@ -11,10 +11,30 @@ import { sidebarTopics, sidebarTopicsOptions, cleanTopicsForStarlight } from './
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
 
+// Giscus comments widget config (https://giscus.app).
+// Replace REPLACE_WITH_* values after installing the giscus GitHub App and
+// enabling Discussions on the repo — see README "Comments (giscus)" for steps.
+const giscusConfig = {
+  repo: 'shinyorg/documentation',
+  repoId: 'REPLACE_WITH_REPO_ID',
+  category: 'Announcements',
+  categoryId: 'REPLACE_WITH_CATEGORY_ID',
+  mapping: 'pathname',
+  reactionsEnabled: '1',
+  inputPosition: 'bottom',
+  lang: 'en',
+};
+
 
 export default defineConfig({
   site: 'https://www.shinylib.net',
   output: 'static',
+  vite: {
+    define: {
+      // Exposed to components as `import.meta.env.GISCUS` at build time.
+      'import.meta.env.GISCUS': JSON.stringify(giscusConfig),
+    },
+  },
   // Astro 6 made `markdown.gfm` optional with no default (the `.md` processor
   // enables GFM internally), but @astrojs/mdx still reads this flag to decide
   // whether to add remark-gfm. Without it, GFM tables break in every .mdx page.
@@ -308,6 +328,8 @@ export default defineConfig({
       components: {
         // Override the default `Sidebar` component with a custom one.
         Sidebar: './src/components/Sidebar.astro',
+        // Inject giscus comments under page content (blog posts + opt-in via `comments: true` frontmatter).
+        MarkdownContent: './src/components/MarkdownContent.astro',
       },
       plugins:[
         //https://frostybee.github.io/starlight-announcement/

@@ -418,6 +418,7 @@ export const sidebarTopics = [
         label: 'Desktop',
         items:[
           { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
+          { label: 'Docking', link: 'controls/docking/', jumpTo: true },
         ]
       },
       { label: 'Blazor Playground', link: 'https://shinyorg.github.io/controls/', attrs: { target: '_blank' } },
