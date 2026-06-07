@@ -16,9 +16,9 @@ const googleAnalyticsId = 'G-SZKGGX6M5W';
 // enabling Discussions on the repo — see README "Comments (giscus)" for steps.
 const giscusConfig = {
   repo: 'shinyorg/documentation',
-  repoId: 'REPLACE_WITH_REPO_ID',
+  repoId: 'R_kgDOJc3znQ',
   category: 'Announcements',
-  categoryId: 'REPLACE_WITH_CATEGORY_ID',
+  categoryId: 'DIC_kwDOJc3znc4C-soD',
   mapping: 'pathname',
   reactionsEnabled: '1',
   inputPosition: 'bottom',
