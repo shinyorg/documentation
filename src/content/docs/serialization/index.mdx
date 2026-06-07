@@ -1,0 +1,182 @@
+---
+title: Serialization
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Centralize every `JsonSerializerContext` in your app behind a single AOT-safe `ISerializer`. Decorate a context with `[ShinyJsonContext]` and the source generator auto-registers it. Decorate an element type with `[ShinyJsonInclude]` and `List<T>`, `T[]`, `IEnumerable<T>` and friends round-trip without reflection — even when the element carries an inline `[JsonConverter]`.
+
+<PlatformSupport frameworks={["dotnet", "blazor"]} os={["android", "ios", "windows"]} />
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="extensions" /> |
+| Downloads | <NugetDownloads name="Shiny.Extensions.Serialization" /> |
+
+## Features
+
+- Single shared `ISerializer` backed by one `JsonSerializerOptions` whose `TypeInfoResolverChain` collects every contributed context
+- `Shiny.Json` static accessor — self-bootstrapping, sibling to `Shiny.Stores`. Works before DI exists (mobile cold-start)
+- `[ShinyJsonContext]` source-generator marker on any user-declared `JsonSerializerContext` → emits a `[ModuleInitializer]` that auto-registers it. No `services.AddJsonContext(...)` calls needed
+- `[ShinyJsonInclude]` source-generator marker on element types → AOT-safe collection wrappers (`List<T>`, `T[]`, `IEnumerable<T>`, `IReadOnlyList<T>`, `IList<T>`, `ICollection<T>`, `IAsyncEnumerable<T>`) using `JsonMetadataServices.CreateListInfo<,>` and friends
+- Composes with inline `[JsonConverter(typeof(MyConverter))]` — the converter handles the element, the generated wrappers handle the collection
+- DI: `services.AddJsonSerialization()` / `AddJsonContext(...)` / `ConfigureJsonSerializer(...)` / `AddSerializer<T>()` / `UseSerializer()`
+- Test isolation: `Shiny.Json.CreateTestScope(...)` adds extras for the scope and resets the cached serializer on dispose
+
+## Setup
+
+<Steps>
+1. Install the NuGet package:
+   ```bash
+   dotnet add package Shiny.Extensions.Serialization
+   ```
+
+2. Optionally register `ISerializer` in DI (not required for the static accessor):
+   ```csharp
+   builder.Services.AddJsonSerialization();
+   ```
+
+3. Decorate a normal `JsonSerializerContext` partial with `[Shiny.ShinyJsonContext]`. The Shiny source generator emits a `[ModuleInitializer]` calling `Shiny.Json.AddContext(MyAppJsonContext.Default)` before `Main`:
+   ```csharp
+   using System.Text.Json.Serialization;
+   using Shiny;
+
+   [ShinyJsonContext]
+   [JsonSerializable(typeof(MyDto))]
+   [JsonSerializable(typeof(MyOtherDto))]
+   internal partial class MyAppJsonContext : JsonSerializerContext;
+   ```
+
+4. Done. `Shiny.Json.Default` and any DI-resolved `ISerializer` both see your types. **You do not need `services.AddJsonContext(...)` anywhere.**
+</Steps>
+
+## Auto-Registering With `[ShinyJsonContext]`
+
+The recommended pattern. Decorate any normal STJ source-generator context and the Shiny generator emits a `[ModuleInitializer]` that calls `Shiny.Json.AddContext(MyContext.Default)` before any user code runs.
+
+This is strictly better than `services.AddJsonContext(MyContext.Default)` for two reasons:
+
+1. **No "forgot to register" bugs.** Module initializers run regardless of which `AddX(...)` extension the consumer called. (Real example: Shiny Locations had `AddGeofencing` registering `ShinyLocationsJsonContext`, but `AddGps` did not — a GPS-only app would have thrown at runtime under AOT. Switching to `[ShinyJsonContext]` removed the latent bug.)
+2. **Works before DI exists.** Module init fires before `Main`, so the static `Shiny.Stores.Default` (mobile cold-start) can use the serializer immediately.
+
+## Adding Collection Support With `[ShinyJsonInclude]`
+
+If an element type's `JsonTypeInfo` is registered (anywhere in the chain) but `List<T>`/`T[]` throw "no metadata for type" under AOT, mark the element:
+
+```csharp
+[ShinyJsonInclude]
+public partial class MyDto
+{
+    public string Name { get; set; } = "";
+}
+```
+
+The generator emits an `IJsonTypeInfoResolver` providing AOT-safe wrappers for:
+
+- `List<MyDto>`
+- `MyDto[]`
+- `IEnumerable<MyDto>`
+- `IReadOnlyList<MyDto>` / `IReadOnlyCollection<MyDto>`
+- `IList<MyDto>` / `ICollection<MyDto>`
+- `IAsyncEnumerable<MyDto>`
+
+Each wrapper lazy-resolves the element `JsonTypeInfo<MyDto>` from the chain at runtime, so the element can come from any other registered context (`[ShinyJsonContext]`-decorated, hand-registered, third-party — doesn't matter).
+
+For types you don't own, use the assembly form:
+
+```csharp
+[assembly: Shiny.ShinyJsonInclude(typeof(SomeExternal.Vendor.Payload))]
+```
+
+## Composing With Inline `JsonConverter<T>`
+
+The original motivating bug: a type carrying `[JsonConverter(typeof(MyConverter))]` serializes fine in isolation, but `List<MyType>` throws under AOT because STJ has no `JsonTypeInfo<List<MyType>>`. The two decorations compose:
+
+```csharp
+[ShinyJsonInclude]
+[JsonConverter(typeof(BoxedIntConverter))]
+public partial class BoxedInt
+{
+    public int Value { get; set; }
+}
+
+public sealed class BoxedIntConverter : JsonConverter<BoxedInt>
+{
+    public override BoxedInt Read(ref Utf8JsonReader reader, Type t, JsonSerializerOptions o) =>
+        new() { Value = reader.GetInt32() };
+
+    public override void Write(Utf8JsonWriter writer, BoxedInt value, JsonSerializerOptions o) =>
+        writer.WriteNumberValue(value.Value);
+}
+```
+
+`BoxedInt` serializes as a bare number via the inline converter. `List<BoxedInt>` goes through the Shiny-generated collection wrapper, which lazy-fetches the `JsonTypeInfo<BoxedInt>` that carries the inline converter. The result is `[1, 2, 3]` — under AOT, no reflection.
+
+## DI Patterns
+
+```csharp
+public class MyService(ISerializer serializer)
+{
+    public string Save(MyDto d) => serializer.Serialize(d);
+    public MyDto Load(string j) => serializer.Deserialize<MyDto>(j);
+}
+
+// Mutate options before first use
+services.ConfigureJsonSerializer(o => o.WriteIndented = false);
+
+// Hand-add a 3rd-party context you can't decorate
+services.AddJsonContext(ThirdPartyJsonContext.Default);
+
+// Swap the whole serializer (MessagePack, MemoryPack, etc.)
+services.AddSerializer<MyMessagePackSerializer>();
+host.Services.UseSerializer();   // snapshot DI-resolved instance into Shiny.Json.Default
+```
+
+## Static Patterns
+
+```csharp
+// Works anywhere — no DI required
+var json = Shiny.Json.Default.Serialize(new MyDto { Name = "x" });
+var back = Shiny.Json.Default.Deserialize<MyDto>(json);
+
+// Late additions (must be before first Serialize call)
+Shiny.Json.AddContext(SomeOtherContext.Default);
+Shiny.Json.Configure(o => o.WriteIndented = false);
+```
+
+## Diagnostics
+
+| ID | Severity | Meaning |
+|---|---|---|
+| `SJSON002` | Error | `[ShinyJsonInclude]` applied to an unbound generic type. Use a closed constructed type. |
+| `SJSON003` | Warning | `[ShinyJsonInclude]` was applied to type `T`, but no `[JsonSerializable(typeof(T))]` is declared on any `JsonSerializerContext` in this compilation. The generated collection wrappers will return `null` at runtime and serialization will throw. Add the `[JsonSerializable]` to a registered context, or suppress the warning if the element is registered in another assembly. |
+
+## Testing
+
+```csharp
+[Collection("ShinyJson")]
+public class MyTests
+{
+    [Fact]
+    public void RoundTrip()
+    {
+        using var scope = Shiny.Json.CreateTestScope(
+            extraResolvers: [ExtraContext.Default],
+            extraConfigure: o => o.WriteIndented = false
+        );
+
+        var json = Shiny.Json.Default.Serialize(new MyDto { Name = "x" });
+        Shiny.Json.Default.Deserialize<MyDto>(json).Name.ShouldBe("x");
+    }
+}
+```
+
+Tests touching `Shiny.Json` must share an xUnit collection (`[Collection("ShinyJson")]`) because the registry is process-static.
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-serialization" />

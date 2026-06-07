@@ -4,9 +4,11 @@ description: Understanding the core concepts that power Shiny
 ---
 import { Card, CardGrid } from '@astrojs/starlight/components';
 
-Shiny is built around three core concepts: **Services**, **Delegates**, and **Observables**. These form the foundation of every Shiny library and understanding them will help you use Shiny effectively.
+Shiny is built around three core concepts: **Services**, **Delegates**, and **Events**. These form the foundation of every Shiny library and understanding them will help you use Shiny effectively.
 
 Shiny is designed as a unified framework — not a collection of independent plugins. Under the hood, it manages storage, logging, platform lifecycle hooks, and cross-platform utilities so you don't have to.
+
+> **AOT-first.** As of v5, Reactive Extensions (Rx) has been removed from `Shiny.Core`, `Shiny.Jobs`, `Shiny.Locations`, `Shiny.Net.Http`, `Shiny.Notifications`, `Shiny.Push`, and `Shiny.BluetoothLE.Hosting`. Those modules now expose plain C# `event EventHandler<T>` for foreground notification. `Shiny.BluetoothLE` (client) retains `IObservable<T>` because reactive composition is genuinely useful when chaining GATT operations and managing scan lifecycles.
 
 ## Core Concepts
 
@@ -42,19 +44,20 @@ public class MyGpsDelegate : IGpsDelegate
 Delegates support full dependency injection and are treated as singletons.
 </Card>
 
-<Card title="Observables" icon="rocket">
-Shiny uses Reactive Extensions (Rx) for real-time event streams. Observables give you powerful composition, filtering, and lifecycle management for platform events.
+<Card title="Events" icon="rocket">
+Most Shiny modules expose plain C# `event EventHandler<T>` for foreground notifications — simple to consume, AOT-clean, and free of System.Reactive overhead.
 
 ```csharp
-gpsManager
-    .WhenReading()
-    .Where(x => x.Speed > 10)
-    .Subscribe(reading => {
-        // Reactive GPS stream
-    });
+gpsManager.GpsReadingReceived += (sender, reading) =>
+{
+    if (reading.Speed > 10)
+    {
+        // foreground GPS handling
+    }
+};
 ```
 
-Observables are ideal for UI binding and foreground scenarios.
+Events are ideal for UI binding and foreground scenarios. `Shiny.BluetoothLE` (client) retains `IObservable<T>` because reactive composition is genuinely useful for GATT pipelines and scan lifecycles.
 </Card>
 </CardGrid>
 
@@ -81,25 +84,25 @@ Observables are ideal for UI binding and foreground scenarios.
     <div class="arch-flow-icon">3</div>
     <div class="arch-flow-content">
       <strong>React</strong>
-      <span>Delegates handle background callbacks; Observables stream foreground events</span>
+      <span>Delegates handle background callbacks; C# events stream foreground updates</span>
     </div>
   </div>
 </div>
 
 ```csharp
 // 1. Register at startup
-services.UseGps<MyGpsDelegate>();
+services.AddGps<MyGpsDelegate>();
 
 // 2. Interact via injected service
-await gpsManager.StartListener(new GpsRequest { UseBackground = true });
+await gpsManager.StartListener(new GpsRequest(GpsBackgroundMode.Standard));
 
-// 3. React — foreground via observable
-gpsManager.WhenReading().Subscribe(reading => { /* update UI */ });
+// 3. React — foreground via C# event
+gpsManager.GpsReadingReceived += (s, reading) => { /* update UI */ };
 
 // 3. React — background via delegate (called by Shiny automatically)
 public class MyGpsDelegate : IGpsDelegate
 {
-    public Task OnReading(IGpsReading reading) => /* handle */;
+    public Task OnReading(GpsReading reading) => /* handle */;
 }
 ```
 
@@ -117,8 +120,10 @@ Delegates solve three problems with traditional events:
 Shiny is framework-agnostic by design. While it integrates beautifully with MAUI, it doesn't depend on it. This means Shiny can move with the .NET ecosystem — whether that's MAUI, Uno Platform, Blazor Hybrid, or whatever comes next.
 :::
 
-:::tip[Why Reactive Extensions?]
-Observables are more powerful and memory-safe than .NET events. They provide built-in operators for filtering, throttling, combining, and disposing of event streams. Even the C# team has acknowledged the limitations of the language's event model.
+:::tip[Why C# events for most modules?]
+As of v5, Shiny's higher-level modules (Jobs, Locations, HTTP transfers, Notifications, Push, BLE Hosting) emit plain `event EventHandler<T>` instead of `IObservable<T>`. This keeps the public surface AOT/trim-safe, drops the System.Reactive dependency for apps that don't need it, and matches the patterns app developers already reach for in MAUI/Blazor.
+
+`Shiny.BluetoothLE` (client) keeps `IObservable<T>` because reactive composition meaningfully simplifies GATT pipelines (chaining reads/writes, managing scan lifecycles, combining notification streams). When you need Rx semantics on top of a Shiny event, lift it yourself with `Observable.FromEventPattern`.
 :::
 
 <style>

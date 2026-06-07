@@ -115,76 +115,55 @@ hostingManager.ClearServices();
 var services = hostingManager.Services;
 ```
 
-## Managed Characteristics
+## Composing Services in a Class
 
-For more complex scenarios, use the managed characteristic pattern with dependency injection.
-
-### 1. Create the Characteristic Class
+The attribute-based managed characteristic pattern (`BleGattCharacteristic` base + `[BleGattCharacteristic]` attribute + `AttachRegisteredServices`) was removed for AOT compliance. Compose your GATT services in code by registering a hosting service class that calls `AddService(...)` on startup:
 
 ```csharp
-[BleGattCharacteristic(
-    "Your-Service-UUID",
-    "Your-Characteristic-UUID",
-    Notifications = NotificationOptions.Notify,
-    Write = WriteOptions.Write
-)]
-public class MyCharacteristic : BleGattCharacteristic
+public class MyGattHostingService(IBleHostingManager manager, ILogger<MyGattHostingService> logger) : IShinyStartupTask
 {
-    readonly ILogger<MyCharacteristic> logger;
-
-    public MyCharacteristic(ILogger<MyCharacteristic> logger)
+    public async void Start()
     {
-        this.logger = logger;
-    }
+        var access = await manager.RequestAccess(advertise: true, connect: true);
+        if (access != AccessState.Available)
+            return;
 
-    public override Task OnStart()
-    {
-        this.logger.LogInformation("Characteristic started");
-        return Task.CompletedTask;
-    }
+        await manager.AddService("Your-Service-UUID", primary: true, sb =>
+        {
+            sb.AddCharacteristic("Your-Characteristic-UUID", cb =>
+            {
+                cb.SetRead(req =>
+                {
+                    var data = System.Text.Encoding.UTF8.GetBytes("Hello");
+                    return Task.FromResult(GattResult.Success(data));
+                });
 
-    public override void OnStop()
-    {
-        this.logger.LogInformation("Characteristic stopped");
-    }
+                cb.SetWrite(req =>
+                {
+                    logger.LogInformation("Received {Bytes} bytes", req.Data.Length);
+                    if (req.IsReplyNeeded)
+                        req.Respond(GattState.Success);
+                    return Task.CompletedTask;
+                }, WriteOptions.Write);
 
-    public override Task<GattResult> OnRead(ReadRequest request)
-    {
-        var data = System.Text.Encoding.UTF8.GetBytes("Hello from managed");
-        return Task.FromResult(GattResult.Success(data));
-    }
+                cb.SetNotification(sub =>
+                {
+                    logger.LogInformation("Subscription change: {Sub}", sub.IsSubscribing);
+                    return Task.CompletedTask;
+                }, NotificationOptions.Notify);
+            });
+        });
 
-    public override Task OnWrite(WriteRequest request)
-    {
-        this.logger.LogInformation("Received: {Data}", request.Data.Length);
-        return Task.CompletedTask;
-    }
-
-    public override Task OnSubscriptionChanged(IPeripheral peripheral, bool subscribed)
-    {
-        this.logger.LogInformation("Subscription: {Subscribed}", subscribed);
-        return Task.CompletedTask;
+        await manager.StartAdvertising(new AdvertisementOptions("MyDevice", "Your-Service-UUID"));
     }
 }
 ```
 
-### 2. Register
+Register it like any other Shiny service:
 
 ```csharp
-services.AddBleHostedCharacteristic<MyCharacteristic>();
+services.AddBluetoothLeHosting();
+services.AddSingleton<IShinyStartupTask, MyGattHostingService>();
 ```
 
-### 3. Attach/Detach
-
-```csharp
-IBleHostingManager hostingManager; // injected
-
-// Attach all registered managed characteristics as GATT services
-await hostingManager.AttachRegisteredServices();
-
-// Detach when done
-hostingManager.DetachRegisteredServices();
-
-// Check if attached
-var isAttached = hostingManager.IsRegisteredServicesAttached;
-```
+This keeps everything testable (the class can be exercised against a mocked `IBleHostingManager`), preserves AOT-cleanliness, and avoids the runtime attribute scanning the old pattern relied on.

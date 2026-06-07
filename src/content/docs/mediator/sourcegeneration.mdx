@@ -34,24 +34,69 @@ All source generated registrations will register your implementations as singlet
 :::
 
 
-3. JSON Converter 
+3. JSON Serialization
 
-With v5 - we created our own JSON serialization source generator because you cannot currently chain source generators (mediator > system.text.json).  This source generator will create high performance JSON converters for your request and response types while also helping our HTTP client be fully AOT compliant.
+Starting in v6.6 mediator routes all JSON through `Shiny.ISerializer` from the
+[`Shiny.Extensions.Serialization`](https://www.nuget.org/packages/Shiny.Extensions.Serialization)
+package. The default chain is **AOT-strict** — it contains no reflection fallback, so every type
+mediator touches (request, response, event, scheduled-command payload, storage / cache entry) must
+have a `JsonTypeInfo` registered. The compiler can't catch missing registrations; you'll see
+`InvalidOperationException: No JsonTypeInfo registered for type 'T'` at runtime if you forget.
 
-You can use this for ANY of your types.  If you manually create your contracts and you use a storage mechanic like Offline mode, we recommend you decorate your types with `[SourceGenerateJsonConverter]` to get the benefits of source generated serialization.
+**Register your contracts.** Declare a partial `JsonSerializerContext` with
+`[JsonSerializable(typeof(T))]` for every type that crosses the wire, and tag it with
+`[ShinyJsonContext]` so a generated `[ModuleInitializer]` registers it with `Shiny.Json` before
+`Main` runs.
 
 ```csharp
-[SourceGenerateJsonConverter]
-public class MyRequest
+using System.Text.Json.Serialization;
+using Shiny;
+
+[ShinyJsonContext]
+[JsonSerializable(typeof(GetCustomerRequest))]
+[JsonSerializable(typeof(CustomerResponse))]
+[JsonSerializable(typeof(OrderPlacedEvent))]
+internal partial class AppJsonContext : JsonSerializerContext;
+```
+
+**Collections.** If a response or property is shaped like `List<Customer>`, `Customer[]`, or
+`IAsyncEnumerable<Customer>`, mark the element type with `[ShinyJsonInclude]` — the extensions
+generator emits collection-shape wrappers automatically.
+
+```csharp
+[ShinyJsonInclude]
+public partial class Customer { /* ... */ }
+```
+
+**OpenAPI HTTP clients.** When `GenerateJsonConverters="true"` on a `MediatorHttp` item, the
+generator emits a custom `IJsonTypeInfoResolver` that wires every generated model, contract, and
+enum (including `Nullable<TEnum>` and `List<T>` / `T[]` shapes) via `JsonMetadataServices`
+factories plus a `[ModuleInitializer]`. No `[ShinyJsonContext]` needed — it's all automatic.
+
+**Attribute-driven HTTP clients (`[Get]`, `[Post]`, `[Body]`).** Request and result types are
+user-written, so they must be in a registered `[ShinyJsonContext]` partial.
+
+**Replacing `[SourceGenerateJsonConverter]`** (legacy v5/early-v6 attribute): still works for the
+HTTP client paths and remains in the source generator for backward compatibility, but new code
+should prefer `[ShinyJsonContext]` + `[JsonSerializable]` for first-class AOT coverage of
+collection shapes.
+
+```csharp
+public class MyRequest : IRequest<MyResponse>
 {
     public string Name { get; set; }
 }
 
-[SourceGenerateJsonConverter]
 public class MyResponse
 {
     public string Message { get; set; }
 }
+
+[ShinyJsonContext]
+[JsonSerializable(typeof(MyRequest))]
+[JsonSerializable(typeof(MyResponse))]
+internal partial class AppJsonContext : JsonSerializerContext;
+```
 
 4. Contract Keys
 

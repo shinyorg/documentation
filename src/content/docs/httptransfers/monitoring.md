@@ -4,55 +4,49 @@ title: Monitoring
 
 ## Overview
 
-Monitor transfer progress in real-time using observables or the managed monitor for UI binding.
+Monitor transfer progress in real-time using C# events on `IHttpTransferManager`, the awaitable `WatchTransfer` helper, or the `HttpTransferMonitor` collection helper for UI binding. Rx has been removed from `Shiny.Net.Http` — everything is plain `event EventHandler` or `Task`.
 
 ## Watching All Transfers
 
 ```csharp
 IHttpTransferManager manager; // injected
 
-manager
-    .WhenUpdateReceived()
-    .Subscribe(result =>
-    {
-        Console.WriteLine($"Transfer: {result.Request.Identifier}");
-        Console.WriteLine($"Status: {result.Status}");
-        Console.WriteLine($"Progress: {result.Progress.PercentComplete:P0}");
-        Console.WriteLine($"Speed: {result.Progress.BytesPerSecond} B/s");
-        Console.WriteLine($"ETA: {result.Progress.EstimatedTimeRemaining}");
-    });
+manager.UpdateReceived += (sender, result) =>
+{
+    Console.WriteLine($"Transfer: {result.Request.Identifier}");
+    Console.WriteLine($"Status: {result.Status}");
+    Console.WriteLine($"Progress: {result.Progress.PercentComplete:P0}");
+    Console.WriteLine($"Speed: {result.Progress.BytesPerSecond} B/s");
+    Console.WriteLine($"ETA: {result.Progress.EstimatedTimeRemaining}");
+};
+
+// Don't forget to detach the handler on dispose/disappear
+// manager.UpdateReceived -= handler;
 ```
 
 ## Watching a Specific Transfer
 
+`WatchTransfer` returns a `Task<HttpTransferResult>` that completes when the transfer reaches `Completed` or `Canceled`, throws on failure, and unhooks internally.
+
 ```csharp
-manager
-    .WatchTransfer("upload-1")
-    .Subscribe(
-        result =>
-        {
-            Console.WriteLine($"Progress: {result.Progress.PercentComplete:P0}");
-        },
-        error =>
-        {
-            Console.WriteLine($"Failed: {error.Message}");
-        },
-        () =>
-        {
-            Console.WriteLine("Transfer completed!");
-        }
-    );
+try
+{
+    var result = await manager.WatchTransfer("upload-1");
+    Console.WriteLine($"Completed at {result.Progress.PercentComplete:P0}");
+}
+catch (Exception ex)
+{
+    Console.WriteLine($"Failed: {ex.Message}");
+}
 ```
 
 ## Watching Transfer Count
 
 ```csharp
-manager
-    .WatchCount()
-    .Subscribe(count =>
-    {
-        Console.WriteLine($"Active transfers: {count}");
-    });
+manager.CountChanged += (sender, count) =>
+{
+    Console.WriteLine($"Active transfers: {count}");
+};
 ```
 
 ## HttpTransferResult
@@ -89,20 +83,21 @@ manager
 
 ## Managed Transfer Monitor
 
-`HttpTransferMonitor` provides an observable collection ideal for binding to UI.
+`HttpTransferMonitor` provides a `BindingList<HttpTransferObject>` ideal for binding to UI. Pass a `SynchronizationContext` to `Start` if you want collection mutations marshalled to the UI thread.
 
 ```csharp
 HttpTransferMonitor monitor; // injected (registered by AddHttpTransfers)
 
-// Start monitoring
+// Start monitoring on the UI thread
 await monitor.Start(
+    SynchronizationContext.Current,
     removeFinished: true,
     removeErrors: true,
     removeCancelled: true
 );
 
 // Bind to the collection
-var transfers = monitor.Transfers; // INotifyReadOnlyCollection<HttpTransferObject>
+var transfers = monitor.Transfers; // BindingList<HttpTransferObject>
 
 // Each HttpTransferObject has:
 // - Identifier, Uri, Type

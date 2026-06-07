@@ -592,6 +592,14 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Serialization',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'serialization/' },
+          { label: 'Release Notes', link: 'serialization/release-notes' }
+        ]
+      },
+      {
         label: 'Localization Generator',
         jumpTo: true,
         items:[
