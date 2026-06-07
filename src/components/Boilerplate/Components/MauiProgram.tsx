@@ -114,6 +114,15 @@ const MauiProgram = (props: Props) => {
       // Desktop docking host — register dockable panels with .AddDockPanel<TView>("panel-id")
       builder.UseShinyDocking();`;
   }
+  if (has('osk')) {
+    src += `
+      // Touch / kiosk on-screen keyboard — auto-shows when an Entry / Editor gains focus
+      builder.UseOnScreenKeyboard(opts =>
+      {
+          opts.AutoShowOnFocus = true;
+          opts.PushContent     = true;
+      });`;
+  }
   // Barcodes (Shiny.Maui.Controls.Barcodes) is view-only — no DI registration required.
   if (has('stores')) {
     src += `

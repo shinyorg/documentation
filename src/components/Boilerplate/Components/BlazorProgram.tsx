@@ -66,6 +66,15 @@ public class Program
         // Visual-Studio-style docking host — register dockable components with .AddDockPanel<TComponent>("panel-id")
         builder.Services.AddShinyDocking();`;
   }
+  if (has('osk')) {
+    src += `
+        // Touch / kiosk on-screen keyboard — place <OnScreenKeyboardHost /> in MainLayout.razor
+        builder.Services.AddShinyOnScreenKeyboard(opts =>
+        {
+            opts.AutoShowOnFocus = true;
+            opts.PushContent     = true;
+        });`;
+  }
   if (has('localization')) {
     src += `
         builder.Services.AddStronglyTypedLocalizations();`;

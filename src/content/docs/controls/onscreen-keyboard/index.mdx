@@ -1,0 +1,198 @@
+---
+title: On-Screen Keyboard
+description: Touch / kiosk on-screen keyboard for .NET MAUI desktop and Blazor — bottom-docked QWERTY with shift / numbers / symbols layers, dispatching into the focused text input
+---
+import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+A focused on-screen keyboard for touch tablets and kiosks. Auto-shows when an `Entry` / `Editor` (MAUI) or `<input>` / `<textarea>` (Blazor) gains focus, docks along the bottom edge, and types into whatever's focused — without stealing focus when keys are tapped.
+
+Two packages ship the same shape:
+
+- **`Shiny.Maui.Controls.Desktop`** — MAUI desktop (Windows + macOS AppKit + MacCatalyst + Linux GTK). Bundled with [Tray Icon](/controls/trayicon/) and [Docking](/controls/docking/) in the desktop-only add-on. Namespace: `Shiny.Maui.Controls.Desktop.OnScreenKeyboard`.
+- **`Shiny.Blazor.Controls.Kiosk`** — Blazor (browser today; Blazor Server / `BlazorWebView` on the roadmap). Bundled with [Docking](/controls/docking/) under the kiosk-shaped add-on. Namespace: `Shiny.Blazor.Controls.Kiosk.OnScreenKeyboard`.
+
+Intentionally limited in scope: English US-QWERTY layout, dispatch into the host app's own text fields, no IME / dead-key composition. The 80% case for touch kiosks, not a replacement for the OS on-screen keyboard.
+
+- <NugetDownloads name="Shiny.Maui.Controls.Desktop" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Kiosk" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} os={["windows", "macos", "linux"]} />
+
+<LibBuilder componentName="osk" client:load />
+
+## v0.1 status
+
+v0.1 is **planned, not yet implemented.** Once it ships it will provide:
+
+| Phase | Lands |
+|---|---|
+| **v0.1** (planned, ~2 weeks of focused work) | US-QWERTY layout, three layers (lowercase / Shift / 123-symbols), bottom-docked placement, auto-show on focus / auto-hide on blur, press-and-hold autorepeat, full AutomationPeer / ARIA tree for switch-input accessibility, theme tokens. **MAUI:** managed dispatch — mutates the focused `InputView`'s `Text` at `CursorPosition`. **Blazor:** `document.execCommand('insertText', ...)` after restoring focus, dispatched via a JS module |
+| v0.2 | Floating mode (reuses `IFloatingDockWindow` from Docking v0.4), optional key-press sounds via the existing `IFeedbackService`, theme-token surface stable |
+| v0.3 | Layout data files (JSON) — AZERTY / QWERTZ / Dvorak addable without code changes |
+| v0.4 | Pluggable `IKeyDispatcher` with optional native synthetic-key dispatch for system-wide injection (opt-in; documents the macOS Accessibility prompt) |
+| v0.5 | Dead-key composition (`` ` `` + `e` → `è`) and a word-prediction hook |
+
+The public surface below is the v0.1 contract — write to it today and your code will keep working as features light up.
+
+## Setup (.NET MAUI)
+
+```bash
+dotnet add package Shiny.Maui.Controls.Desktop
+```
+
+In `MauiProgram.cs`:
+
+```csharp
+using Shiny;
+using Shiny.Maui.Controls.Desktop.OnScreenKeyboard;
+
+var builder = MauiApp.CreateBuilder();
+builder
+    .UseMauiApp<App>()
+    .UseOnScreenKeyboard(opts =>
+    {
+        opts.AutoShowOnFocus = true;     // show when an Entry / Editor gains focus
+        opts.AutoHideOnBlur  = true;
+        opts.Height          = 280;
+        opts.PushContent     = true;     // shrinks the page above by Height
+        opts.Theme           = OnScreenKeyboardTheme.Light;
+    });
+```
+
+Resolve `IOnScreenKeyboard` from DI to control visibility from code, or use it inline as a `View`:
+
+```csharp
+public class MyPageViewModel(IOnScreenKeyboard keyboard)
+{
+    public void OnLaunchKioskMode()
+    {
+        keyboard.Show();
+    }
+}
+```
+
+```xml
+<!-- Inline use, e.g. in a kiosk-style page that always shows the keyboard -->
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:osk="clr-namespace:Shiny.Maui.Controls.Desktop.OnScreenKeyboard;assembly=Shiny.Maui.Controls.Desktop">
+    <Grid RowDefinitions="*,Auto">
+        <!-- your page content -->
+        <osk:OnScreenKeyboardView Grid.Row="1" Height="280" />
+    </Grid>
+</ContentPage>
+```
+
+## Setup (Blazor)
+
+```bash
+dotnet add package Shiny.Blazor.Controls.Kiosk
+```
+
+`Program.cs`:
+
+```csharp
+using Shiny.Blazor.Controls.Kiosk.OnScreenKeyboard;
+
+builder.Services.AddShinyOnScreenKeyboard(opts =>
+{
+    opts.AutoShowOnFocus = true;
+    opts.AutoHideOnBlur  = true;
+    opts.HeightPx        = 280;
+    opts.PushContent     = true;       // adds body { padding-bottom: var(--shiny-osk-height); }
+});
+```
+
+`_Imports.razor`:
+
+```razor
+@using Shiny.Blazor.Controls.Kiosk.OnScreenKeyboard
+```
+
+Place once at the root layout (typically `MainLayout.razor`):
+
+```razor
+<OnScreenKeyboardHost />
+```
+
+Or inject `IOnScreenKeyboardService` into any component to drive visibility from code.
+
+## Public Surface
+
+Identical shape on both renderers — only the `View` / `RenderFragment` type differs.
+
+```csharp
+public interface IOnScreenKeyboard            // IOnScreenKeyboardService on Blazor
+{
+    bool IsVisible { get; }
+    event EventHandler<bool>? VisibilityChanged;
+
+    void Show();
+    void Hide();
+    void Toggle();
+}
+
+public sealed class OnScreenKeyboardOptions
+{
+    public bool AutoShowOnFocus { get; set; } = true;
+    public bool AutoHideOnBlur  { get; set; } = true;
+    public double Height        { get; set; } = 280;     // HeightPx on Blazor
+    public bool PushContent     { get; set; } = true;    // false = overlay above content
+    public OnScreenKeyboardTheme Theme { get; set; } = OnScreenKeyboardTheme.Light;
+    public TimeSpan AutoRepeatDelay   { get; set; } = TimeSpan.FromMilliseconds(400);
+    public TimeSpan AutoRepeatInterval { get; set; } = TimeSpan.FromMilliseconds(50);
+}
+```
+
+## Layout
+
+A hand-tuned US-QWERTY with three switchable layers:
+
+| Layer | Keys |
+|---|---|
+| **Lowercase** | `` ` 1 2 3 4 5 6 7 8 9 0 - = ⌫`` / Tab Q W E R T Y U I O P [ ] \ / Caps A S D F G H J K L ; ' Enter / Shift Z X C V B N M , . / Shift / Ctrl Alt [Space] Alt ◀ ▼ ▲ ▶ |
+| **Shift** | Capital letters + shifted symbols (`!@#$%^&*()_+`, etc.) — visual modifier indicator stays lit until released |
+| **123 / Symbols** | Numeric pad + punctuation + arrow keys — tap-toggle modifier; tap again to return to letters |
+
+Modifier keys behave like a real keyboard: `Shift` is momentary unless `Caps Lock` is engaged. The Numbers/Symbols toggle is sticky. State is fully visible in the rendered key chrome.
+
+## The non-obvious bits
+
+Two implementation details that make or break a touch OSK:
+
+**1. No focus stealing.** Every key uses `pointerdown` + `preventDefault()` rather than `click` (Blazor) or sets `Focusable = false` and intercepts `PointerPressed` (MAUI). If you let the OS take focus when a key is tapped, the target input loses its caret the moment the user starts typing. This is the single biggest cause of "the OSK doesn't work" bugs.
+
+**2. Caret-position tracking.** Mutating `Text` at `CursorPosition` (MAUI) or dispatching `insertText` via `execCommand` (Blazor) works cleanly, but selection-replace edge cases (user selects "abc" and types "x" → result is "x", not "abcx") need bookkeeping. The implementation tracks `SelectionStart`/`SelectionLength` and replaces the range when present.
+
+## Limitations (v0.1)
+
+- **MAUI inputs only / DOM inputs only.** The OSK dispatches into its host's text inputs. Won't inject into popups owned by other apps, native windows inside a WebView, or focused windows belonging to other processes. For kiosk apps this is the desired behaviour. Opt-in system-wide dispatch arrives in v0.4.
+- **Shadow DOM** (some Web Components with internal `<input>` elements) — `focusin` doesn't pierce shadow roots. v0.1 skips this.
+- **Rich editors** (Quill, ProseMirror, Monaco) — `execCommand('insertText')` works against `<input>` / `<textarea>` / simple contenteditable but selection behaviour can get weird inside complex editor frameworks. v0.1 documents this as best-effort.
+- **Enter key** dispatches a `keydown`/`keyup` for `Enter` (so form submit fires) — it does NOT insert `\n`. Use `Shift+Enter` (configurable) for a literal newline in `<textarea>` / multi-line `Editor`.
+- **No IME, no dead-key composition, no language switching** until v0.5 / v0.3 respectively.
+
+## Theming
+
+MAUI: `ResourceDictionary` keys — `OnScreenKeyboardKeyBrush`, `OnScreenKeyboardModifierBrush`, `OnScreenKeyboardPressedBrush`, `OnScreenKeyboardBackgroundBrush`, `OnScreenKeyboardForegroundBrush`. Override the resource keys in your app theme to restyle.
+
+Blazor: CSS custom properties — `--shiny-osk-key-bg`, `--shiny-osk-key-fg`, `--shiny-osk-key-pressed-bg`, `--shiny-osk-modifier-bg`, `--shiny-osk-bg`, `--shiny-osk-height`. Override on a parent element, or on `<OnScreenKeyboardHost>` directly.
+
+Both renderers honour reduced-motion preferences — animation duration is a theme token, not a constant.
+
+## Accessibility
+
+Every key exposes the appropriate platform automation role:
+
+- **Windows MAUI**: AutomationPeer with `Name = label` and `LocalizedControlType = "key"`
+- **macOS / AppKit / Catalyst**: `NSAccessibilityRole.Button` with a localized description
+- **Linux GTK**: ATK role `KEY` via the underlying GtkButton
+- **Blazor**: ARIA `role="button"` + `aria-keyshortcuts` matching the displayed glyph, contained inside `role="application"` so screen readers don't fight the typing flow
+
+The OSK is designed so switch-input users can step through keys with a single-button scanner — designed in v0.1 rather than retrofitted, since the AutomationPeer tree is hard to add cleanly later.
+
+## Related
+
+- [Tray Icon](/controls/trayicon/) — ships in the same `Shiny.Maui.Controls.Desktop` package
+- [Docking](/controls/docking/) — once v0.4 floating windows land, the OSK can be hosted in a floating dock window for "always on top" kiosk use
