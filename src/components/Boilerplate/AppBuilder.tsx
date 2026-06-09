@@ -28,11 +28,12 @@ const AppBuilder = () => {
   const showPlatformConfig = hasPlatformConfig(components);
   const hasMediator = Data.hasComponent('mediator', components);
 
+  const visible = ShinyComponents.filter(c => !c.hideFromAppBuilder);
   const availableComponents = isMaui
-    ? ShinyComponents.filter(c => !ASPNET_ONLY_IDS.includes(c.id) && !BLAZOR_ONLY_IDS.includes(c.id))
+    ? visible.filter(c => !ASPNET_ONLY_IDS.includes(c.id) && !BLAZOR_ONLY_IDS.includes(c.id) && c.id !== 'controls-kiosk')
     : mode === 'blazor'
-      ? ShinyComponents.filter(c => BLAZOR_COMPATIBLE_IDS.includes(c.id))
-      : ShinyComponents.filter(c => ASPNET_COMPATIBLE_IDS.includes(c.id));
+      ? visible.filter(c => BLAZOR_COMPATIBLE_IDS.includes(c.id) && c.id !== 'controls-desktop')
+      : visible.filter(c => ASPNET_COMPATIBLE_IDS.includes(c.id));
 
   const handleModeChange = (newMode: AppMode) => {
     if (newMode === mode) return;

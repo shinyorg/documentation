@@ -7,25 +7,25 @@ import type { TemplateKind } from './templateFiles';
  */
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
-    shinyMediator: '6.4.0',
-    shinyShell: '6.1.1',
-    shinyControls: '1.0.1-beta-0092',
+    shinyMediator: '6.6.1',
+    shinyShell: '6.2.0',
+    shinyControls: '1.0.1-beta-0102',
     // Shiny — client packages that share the core release train
-    shinyClient: '5.0.0-beta-0121',
-    shinyConfiguration: '5.0.0-beta-0121',
+    shinyClient: '5.0.0-beta-0135',
+    shinyConfiguration: '5.0.0-beta-0135',
     shinyLocalization: '2.0.1',
-    shinyStores: '4.1.1',
-    shinyReflector: '4.1.1',
-    shinyDI: '4.1.1',
+    shinyStores: '5.0.0',
+    shinyReflector: '5.0.0',
+    shinyDI: '5.0.0',
     shinySpatial: '1.1.0',
     shinyContactStore: '1.0.1',
     shinySpeech: '2.1.0',
-    shinyAiConversation: '1.0.0-beta-0047',
+    shinyAiConversation: '1.0.0-beta-0050',
     shinyMusic: '3.0.1',
     shinyHealth: '1.0.0',
-    shinyDocumentDb: '6.0.0',
-    shinyMauiHosting: '4.1.1',
-    shinyWebHosting: '4.1.1',
+    shinyDocumentDb: '6.1.0',
+    shinyMauiHosting: '5.0.0',
+    shinyWebHosting: '5.0.0',
 
     // MAUI tooling
     devflow: '0.1.0-preview.10.26274.3',
@@ -33,8 +33,8 @@ export const VERSIONS = {
     // Microsoft + third-party
     ctMvvm: '8.4.2',
     ctMauiMarkup: '7.0.1',
-    ctMediaElement: '9.0.0',
-    ctCamera: '6.0.1',
+    ctMediaElement: '10.0.0',
+    ctCamera: '6.1.0',
     sentry: '6.6.0',
     barcodes: '3.0.4',
     biometric: '2.5.1',
@@ -55,15 +55,15 @@ export const VERSIONS = {
     fluentUI: '4.14.2',
     sqliteNetPcl: '1.9.172',
     roomsharp: '0.5.5',
-    msExtAi: '10.6.0',
+    msExtAi: '10.7.0',
     androidAuto: '1.7.0.3',
     systemReactive: '6.1.0',
     humanizer: '3.0.10',
     unitsNet: '5.75.0',
     sysLinqAsync: '7.0.1',
-    refit: '10.1.6',
+    refit: '11.0.1',
     orleans: '10.1.0',
-    scalar: '2.14.14',
+    scalar: '2.16.2',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';
@@ -351,15 +351,9 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'shinybarcodes', label: 'Shiny Barcodes & QR Codes', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Pure-managed 1D/2D barcode & QR code renderer (ZXing.Net, no SkiaSharp) https://shinylib.net/controls/barcodes/' },
-    { id: 'shinytrayicon', label: 'Shiny Tray Icon (Desktop)', type: 'bool', defaultValue: false, category: 'ui',
+    { id: 'shinydesktopcontrols', label: 'Shiny Desktop Controls', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
-        description: 'Cross-platform system tray / status-bar icon for MAUI desktop (Windows, macOS, MacCatalyst, Linux). Ships in the Shiny.Maui.Controls.Desktop package. https://shinylib.net/controls/trayicon/' },
-    { id: 'shinydocking', label: 'Shiny Docking (Desktop)', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.shinyControls,
-        description: 'Visual-Studio-style window docking for MAUI desktop (dockable tool windows, tabbed groups, splitters, auto-hide rails, tear-off floating windows). Ships in the Shiny.Maui.Controls.Desktop package. https://shinylib.net/controls/docking/' },
-    { id: 'shinyosk', label: 'Shiny On-Screen Keyboard (Touch / Kiosk)', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.shinyControls,
-        description: 'Touch / kiosk on-screen keyboard for MAUI desktop and Blazor — US-QWERTY, bottom-docked, auto-shows on input focus, full a11y tree. Ships in Shiny.Maui.Controls.Desktop and Shiny.Blazor.Controls.Kiosk. https://shinylib.net/controls/onscreen-keyboard/' },
+        description: 'Shiny.Maui.Controls.Desktop — Tray Icon, Visual-Studio-style window Docking, and Touch / Kiosk On-Screen Keyboard for Windows, macOS, MacCatalyst, and Linux. https://shinylib.net/controls/' },
     { id: 'uxdivers', label: 'UX Divers Dialogs', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyShell,
         description: 'Popups IDialogs implementation for Shiny MAUI Shell https://github.com/shinyorg/mauishell',
@@ -487,12 +481,32 @@ const ASPNET_PARAMS: TemplateParam[] = [
             { value: 'postgresql', label: 'PostgreSQL', description: 'Npgsql.EntityFrameworkCore.PostgreSQL' },
         ],
     },
-    { id: 'connectionstring', label: 'Connection String', type: 'string', defaultValue: '', category: 'data',
-        description: 'The database connection string',
-        visibleWhen: (s) => s.ef !== 'none' },
     { id: 'efspatial', label: 'EF Spatial (NetTopologySuite)', type: 'bool', defaultValue: false, category: 'data',
         description: 'Adds NetTopologySuite spatial support to your EF Core provider',
         visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'documentdb', label: 'Shiny.DocumentDb Provider', type: 'choice', defaultValue: 'none', category: 'data',
+        description: 'Adds Shiny.DocumentDb with the chosen storage provider https://shinylib.net/documentdb/',
+        version: VERSIONS.shinyDocumentDb,
+        choices: [
+            { value: 'none', label: 'None', description: 'No DocumentDb provider' },
+            { value: 'sqlite', label: 'SQLite', description: 'Shiny.DocumentDb.Sqlite' },
+            { value: 'sqlcipher', label: 'SQLite (SqlCipher)', description: 'Shiny.DocumentDb.Sqlite.SqlCipher' },
+            { value: 'sqlserver', label: 'SQL Server', description: 'Shiny.DocumentDb.SqlServer' },
+            { value: 'mysql', label: 'MySQL', description: 'Shiny.DocumentDb.MySql' },
+            { value: 'postgresql', label: 'PostgreSQL', description: 'Shiny.DocumentDb.PostgreSql' },
+            { value: 'cosmosdb', label: 'Cosmos DB', description: 'Shiny.DocumentDb.CosmosDb' },
+            { value: 'mongodb', label: 'MongoDB', description: 'Shiny.DocumentDb.MongoDb' },
+            { value: 'litedb', label: 'LiteDB', description: 'Shiny.DocumentDb.LiteDb' },
+            { value: 'duckdb', label: 'DuckDB', description: 'Shiny.DocumentDb.DuckDb' },
+        ],
+    },
+    { id: 'aidocumentdb', label: 'DocumentDB AI Tools', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyDocumentDb,
+        description: 'Exposes document store operations as AI tools https://shinylib.net/documentdb/ai-tools/',
+        visibleWhen: (s) => s.documentdb !== 'none' },
+    { id: 'connectionstring', label: 'Connection String', type: 'string', defaultValue: '', category: 'data',
+        description: 'The database connection string',
+        visibleWhen: (s) => s.ef !== 'none' || (s.documentdb !== 'none' && s.documentdb !== 'litedb') },
 
     // Auth
     { id: 'jwtauth', label: 'JWT Authentication', type: 'bool', defaultValue: true, category: 'auth',
@@ -530,9 +544,24 @@ const ASPNET_PARAMS: TemplateParam[] = [
 
 function computeAspNetSymbols(state: TemplateState): Record<string, boolean | string> {
     const s = { ...state } as Record<string, boolean | string>;
+    // Entity Framework
+    s.efnone = s.ef === 'none';
     s.efmssql = s.ef === 'sqlserver';
     s.efpostgres = s.ef === 'postgresql';
-    s.efnone = s.ef === 'none';
+    // Shiny.DocumentDb
+    s.docdbnone = s.documentdb === 'none';
+    s.usedocumentdb = s.documentdb !== 'none';
+    s.docdbsqlite = s.documentdb === 'sqlite';
+    s.docdbsqlcipher = s.documentdb === 'sqlcipher';
+    s.docdbsqlserver = s.documentdb === 'sqlserver';
+    s.docdbmysql = s.documentdb === 'mysql';
+    s.docdbpostgres = s.documentdb === 'postgresql';
+    s.docdbcosmos = s.documentdb === 'cosmosdb';
+    s.docdbmongo = s.documentdb === 'mongodb';
+    s.docdblitedb = s.documentdb === 'litedb';
+    s.docdbduckdb = s.documentdb === 'duckdb';
+    // Any data layer active (EF or DocumentDB) — used by auth handlers
+    s.useanydata = s.ef !== 'none' || s.documentdb !== 'none';
     // Auth handlers (Handlers/Auth/*) use Shiny.Mediator — force it on when jwtauth is enabled.
     s.shinymediator = !!(s.shinymediator || s.jwtauth);
     return s;
@@ -623,6 +652,9 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'shinybarcodes', label: 'Shiny Barcodes & QR Codes', type: 'bool', defaultValue: false, category: 'components',
         version: VERSIONS.shinyControls,
         description: 'Pure-managed 1D/2D barcode & QR code renderer (SVG or PNG data-URI) https://shinylib.net/controls/barcodes/' },
+    { id: 'shinykiosk', label: 'Shiny Blazor Kiosk Controls', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Shiny.Blazor.Controls.Kiosk — Touch / Kiosk On-Screen Keyboard and Docking for Blazor WebAssembly. https://shinylib.net/controls/' },
 ];
 
 function computeBlazorSymbols(state: TemplateState): Record<string, boolean | string> {
