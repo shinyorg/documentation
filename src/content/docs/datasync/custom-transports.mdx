@@ -1,0 +1,79 @@
+---
+title: Custom Transports
+---
+
+The default `RestSyncTransport` speaks plain HTTP + JSON. If you need gRPC, GraphQL, a custom envelope, or simply a different REST shape, implement `ISyncTransport` and register it after `AddDataSync`.
+
+## ISyncTransport
+
+```csharp
+public interface ISyncTransport
+{
+    Task<SyncPullResult> Pull(SyncEndpoint endpoint, string? cursor, CancellationToken ct);
+
+    Task<SyncSendResult> Send(SyncEndpoint endpoint, SyncOperation op, CancellationToken ct);
+
+    Task<IReadOnlyList<SyncSendResult>> SendBatch(SyncEndpoint endpoint, IReadOnlyList<SyncOperation> ops, CancellationToken ct);
+
+    Task<SyncTombstoneResult> FetchTombstones(SyncEndpoint endpoint, string? cursor, CancellationToken ct);
+}
+```
+
+- `Pull` returns deltas + the next cursor + a `hasMore` flag.
+- `Send` returns the per-op outcome (success / conflict / transient / terminal).
+- `SendBatch` returns one outcome per op, keyed back to the input order.
+- `FetchTombstones` returns deleted ids + the tombstone cursor.
+
+Each result type carries either the success body, the conflict payload, or the exception that caused failure — the engine pattern-matches on that.
+
+## Replacing the default transport
+
+```csharp
+public class GrpcSyncTransport : ISyncTransport
+{
+    public Task<SyncPullResult> Pull(SyncEndpoint endpoint, string? cursor, CancellationToken ct) { /* ... */ }
+    public Task<SyncSendResult> Send(SyncEndpoint endpoint, SyncOperation op, CancellationToken ct) { /* ... */ }
+    public Task<IReadOnlyList<SyncSendResult>> SendBatch(SyncEndpoint endpoint, IReadOnlyList<SyncOperation> ops, CancellationToken ct) { /* ... */ }
+    public Task<SyncTombstoneResult> FetchTombstones(SyncEndpoint endpoint, string? cursor, CancellationToken ct) { /* ... */ }
+}
+
+builder.Services.AddDataSync<MyDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("todos");  // Url is your choice — gRPC method name, GraphQL operation, etc.
+});
+
+// Override the default REST transport
+builder.Services.AddSingleton<ISyncTransport, GrpcSyncTransport>();
+```
+
+The engine resolves the *last* registered `ISyncTransport`, so the override above replaces `RestSyncTransport` cleanly.
+
+## When to use the named HttpClient instead
+
+For the common case — same protocol but different headers, auth handlers, or base addresses — don't write a custom transport. Configure the named `HttpClient`:
+
+```csharp
+builder.Services
+    .AddHttpClient(RestSyncTransport.HttpClientName, c =>
+    {
+        c.BaseAddress = new Uri("https://api.example.com");
+        c.Timeout = TimeSpan.FromMinutes(2);
+    })
+    .AddPolicyHandler(GetRetryPolicy())
+    .AddHttpMessageHandler<SigningHandler>();
+```
+
+`RestSyncTransport.HttpClientName` is the string `"Shiny.Data.Sync"`. Anything you bolt onto that client (Polly, signing handlers, base address) is picked up automatically.
+
+## Hybrid: REST inbox, gRPC outbox
+
+You can't currently mix transports per endpoint — there is one `ISyncTransport` per host. Two ways to express this:
+
+1. **Custom transport that internally dispatches.** Inspect `endpoint.Key` (or any property you set) and route inbound / outbound calls accordingly. Most apps that need this end up wrapping `RestSyncTransport` for one half and a custom client for the other.
+
+2. **Two hosts.** Spin up a second DI scope with its own `IDataSyncManager` and transport. Heavy-handed, but tractable when you genuinely need both protocols.
+
+## Caveats
+
+- On iOS / Mac Catalyst, the default `RestSyncTransport` is **not** what runs the outbox or inbox — the NSURLSession-backed `DataSyncManager` handles those directly. A custom `ISyncTransport` registered there is ignored. If you need a custom protocol on Apple, opt out of NSURLSession with `AddHttpClientDataSync<TDelegate>` and your transport runs cross-platform.
+- The transport contract is **stable but not finalised** — if you write one, pin to the version you tested against and review release notes when upgrading.

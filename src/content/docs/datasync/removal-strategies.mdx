@@ -2,77 +2,102 @@
 title: Removal Strategies
 ---
 
-Shiny.DataSync provides four strategies for removing data that the client should no longer have. All are optional and composable — use any combination on the same entity.
+`Shiny.Data.Sync` provides three layered strategies for removing entities the client should no longer have. All are optional and composable — combine any of them on the same endpoint.
 
-## Strategy Overview
+## Strategy overview
 
-| Strategy | When to use | Server provides |
-|----------|-------------|-----------------|
-| **Soft-Delete** | Server marks entities as deleted but still returns them in pull | A boolean flag on the entity (e.g. `IsDeleted`) |
-| **Tombstone** | Server tracks deleted IDs separately | `string[]` of deleted IDs at a dedicated endpoint |
-| **Reconciliation** | Need to catch all cases (unassigned work, bulk deletes) | `string[]` of all valid IDs at a dedicated endpoint |
-| **Expiry** | Server changes entity state to mean "not for this client anymore" | A state change on the entity (e.g. `AssignedTo` becomes null) |
+| Strategy | When to use | What the server provides |
+|---|---|---|
+| **Inline Delete verb** | The default — the server emits a delete record in the same inbox stream | `{ "verb": "Delete", "id": "..." }` items in the pull response |
+| **Tombstones** | The server can't merge deletes into the main pull | A separate URL returning `["id1","id2",...]` (or a paginated `{ cursor, ids }`) |
+| **Soft-delete predicate** | The server signals deletes via a flag on the entity | A boolean on the entity (e.g. `IsDeleted`) |
+| **Expiry predicate** | A state change should evict the entity even though the server didn't mark it deleted | Any condition on the deserialized entity (e.g. `AssignedTo == null`) |
 
-## Soft-Delete
+## Inline Delete verb
 
-The simplest approach. The server includes a deletion flag on the entity, and the library removes it locally when detected during pull.
+This is the default. Whenever the server includes `{ "verb": "Delete", "id": "...", "payload": null }` in its inbox response, the engine dispatches that as a `SyncReceivedItem` with `Verb = Delete` and `Entity = null`.
 
-```csharp
-e.SoftDeletePredicate = x => x.IsDeleted;
-```
-
-## Tombstone
-
-The server maintains a separate endpoint that returns the IDs of deleted entities. Supports incremental fetching via a date variable.
-
-```csharp
-e.TombstoneUri = "/api/items/tombstones";
-e.TombstoneHttpMethod = HttpMethod.Get;       // default: GET
-e.TombstoneDateVariable = "since";            // appends ?since=<timestamp>
-```
-
-**Server response**: `string[]` — an array of deleted entity IDs.
-
-## Reconciliation
-
-The nuclear option. The server returns all valid entity IDs, and any local entity not in the set is removed. This catches everything — bulk deletes, unassigned work orders, anything.
-
-```csharp
-e.ReconciliationUri = "/api/items/ids";
-e.ReconciliationHttpMethod = HttpMethod.Get;   // default: GET
-e.ReconciliationMinimumTime = TimeSpan.FromMinutes(30); // throttle — this is expensive
-```
-
-**Server response**: `string[]` — an array of all valid entity IDs.
-
-:::tip
-Reconciliation skips entities with pending local changes to avoid removing in-progress work. Use `ReconciliationMinimumTime` to throttle — this operation fetches the full ID set every time.
-:::
-
-## Expiry
-
-Similar to soft-delete, but instead of a deletion flag, it detects a meaningful state change. For example, a work order that becomes unassigned from the current user.
-
-```csharp
-e.ExpiryPredicate = x => x.AssignedTo == null;
-```
-
-## Combining Strategies
-
-You can combine strategies for maximum coverage:
-
-```csharp
-ds.AddEntity<WorkOrder>(x => x.Id, e =>
+```json
 {
-    e.PullUri = "/api/workorders";
-    e.PushUri = "/api/workorders";
+  "cursor": "2026-06-09T10:00:00Z",
+  "hasMore": false,
+  "items": [
+    { "id": "abc", "verb": "Update", "payload": { ... } },
+    { "id": "xyz", "verb": "Delete" }
+  ]
+}
+```
 
-    // Real-time: catch soft-deletes and unassigned work orders during pull
-    e.SoftDeletePredicate = x => x.IsDeleted;
-    e.ExpiryPredicate = x => x.AssignedTo == null;
+## Tombstones
 
-    // Safety net: reconcile all IDs every 30 minutes
-    e.ReconciliationUri = "/api/workorders/ids";
-    e.ReconciliationMinimumTime = TimeSpan.FromMinutes(30);
+Some servers can't merge deletes into the main pull (legacy CRUD APIs, separate audit pipelines, etc.). Point the endpoint at a dedicated delete URL with `TombstoneUrl`:
+
+```csharp
+opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos", ep =>
+{
+    ep.TombstoneUrl = "https://api.example.com/todos/deleted";
+    ep.TombstoneCursorParameter = "since";  // default
 });
 ```
+
+After every successful pull, the engine issues a GET against the tombstone URL. Each returned id is dispatched to `OnReceived` with `Verb = Delete` and `Entity = null`. The cursor for the tombstone stream is persisted independently from the main pull cursor (`SyncTombstoneCursor`), so the two streams can advance at different rates.
+
+The default `RestSyncTransport` accepts either of two response shapes:
+
+```json
+["id1", "id2", "id3"]
+```
+
+or, when the server paginates / cursors deletes separately:
+
+```json
+{ "cursor": "<opaque next cursor>", "ids": ["id1","id2","id3"] }
+```
+
+On iOS / Mac Catalyst the tombstone fetch also rides the background `NSURLSession` (`tombstone:{endpointKey}` task description), so it survives suspension just like the main pull.
+
+## Soft-delete predicate
+
+When the server returns the entity itself but flags it as deleted, register a predicate. The engine evaluates it on the deserialized entity inside the inbox dispatch loop and — when it returns `true` — rewrites the verb to `Delete` before the delegate sees it:
+
+```csharp
+opts.RegisterEndpoint<Project>("https://api.example.com/projects", ep =>
+{
+    ep.SoftDeletePredicate = entity => entity is Project p && p.IsArchived;
+});
+```
+
+`Entity` stays populated on the `SyncReceivedItem`, so consumers can read the final state on the way out the door (useful for showing "this project was archived" in a notification).
+
+## Expiry predicate
+
+Like soft-delete, but for server-driven state changes that *aren't* literal deletes — e.g. a work order that becomes unassigned from the current user. The engine treats it identically to a soft-delete: verb rewritten to `Delete`, entity preserved.
+
+```csharp
+opts.RegisterEndpoint<WorkOrder>("https://api.example.com/workorders", ep =>
+{
+    ep.ExpiryPredicate = entity => entity is WorkOrder wo && wo.AssignedTo != currentUser.Id;
+});
+```
+
+## Combining strategies
+
+You can layer all of them on one endpoint for maximum coverage:
+
+```csharp
+opts.RegisterEndpoint<WorkOrder>("https://api.example.com/workorders", ep =>
+{
+    // Real-time: catch soft-deletes and unassigned work orders during pull
+    ep.SoftDeletePredicate = wo => wo is WorkOrder w && w.IsDeleted;
+    ep.ExpiryPredicate     = wo => wo is WorkOrder w && w.AssignedTo == null;
+
+    // Safety net: a separate stream of deleted IDs from the audit pipeline
+    ep.TombstoneUrl = "https://api.example.com/workorders/deleted";
+});
+```
+
+The order of evaluation per inbox item is: deserialize → soft-delete predicate → expiry predicate → dispatch. After the main pull finishes, tombstones are fetched as a separate request and dispatched.
+
+## Tombstones over background NSURLSession
+
+On iOS / Mac Catalyst the tombstone request rides the same background session as the main pull, so even a brief foreground window is enough to kick it off — the OS will complete the download after suspension. On Android the tombstone fetch piggy-backs on the foreground service while it's running; on Windows / Linux / macOS it just runs inline in the inbox loop.

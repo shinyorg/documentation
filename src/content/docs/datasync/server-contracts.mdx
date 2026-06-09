@@ -2,80 +2,170 @@
 title: Server API Contracts
 ---
 
-Shiny.DataSync communicates with your server via standard HTTP + JSON. This page describes the expected request and response shapes for each endpoint type.
+The default `RestSyncTransport` speaks plain HTTP + JSON. This page lists every request and response shape so you can wire up a backend in any language. If your server can't (or shouldn't) speak this protocol, swap the transport — see [Custom Transports](/datasync/custom-transports).
 
-## Endpoint Summary
+## Endpoint summary
 
-| Endpoint | Method | Request Body | Response Body |
-|----------|--------|-------------|---------------|
-| Pull | GET | — | `T[]` (entity array) |
-| Push | POST | `T[]` (entity array) | 2xx status |
-| Delete | POST | `T[]` (entities to delete) | 2xx status |
-| Tombstone | GET | — | `string[]` (deleted entity IDs) |
-| Reconciliation | GET | — | `string[]` (all valid entity IDs) |
+| Stream | Method | Path | Request body | Response body |
+|---|---|---|---|---|
+| Outbox — Create | `POST` | `{Url}` | `T` (the entity) | server-defined (passed to `OnSent`) |
+| Outbox — Update | `PUT` | `{Url}/{id}` | `T` | server-defined |
+| Outbox — Delete | `DELETE` | `{Url}/{id}` | — | — |
+| Outbox — Batch | `POST` | `{BatchUrl}` or `{Url}/batch` | `SyncBatchRequest` | `SyncBatchResponse` |
+| Inbox — Pull | `GET` | `{PullUrl}` or `{Url}` | — | `SyncPullResponse` |
+| Inbox — Tombstones | `GET` | `{TombstoneUrl}` | — | `string[]` or `{ cursor, ids }` |
 
-## Pull
+Default headers on every request:
 
-Returns an array of entities. Supports an optional `?since=<ISO8601>` query parameter when `PullDateVariable` is configured.
+- `Content-Type: application/json` on writes
+- `Accept: application/json` on reads
+- Anything added by `ISyncInterceptor` and `SyncEndpoint.OnBeforeSend`
 
-```
-GET /api/todos?since=2026-05-01T00:00:00Z
+## Inbox pull
 
-Response 200:
-[
-  { "id": "abc", "title": "Buy milk", "isComplete": false, "version": 3 },
-  { "id": "def", "title": "Walk dog", "isComplete": true, "version": 7 }
-]
-```
-
-## Push
-
-Receives an array of entities to create or update. The server should return any 2xx status code on success.
+The default cursor parameter is `since` (override with `CursorParameter` or omit it with `null`):
 
 ```
-POST /api/todos
+GET /todos?since=2026-06-01T00:00:00Z
+```
+
+Expected response (`SyncPullResponse`):
+
+```json
+{
+  "cursor": "<opaque next cursor>",
+  "hasMore": false,
+  "items": [
+    { "id": "abc", "verb": "Create", "payload": { "identifier": "abc", "title": "Buy milk", "completed": false } },
+    { "id": "def", "verb": "Update", "payload": { "identifier": "def", "title": "Walk dog", "completed": true } },
+    { "id": "ghi", "verb": "Delete" }
+  ]
+}
+```
+
+Notes:
+
+- `verb` is one of `"Create"`, `"Update"`, `"Delete"` (case-insensitive).
+- `payload` is required for `Create` / `Update`. For `Delete` it can be omitted, `null`, or `{}`.
+- When `hasMore: true`, the engine immediately re-pulls with the new cursor — one `PullNow` / `PullAll` call drains the full delta set.
+- `HTTP 304 Not Modified` is treated as "no changes" — `LastPulledAt` is bumped but the cursor is left alone.
+
+### Cursors
+
+The cursor is opaque — `Shiny.Data.Sync` persists whatever string you return and round-trips it on the next pull. Common patterns:
+
+- ISO-8601 timestamp of the last change you returned
+- Monotonic integer (database `xmin`, transaction id, snapshot lsn, etc.)
+- Combined "timestamp + entity id" tuple for tie-breaking
+
+## Outbox — single-send (Batch = false)
+
+The engine emits one HTTP request per queued op:
+
+```
+POST /todos
 Content-Type: application/json
 
-[
-  { "id": "abc", "title": "Buy milk", "isComplete": true, "version": 3 }
-]
-
-Response 200
+{ "identifier": "abc", "title": "Buy milk", "completed": false }
 ```
 
-## Delete
-
-If `DeleteUri` is configured separately from `PushUri`, delete operations are sent here. Receives the full entity objects, not just IDs.
-
 ```
-POST /api/todos/delete
+PUT /todos/abc
 Content-Type: application/json
 
-[
-  { "id": "abc", "title": "Buy milk", "isComplete": true, "version": 3 }
-]
-
-Response 200
+{ "identifier": "abc", "title": "Buy milk", "completed": true }
 ```
 
-## Tombstone
+```
+DELETE /todos/abc
+```
 
-Returns an array of entity ID strings representing entities deleted on the server. Supports `?since=<ISO8601>` when `TombstoneDateVariable` is configured.
+Any 2xx is treated as success. The full response body is passed to `IDataSyncDelegate.OnSent(op, responseBody)` so you can read a server-assigned id, ETag, or whatever you need.
+
+## Outbox — batched (Batch = true)
+
+When `Batch = true`, all queued ops for the endpoint are coalesced into a single request:
 
 ```
-GET /api/todos/tombstones?since=2026-05-01T00:00:00Z
+POST /todos/batch
+Content-Type: application/json
 
-Response 200:
+{
+  "operations": [
+    { "id": "<op-guid>", "entityId": "abc", "verb": "Create", "payload": { ... } },
+    { "id": "<op-guid>", "entityId": "def", "verb": "Update", "payload": { ... } },
+    { "id": "<op-guid>", "entityId": "ghi", "verb": "Delete" }
+  ]
+}
+```
+
+Coalescing happens client-side before the request — trailing `Delete` wins, `Create + Update(s)` collapses into a single `Create` with the latest payload, and `Update + Update(s)` collapses into a single `Update`.
+
+Expected response (`SyncBatchResponse`):
+
+```json
+{
+  "results": [
+    { "id": "<op-guid>", "status": 200, "body": { /* server's serialized entity */ }, "error": null },
+    { "id": "<op-guid>", "status": 409, "body": { /* current remote state */ }, "error": null },
+    { "id": "<op-guid>", "status": 500, "body": null, "error": "Unexpected database error" }
+  ]
+}
+```
+
+Notes:
+
+- One result per op, keyed by the `id` the client sent.
+- `status` is the per-op HTTP status. The conflict / retry / error logic runs per result, exactly as if each op had been sent individually.
+- `body` for a successful op is passed to `OnSent`. For 409 / 412 it's the remote payload passed to `OnConflict`.
+- `error` is a free-form server-side message attached to `SyncOperation.LastError`.
+
+The Apple `NSURLSession` path does **not** batch — it sends one upload task per op by design. Everything else (Android, Windows, Linux, macOS, Blazor) honours the flag.
+
+## Tombstones
+
+```
+GET /todos/deleted?since=2026-06-01T00:00:00Z
+```
+
+Either of two shapes is accepted:
+
+```json
 ["abc", "def", "ghi"]
 ```
 
-## Reconciliation
-
-Returns an array of all valid entity ID strings. Any local entity whose ID is not in this set will be removed (except entities with pending local changes).
-
+```json
+{ "cursor": "<opaque next cursor>", "ids": ["abc", "def", "ghi"] }
 ```
-GET /api/todos/ids
 
-Response 200:
-["abc", "def", "jkl", "mno"]
+The second shape lets the tombstone stream advance its cursor independently from the main pull — useful when deletes pile up and need their own pagination.
+
+## Retry status codes
+
+The engine treats these as **transient** and schedules a retry with exponential backoff:
+
+- `0` — network down / connection error
+- `408` — request timeout
+- `429` — rate limited (respects `Retry-After` if you add it)
+- `5xx` — server error
+
+Everything else (4xx besides the above, or a 2xx with a parse error) is **terminal**:
+
+- `409` / `412` — handed to `OnConflict` per the endpoint's `DefaultConflictPolicy`
+- everything else — handed to `OnError` after the retry budget is exhausted
+
+## CORS for Blazor
+
+`Shiny.Data.Sync.Blazor` runs in the browser, so your server must respond to preflight `OPTIONS` requests and include `Access-Control-Allow-Origin`. ASP.NET example:
+
+```csharp
+app.UseCors(p => p
+    .WithOrigins("https://myapp.example.com")
+    .AllowAnyMethod()
+    .AllowAnyHeader()
+);
 ```
+
+## A reference implementation
+
+A working ASP.NET reference server (using `Shiny.DocumentDb.Sqlite` for storage) lives in this repo at `samples/Sample.Api`. It covers every endpoint above plus a `/{type}/current` convenience route for inspecting state during development.

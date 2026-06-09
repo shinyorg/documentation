@@ -1,0 +1,89 @@
+---
+title: Conflict Resolution
+---
+
+When the server returns `409 Conflict` or `412 Precondition Failed` for an outbox operation, `Shiny.Data.Sync` consults the endpoint's `DefaultConflictPolicy` to decide what to do.
+
+## Endpoint policies
+
+```csharp
+opts.RegisterEndpoint<Project>(url, ep =>
+{
+    ep.DefaultConflictPolicy = ConflictPolicy.AskDelegate;   // default
+});
+```
+
+| Policy | Behavior |
+|---|---|
+| `AskDelegate` (default) | Calls `IDataSyncDelegate.OnConflict(op, remotePayload)`. |
+| `ServerWins` | Drops the local op, dispatches the remote payload through `OnReceived` as an `Update`. |
+| `ClientWins` | Re-queues the local op as-is. The server should ultimately accept it (e.g. drop the ETag check). |
+
+## Delegate-driven resolution
+
+`OnConflict` receives the local `SyncOperation` and the **current remote payload** as the server returned it. Decide what to apply by returning a `ConflictResolution`:
+
+```csharp
+public Task<ConflictResolution> OnConflict(SyncOperation op, string remotePayload)
+{
+    // Discard the local op and accept the remote state. Same as ConflictPolicy.ServerWins.
+    if (alwaysTrustServer)
+        return Task.FromResult(ConflictResolution.AcceptRemote);
+
+    // Force the local op through. Same as ConflictPolicy.ClientWins.
+    if (op.Verb == SyncVerb.Delete)
+        return Task.FromResult(ConflictResolution.KeepLocal);
+
+    // Merge: parse both sides, build a combined payload, retry with that.
+    var local = JsonSerializer.Deserialize<Project>(op.Payload!, AppJsonContext.Default.Project)!;
+    var remote = JsonSerializer.Deserialize<Project>(remotePayload, AppJsonContext.Default.Project)!;
+
+    var merged = local with
+    {
+        Title = remote.Title,              // server-wins for title
+        Tags = local.Tags.Union(remote.Tags).ToArray(), // union of tags
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
+
+    var mergedJson = JsonSerializer.Serialize(merged, AppJsonContext.Default.Project);
+    return Task.FromResult(ConflictResolution.UseMerged(mergedJson));
+}
+```
+
+`ConflictResolution` factory methods:
+
+| Factory | Result |
+|---|---|
+| `ConflictResolution.AcceptRemote` | Same as `ServerWins` — the remote payload is dispatched as an `Update` and the local op is removed. |
+| `ConflictResolution.KeepLocal` | Re-queues the local op as-is. |
+| `ConflictResolution.UseMerged(string mergedPayload)` | Replaces the op's `Payload` with `mergedPayload` and re-queues. |
+
+## Observing conflicts
+
+Conflict moments fire on the unified `Activity` stream:
+
+```csharp
+sync.Activity += (s, evt) =>
+{
+    if (evt.Type == SyncEventType.OutboxConflict)
+        Log.Warn($"{evt.EndpointKey} conflict for {evt.Operation?.EntityIdentifier} (HTTP {evt.StatusCode})");
+};
+```
+
+The typed `UpdateReceived` event also fires the operation as `SyncOperationState.ConflictPending` so a status bar can flag it.
+
+## Choosing a policy
+
+| Situation | Recommended policy |
+|---|---|
+| Reference data the user can't edit on the client | `ServerWins` — the server is the source of truth. |
+| Mobile-first workflow where the user expects their edit to win | `ClientWins` (or `KeepLocal` from the delegate). |
+| Real conflicts (two editors, both with local changes) | `AskDelegate` with a merge implementation. |
+| You can't merge but want to log and skip | `AskDelegate` returning `AcceptRemote`. |
+
+## ETags and precondition headers
+
+`Shiny.Data.Sync` does not attach `If-Match` headers automatically. If your server uses optimistic concurrency, attach the ETag either:
+
+- in the per-endpoint `OnBeforeSend` hook (read it off the op's payload or your local store), or
+- in a global `ISyncInterceptor.BeforePush` for cross-cutting precondition handling.

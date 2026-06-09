@@ -80,6 +80,18 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddHttpTransfers<ShinyApp.Delegates.MyHttpTransferDelegate>();`;
   }
+  if (has('datasync')) {
+    src += `
+      // Auto-picks the right transport: NSURLSession on Apple, foreground service on Android, HttpClient elsewhere.
+      // Register one endpoint per ISyncEntity type — see https://shinylib.net/datasync/entity-registration
+      builder.Services.AddDataSync<ShinyApp.Delegates.MyDataSyncDelegate>(opts =>
+      {
+          opts.RegisterEndpoint<ShinyApp.Models.TodoItem>("https://api.example.com/todos");
+      });
+      builder.Services.AddHttpClient(Shiny.Data.Sync.Infrastructure.RestSyncTransport.HttpClientName, c =>
+          c.BaseAddress = new Uri("https://api.example.com")
+      );`;
+  }
   if (has('notifications')) {
     src += `
       builder.Services.AddNotifications();`;

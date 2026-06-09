@@ -9,173 +9,195 @@ import NugetDownloads from '/src/components/NugetDownloads.astro';
 
 | | |
 |---------|---------|
-| GitHub | <GitHubStars org="shinyorg" repo="datasync" /> |
-| Downloads | <NugetDownloads name="Shiny.DataSync" /> |
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Data.Sync" /> |
 
-<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "windows", "macos"]} />
+<PlatformSupport frameworks={["dotnet", "maui", "blazor"]} os={["android", "ios", "maccatalyst", "macos", "windows", "linux"]} />
 
-Shiny.DataSync is an **AOT-compliant, offline-first data synchronization engine** for .NET MAUI and desktop applications. It syncs data between a local SQLite store and your HTTP APIs with automatic background scheduling via [Shiny Jobs](/jobs/).
+`Shiny.Data.Sync` is a **reliable, background-capable, bidirectional JSON sync engine** between a mobile / desktop app and an HTTP backend. Where `Shiny.Net.Http` moves **files** in the background, `Shiny.Data.Sync` moves **records**: Create / Update / Delete operations queued in a local outbox, drained against your REST API, with a complementary inbox for delta pulls.
 
-## Why DataSync?
+It mirrors the platform tier guarantees of `Shiny.Net.Http`:
 
-**Your server, your rules.** Unlike many sync frameworks that require you to adopt a specific server-side stack, protocol, or database schema, Shiny.DataSync is designed to work with **your existing API endpoints as-is**. There's no proprietary server SDK to install, no special database tables to create, and no middleware to configure. If your API can return JSON arrays and accept JSON POST bodies, you're ready to go.
+| Platform | Outbox transport | Inbox transport | Survives app kill |
+|---|---|---|---|
+| iOS / Mac Catalyst | Background `NSURLSession` upload task | Background `NSURLSession` download task | **Yes** (both directions) |
+| Android | Foreground Service + `HttpClient` | `HttpClient` (in-process) | Outbox **yes** (foreground notification visible); inbox no |
+| Windows / Linux / macOS / base .NET | `HttpClient` + connectivity loop | `HttpClient` + connectivity loop | No — resumes on next launch |
+| Blazor WebAssembly | `HttpClient` + `LocalStorage` | `HttpClient` + `LocalStorage` | No — sync runs while the tab is open |
 
-This means:
-- **Zero server-side changes** — keep your existing REST/HTTP endpoints exactly as they are. No new dependencies, no protocol negotiation, no server SDK lock-in.
-- **Freedom to mix and match** — sync different entity types against completely different backends, microservices, or even third-party APIs. Each entity has its own pull and push URIs.
-- **Incremental adoption** — add offline sync to one entity at a time without rewriting your API layer or committing to a framework migration.
-- **No vendor lock-in** — because the contract is plain HTTP + JSON, you can swap server implementations freely. Today it's ASP.NET Core, tomorrow it could be Node.js, Go, or a cloud function.
+## Why Shiny.Data.Sync?
 
-**Background sync, built in.** DataSync automatically registers a [Shiny Jobs](/jobs/) background task when you call `AddDataSync()`. This means your data syncs even when your app is backgrounded or the user isn't actively using it — on both iOS and Android. Pending changes are queued locally, pushed when connectivity is available, and fresh data is pulled on schedule. Your users get a seamless offline-first experience with no extra plumbing.
+**Your server, your rules.** No proprietary protocol, no special database tables, no middleware. If your API can return JSON and accept JSON, you're ready to go. Each entity has its own URL and can target a completely different backend.
+
+**True background sync.** On iOS / Mac Catalyst the outbox **and** the inbox ride the same background `NSURLSession`, so queued operations and pending pulls survive the app being killed. On Android the outbox runs inside a foreground service; on every other target an in-process `HttpClient` loop reacts to connectivity events.
+
+**AOT and trim safe.** All serialization runs through `Shiny.Json.Default` (the shared `ISerializer` from `Shiny.Extensions.Serialization`). Tag your entities with `[ShinyJsonContext]` and a source-generated module initializer wires them into the shared chain before any code runs — no per-endpoint `JsonTypeInfo` plumbing.
+
+**One stream of everything.** Outbox queueing, retries, conflicts, inbox deltas, and tombstone deletes all surface through the unified `Activity` event. Subscribe once and you have your telemetry, your status bar, and your pull-to-refresh feedback.
 
 ## Core Concepts
 
-- **Entities are plain classes** — no base classes, no attributes, no interfaces. Just POCOs with an ID property.
-- **AOT compliance is required** — all entity types must be registered in a `System.Text.Json` source-generated `JsonSerializerContext`. The type, its array type, and its List type must all be included.
-- **Sync direction per entity** — `SyncDirection.Both` (default), `PullOnly`, or `PushOnly`.
-- **Sync order** — `Sync()` runs: Clean → Push → Pull.
-- **Server wins** — no merge conflict resolution. Local changes are pushed as-is, pulled data overwrites local.
-- **SyncJob auto-registered** — `AddDataSync()` automatically registers a Shiny background job. No manual `AddJob()` needed.
+- **Entities implement `ISyncEntity`** — one property: `Identifier`. No base classes, no attributes.
+- **Endpoints are registered up-front** — one URL, one entity type, one stable key. Persisted with each queued operation, so renaming an endpoint key strands existing work.
+- **Outbox** — queued `Create` / `Update` / `Delete` operations with serialized JSON payloads, retry counters, and exponential backoff.
+- **Inbox** — server-driven delta pulls keyed by an opaque cursor. The default REST transport expects `{ cursor, hasMore, items: [{ id, verb, payload }] }`.
+- **Direction** — per endpoint: `Both` (default), `PullOnly`, `PushOnly`.
+- **Conflicts** — when the server returns 409 / 412, the delegate decides: accept remote, keep local, or merge.
+- **Tombstones, soft-delete, expiry** — three layered strategies for removing entities the client should no longer have. See [Removal Strategies](/datasync/removal-strategies).
 
 ## Setup
 
 <LibBuilder componentName="datasync" client:load />
 
-### 1. Define entity classes
+### 1. Define an entity
+
+Any record (class, struct, or record) that exposes a stable `Identifier`:
 
 ```csharp
-public class TodoItem
-{
-    public string Id { get; set; } = Guid.NewGuid().ToString();
-    public string Title { get; set; } = "";
-    public bool IsComplete { get; set; }
-    public bool IsDeleted { get; set; }
-    public long Version { get; set; }
-    public DateTimeOffset? UpdatedAt { get; set; }
-}
+using Shiny.Data.Sync;
+
+public record TodoItem(string Identifier, string Title, bool Completed) : ISyncEntity;
 ```
 
-### 2. Create a JsonSerializerContext
+### 2. Wire serialization (AOT-safe)
+
+Add the entity to a `[ShinyJsonContext]`-attributed `JsonSerializerContext`. The source-generated module initializer wires it into `Shiny.Json.Default` before any sync code runs.
 
 ```csharp
+[ShinyJsonContext]
 [JsonSerializable(typeof(TodoItem))]
-[JsonSerializable(typeof(TodoItem[]))]
-[JsonSerializable(typeof(List<TodoItem>))]
 public partial class AppJsonContext : JsonSerializerContext;
 ```
 
-:::caution
-Always include `typeof(T)`, `typeof(T[])`, **and** `typeof(List<T>)` for every entity type. Missing any of these will cause runtime failures.
-:::
+The same context covers every endpoint that uses these types — no per-endpoint plumbing.
 
-### 3. Register DocumentDB (entity storage)
+### 3. Implement the delegate
 
 ```csharp
-builder.Services.AddDocumentStore(opts =>
+using Shiny.Data.Sync;
+
+public class MyDataSyncDelegate : IDataSyncDelegate
 {
-    opts.DatabaseProvider = new SqliteDatabaseProvider(
-        $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "app.db")}"
-    );
-    opts.MapTypeToTable<TodoItem>();
-    // Add MapTypeToTable for every entity type
-});
-```
-
-### 4. Register DataSync
-
-```csharp
-builder.Services.AddDataSync(ds =>
-{
-    ds.MetadataDatabasePath = Path.Combine(FileSystem.AppDataDirectory, "sync_meta.db");
-    ds.MaxPushAttempts = 5; // 0 = disabled (never auto-remove failed items)
-
-    ds.HttpJsonSerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+    public Task OnSent(SyncOperation op, string? responseBody)
     {
-        TypeInfoResolver = AppJsonContext.Default
-    };
-
-    ds.AddEntity<TodoItem>(x => x.Id, e =>
-    {
-        e.Direction = SyncDirection.Both;
-        e.PullUri = "/api/todos";
-        e.PullDateVariable = "since";
-        e.PullMinimumTime = TimeSpan.FromMinutes(5);
-        e.PushUri = "/api/todos";
-        e.PushBufferSize = 50;
-        e.VersionSelector = x => x.Version;
-    });
-});
-```
-
-### 5. Configure the HttpClient
-
-The library uses `IHttpClientFactory` with the client name `"DataSync"`:
-
-```csharp
-builder.Services.AddHttpClient("DataSync", client =>
-{
-    client.BaseAddress = new Uri("https://your-api.com");
-});
-```
-
-### 6. For MAUI apps, call UseShiny()
-
-```csharp
-builder.UseMauiApp<App>().UseShiny();
-```
-
-## Quick Example
-
-```csharp
-public class MyViewModel
-{
-    readonly ISyncService _sync;
-
-    public MyViewModel(ISyncService sync)
-    {
-        _sync = sync;
+        // The server accepted the op. responseBody may carry a server-assigned id, ETag, etc.
+        return Task.CompletedTask;
     }
 
-    async Task AddTodo(string title)
+    public Task OnError(SyncOperation op, int statusCode, Exception ex)
     {
-        await _sync.Insert(new TodoItem { Title = title });
+        // The op exhausted its retry budget. Persist to a dead-letter store, surface to the user, or re-queue.
+        return Task.CompletedTask;
     }
 
-    async Task CompleteTodo(TodoItem todo)
+    public Task OnReceived(SyncReceivedItem item)
     {
-        todo.IsComplete = true;
-        await _sync.Update(todo);
+        // The engine already deserialized item.Entity using Shiny.Json.Default.
+        if (item.Entity is TodoItem todo)
+            myLocalStore.Apply(todo, item.Verb);
+        return Task.CompletedTask;
     }
 
-    async Task DeleteTodo(TodoItem todo)
-    {
-        await _sync.Remove<TodoItem>(todo.Id);
-    }
-
-    async Task SyncAll()
-    {
-        // Full cycle: Clean -> Push -> Pull
-        await _sync.Sync();
-    }
-
-    void ObserveSync()
-    {
-        _sync.WhenSync().Subscribe(evt =>
-        {
-            // evt.Type: PushStarted, PushCompleted, PushFailed, PullStarted, PullCompleted, PullFailed
-            Console.WriteLine($"{evt.Type} - {evt.EntityType?.Name} ({evt.Count} items)");
-        });
-    }
+    public Task<ConflictResolution> OnConflict(SyncOperation op, string remotePayload)
+        => Task.FromResult(ConflictResolution.AcceptRemote);
 }
 ```
 
-## Samples
-* [Sample MAUI App](https://github.com/shinyorg/datasync/tree/main/samples/Sample.Maui)
-* [Sample API](https://github.com/shinyorg/datasync/tree/main/samples/Sample.Api)
+### 4. Register services
+
+```csharp
+using Shiny;
+using Shiny.Data.Sync;
+
+builder.Services.AddDataSync<MyDataSyncDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos");
+
+    opts.RegisterEndpoint<Project>("https://api.example.com/projects", ep =>
+    {
+        ep.Direction = SyncDirection.Both;
+        ep.Batch = true;                                  // coalesce queued ops per round-trip
+        ep.UseMeteredConnection = false;                  // wait for WiFi
+        ep.MinPullInterval = TimeSpan.FromMinutes(5);     // throttle scheduled pulls
+        ep.DefaultConflictPolicy = ConflictPolicy.ServerWins;
+    });
+});
+
+// Optional: a single cross-cutting auth header for every sync request
+builder.Services.AddSyncInterceptor<MyAuthInterceptor>();
+
+// Centralize base address / Polly handlers on the named client
+builder.Services.AddHttpClient(RestSyncTransport.HttpClientName, c =>
+    c.BaseAddress = new Uri("https://api.example.com")
+);
+```
+
+On Blazor WebAssembly call `AddBlazorDataSync<TDelegate>` from `Shiny.Data.Sync.Blazor` instead — it persists the outbox and cursors to `LocalStorage` and drives sync from an in-process `HttpClient` loop on connectivity events.
+
+```csharp
+builder.Services.AddBlazorDataSync<MyDataSyncDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos");
+});
+```
+
+### 5. Queue and pull
+
+```csharp
+public class TodosService(IDataSyncManager sync)
+{
+    public Task Create(TodoItem item) => sync.Queue(SyncVerb.Create, item);
+    public Task Update(TodoItem item) => sync.Queue(SyncVerb.Update, item);
+    public Task Delete(TodoItem item) => sync.Queue(SyncVerb.Delete, item);
+
+    public Task Refresh(CancellationToken ct = default) => sync.PullNow<TodoItem>(ct);
+}
+```
+
+`PullNow<T>` bypasses the per-endpoint `MinPullInterval` — use it for pull-to-refresh. `PullAll` runs every endpoint that is `Both` or `PullOnly` and honours the throttle. A `SyncJob` is auto-registered, so periodic pulls run in the background without any additional plumbing.
+
+## Observing sync
+
+```csharp
+sync.PendingCountChanged += (s, count) => StatusLabel.Text = $"{count} pending";
+
+sync.UpdateReceived += (s, result) =>
+{
+    if (result.State == SyncOperationState.Error)
+        ShowToast($"Sync failed: {result.Exception?.Message}");
+};
+
+sync.PullCompleted += (s, c) =>
+{
+    if (c.Error != null) ShowToast($"Pull failed for {c.EndpointKey}: {c.Error.Message}");
+    else if (c.ItemsReceived > 0) ShowToast($"{c.ItemsReceived} new {c.EndpointKey} items");
+};
+
+// Unified stream — covers every outbox + inbox lifecycle moment
+sync.Activity += (s, evt) =>
+    Console.WriteLine($"{evt.Type} {evt.EndpointKey} items={evt.ItemCount} status={evt.StatusCode}");
+```
+
+The `Activity` event fires `SyncEvent` records for: `OutboxQueued`, `OutboxStarted`, `OutboxSent`, `OutboxFailed`, `OutboxConflict`, `OutboxRetryScheduled`, `OutboxCanceled`, `InboxPullStarted`, `InboxItemReceived`, `InboxPullCompleted`, `InboxPullFailed`, `TombstonesApplied`.
+
+## Cancelling work
+
+```csharp
+await sync.Cancel(operationId);   // one operation
+await sync.CancelAll<TodoItem>(); // everything for one endpoint
+await sync.CancelAll();           // entire outbox (in-flight inbox pulls are left alone)
+```
 
 ## AI Coding Assistant
 
-<AiSkill skillName="shiny-datasync" />
+<AiSkill skillName="shiny-data-sync" />
 
-## Links
-* [GitHub Repository](https://github.com/shinyorg/datasync)
+## Where next?
+
+- [Entity Registration](/datasync/entity-registration) — every option on `SyncEndpoint`
+- [Conflict Resolution](/datasync/conflict-resolution) — handling 409 / 412 with merges
+- [Removal Strategies](/datasync/removal-strategies) — tombstones, soft-delete, and expiry predicates
+- [Server API Contracts](/datasync/server-contracts) — the exact JSON shapes the default REST transport speaks
+- [Sync Interceptors](/datasync/sync-interceptor) — global auth / signing / tracing
+- [Platform Behavior](/datasync/platform-behavior) — what runs where, and what survives app kill
+- [Custom Transports](/datasync/custom-transports) — swap out the default REST transport for gRPC, GraphQL, or anything else

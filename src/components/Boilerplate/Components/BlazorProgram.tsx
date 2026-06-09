@@ -26,6 +26,11 @@ const BlazorProgram = (props: Props) => {
     usings.add('Shiny');
     usings.add('Shiny.Push.Blazor');
   }
+  if (has('datasync')) {
+    usings.add('Shiny');
+    usings.add('Shiny.Data.Sync');
+    usings.add('Shiny.Data.Sync.Infrastructure');
+  }
   if (has('documentdb')) {
     usings.add('Shiny.DocumentDb');
     usings.add('Shiny.DocumentDb.Sqlite');
@@ -121,6 +126,18 @@ public class Program
         {
             VapidPublicKey = "YOUR_VAPID_PUBLIC_KEY"
         });`;
+  }
+  if (has('datasync')) {
+    src += `
+        // Blazor WASM transport — HttpClient + LocalStorage. Sync runs while the tab is open.
+        // Register one endpoint per ISyncEntity type — see https://shinylib.net/datasync/entity-registration
+        builder.Services.AddBlazorDataSync<BlazorApp.MyDataSyncDelegate>(opts =>
+        {
+            opts.RegisterEndpoint<BlazorApp.TodoItem>("/api/todos");
+        });
+        builder.Services.AddHttpClient(RestSyncTransport.HttpClientName, c =>
+            c.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress)
+        );`;
   }
   // Reflector is attribute-based only, no builder registration needed
 

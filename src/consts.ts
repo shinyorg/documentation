@@ -70,7 +70,7 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'aiconversation', 'docking', 'osk'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'gps', 'ble', 'jobs', 'push', 'datasync', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'aiconversation', 'docking', 'osk'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'webhost'];
@@ -531,14 +531,11 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "datasync",
-        "nuget": "Shiny.DataSync",
+        "nuget": "Shiny.Data.Sync",
+        "blazorNuget": "Shiny.Data.Sync.Blazor",
         "description": "Data Sync",
         "category": "essentials",
-        "version": "2.0.0.2381-preview",
-        "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Sqlite", "version": "6.0.0" },
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "6.0.0" }
-        ]
+        "version": DEFAULT_VERSION
     },
     {
         "id": "mauihost",
@@ -579,7 +576,7 @@ export const Data = {
     },
 
     usesHosting(compos: ShinyComponent[]): boolean {
-        const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push'];
+        const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'datasync'];
         return compos.some(x => hostingIds.includes(x.id));
     },
 

@@ -1,0 +1,105 @@
+---
+title: Platform Behavior
+---
+
+`Shiny.Data.Sync` provides the same tiered cross-platform guarantees as `Shiny.Net.Http`. The transport you get is selected automatically by `AddDataSync<TDelegate>` based on the target TFM.
+
+## Transport per platform
+
+| Platform | Outbox transport | Inbox transport | Survives app kill |
+|---|---|---|---|
+| iOS / Mac Catalyst | Background `NSURLSession` upload task | Background `NSURLSession` download task | **Yes** (both directions) |
+| Android | Foreground Service + `HttpClient` | `HttpClient` (in-process) | Outbox **yes** (notification visible while syncing); inbox no |
+| Windows / Linux / macOS / base .NET | `HttpClient` + connectivity loop | `HttpClient` + connectivity loop | No — resumes on next launch |
+| Blazor WebAssembly | `HttpClient` + `LocalStorage` | `HttpClient` + `LocalStorage` | No — sync runs while the tab is open |
+
+## iOS / Mac Catalyst
+
+The outbox and inbox share a single background `NSURLSession` (`HttpMaximumConnectionsPerHost = 4`). Tombstone fetches ride the same session.
+
+- The JSON payload for each outbox op is serialized to a temp file under the app's caches directory — background `NSURLSession`s require file-backed uploads. The temp file is cleaned up when the op completes or fails.
+- The same background session carries upload **and** download tasks, so the outbox and inbox compete for the four-connection pool. A saturated outbox queues inbox pulls behind it.
+- `OnBeforeSend` (and `ISyncInterceptor.BeforePush`) receive a stub `HttpRequestMessage` with headers only — there is no body to inspect. Signers that hash the body (AWS SigV4) won't work on Apple; either validate server-side or use `AddHttpClientDataSync<TDelegate>` to opt out of NSURLSession.
+- `PullAll` is fire-and-forget. The returned `Task` completes once the background tasks are kicked off, not when the downloads finish — subscribe to `PullCompleted` to know when work actually completed.
+- Tombstone tasks use the `tombstone:{endpointKey}` task description so they round-trip across app suspension just like the main pull.
+
+### Required Info.plist keys
+
+Background uploads / downloads need the standard `NSURLSession` background mode (the same one `Shiny.Net.Http` uses). If your app already uses HTTP Transfers, nothing extra is required. If not, add:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+    <string>fetch</string>
+    <string>processing</string>
+</array>
+```
+
+`Shiny.Hosting.Maui` wires up the `application:handleEventsForBackgroundURLSession:completionHandler:` callback automatically, so the OS can wake the app when background tasks resume.
+
+## Android
+
+The outbox runs inside a Shiny-managed foreground service (the same service used by `Shiny.Net.Http`). While the service is alive, the user sees a notification ("Syncing..." by default) — kill the service and the outbox naturally stops too.
+
+- The inbox runs in-process; it does **not** survive being swept by the OS. Pending pulls resume on the next launch.
+- A regained network connection triggers an immediate outbox drain + `PullAll` via `IConnectivity.Changed`.
+- `Batch = true` is honoured — the HttpClient path coalesces queued ops into a single `POST /batch` per endpoint.
+
+## Windows / Linux / macOS / base .NET
+
+A single `HttpClient` loop drives both directions:
+
+- The loop listens on `IConnectivity.Changed`. When the network comes back, it drains the outbox and runs `PullAll`.
+- Nothing survives a process kill, but everything is persisted (operations, cursors, tombstone cursors), so the loop picks up where it left off when the app starts again.
+- `Batch = true` is honoured.
+- There is no foreground notification on these platforms.
+
+## Blazor WebAssembly
+
+`Shiny.Data.Sync.Blazor` registers an `HttpClient`-backed sync engine that persists the outbox and inbox cursors to `LocalStorage`:
+
+```csharp
+builder.Services.AddBlazorDataSync<MyDataSyncDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("/api/todos");
+});
+```
+
+- Sync only runs while the tab is open. There is **no** Service Worker Background Sync integration today — that's planned for a future `Shiny.Data.Sync.Blazor.ServiceWorker` package matching `Shiny.Net.Http.Blazor`.
+- The named HttpClient is still `RestSyncTransport.HttpClientName` (`"Shiny.Data.Sync"`); configure base address and handlers with `AddHttpClient(...).ConfigureHttpClient(...)`.
+- CORS applies — see [Server API Contracts → CORS for Blazor](/datasync/server-contracts#cors-for-blazor).
+
+## Forcing the HttpClient path on a native target
+
+If you want the cross-platform `HttpClient` engine even on a native target (for testing, to skip the NSURLSession constraints, or because a custom interceptor needs the request body), register explicitly:
+
+```csharp
+builder.Services.AddHttpClientDataSync<MyDataSyncDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos");
+});
+```
+
+You give up the survives-app-kill guarantee on iOS / Mac Catalyst.
+
+## Background connectivity events
+
+Every transport hooks `IConnectivity.Changed` (registered automatically by `AddDataSync`):
+
+- A network transition from offline → online drains the outbox immediately.
+- The same transition kicks off a `PullAll` — respecting each endpoint's `MinPullInterval`.
+- A transition online → offline simply pauses the loop; in-flight requests are allowed to fail naturally and retry on backoff.
+
+`UseMeteredConnection = false` on an endpoint additionally requires the connection to be unmetered (typically WiFi) before its outbox runs.
+
+## Periodic background sync
+
+`AddDataSync` registers a `SyncJob` with the Shiny job scheduler (`WithInternet(InternetAccess.Any)`). On iOS this runs through `BGTaskScheduler`; on Android through `WorkManager`; on Windows through COM-activated background tasks; everywhere else through the in-process Shiny job runner. The job calls `PullAll` and drains any backlogged outbox ops — no manual `AddJob` registration needed.
+
+To turn it off (e.g. because you trigger pulls only on push), remove the job after the fact:
+
+```csharp
+// not recommended — but possible
+var jobs = host.Services.GetRequiredService<IJobManager>();
+await jobs.Cancel(nameof(Shiny.Data.Sync.SyncJob));
+```

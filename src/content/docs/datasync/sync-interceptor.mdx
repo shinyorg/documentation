@@ -1,54 +1,70 @@
 ---
-title: Sync Interceptor
+title: Sync Interceptors
 ---
 
-The `ISyncInterceptor` interface lets you modify HTTP requests before they are sent during pull and push operations. The most common use case is adding authentication headers.
+An `ISyncInterceptor` is a cross-cutting hook invoked on **every** sync HTTP request the engine emits — inbox pulls, outbox pushes (single or batched), and tombstone fetches. Register one or more in DI to attach auth headers, trace ids, or signing once instead of repeating the logic in every endpoint's `OnBeforeSend`.
 
-## Implementing ISyncInterceptor
+## The interface
 
 ```csharp
-public class MySyncInterceptor : ISyncInterceptor
+public interface ISyncInterceptor
 {
-    readonly IAuthService _auth;
+    Task BeforePull(SyncEndpoint endpoint, string? cursor, HttpRequestMessage request);
 
-    public MySyncInterceptor(IAuthService auth)
+    Task BeforePush(SyncEndpoint endpoint, IReadOnlyList<SyncOperation> operations, HttpRequestMessage request);
+
+    Task BeforeTombstoneFetch(SyncEndpoint endpoint, string? cursor, HttpRequestMessage request)
+        => this.BeforePull(endpoint, cursor, request); // default forwards to BeforePull
+}
+```
+
+`BeforePush`'s `operations` is the full coalesced batch when the endpoint has `Batch = true`; for single-send endpoints it is a one-element list.
+
+## Auth example
+
+```csharp
+public class AuthInterceptor(ITokenService tokens) : ISyncInterceptor
+{
+    public async Task BeforePull(SyncEndpoint endpoint, string? cursor, HttpRequestMessage req)
     {
-        _auth = auth;
+        var token = await tokens.GetAccessTokenAsync();
+        req.Headers.Authorization = new("Bearer", token);
     }
 
-    public async Task BeforePull(Type documentType, DateTimeOffset lastRun, HttpRequestMessage request)
+    public async Task BeforePush(SyncEndpoint endpoint, IReadOnlyList<SyncOperation> ops, HttpRequestMessage req)
     {
-        var token = await _auth.GetAccessTokenAsync();
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        var token = await tokens.GetAccessTokenAsync();
+        req.Headers.Authorization = new("Bearer", token);
     }
 
-    public async Task BeforePush(Type documentType, object[] items, HttpRequestMessage request)
-    {
-        var token = await _auth.GetAccessTokenAsync();
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-    }
+    // BeforeTombstoneFetch's default forwards to BeforePull — override only if your tombstone URL is on a different auth domain.
 }
 ```
 
 ## Registration
 
-Register as a singleton in your DI container:
-
 ```csharp
-builder.Services.AddSingleton<ISyncInterceptor, MySyncInterceptor>();
+builder.Services.AddSyncInterceptor<AuthInterceptor>();
 ```
 
-:::tip
-Use `ISyncInterceptor` for auth headers rather than configuring the HttpClient directly — the interceptor is called per-request and can refresh tokens dynamically.
-:::
+Multiple interceptors can be registered — they execute in registration order. All registered interceptors run **before** the per-endpoint `SyncEndpoint.OnBeforeSend`, so endpoint hooks still win on header conflicts.
 
-## Parameters
+## When to use OnBeforeSend instead
 
-| Method | Parameters | Description |
-|--------|-----------|-------------|
-| `BeforePull` | `Type documentType` — the entity type being pulled | Called before each pull HTTP request |
-| | `DateTimeOffset lastRun` — when this entity type was last pulled | |
-| | `HttpRequestMessage request` — the outgoing request to modify | |
-| `BeforePush` | `Type documentType` — the entity type being pushed | Called before each push HTTP request |
-| | `object[] items` — the entities about to be pushed | |
-| | `HttpRequestMessage request` — the outgoing request to modify | |
+The two hooks compose:
+
+| Use the interceptor for | Use `OnBeforeSend` for |
+|---|---|
+| Auth headers (Bearer / API keys) | Endpoint-specific trace ids |
+| Request signing (HMAC, etc.) | Tenant headers that vary by entity |
+| Tracing / correlation ids | Per-endpoint feature flags |
+| Anything you'd otherwise repeat in every endpoint | One-off behaviour |
+
+## Caveat: Apple uploads stream from disk
+
+On iOS / Mac Catalyst the outbox uses `NSURLSession` background upload tasks, which require file-backed uploads. The `HttpRequestMessage` your interceptor sees has the headers populated but **no body attached** — the engine writes the payload to a temp file separately. This is fine for header-based auth (Bearer, API key, etc.) but breaks signers that hash the request body (e.g. AWS SigV4).
+
+If you need body-hashing auth on Apple, either:
+
+- have the server validate the body via a downstream service (the upload still succeeds), or
+- pin the Apple platforms to the HttpClient path with `AddHttpClientDataSync<TDelegate>` (you lose the survives-app-kill guarantee for the outbox).

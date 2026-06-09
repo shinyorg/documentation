@@ -155,9 +155,12 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'datasync/' },
           { label: 'Entity Registration', link: 'datasync/entity-registration' },
+          { label: 'Conflict Resolution', link: 'datasync/conflict-resolution' },
           { label: 'Removal Strategies', link: 'datasync/removal-strategies' },
-          { label: 'Sync Interceptor', link: 'datasync/sync-interceptor' },
+          { label: 'Sync Interceptors', link: 'datasync/sync-interceptor' },
           { label: 'Server API Contracts', link: 'datasync/server-contracts' },
+          { label: 'Platform Behavior', link: 'datasync/platform-behavior' },
+          { label: 'Custom Transports', link: 'datasync/custom-transports' },
           { label: 'Release Notes', link: 'datasync/release-notes' }
         ]
       },
