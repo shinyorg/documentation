@@ -1,0 +1,230 @@
+---
+title: Architecture
+---
+
+`Shiny.Net.Http` is a background HTTP transfer engine — queue an upload or download, and the platform-tier transport drains it past app suspension. This page explains *why* the engine is shaped the way it is.
+
+If you've used [`Shiny.Data.Sync`](/datasync/architecture), the architectural playbook will look familiar — the two libraries deliberately share the same shape because the OS guarantees are the same.
+
+## TL;DR — the shape
+
+```
+   App code ──► IHttpTransferManager
+                       │
+                       ▼
+              Queue(HttpTransferRequest)
+                       │
+                       ▼
+           HttpTransfer record (persisted)
+                       │
+                       ▼
+   ┌───────────────────┴──────────────────────┐
+   │                                          │
+   ▼                                          ▼
+ iOS / Mac Catalyst                Android / Win / Linux / macOS
+ NSURLSession background           HttpClientHttpTransferProcess
+ upload + download tasks           (HttpClient loop +
+                                    IConnectivity gating +
+                                    HTTP Range resume)
+                                          │
+                                          ▼
+                                  Android foreground service
+                                  Windows / Linux / macOS in-proc
+
+   Blazor WASM
+   ───────────
+   IndexedDB queue
+   Service Worker + Background Sync API
+```
+
+Three immutable design pillars:
+
+1. **The transfer record is persisted before any bytes move.** `Queue(request)` writes an `HttpTransfer` to the Shiny repository. The transport reads from the repository — never from in-memory state.
+2. **The transport is platform-tiered.** iOS / Mac Catalyst → background `NSURLSession`. Android → foreground service. Windows / Linux / macOS / base .NET → `HttpClient` loop. Blazor WASM → Service Worker. The surface is uniform; the guarantees match what the OS allows.
+3. **Range-aware resume on the managed path.** Whenever the transport runs in-process (everywhere except iOS NSURLSession), downloads attempt HTTP `Range` requests on resume so a partial download survives a process kill.
+
+## Why a persistent queue?
+
+A queued transfer can outlive a single process lifetime. On iOS the upload is handed to `NSURLSession` and the OS finishes it after the app is suspended. On Android the queue is drained inside a foreground service that the user can kill. On every other platform the queue is drained in-process — when the process dies mid-transfer, the next launch picks up where it left off.
+
+So `Queue<T>` writes the `HttpTransfer` to the repository **before** any bytes move. The schema is small:
+
+```csharp
+record HttpTransfer(
+    HttpTransferRequest Request,   // URI, type, local file path, headers, content, metered flag
+    long? BytesToTransfer,         // total bytes when known
+    long BytesTransferred,         // bytes done so far — drives resume
+    HttpTransferState Status,      // Pending / InProgress / Completed / Error / PausedByCostedNetwork
+    DateTimeOffset CreatedAt
+)
+```
+
+`BytesTransferred` is the persistence-side signal for resume. When the process restarts, the managed transport reads the row, looks at the local file's actual size, and sends a `Range: bytes={start}-` header for downloads. If the server responds `206 Partial Content`, the transfer resumes. If the server returns the full body (no range support), it restarts cleanly.
+
+The same persistence layer means in-process events can drive UI directly:
+
+- `IHttpTransferManager.CountChanged` fires when a row is added/removed.
+- `UpdateReceived` fires per progress tick (throttled — see below).
+
+## Why platform-tiered transports?
+
+iOS and Android take cross-platform "background transfer" promises away from you. Pretending otherwise produces frameworks that work in dev and silently drop bytes in production.
+
+So the library matches what each OS actually allows:
+
+| Platform | Mechanism | What survives app kill |
+|---|---|---|
+| iOS / Mac Catalyst | Background `NSURLSession` (`CreateBackgroundSessionConfiguration`) | **Yes** — the OS resumes uploads / downloads after suspension and wakes the app via `application:handleEventsForBackgroundURLSession:` to dispatch the result. |
+| Android | Foreground Service hosting the managed `HttpClient` loop | **Yes** while the service runs — user sees a notification. The service stops when the queue is empty. |
+| Windows / Linux / macOS / .NET base | In-process `HttpClient` loop driven by `IConnectivity.Changed` | Nothing — the process must be alive. But everything is persisted, so the next launch resumes mid-air via HTTP `Range`. |
+| Blazor WebAssembly | IndexedDB queue + Service Worker + Background Sync API | Service-worker-managed — survives the tab being closed on Chromium browsers (Firefox / Safari do not support Background Sync; queue still drains while tab is open). |
+
+The user-facing API (`AddHttpTransfers<TDelegate>` + `IHttpTransferManager`) is identical on every target.
+
+### Why upload tasks rather than data tasks on Apple?
+
+`NSURLSession` background mode only permits *upload* and *download* tasks. Sending a request body as a data task would work in the foreground but silently fail to resume after suspension. So:
+
+- Uploads become `NSURLSessionUploadTask` instances fed from a temp file on disk. For multipart uploads the engine builds the multipart envelope to disk before kicking off the task.
+- Downloads become `NSURLSessionDownloadTask` instances — the body is captured by `URLSession(_:downloadTask:didFinishDownloadingTo:)` and moved to the user-supplied `LocalFilePath` on completion.
+
+The cost: interceptors / `IHttpTransferDelegate` don't see the request body on Apple. Signers that hash the body (AWS SigV4) need to compute the hash from the file before queueing — which is what `AwsS3UploadRequest` / `AzureBlobStorageUploadRequest` already do.
+
+### Why a foreground service on Android?
+
+Android killed truly invisible background work years ago. `WorkManager` will run a job — but coalesces, defers, and deprioritizes it based on Doze, battery, and the scheduler's mood. None of that is acceptable for "the user just hit Upload and the connection just came back."
+
+A foreground service guarantees the OS keeps the process alive while the queue drains. The user-visible notification is the trade — but it's the only API contract on modern Android that delivers "run this transfer right now and don't kill me until it's done."
+
+`HttpTransferService` extends `ShinyAndroidForegroundService<IHttpTransferManager, IHttpTransferDelegate>` and runs with `ForegroundServiceType = TypeDataSync`. The notification content is customisable via `IAndroidForegroundServiceDelegate.Configure(builder)` — see the [delegate page](/httptransfers/delegate).
+
+### Why a Service Worker on Blazor WASM?
+
+Blazor WASM has no `IConnectivity.Changed` of its own and the JS runtime gives up the moment the tab closes. The only browser primitive that survives a closed tab is **Background Sync** (`SyncEvent` in a Service Worker). So `Shiny.Net.Http.Blazor` queues transfers to **IndexedDB** and registers a Service Worker that drains the queue when the browser fires `sync`.
+
+The Service Worker can't invoke C# (the Blazor runtime isn't reachable from the SW context). So the worker is pure JavaScript and reads / writes to the same IndexedDB store the Blazor side uses. The C# `IHttpTransferDelegate` callbacks fire **when the page reopens** and the Blazor side detects new completion records.
+
+Trade-offs:
+
+- **No resumable downloads.** The SW `fetch()` returns a whole `Blob`; appending to a partial body isn't supported.
+- **Upload bodies are bridged via JS interop and persisted as IndexedDB `Blob`s.** Fine for small/medium files; very large uploads will block the JS thread during the marshal step.
+- **Chromium-only Background Sync.** Firefox / Safari run only while the tab is open. The engine still drains in-tab there.
+
+## Why a single managed `HttpClientHttpTransferProcess`?
+
+Android (inside the foreground service), Windows, Linux, macOS, and base .NET all run the **same** `HttpClientHttpTransferProcess`. One state machine, one set of tests, four hosts. The platform layer is just *when* and *where* the loop runs:
+
+- Android: hosted in the foreground service — the service starts on `Queue`, the loop runs, the service stops when the queue empties.
+- Windows / Linux / macOS / base .NET: hosted in-process — kicked by app start, by `Queue`, and by `IConnectivity.Changed`.
+
+The loop:
+
+1. Read all `HttpTransfer` rows.
+2. For each one, if `connectivity.IsInternetAvailable()` and `(UseMeteredConnection || on Wifi)`:
+   - Drive the transfer — upload pumps bytes through `ProgressStreamContent`; download writes to disk with a `Range` header.
+3. Persist progress every ~1 second.
+4. Wait for the next pass (or for connectivity to come back).
+
+`PausedByCostedNetwork` is a first-class state, distinct from `Pending`, so a transfer that's blocked on Wifi shows up correctly in the UI.
+
+## Why Range-aware downloads instead of restart-from-zero?
+
+A 200 MB download is expensive to redo. So on every resume, the managed download path:
+
+1. Inspects the current size of `LocalFilePath` (the persisted prefix).
+2. Sends `Range: bytes={size}-` against the server.
+3. If the server answers `206 Partial Content`, opens the file in `Append` mode and continues writing.
+4. If the server ignores `Range` and returns `200 OK`, truncates and restarts cleanly.
+
+This is the largest single behavioural difference from the iOS NSURLSession path — the OS resumes on its own there and the application code never sees a "where did we leave off?" moment. On every other platform, persisted byte counts + `Range` headers are how resume works.
+
+Upload resume is **not** implemented on the managed path: the protocol semantics depend on the server (AWS S3 multipart, Azure block blob `BlockList`, GCS resumable upload all behave differently). On NSURLSession, uploads resume only as far as the OS-level upload task survives — which is "almost always" but not "always".
+
+## Why per-transfer headers, content, and HTTP method overrides?
+
+```csharp
+record HttpTransferRequest(
+    string Identifier,
+    string Uri,
+    TransferType Type,                  // UploadMultipart / UploadRaw / Download
+    string LocalFilePath,
+    bool UseMeteredConnection = true,
+    TransferHttpContent? HttpContent = null,
+    IDictionary<string, string>? Headers = null
+)
+{
+    public string? HttpMethod { get; set; }      // override default GET/POST
+    public string FileFormDataName { get; set; } = "file";
+}
+```
+
+A queued transfer is small JSON. The persistence layer doesn't need to know what auth scheme you use or which form field your server expects — `Headers` carries headers verbatim, `HttpContent` carries form fields or a JSON body, and `HttpMethod` overrides the default. The library doesn't try to model auth, S3 / Azure SAS, or signed URLs — those are constructed by the `AwsS3UploadRequest` / `AzureBlobStorageUploadRequest` builders that *produce* an `HttpTransferRequest` upstream.
+
+The result: a sub-record of the request flows verbatim through both transports. The Apple side writes the `Headers` dictionary into `NSMutableUrlRequest`; the managed side writes them into an `HttpRequestMessage`. Same intent, two surfaces.
+
+## Why `IHttpTransferDelegate` for completion / errors?
+
+The transports run in the background — there is **no** UI context when the OS resumes an iOS upload, or when the Android foreground service finishes the last queued transfer. So completion / error callbacks land on the registered `IHttpTransferDelegate` (singleton, in DI):
+
+```csharp
+public interface IHttpTransferDelegate
+{
+    Task OnCompleted(HttpTransferRequest request);
+    Task OnError(HttpTransferRequest request, int statusCode, Exception ex);
+}
+```
+
+Two reasons it's a typed delegate, not an event:
+
+1. **Background dispatch.** The OS may invoke completion handlers when the app is in the background. A typed `IDataSyncDelegate`-style contract is easier to wire through `application:handleEventsForBackgroundURLSession:` and the Android foreground service.
+2. **DI scoping.** The delegate is resolved from the DI container, so it can take dependencies (a local store, a notification dispatcher, a sync engine). Events would force you to attach handlers from somewhere with a long lifetime, and on iOS that "somewhere" doesn't exist when the app is killed.
+
+For *observation* (progress bars, in-app status), there are events: `IHttpTransferManager.UpdateReceived`, `CountChanged`. The split is the same as `Shiny.Data.Sync`: events for spectators, delegate for integration.
+
+## Why a `Range`-checked retry on `IOException`, but a permanent failure on most 4xx?
+
+Errors split two ways:
+
+- **Transient** — `HttpStatusCode 0` (network down), `408` (timeout), `429` (rate limited), `5xx`. The transport waits for the next loop pass (or `IConnectivity.Changed`) and retries with the persisted byte count. `Status` stays `InProgress`.
+- **Terminal** — anything else. `Status` flips to `Error`, `IHttpTransferDelegate.OnError(request, statusCode, ex)` fires, and the row is removed.
+
+No exponential backoff on this loop — the connectivity-driven re-pass takes the role of "wait before retry". The connectivity loop won't fire until the network actually returns, so backoff would be redundant.
+
+For applications that need real exponential backoff (idempotent uploads against a flaky service), the right model is an upstream retry — your delegate's `OnError` re-queues with a different identifier or marks the local state for the next user-initiated retry.
+
+## Why per-transfer notifications on Android (opt-in)?
+
+Android shows one notification while the foreground service is running. Some apps want a notification *per transfer* — five files queued, five progress bars in the system tray.
+
+`PerTransferNotificationStrategy` is opt-in:
+
+```csharp
+services.AddShinyService<Shiny.Net.Http.PerTransferNotificationStrategy>();
+```
+
+Default (`SummaryTransferNotificationStrategy`) keeps a single rolling notification with the count and overall progress. The strategy is just an `IObservable<HttpTransferResult>` subscriber that builds Android notifications — drop your own in if neither suits you.
+
+## What `Shiny.Net.Http` deliberately does not do
+
+| Not built in | Why |
+|---|---|
+| Chunked / multipart resumable uploads | Per-cloud protocol. Use the `Shiny.Net.Http` S3 / Azure builders or compose your own on top. |
+| Server-Sent Events / long-polling | Use SignalR, gRPC streaming, or WebSockets. The engine moves *files*. |
+| Per-transfer auth refresh | Auth tokens go stale during a multi-hour upload. Re-queue with refreshed tokens in `OnError`, or attach a long-lived signed URL up front. |
+| Synchronous progress callbacks | All progress flows through the persisted record + the event stream. Background dispatch can't reach a UI thread directly. |
+| Built-in checksum validation | Server-side responsibility. Surface the server's response body to your delegate and validate there. |
+| Streamed-from-memory uploads | Background transports require disk-backed payloads. Write to disk first, queue the path. |
+
+## When **not** to use `Shiny.Net.Http`
+
+- **Small JSON records.** Use [`Shiny.Data.Sync`](/datasync/) for batched record sync; the queue is record-shaped there, not file-shaped.
+- **Realtime streams.** SignalR, MQTT, WebSockets. Persisted file uploads are the wrong tool for streamed events.
+- **Server-to-server transfers.** Run on a server-side worker (Hangfire, ASP.NET hosted service) with a regular `HttpClient`. The background-transport guarantees here are mobile-OS-specific.
+- **Anything that needs to finish in < 5 seconds.** A regular `HttpClient.SendAsync()` will be simpler and faster — the queue / persistence / foreground-service overhead only pays off when the transfer might survive suspension.
+
+For everything in the middle — multi-megabyte uploads that need to survive the app going to the background, downloads that should resume after a connection drop, queues that drain when the user comes back from offline — that is exactly what this library is for.
+
+## Related
+
+- [`Shiny.Data.Sync` architecture](/datasync/architecture) — the same playbook applied to records instead of files. The two libraries share their persistence and transport patterns deliberately.
+- [`Shiny.Jobs` architecture](/jobs/architecture) — the underlying scheduler that drives connectivity-checked retries on the managed path.

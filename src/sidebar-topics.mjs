@@ -24,18 +24,6 @@ export const sidebarTopics = [
         ]
       },
       { label: 'AI Skills', link: 'foundation/ai-skills' },
-      {
-        label: 'Blazor Playground',
-        expandInHomenav: true,
-        items: [
-          { label: 'AI Conversation', link: 'https://shinyorg.github.io/aiconversation/', attrs: { target: '_blank' } },
-          { label: 'Controls',        link: 'https://shinyorg.github.io/controls/',       attrs: { target: '_blank' } },
-          { label: 'DocumentDb',      link: 'https://shinyorg.github.io/DocumentDb/',     attrs: { target: '_blank' } },
-          { label: 'Mediator',        link: 'https://shinyorg.github.io/mediator/',       attrs: { target: '_blank' } },
-          { label: 'Shiny Core',      link: 'https://shinyorg.github.io/shiny/',          attrs: { target: '_blank' } },
-          { label: 'Speech',          link: 'https://shinyorg.github.io/speech/',         attrs: { target: '_blank' } },
-        ]
-      },
     ],
   },
   {
@@ -49,6 +37,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'aiconversation/' },
+          { label: 'Architecture', link: 'aiconversation/architecture' },
           { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
           { label: 'Message Store', link: 'aiconversation/message-store' },
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
@@ -75,6 +64,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'jobs/' },
+          { label: 'Architecture', link: 'jobs/architecture' },
           { label: 'Create a Job', link: 'jobs/create' },
           { label: 'Managing Jobs', link: 'jobs/managing' },
           { label: 'FAQ', link: 'jobs/faq' },
@@ -86,6 +76,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items: [
           { label: 'Getting Started', link: 'httptransfers/' },
+          { label: 'Architecture', link: 'httptransfers/architecture' },
           { label: 'Transfers', link: 'httptransfers/transfers' },
           { label: 'Azure Blob Storage', link: 'httptransfers/azure' },
           { label: 'AWS S3', link: 'httptransfers/aws-s3' },
@@ -112,6 +103,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'push/' },
+          { label: 'Architecture', link: 'push/architecture' },
           { label: 'Native', link: 'push/native' },
           { label: 'Platform Specific', link: 'push/platform' },
           { label: 'Azure Push Notifications', link: 'push/azure' },
@@ -154,6 +146,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items: [
           { label: 'Getting Started', link: 'datasync/' },
+          { label: 'Architecture', link: 'datasync/architecture' },
           { label: 'Entity Registration', link: 'datasync/entity-registration' },
           { label: 'Conflict Resolution', link: 'datasync/conflict-resolution' },
           { label: 'Removal Strategies', link: 'datasync/removal-strategies' },
@@ -222,6 +215,7 @@ export const sidebarTopics = [
         label: 'Locations',
         jumpTo: true,
         items:[
+          { label: 'Architecture', link: 'locations/architecture' },
           { label: 'GPS', link: 'locations/gps' },
           { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
           { label: 'Geofencing', link: 'locations/geofencing' },
@@ -235,6 +229,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items: [
           { label: 'Getting Started', link: 'speech/' },
+          { label: 'Architecture', link: 'speech/architecture' },
           { label: 'Azure AI Speech', link: 'speech/azure' },
           { label: 'ElevenLabs', link: 'speech/elevenlabs' },
           { label: 'OpenAI', link: 'speech/openai' },
@@ -658,6 +653,20 @@ export const sidebarTopics = [
         ]
       }
     ]
+  },
+  {
+    label: 'Blazor Playgrounds',
+    link: 'https://shinyorg.github.io/shiny/',
+    icon: 'laptop',
+    attrs: { target: '_blank' },
+    items: [
+      { label: 'AI Conversation', link: 'https://shinyorg.github.io/aiconversation/', attrs: { target: '_blank' } },
+      { label: 'Controls',        link: 'https://shinyorg.github.io/controls/',       attrs: { target: '_blank' } },
+      { label: 'DocumentDb',      link: 'https://shinyorg.github.io/DocumentDb/',     attrs: { target: '_blank' } },
+      { label: 'Mediator',        link: 'https://shinyorg.github.io/mediator/',       attrs: { target: '_blank' } },
+      { label: 'Shiny Core',      link: 'https://shinyorg.github.io/shiny/',          attrs: { target: '_blank' } },
+      { label: 'Speech',          link: 'https://shinyorg.github.io/speech/',         attrs: { target: '_blank' } },
+    ],
   }
 ];
 

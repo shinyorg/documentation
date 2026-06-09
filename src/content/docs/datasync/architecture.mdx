@@ -1,0 +1,270 @@
+---
+title: Architecture
+---
+
+`Shiny.Data.Sync` is opinionated by design. This page walks through the architectural choices behind the library, what each choice buys you, and what it costs — so you can decide whether the model fits and, when it doesn't, where to swap a piece out.
+
+## TL;DR — the shape
+
+```
+   App code ──────────► IDataSyncManager ──┐
+                              ▲            │
+                              │            ▼
+                  IDataSyncDelegate  ◄─── Outbox  (persisted SyncOperations)
+                              ▲            │
+                              │            ▼
+                          Inbox cursor ──► ISyncTransport ──► HTTP
+                                            │
+                                            └─► RestSyncTransport (default)
+```
+
+Three immutable design pillars:
+
+1. **The outbox is a persistent queue, not a callback.** Every `Queue<T>` write goes through the Shiny repository before the network is ever touched. The transport then drains the queue — process death, app suspension, and connectivity drops all leave the queue intact.
+2. **The inbox is an opaque cursor stream, not a snapshot.** Each endpoint persists a cursor. Pulls round-trip that cursor to the server, the server decides what's new, and the engine never tries to compute deltas locally.
+3. **Transports are platform-tiered.** The same `IDataSyncManager` interface picks `NSURLSession` on Apple, a foreground service on Android, and a connectivity-driven `HttpClient` loop everywhere else — so the surface area is uniform but the background guarantees match what the OS actually allows.
+
+## Why separate outbox and inbox?
+
+A single bidirectional sync pipe has been tried many times in this space. It almost always sacrifices one direction for the other.
+
+Server-side `LastWriteWins` merges feel simple until two clients edit the same record offline; client-side merges feel simple until you need to support 80% of users on a flaky cell tower. `Shiny.Data.Sync` splits the directions so each can be tuned independently:
+
+- The **outbox** cares about *durable, ordered, retryable writes*. It needs persistence, exponential backoff, conflict handling, and coalescing of redundant ops (e.g. five updates to one record before the network came back).
+- The **inbox** cares about *efficient bulk delta pulls*. It needs an opaque cursor, paginated draining (`hasMore`), and separate-stream support for deletes (tombstones).
+
+Treating them separately also lets each end be a different protocol. The default REST transport speaks the same JSON for both, but a custom `ISyncTransport` could move the outbox over gRPC and the inbox over Server-Sent Events without the engine caring.
+
+## Why a persistent queue, not in-memory?
+
+Mobile devices die. App processes get killed by the OS, by the user, by an OOM event in another app, by a wakelock-starved Doze cycle. If a queued write only lives in memory, that write evaporates with the process.
+
+So `Queue<T>` writes a `SyncOperation` to the [Shiny repository](/stores/) **before** dispatching it to the transport. The op is durable. The schema is small enough to fit in any backing store: `Identifier`, `EndpointKey`, `EntityIdentifier`, `Verb`, `Payload`, `State`, `CreatedAt`, `Attempts`, `LastError`, `NextAttemptAt`. The transport reads the queue, updates state in-place, and removes the op on success.
+
+This is the same architecture `Shiny.Net.Http` uses for background file transfers. It composes with the rest of Shiny:
+
+- On iOS / Mac Catalyst, queued ops drive `NSURLSession` upload tasks. The OS keeps a parallel queue, so even if Shiny's in-process queue dies, the OS still drives the upload to completion and notifies us on wake.
+- On Android, queued ops are drained inside a foreground service. The service spawns on `Queue<T>` and dies when the queue is empty.
+- On Windows / Linux / macOS / Blazor, queued ops are drained by the in-process `HttpClientDataSyncProcess` — which is woken by `IConnectivity.Changed`, by app startup, and by `Queue<T>` itself.
+
+When the process dies mid-send, the next launch replays the op. `Attempts` and `NextAttemptAt` are also persisted, so the exponential-backoff window survives.
+
+### Trade-off
+
+Every `Queue<T>` is a synchronous-ish write to the repository. On SQLite this is a few ms; on `LocalStorage` it's faster. If you are queueing >1000 ops/sec from the UI thread, you'll feel it. In practice no real app does that — but if yours does, batch the writes upstream.
+
+## Why an opaque cursor, not a timestamp?
+
+Most "delta sync" articles describe a `?since=<timestamp>` model. It works in toy demos and breaks in production. Three reasons:
+
+1. **Clock skew.** Mobile devices have clocks. Servers have clocks. The two disagree, sometimes by minutes. A timestamp-keyed delta query is a race condition with the client's local time.
+2. **Tie-breakers.** Two records with identical timestamps and a `>` filter leave one behind forever. A `>=` filter returns the same record twice on every pull.
+3. **Server flexibility.** A server may want to switch from "timestamp" to "transaction-id" to "snapshot-LSN" without breaking clients. An opaque string is the only abstraction that survives this.
+
+So the engine treats the cursor as a fully opaque string. The server returns one — the engine writes it down — next pull sends it back. The server defines what it means. Common shapes:
+
+- ISO-8601 timestamp of the last change served (with the server doing tie-breaks)
+- Monotonic transaction id (`xmin`, lsn, snapshot id)
+- A `"timestamp + entity id"` tuple encoded as a string
+
+Cursors are stored per endpoint in `SyncCursor(Identifier, Cursor, LastPulledAt)`. Tombstones get their own cursor (`SyncTombstoneCursor`) — the main delta stream and the delete stream advance independently, because servers usually expose them as separate streams under the hood.
+
+### Why `HasMore` rather than a per-pull paging API?
+
+Some endpoints return thousands of changes after the user has been offline for a week. The engine drains pages back-to-back inside one `PullNow` / `PullAll` call — server says `hasMore: true`, engine immediately re-pulls with the new cursor, and the trip continues until the server says `hasMore: false` or the call is cancelled.
+
+This keeps the surface API simple (`PullNow` is "one operation" from the caller's view) while letting the server paginate naturally.
+
+## Why a typed `IDataSyncDelegate` instead of events for everything?
+
+The four delegate methods — `OnSent` / `OnError` / `OnReceived` / `OnConflict` — are the contractual seam between the engine and your app. Three reasons they live on an interface rather than on events:
+
+1. **Conflict resolution must be awaitable.** `OnConflict` returns a `ConflictResolution`. Event subscribers can't return values, and you can't `await` an event handler. A typed `Task<T>` interface fits naturally.
+2. **Dispatch ordering is deterministic.** The engine calls `OnReceived` once per delta in pull order. Events would let subscribers stack arbitrary listeners, fan out, and obscure ordering. With a single delegate registered in DI, the contract is one-in-one-out.
+3. **Failure semantics are clearer.** A delegate that throws gets logged and the engine moves on — the op is still acknowledged. With events, exceptions could leak into the dispatch loop or be swallowed silently depending on the subscriber.
+
+For *observation* (telemetry, UI status, toasts) the engine *does* expose events: `Activity`, `PullCompleted`, `UpdateReceived`, `PendingCountChanged`. The split is intentional — events are read-only spectators, the delegate is the integration seam.
+
+## Why platform-tiered transports?
+
+iOS and Android take cross-platform "background sync" promises away from you. Pretending otherwise produces frameworks that work in dev and silently miss writes in production.
+
+So the library matches what each OS actually allows:
+
+| Platform | Mechanism | What survives app kill |
+|---|---|---|
+| iOS / Mac Catalyst | Background `NSURLSession` | **Outbox + inbox** — the OS resumes both. Apps get woken via `application:handleEventsForBackgroundURLSession:` to dispatch the result. |
+| Android | Foreground Service (`Shiny`-managed) | **Outbox** — the user sees a notification while the queue runs. Inbox runs in-process and pauses on suspension. |
+| Windows / Linux / macOS / .NET base | In-process `HttpClient` loop driven by `IConnectivity.Changed` | Nothing — the process must be alive. But everything is persisted, so the next launch resumes mid-air. |
+| Blazor WASM | In-process `HttpClient` + `LocalStorage` | Nothing — sync runs while the tab is open. Service Worker integration is on the roadmap. |
+
+Each tier registers its own `IDataSyncManager` implementation; the shared `SyncInboxProcessor`, `HttpClientDataSyncProcess`, `OperationCoalescer`, and `RestSyncTransport` infrastructure is reused.
+
+This is the same pattern `Shiny.Net.Http` uses for file transfers — and the two libraries deliberately share their playbook, because the OS guarantees are the same.
+
+### Why upload tasks rather than data tasks on Apple?
+
+`NSURLSession` background mode only permits *upload* and *download* tasks. Sending a JSON body as a data task would work in the foreground but silently fail to resume in the background. So:
+
+- Outbox sends become **upload tasks** with the JSON payload serialized to a temp file on disk (`AppleSyncTempFiles`). The file is deleted on success / failure.
+- Inbox pulls become **download tasks** — the response body is captured by `URLSession(_:downloadTask:didFinishDownloadingTo:)` and parsed by `PullParser`.
+- Tombstone fetches also ride download tasks (`tombstone:{endpointKey}` task description) on the same session.
+
+The cost is interceptors don't see the request body on Apple — Stream signers (AWS SigV4) won't work there. Document it, move on.
+
+### Why a foreground service on Android?
+
+Android killed background processing several years ago. `WorkManager` and `JobScheduler` can run a job — but they get coalesced, deferred, and deprioritized based on doze state, battery, and the OS scheduler's mood. None of that is acceptable for "user just hit Save and the network just came back".
+
+A foreground service guarantees the OS keeps the process alive while the queue drains. The user-visible notification is the trade — but it's the only API contract on Android that delivers "drain this queue right now and don't kill me until you do".
+
+## Why the operation coalescer?
+
+A user can hit "Save" twelve times while the network is offline. Sending twelve `Update`s for the same entity wastes bandwidth, server CPU, and is harder to roll back. `OperationCoalescer` collapses redundant ops in the outbox before they go on the wire:
+
+- Trailing `Delete` wins — any preceding `Create` / `Update` for the same entity is dropped.
+- `Create + Update(s)` → single `Create` with the latest payload.
+- `Update + Update(s)` → single `Update` with the latest payload.
+- `Delete + Create` (entity recreated under the same id) → fresh `Create`.
+
+This only runs for endpoints with `Batch = true`. Single-send endpoints still emit one HTTP request per op — coalescing changes write history, and not every server can tolerate that.
+
+The coalescer runs **client-side, before the request**. The server sees coalesced ops, the engine acknowledges the original op-ids, and the delegate's `OnSent` is fired for each coalesced op. From the server's perspective, it's a single batch; from the app's perspective, every queued op gets resolved.
+
+## Why `ISyncEntity` instead of a marker attribute?
+
+A property is the cheapest possible contract:
+
+```csharp
+public interface ISyncEntity
+{
+    string Identifier { get; }
+}
+```
+
+- It's enforceable at compile time — `Queue<T>` and `RegisterEndpoint<T>` are constrained.
+- It avoids reflection — the engine reads `entity.Identifier` directly.
+- It composes — records, classes, structs all implement it identically.
+- It doesn't conflict with any existing app convention — apps with an `Id` property add `Identifier => Id;` and move on.
+
+A marker attribute would have meant either runtime reflection (AOT-hostile) or a source generator (more moving parts than the one property buys back).
+
+## Why JSON serialization through `Shiny.Json.Default`?
+
+Three constraints:
+
+1. **AOT / trimming.** `JsonSerializerContext` source-gen is the only path that survives `PublishAot=true` and aggressive trimming.
+2. **Per-app, not per-endpoint.** Apps register many entities. Forcing each `RegisterEndpoint<T>` to receive a `JsonTypeInfo<T>` would clutter every call site and discourage adoption.
+3. **Composability.** Multiple Shiny libraries (transfers, mediator, sync) all want to serialize app types. Plumbing a chain of resolvers per library is fragile.
+
+So serialization is centralized in `Shiny.Json.Default` — the shared `ISerializer` from `Shiny.Extensions.Serialization`. Apps mark their `JsonSerializerContext` with `[ShinyJsonContext]`. A source-generated module initializer adds the context to a shared chain *before any code runs*. Every library that resolves serialization through `Shiny.Json.Default` picks the entity up automatically.
+
+The registry captures typed delegates at registration time:
+
+```csharp
+SerializeEntity   = static entity => Json.Default.Serialize<T>((T)entity);
+DeserializeEntity = static payload => Json.Default.Deserialize<T>(payload);
+```
+
+The cast is the cost of being generic-erased downstream. The static-lambda capture keeps it AOT-clean.
+
+## Why does the library not include a merge engine?
+
+Three-way merge of arbitrary records is hard. The right resolution depends on the entity's semantics (a `Title` string wants last-write-wins; a `Tags` array probably wants union; a `Balance` decimal wants neither). A built-in merge engine would impose a per-field choice that wouldn't fit half the cases.
+
+So the library exposes the *moment* a conflict happens (`OnConflict`) and the three *shapes* a resolution can take (`AcceptRemote` / `KeepLocal` / `UseMerged(string mergedPayload)`) — and stops there. Apps that need merging implement it in the delegate, where they have full type context and can apply per-field rules.
+
+For the simple cases, `DefaultConflictPolicy = ConflictPolicy.ServerWins` (or `ClientWins`) sidesteps the delegate entirely.
+
+## Why an `ISyncTransport` abstraction over `HttpClient`?
+
+`HttpClient` is the right wire for 95% of apps. But it's not the only one — and even when it is, the *shape* on top can vary (REST, JSON-RPC, GraphQL, gRPC-Web, a custom envelope).
+
+`ISyncTransport` is the seam:
+
+- `Pull(endpoint, cursor, ct)` → `SyncPullResult`
+- `Send(endpoint, op, ct)` → `SyncSendResult`
+- `SendBatch(endpoint, ops, ct)` → `SyncBatchResult`
+- `FetchTombstones(endpoint, cursor, ct)` → `SyncTombstoneResult`
+
+The default `RestSyncTransport` maps these to `POST` / `PUT` / `DELETE` / `GET` / `GET` against the endpoint's `Url` / `PullUrl` / `BatchUrl` / `TombstoneUrl`. Drop in a custom transport and the rest of the engine — outbox, inbox loop, coalescer, retry, conflict, tombstones, events — keeps working unchanged.
+
+The Apple `DataSyncManager` does **not** route through `ISyncTransport` — it talks to `NSURLSession` directly because that's the price of background uploads. If you must run a custom transport on Apple, opt out of NSURLSession with `AddHttpClientDataSync<TDelegate>` and your transport runs cross-platform.
+
+## Why is `RestSyncTransport.HttpClientName` the named client?
+
+Apps already centralize base addresses, Polly handlers, message handlers, and signing through `IHttpClientFactory`. Forcing the library to expose its own `Configure(action)` would duplicate that. So the engine just *uses* the named client `Shiny.Data.Sync`:
+
+```csharp
+services
+    .AddHttpClient(RestSyncTransport.HttpClientName, c => c.BaseAddress = new Uri("https://api.example.com"))
+    .AddPolicyHandler(GetRetryPolicy())
+    .AddHttpMessageHandler<SigningHandler>();
+```
+
+Polly, OpenTelemetry, OAuth refresh handlers, and any other `IHttpClientFactory` pattern composes naturally.
+
+## Why interceptors **and** `OnBeforeSend`?
+
+Two hooks for two scopes:
+
+- `ISyncInterceptor` — **cross-cutting**, runs on every sync HTTP request the engine emits. Auth, tracing, signing. Multiple interceptors run in DI registration order.
+- `SyncEndpoint.OnBeforeSend` — **per-endpoint**, runs after all interceptors. Trace ids that vary per entity, feature flags, one-off behavior.
+
+Both compose because they are both `HttpRequestMessage` hooks. Endpoint-specific logic runs last so it wins on header conflicts — which is what most apps actually want.
+
+## Why `MinPullInterval` only throttles scheduled pulls?
+
+`PullAll` and the auto-registered `SyncJob` run periodically and shouldn't hammer the server. `PullNow<T>()` is "the user just hit pull-to-refresh" — that should always go through. So the throttle is checked in `PullAll` / `SyncJob` and explicitly bypassed in `PullNow`. The check uses the persisted `SyncCursor.LastPulledAt` so it survives process restarts.
+
+## Why three layered removal strategies?
+
+Real backends signal deletes in many shapes:
+
+- **Inline `Delete` verb in the main pull** — the cleanest case. The engine dispatches it directly.
+- **Tombstones via a separate URL** — common for legacy APIs that compute deletes from an audit table.
+- **Soft-delete flag on the entity** (`IsDeleted = true`) — common for APIs that "never really delete" anything.
+- **Server-driven state change** that should evict the entity client-side (`AssignedTo == null` once a work order is reassigned).
+
+So the engine supports all four, layered:
+
+1. The inbox dispatches `Verb = Delete` items directly.
+2. After each successful pull, if `TombstoneUrl` is set, it fetches deletes from there.
+3. Before dispatch, if `SoftDeletePredicate` or `ExpiryPredicate` returns `true`, the verb is rewritten to `Delete` (entity stays populated so consumers can read final state).
+
+The strategies *compose* — you can layer all three on one endpoint. See [Removal Strategies](/datasync/removal-strategies).
+
+## Why `SyncJob` is auto-registered
+
+A periodic background pull is the right default for almost every sync deployment. Forcing every app to `AddJob<SyncJob>(...)` themselves would be ceremony that 95% of users want. So `AddDataSync` calls `services.AddJob<SyncJob>(r => r.WithInternet(InternetAccess.Any))` automatically.
+
+To turn it off (e.g. because pulls are push-triggered):
+
+```csharp
+var jobs = host.Services.GetRequiredService<IJobManager>();
+await jobs.Cancel(nameof(Shiny.Data.Sync.SyncJob));
+```
+
+## What `Shiny.Data.Sync` deliberately does not do
+
+A few features have been deliberately left out — because the cost-benefit isn't there, or because the right shape varies too much per app.
+
+| Not built in | Why |
+|---|---|
+| Built-in field-level merge engine | Per-field merge rules vary too much. Implement in `OnConflict`. |
+| Local query API over synced entities | The library is a transport, not a database. Pair it with [DocumentDB](/documentdb/) (or any store you like) inside `OnReceived`. |
+| Schema migration | Server-driven schema changes are a server problem; the engine treats `Payload` as opaque JSON. Use `JsonSerializerOptions` evolution and `RawPayload` for back-compat fallback. |
+| Realtime push | Use [Shiny Push](/push/) or a SignalR connection to call `PullNow<T>` when the server has news. The engine doesn't open long-lived sockets. |
+| Encryption at rest | Use SQLCipher via `Shiny.DocumentDb.Sqlite.SqlCipher` or Apple Data Protection. The repository already respects the platform key/value store. |
+| ETag / `If-Match` automation | The shape varies per server. Set it in `OnBeforeSend` or `ISyncInterceptor.BeforePush`. |
+
+If your app needs any of the above, the engine is designed to compose with libraries that *do* — not to subsume them.
+
+## When **not** to use Shiny.Data.Sync
+
+- **Large blobs.** Use [`Shiny.Net.Http`](/httptransfers/). Sync moves JSON records; transfers move multi-megabyte files with range-aware resume.
+- **Realtime streams.** Use SignalR, MQTT, gRPC-Streaming, or WebSockets. The engine does delta pulls, not subscribed streams.
+- **Server-of-record on the client.** If the client is canonical and the server is a backup, you don't want sync — you want a backup. Push the file with HTTP Transfers.
+- **Pure read-only reference data** that never changes. A normal HTTP call with HTTP caching is simpler than wiring an endpoint.
+
+For everything in the middle — record CRUD, offline-first feature work, queue-on-failure, drain-on-reconnect — that is exactly what the library is for.

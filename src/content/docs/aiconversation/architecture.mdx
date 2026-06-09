@@ -1,0 +1,285 @@
+---
+title: Architecture
+---
+
+`Shiny.AiConversation` is opinionated about one thing: every conversational AI app needs to coordinate the same six concerns, so the library makes them composable instead of letting you reinvent them. This page walks the architectural choices, what each one buys you, and where the seams live.
+
+## TL;DR — the shape
+
+```
+   App code ──► IAiConversationService (one entry point)
+                           │
+                ┌──────────┴───────────────────────────────┐
+                │                                          │
+        TalkTo / ListenAndTalk / StartWakeWord       Status / events
+                │
+                ▼
+   ┌────────────────────────────────────────────────────────────┐
+   │                AiConversationService                        │
+   │   ┌──────────────────┐  ┌────────────────────────────┐     │
+   │   │ Session loop     │  │ Context build per request  │     │
+   │   │ (state machine)  │  │   IContextProvider chain   │     │
+   │   └──┬──────────┬────┘  └────────────────────────────┘     │
+   │      │          │                                          │
+   └──────┼──────────┼──────────────────────────────────────────┘
+          │          │
+          ▼          ▼
+   ISpeechToText  IChatClientProvider ──► IChatClient
+   ITextToSpeech                            (Microsoft.Extensions.AI)
+   IAudioPlayer                                  │
+   ISoundProvider                                ▼
+                                          IMessageStore? (optional)
+```
+
+Five immutable design pillars:
+
+1. **One entry point.** Apps talk to `IAiConversationService`. Speech, TTS, sound effects, wake word, chat, history, tools — every concern lives behind that one interface.
+2. **Status is the state machine.** `AiState` (Idle / Listening / Thinking / Responding) is the contract for every UI binding. Internal loops always end in a known status; events fire on transition.
+3. **The chat client is pluggable; the wiring is not.** `IChatClientProvider` is the only contract between this library and your AI backend. Auth, refresh, model selection, transport — all behind one method.
+4. **Context is built per request, not per app.** `IContextProvider.Apply(AiContext)` runs every turn so system prompts, tools, voice settings, and quiet words can change based on session state without re-registering services.
+5. **Speech is mandatory, but everything else is optional.** STT + TTS are required (this is a *conversation* service). Message persistence, wake word, sound effects, voice selection — all opt-in via DI.
+
+## Why a single service?
+
+The naive shape is a constellation of services: `IChatClient` from Microsoft.Extensions.AI, `ISpeechToTextService` and `ITextToSpeechService` from `Shiny.Speech`, `IAudioPlayer` for blips, `IMessageStore` for history, your own state machine to coordinate them. Every app ends up writing the same orchestration layer — and inevitably the same bugs:
+
+- The mic doesn't release before TTS plays, and the device thinks the user is talking to itself.
+- TTS interrupts itself when the user says "stop."
+- The wake-word loop competes with `ListenAndTalk` for the audio session.
+- The "Thinking" indicator stays on after the AI errors out.
+
+So the library turns that orchestration into the *only* public surface. `IAiConversationService` owns the audio session, the state machine, the cancellation flow, and the event dispatch. Your code calls `TalkTo`, `ListenAndTalk`, `StartWakeWord`, or `StopWakeWord` — and reads `Status` and the event stream.
+
+```csharp
+aiService.StatusChanged += s => UpdateUi(s);
+aiService.AiResponded   += r => RenderResponse(r);
+aiService.SpeechOccurred += s => RenderBubble(s);
+aiService.ErrorOccurred  += e => ShowToast(e.Message);
+
+await aiService.StartWakeWord("Hey Copilot");
+```
+
+Three lines to wire UI; one line to start the conversation. The state machine, mic management, and audio session live inside the service.
+
+## Why `AiState` rather than booleans?
+
+A `bool isListening` + `bool isThinking` model lets you observe two contradictory truths at once, and your UI has to handle every combination. `AiState` is a single enum:
+
+```csharp
+public enum AiState
+{
+    Idle,
+    Listening,   // mic is open, capturing user speech
+    Thinking,    // request is in flight to the chat client
+    Responding   // TTS is speaking the AI response
+}
+```
+
+Every UI binding becomes a switch — and the service guarantees you only ever transition through valid states. `Idle → Listening → Thinking → Responding → Idle` (or back to `Listening` mid-conversation if the response ends in a question and interruption is enabled).
+
+The `StatusChanged` event fires on every transition. The `IsWakeWordEnabled` property indicates whether a wake-word loop is the *driver* of those transitions or whether the call was a one-shot `ListenAndTalk` / `TalkTo`.
+
+## Why split `StartWakeWord` from `ListenAndTalk`?
+
+They use the same primitives but solve different problems:
+
+- `ListenAndTalk(ct)` opens the mic, captures **one** utterance, sends it to the chat client, optionally speaks the response, and returns. Push-to-talk.
+- `StartWakeWord("Hey Copilot")` opens the mic for the long haul. It runs an STT session continuously, watches for the wake word, and on each hit captures the next utterance and forwards it to `TalkTo`. The mic stays open across turns.
+
+Conflating them would force one of:
+
+- A `Mode` property that callers have to manage and that the library has to validate on every operation.
+- A single `StartListening` that the caller has to manually call N times for N utterances — losing the "mic stays open across turns" model that makes hands-free interaction feel responsive.
+
+So they're separate calls with separate contracts. The service throws if you try to mix them: `ListenAndTalk` while a wake-word loop is active fails fast, and starting wake word during any active session fails fast.
+
+## Why `IChatClientProvider` instead of consuming `IChatClient` directly?
+
+Microsoft.Extensions.AI gives you `IChatClient` — and for static configurations that's exactly what `Shiny.AiConversation` does too. The default `InjectedChatClientProvider` just resolves `IChatClient` from DI.
+
+But the real-world cases need indirection:
+
+- **GitHub Copilot device-code auth.** The first call has to prompt the user, store a refresh token, and exchange it for an access token. The chat client can't be constructed until the user finishes auth.
+- **Token-refresh on a long-lived service.** OAuth tokens expire. The provider can transparently refresh on every `GetChatClient(ct)`.
+- **Model selection at runtime.** A "smart router" can return one client for fast / cheap models and another for harder reasoning, based on the message.
+- **Backend swap without a rebuild.** Settings page lets the user choose OpenAI vs. Azure vs. Ollama.
+
+So `IChatClientProvider` is the indirection point:
+
+```csharp
+public interface IChatClientProvider
+{
+    Task<IChatClient> GetChatClient(CancellationToken cancelToken = default);
+}
+```
+
+One method, async, cancellable. The service calls it every turn. Static apps wire `IChatClient` in DI and get the default provider for free; dynamic apps implement `IChatClientProvider` and own the lifecycle.
+
+## Why `IContextProvider` instead of attributes / global system prompts?
+
+System prompts, AI tools, quiet words, STT / TTS options — all of those depend on app state that changes during the session. The user's current screen, the time of day, the user's locale, the acknowledgement mode the user just toggled. Static configuration can't reach those.
+
+So the library uses a **visitor pattern**: every turn, the service builds a fresh `AiContext` and walks the registered `IContextProvider` instances, asking each one to mutate the context:
+
+```csharp
+public interface IContextProvider
+{
+    Task Apply(AiContext context);
+}
+
+public class AiContext
+{
+    public AiAcknowledgement Acknowledgement { get; set; }
+    public List<AITool> Tools { get; } = [];
+    public List<string> SystemPrompts { get; } = [];
+    public List<string>? QuietWords { get; } = [..DefaultQuietWords];
+    public SpeechRecognitionOptions? SpeechToTextOptions { get; set; }
+    public TextToSpeechOptions? TextToSpeechOptions { get; set; }
+}
+```
+
+Three things this buys:
+
+1. **Composition.** Multiple providers compose freely — the built-in `ContextProvider` adds the current time and DI-registered tools, then your `MyContextProvider` adds tenant-specific tools, then `VoiceSelectionContextProvider` (opt-in) adds voice-management tools. Each provider runs once per turn, in registration order.
+2. **State without globals.** `IContextProvider` can be a transient or scoped service that pulls fresh app state from your stores. No global static prompt list.
+3. **Late binding.** A provider can decide "for this turn, override STT to use the medical-terminology recognizer" or "swap to a softer TTS voice while the user is in a meeting." Per-turn decisions, not per-app.
+
+The cost: every turn does an extra DI resolve + N method calls. That's microseconds against a network round-trip — invisible in practice.
+
+## Why `AiAcknowledgement` is the only "personality" knob?
+
+The library could expose dozens of "tone", "verbosity", "voice", "interruption" knobs. Instead it has one enum:
+
+```csharp
+public enum AiAcknowledgement
+{
+    None,        // No audio feedback, no TTS — text-only response
+    AudioBlip,   // Short sound cues on transitions, no TTS
+    LessWordy,   // TTS with "be concise" system prompt
+    Full         // TTS with the response verbatim
+}
+```
+
+This is the single dial users actually want — *how loud do I want this assistant to be?* — collapsed into four sensible defaults. Everything else (sound provider, exact voice, custom prompts) is configurable through the regular DI seams (`SetSoundProvider`, `TextToSpeechOptions`, `AddContextProvider`). The enum is the user-facing knob; the seams are the developer-facing ones.
+
+The acknowledgement value flows through the context build, so a provider can pick a different system prompt for `LessWordy` vs `Full`. That's exactly what the built-in `ContextProvider` does — it injects "Be concise" only when `Acknowledgement == LessWordy`.
+
+## Why is the message store optional?
+
+Two reasons short-term and persistent history are different concerns:
+
+1. **`CurrentChatMessages`** lives in the service, always. It's the conversational memory the chat client sees on the next turn (`ChatMessage[]` passed to `IChatClient.GetResponseAsync`). Without this, every turn would be a one-shot prompt with no context — useless for actual conversation.
+2. **`IMessageStore`** persists turns to disk (or your own backend). It's only relevant if your app shows history across sessions, supports search, or wants the AI to recall its own past via the `ChatLookupAITool`.
+
+Most early-stage apps don't need (2). So `IMessageStore` is opt-in. When you register one, the built-in `ContextProvider` automatically adds a `ChatLookupAITool` (the AI can call it to search its own history) — and the service starts persisting turns. When you don't, the current session lives in memory and is gone on app restart.
+
+This split keeps the "tiny demo app" registration trivial (one line, `AddShinyAiConversation(_ => {})`) while letting production apps swap in `Shiny.AiConversation.MessageStores.SqliteDocDb` or a custom store.
+
+## Why two separate speech-event streams?
+
+There are two distinct consumers of speech events:
+
+- **Live transcription UIs** want every interim STT hypothesis as the user is still speaking — for waveform displays, live-caption strips, or voice-level meters.
+- **Conversation bubbles** want the *final* utterance once the user is done, and the AI's response once it's about to be spoken.
+
+So:
+
+```csharp
+event Action<SpeechRecognitionResult>? SpeechResultReceived;  // every interim + final STT result
+event Action<ConversationSpeech>? SpeechOccurred;              // final user utterance + AI response
+```
+
+The first is firehose-rate (10s per second on iOS streaming STT). The second fires twice per turn: once on `Heard` (the final user utterance), once on `Spoken` (the AI's response right before TTS). Subscribe to whichever fits your UI.
+
+The bubble-UI sample uses `SpeechOccurred` exclusively; the "live waveform" sample uses both.
+
+## Why audio interruption is opt-in
+
+`InterruptionEnabled` defaults to `false`. When you set it to `true`:
+
+- While TTS is speaking the AI response, the mic stays open.
+- If the user speaks a **quiet word** (default list includes "stop", "cancel", "shut up", "quiet", "nevermind", "hush"), TTS halts immediately and the service returns to `Idle`.
+- If the user speaks **anything else** above `InterruptionMinConfidence` (default 0.5), TTS halts and the new utterance is forwarded to the chat client as the next turn.
+
+Three reasons it's off by default:
+
+1. **Echo cancellation isn't perfect.** Devices without acoustic echo cancellation pick up the TTS playback as user speech and trigger spurious interruptions.
+2. **Battery and CPU.** Listening + speaking simultaneously roughly doubles the audio pipeline workload.
+3. **Power user opt-in.** Most casual users prefer the "wait for it to finish" interaction; advanced users want to barge in.
+
+So apps that want it ask for it; apps that don't, don't pay for it.
+
+The quiet word list is configurable through `IContextProvider.Apply` (`context.QuietWords`) so a tenant can swap "stop" for the locale-appropriate word.
+
+## Why `AddVoiceSelectionTools` is its own opt-in
+
+`VoiceSelectionContextProvider` adds three AI-callable tools:
+
+- "List the available voices."
+- "Play a sample of this voice."
+- "Change my voice to this one."
+
+This is a fully-formed feature — but it depends on `ITextToSpeechService`, requires that the platform's TTS engine actually expose voice metadata, and isn't relevant for read-only / blip-only acknowledgement modes. So it's not in the default registration. One line opts in:
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.AddVoiceSelectionTools();
+});
+```
+
+The same shape will be used for future voice-related features (e.g. voice cloning, pitch adjustment).
+
+## Why Speech is auto-registered (but opt-out)
+
+```csharp
+public bool AutoAddSpeechServices { get; set; } = true;
+```
+
+`AddShinyAiConversation` calls `services.AddSpeechServices()` and `services.AddAudioPlayer()` automatically because *every* conversation-service caller needs them. The opt-out exists for apps that wire Speech themselves (custom recognizer, cloud-only STT, etc.) — set `opts.AutoAddSpeechServices = false`.
+
+If you do opt out, you must register `ISpeechToTextService`, `ITextToSpeechService`, and `IAudioPlayer` yourself. The library doesn't fall back to a no-op — STT failure throws and propagates through `ErrorOccurred`.
+
+## Platform-specific behavior
+
+| Platform | What's different |
+|---|---|
+| **iOS** | Streaming STT — interim results arrive several times per second; transitions feel instant. |
+| **Android** | Native STT works in **segments**: it stops listening after a silence, returns the final result, and must be restarted for the next segment. Causes brief pauses during wake-word / `ListenAndTalk`. Use the [ElevenLabs](/speech/elevenlabs) cloud provider for continuous transcription. **Do not use Azure Speech on Android** — Azure's native libs don't support Android 15+'s 16 KB page size. |
+| **Windows** | Native STT + TTS work. Microphone permission required in `Package.appxmanifest`. |
+| **Blazor** | STT / TTS surface depends on the browser's Web Speech API support. Wake-word continuous listening is most reliable on Chromium. |
+
+## Why no "history truncation" in the library?
+
+The `CurrentChatMessages` list grows unbounded inside the service for the duration of the session. The library doesn't impose a token-window limit because:
+
+- Token-window strategies vary per model (4K, 8K, 128K, 1M, etc.).
+- Summarization-based truncation needs another LLM call — a policy decision, not a service responsibility.
+- Apps that need it usually want to control *what* gets summarized (drop tool calls? keep the system prompt? preserve the last user turn verbatim?).
+
+So apps that need long sessions implement truncation by intercepting messages in their `IContextProvider` (mutate `context.SystemPrompts` and pass an already-summarized context). Mediator + a summarizer LLM is the common pattern.
+
+## What `Shiny.AiConversation` deliberately does not do
+
+| Not built in | Why |
+|---|---|
+| Built-in summarization / context-window pruning | Per-model policy. Implement in a context provider. |
+| Multimodal input (images, audio attachments) | Microsoft.Extensions.AI's `ChatMessage` already carries `ChatMessageContent` for this — pass it through `TalkTo`'s message stream when the abstraction stabilizes. |
+| Streaming token rendering to UI | The service exposes `AiResponded` with the full `ChatResponse`. For streaming UIs, subscribe to the underlying `IChatClient.GetStreamingResponseAsync()` directly and skip this service for that turn. |
+| Per-user identity / multi-tenant chat history | Implement in your `IMessageStore`. The service is single-user-per-process. |
+| Group chat / multi-agent routing | Single conversation per service instance. For multi-agent flows, instantiate multiple services or use [Mediator](/mediator/) with an AI tool boundary. |
+| Voice cloning / custom voice training | Delegated to your TTS provider (ElevenLabs, Azure Neural Voice, etc.). |
+
+## When **not** to use Shiny.AiConversation
+
+- **You only need a chat completion call.** Use Microsoft.Extensions.AI directly. The orchestration layer here only pays off when you have audio + state + history concerns to coordinate.
+- **Server-side AI workloads.** The service is wired for client-side audio sessions. A backend `IChatClient` call with no STT / TTS doesn't need this library.
+- **A custom audio engine.** If you're building a DAW, a podcast platform, or a hyper-tuned voice product, the audio session model here is too opinionated — use the underlying `IChatClient` + your own audio stack.
+
+For everything in the middle — "I want my MAUI / Blazor app to talk to an LLM with voice, optionally hands-free, optionally with history, and I don't want to write the state machine" — that is exactly what this library is for.
+
+## Related
+
+- [`Shiny.Speech` architecture](/speech/) — the underlying STT / TTS abstraction.
+- [Mediator AI Extensions](/mediator/extensions/ai) — when you want your *contracts* as AI tools instead of (or alongside) the conversation surface.
+- [Microsoft.Extensions.AI](https://learn.microsoft.com/dotnet/ai/microsoft-extensions-ai-overview) — the chat client abstraction the service builds on.

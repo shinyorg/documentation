@@ -1,0 +1,234 @@
+---
+title: Architecture
+---
+
+`Shiny.Speech` is built around one observation: every app that needs voice — assistants, dictation, accessibility, hands-free workflows, audio capture — ends up coordinating the same four primitives (mic capture, speech-to-text, text-to-speech, audio playback) across an unforgiving fleet of platform APIs. Each platform models them differently; cloud providers model them differently again. The library's job is to expose a single, stable surface across all of them — and to keep the cloud and native paths interchangeable so an app can swap providers without rewriting consumers.
+
+## TL;DR — the shape
+
+```
+   App code ──► ISpeechToTextService / ITextToSpeechService / IAudioSource / IAudioPlayer
+                                       │
+                          (one DI registration call)
+                                       │
+                ┌──────────────────────┴───────────────────────────┐
+                │                                                  │
+        Native platform path                              Cloud provider path
+                │                                                  │
+                ▼                                                  ▼
+   ┌─────────────────────────┐                ┌─────────────────────────────────┐
+   │ SpeechToTextImpl        │                │ CloudSpeechToText               │
+   │ TextToSpeechImpl        │                │ CloudTextToSpeech               │
+   │ (per-platform)          │                │  (composes provider + audio)    │
+   └─────────────────────────┘                └──────────────┬──────────────────┘
+       Apple SFSpeechRecognizer                              │
+       Android SpeechRecognizer                              ▼
+       Windows.Media.Speech.*                ┌─────────────────────────────────┐
+       Browser Web Speech API                │ ISpeechToTextProvider           │
+                                             │ ITextToSpeechProvider           │
+                                             │ (Azure / OpenAI / ElevenLabs)   │
+                                             └──────────────┬──────────────────┘
+                                                            │
+                                                            ▼
+                                             ┌─────────────────────────────────┐
+                                             │ IAudioSource  (raw 16k PCM)     │
+                                             │ IAudioPlayer  (MP3 playback)    │
+                                             └─────────────────────────────────┘
+```
+
+Five immutable design pillars:
+
+1. **Four interfaces, one shape across every backend.** `ISpeechToTextService`, `ITextToSpeechService`, `IAudioSource`, `IAudioPlayer`. The native implementations and the cloud-composed implementations are wire-compatible — consumers don't care which is registered.
+2. **STT is event-based with explicit Start/Stop.** A request/response shape can't model continuous recognition, partial results, or wake-word loops. `Start` + events + `Stop` does, and it's the only contract that survives across SFSpeechRecognizer's streaming, Android's segmented engine, ElevenLabs Scribe's one-shot POST, and Azure's continuous WebSocket session.
+3. **Cloud providers compose, they don't impersonate.** `ISpeechToTextProvider` + `ITextToSpeechProvider` are stateless. The orchestration — mic lifecycle, audio capture, playback, keyword regex matching, error fan-out — lives in `CloudSpeechToText` / `CloudTextToSpeech`. Adding a provider is one class, not a service implementation.
+4. **The audio I/O abstractions are first-class, not internal helpers.** `IAudioSource` and `IAudioPlayer` are public surface. Cloud providers depend on them, the AI Conversation library depends on them, and apps that just need raw PCM or MP3 playback depend on them directly.
+5. **Capability bits, not exceptions.** `IsSupported`, `IsListening`, `IsSpeaking`, `IsPlayerAnalysisSupported` let app code check what a platform can do without trying it and catching. The Browser doesn't have native TTS metering; Windows doesn't expose level taps; the API says so before you bind UI.
+
+## Why an event-based STT contract?
+
+The obvious shape is `Task<string> RecognizeAsync(...)` — call, await, get text. It collapses three things that real STT engines do not collapse:
+
+- **Partial results.** SFSpeechRecognizer and the Web Speech API fire interim hypotheses several times per second. Dictation UIs want them. A task-returning API hides them.
+- **Continuous sessions.** Wake-word loops, dictation, voice memos — all want the mic open across multiple utterances. One `Task` per call forces an outer loop that re-acquires the mic every cycle.
+- **Multiple consumers.** A view model wants the result text. An analytics service wants the keyword event. A VU meter wants the audio level. Subscriptions compose; a returned `Task<string>` doesn't.
+
+So `ISpeechToTextService` is event-based:
+
+```csharp
+public interface ISpeechToTextService
+{
+    bool IsSupported { get; }
+    bool IsListening { get; }
+    Task<AccessState> RequestAccess();
+
+    Task Start(SpeechRecognitionOptions? options = null);
+    Task Stop();
+
+    event EventHandler<SpeechRecognitionResult> ResultReceived;
+    event EventHandler<string> KeywordHeard;
+    event EventHandler<SpeechRecognitionError> Error;
+}
+```
+
+`Start` throws if already listening. `Stop` is idempotent. Every `SpeechRecognitionResult` carries `IsFinal` so consumers can choose to render partials, finals, or both. The library guarantees a final `ResultReceived` arrives before the recognition task drains on `Stop` — including for one-shot providers like ElevenLabs Scribe where the final result lands only after the audio is POSTed.
+
+For apps that genuinely want the "await one utterance" shape, the extension methods (`ListenUntilSilence`, `StatementAfterKeyword`, `WaitListenForKeywords`, `ListenForKeywords`) compose the events into `Task<string?>` / `IAsyncEnumerable<string>` — so the convenience is there without polluting the core contract.
+
+## Why split the cloud surface into provider + service?
+
+A naive cloud STT library implements `ISpeechToTextService` directly per provider — `AzureSpeechToTextService`, `ElevenLabsSpeechToTextService`, etc. Each one re-implements:
+
+- Microphone permission request and audio capture.
+- Start/Stop state, double-start guard, idempotent stop.
+- Keyword regex matching, dedup window, `KeywordHeard` event.
+- Error fan-out and recognition-task draining.
+
+That's the same code in every provider, with subtly different bugs. So the library splits it:
+
+```csharp
+// Provider: stateless, audio-stream-in → results-out.
+public interface ISpeechToTextProvider
+{
+    IAsyncEnumerable<SpeechRecognitionResult> RecognizeAsync(
+        Stream audioStream,
+        SpeechRecognitionOptions? options = null,
+        CancellationToken cancellationToken = default
+    );
+
+    event EventHandler<SpeechRecognitionError>? Error;
+}
+
+// Service: owns the mic lifecycle and the public contract.
+public class CloudSpeechToText : ISpeechToTextService { /* state, events, regex, drain */ }
+```
+
+`AddCloudSpeechToText<TProvider>()` wires the provider, the audio source, and the service in one call. Adding a new cloud backend is *one* class — implement `RecognizeAsync`, surface non-fatal errors on `Error`, register with `AddCloudSpeechToText<MyProvider>()`. Azure, OpenAI, and ElevenLabs all use the same `CloudSpeechToText` implementation.
+
+The same split holds for TTS: `ITextToSpeechProvider.SynthesizeAsync` returns an MP3 stream; `CloudTextToSpeech` plays it through `IAudioPlayer` and forwards `AudioLevelChanged`.
+
+## Why is the cloud STT error contract two-tiered?
+
+Continuous cloud recognition can fail in two distinct ways:
+
+1. **Fatal failure.** Network is gone, auth is broken, the provider rejects the audio format. The session can't continue; the enumerator throws and the service raises `Error`, sets `IsListening = false`, and stops the mic.
+2. **Recoverable hiccup.** A single chunked HTTP request fails between segments; the next one succeeds. The session keeps running, but the app might want to log or surface the transient blip.
+
+A single error channel collapses these and forces every consumer to guess severity. So `ISpeechToTextProvider.Error` is the second tier: providers raise it for non-fatal events without terminating `RecognizeAsync`. `CloudSpeechToText` subscribes once and forwards everything to the service-level `Error` event, so app code still wires exactly one handler.
+
+## Why mandatory `IAudioSource` / `IAudioPlayer`?
+
+The cloud STT path needs a microphone stream. The cloud TTS path needs to play an MP3. Both could be wrapped privately inside each `CloudSpeechToText` / `CloudTextToSpeech` — and that would be wrong, because:
+
+- **The AI Conversation library needs the same primitives.** `Shiny.AiConversation` calls `IAudioPlayer` directly for sound effects (the listening-blip, the response-blip) without going through TTS.
+- **Apps need raw audio.** Voice memos, custom acoustic models, audio analysis, server-side STT — all want PCM bytes without coupling to a recognizer.
+- **`AudioLevelChanged` only works if the player is observable.** The VU meter on `ITextToSpeechService` forwards from `IAudioPlayer.AudioLevelChanged`. Making the player private breaks the level signal.
+
+So `IAudioSource` and `IAudioPlayer` are first-class. `AddSpeechServices()` registers them; cloud-provider registrations call `AddAudioSource()` / `AddAudioPlayer()` to make sure they exist; apps that only need raw capture or playback can register just those.
+
+The capture contract is intentionally narrow:
+
+```csharp
+Task<Stream> StartCaptureAsync(CancellationToken cancellationToken = default);
+```
+
+Raw PCM, 16 kHz, 16-bit, mono. Every cloud STT provider in the ecosystem accepts this format (or transcodes it cheaply). Apps that need 48 kHz stereo for music recording aren't the target — that's a different library.
+
+## Why `IsPlayerAnalysisSupported` instead of a no-op level event?
+
+The VU meter signal (`AudioLevelChanged`) doesn't work the same everywhere:
+
+| Surface | iOS / macOS | Android | Windows | Browser |
+|---|---|---|---|---|
+| Native TTS | ✅ `AVAudioEngine` tap | ✅ `OnAudioAvailable` RMS | ❌ | ❌ |
+| Cloud TTS | ✅ via `IAudioPlayer` | ✅ via `IAudioPlayer` | ❌ | ❌ |
+| Generic `IAudioPlayer` | ✅ `AVAudioPlayer.MeteringEnabled` | ✅ `Visualizer` on session | ❌ | ❌ |
+
+The library could silently never fire the event on unsupported platforms. That's worse — UI binds to the event, shows an idle bar forever, and the developer has no way to know whether their handler is wrong or the platform is. So the contract publishes its own capabilities:
+
+```csharp
+if (tts.IsPlayerAnalysisSupported)
+    tts.AudioLevelChanged += UpdateVuBar;
+else
+    HideVuBar();
+```
+
+The same pattern repeats on `IAudioPlayer.IsPlayerAnalysisSupported`. Capability bits push the platform discovery into the API instead of into runtime surprises.
+
+## Why is Apple TTS routed through `AVAudioEngine`?
+
+The canonical Apple TTS path is `AVSpeechSynthesizer.Speak(utterance)` — fire-and-forget, no tap, no level signal. The library wraps that in `AVAudioEngine` + `AVAudioPlayerNode` so a tap can compute RMS for `AudioLevelChanged`. That costs ~50–150 ms on the first utterance (engine warm-up) and is invisible on subsequent calls (the engine is cached). For apps that ignore the VU meter, the cost is harmless; for apps that need it, this is the only way to get a level signal out of the native synthesizer.
+
+## Why a regex-based keyword matcher?
+
+Native engines (SFSpeechRecognizer, Android's `RecognizerIntent.EXTRA_PROMPT`) don't all expose true wake-word detection. Some do, some don't, none uniformly. The library compromises:
+
+- `SpeechRecognitionOptions.Keywords` is a string array.
+- The service watches every final `SpeechRecognitionResult.Text` for a regex match with `\b` word boundaries, case-insensitive.
+- A 3-second dedup window suppresses re-fires of the same final text (some engines emit the same final more than once).
+- The matched substring is delivered on `KeywordHeard`.
+
+It's not as precise as a dedicated wake-word engine (Porcupine, Snowboy) and intentionally so — the library's job is to make every backend look the same, not to ship a fifth wake-word implementation. Apps that need true low-power always-on wake words plug their own engine in and call `Start` / `Stop` on detection.
+
+## Why no streaming TTS?
+
+`ITextToSpeechProvider.SynthesizeAsync` returns a fully-buffered `Stream`. The Azure and ElevenLabs SDKs both *can* stream audio chunks as they're generated, and the library deliberately doesn't surface that. Reasons:
+
+- **Platform playback APIs aren't stream-friendly.** `MediaPlayer` on Android, `AVAudioPlayer` on iOS, the browser's `Audio` element — all expect a complete source. Streaming would require switching to a different (and less reliable) playback path per platform.
+- **The latency win is small on short utterances.** For chat-response-style TTS (<10 seconds), the time-to-first-byte savings from streaming are dwarfed by the network round-trip; the user perceives the same delay.
+- **Cancellation is simpler.** A buffered stream + `IAudioPlayer.PlayAsync(stream, ct)` cancels cleanly. Streaming TTS introduces a half-played-buffer race that every platform handles differently.
+
+Apps that genuinely need streaming TTS (long-form narration, real-time voice agents on tens-of-seconds responses) reach for the provider's native SDK and skip this abstraction for that path.
+
+## Why a separate `Shiny.Speech.MicrosoftAI` package?
+
+`Microsoft.Extensions.AI` defines `ISpeechToTextClient` and `ITextToSpeechClient` — the same shape, expressed as `IAsyncEnumerable<SpeechToTextResponseUpdate>` instead of `Start` + events. The two contracts are *similar* but not equivalent: `ISpeechToTextClient` assumes the caller already has an audio `Stream`; `ISpeechToTextService` owns the mic lifecycle.
+
+So the adapter is a thin separate package:
+
+```csharp
+public class ShinySpeechToTextClient(
+    ISpeechToTextProvider provider,
+    IAudioSource audioSource
+) : ISpeechToTextClient { /* maps RecognizeAsync → SpeechToTextResponseUpdate */ }
+```
+
+Apps that consume `Microsoft.Extensions.AI` agents (Semantic Kernel, MEAI pipelines) get the Shiny providers behind the MEAI interfaces. Apps that don't never pull the dependency.
+
+The opposite direction — exposing arbitrary `ISpeechToTextClient` instances *as* `ISpeechToTextService` — isn't supported. MEAI's contract doesn't model continuous mic ownership; reverse-adapting it would re-introduce the bugs `CloudSpeechToText` already solves.
+
+## Platform-specific behavior
+
+| Platform | What's different |
+|---|---|
+| **iOS / macOS** | SFSpeechRecognizer streams interim results several times per second. CarPlay routes audio through the car's mic/speakers automatically when active. TTS goes through `AVAudioEngine` for VU metering. |
+| **Android** | Native STT works in **segments** — it stops after silence and must restart for the next segment. Causes brief pauses during continuous listening. Prefer the [ElevenLabs](/speech/elevenlabs) provider for truly continuous recognition. **Don't use Azure on Android** — its native libs don't support Android 15+'s 16 KB page size. |
+| **Windows** | `Windows.Media.SpeechRecognition` + `Windows.Media.SpeechSynthesis`. No native VU metering for TTS. |
+| **Browser (Blazor WASM)** | Web Speech API for STT + TTS; reliability varies by browser (Chromium is most consistent). `IAudioSource` captures raw PCM via `getUserMedia` + `ScriptProcessorNode`, downsampled to 16 kHz mono. No VU metering. |
+
+## What `Shiny.Speech` deliberately does not do
+
+| Not built in | Why |
+|---|---|
+| Conversation state / chat history / wake-word orchestration | Use [`Shiny.AiConversation`](/aiconversation/) — it composes Speech with `IChatClient` and owns the state machine. |
+| Low-power always-on wake-word detection | Specialty domain (Porcupine, Snowboy). Plug your own engine in and gate `Start` / `Stop` on its event. |
+| High-fidelity audio capture (48 kHz stereo) | Targets STT-grade audio. Music or recording apps should use the platform's native capture stack. |
+| Streaming TTS chunk-by-chunk | Buffered playback is universally reliable; streaming gains are small and platform-coupling is high. See above. |
+| Speaker identification / diarization | Per-provider, not portable. If your provider returns it, surface it from your custom `ISpeechToTextProvider`. |
+| TTS audio caching | Apps that pre-render frequent utterances should cache the `Stream` themselves and play through `IAudioPlayer`. |
+
+## When **not** to use Shiny.Speech
+
+- **You only need a single TTS call on one platform.** Use the platform's native API directly — the abstraction overhead doesn't pay for itself.
+- **You're building a DAW or pro audio app.** The 16 kHz mono capture contract is too narrow; use the platform's native capture stack.
+- **You're calling a cloud STT endpoint server-side.** No mic, no audio session — just call the provider's SDK directly.
+
+For everything else — "I want STT and/or TTS in my MAUI or Blazor app, ideally with a cloud provider option, ideally without rewriting consumers when I switch backends" — that is exactly what this library is for.
+
+## Related
+
+- [`Shiny.AiConversation` architecture](/aiconversation/architecture) — the conversation/state-machine layer built on top of Speech.
+- [Azure AI Speech](/speech/azure) — native cloud provider for STT + TTS with SSML prosody.
+- [ElevenLabs](/speech/elevenlabs) — Scribe STT (continuous recognition on Android) + multilingual TTS.
+- [OpenAI](/speech/openai) — Whisper / GPT-4o Transcribe STT + GPT-4o Mini TTS.
+- [Custom Provider](/speech/custom-provider) — implement `ISpeechToTextProvider` / `ITextToSpeechProvider` for your own backend.
+- [Microsoft.Extensions.AI adapter](/speech/microsoft-ai) — expose providers as `ISpeechToTextClient` / `ITextToSpeechClient`.

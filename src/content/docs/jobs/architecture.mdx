@@ -1,0 +1,213 @@
+---
+title: Architecture
+---
+
+`Shiny.Jobs` exposes one abstraction — `IJob` + `IJobManager` + `JobRegistration` — and routes every platform to whatever the OS actually offers for background work. This page explains the design choices that get you there, what each tier buys you, and what it costs.
+
+## TL;DR — the shape
+
+```
+   App code ──► AddJob<T>(reg => reg.WithInternet(InternetAccess.Any))
+                          │
+                          ▼
+                  JobRegistrar (DI)
+                          │
+                          ▼
+          ┌───────────────┴──────────────────────────────┐
+          │       AbstractJobManager (shared)            │
+          │   - RunJob(Type)                             │
+          │   - RunAll(sequential|concurrent)            │
+          │   - RunTask(name, func)                      │
+          │   - Registration/lookup, lifecycle hooks     │
+          └───────────────┬──────────────────────────────┘
+                          │
+   ┌──────────────────────┼──────────────────────┐
+   │                      │                      │
+   ▼                      ▼                      ▼
+ iOS / Mac              Android               Windows
+ BGTaskScheduler        WorkManager           COM-activated
+ BeginBackgroundTask    Wake-lock             background tasks
+                          │
+                          ▼
+                 Linux / macOS / Blazor / base .NET
+                 In-process Timer + Connectivity/Battery checks
+```
+
+Five immutable design pillars:
+
+1. **One `IJob` contract, one DI registration call.** Adding a job is `services.AddJob<T>(r => r.WithInternet(...))`. The platform host picks the right scheduler.
+2. **Constraints, not schedules.** Jobs declare what they *need* (`WithInternet`, `WithCharging`, `WithBatteryNotLow`, `WithForeground`) — not when to run. The OS picks when.
+3. **Category-based dispatch.** Jobs are grouped into four constraint buckets, registered with the OS once, and dispatched to all matching jobs when the OS wakes the bucket.
+4. **Scoped resolution per run.** Every job execution gets a fresh DI scope. State that needs to survive runs is *your* responsibility, not the manager's.
+5. **`RunTask` and `RunJob` are different things.** `RunTask` is a one-off function you want to keep alive past app suspension. `RunJob` is a registered, OS-scheduled work unit.
+
+## Why no schedules, only constraints?
+
+Most "background scheduler" libraries take this shape:
+
+```csharp
+services.AddJob<MyJob>(every: TimeSpan.FromHours(1));   // ← every hour
+```
+
+It looks right and it's wrong almost everywhere on mobile.
+
+iOS doesn't let you pick a wall-clock interval. `BGTaskScheduler` runs your task when iOS decides — based on device usage, battery, network, and several other heuristics. The intervals you see on Android's `WorkManager` are *minimum* intervals: 15 minutes is the floor, and Doze can stretch them to hours.
+
+So the library doesn't pretend. Jobs declare what they *need*:
+
+```csharp
+services.AddJob<SyncJob>(r => r.WithInternet(InternetAccess.Any));         // requires network
+services.AddJob<BigCpuJob>(r => r.WithCharging().WithBatteryNotLow());    // only while charging
+services.AddJob<FastUiJob>(r => r.WithForeground());                       // foreground-only
+```
+
+The OS handles the *when*. On iOS that maps to `BGProcessingTaskRequest.RequiresNetworkConnectivity` and `RequiresExternalPower`. On Android to `Constraints.SetRequiredNetworkType` and `SetRequiresCharging`. On Windows to `SystemCondition.InternetAvailable` and `BackgroundWorkCostNotHigh`. On the in-process .NET path, the runner enforces them by checking `IConnectivity` / `IBattery` before each run.
+
+This is the only model that survives across the four schedulers. Per-job intervals would lock you into one of them.
+
+## Why category-based dispatch instead of one-task-per-job?
+
+Both `BGTaskScheduler` and `WorkManager` charge you for every distinct task identifier you register. iOS gives you a small handful of background launches per day across *all* registered identifiers; WorkManager batches work but still pays a context-switch cost per worker. Naive "one OS task per job" registration burns through that budget fast.
+
+So the library groups every job into one of four constraint buckets:
+
+| Charging | Internet | Bucket identifier |
+|---|---|---|
+| no | no | `shiny.jobs.none` |
+| yes | no | `shiny.jobs.charging` |
+| no | yes | `shiny.jobs.network` |
+| yes | yes | `shiny.jobs.charging.network` |
+
+Each non-empty bucket registers **one** OS-level task at startup. When the OS wakes the bucket, the bucket dispatcher fans out to every matching `IJob` registered with those constraints, runs them sequentially in a shared scope, and reports completion.
+
+Eight registered jobs typically become one or two OS tasks. The OS sees less; you spend less of the background budget; and you can add new jobs without re-budgeting.
+
+## Why `IJob` is a one-method interface
+
+```csharp
+public interface IJob
+{
+    Task Run(CancellationToken cancelToken);
+}
+```
+
+One method. No state. No metadata on the type — the metadata lives on `JobRegistration` instead. Three reasons:
+
+1. **Testability.** A `Func<CancellationToken, Task>` and an `IJob` are interchangeable. Tests don't need fixtures.
+2. **DI composition.** `IJob` is resolved per run, so the job gets fresh dependencies (and a fresh scope). Long-lived singletons stay out of the job runtime.
+3. **AOT.** No reflection over attributes — `JobRegistration` carries the type directly, the scope resolves an instance, the manager calls `.Run(ct)`. Trim/AOT-safe by construction.
+
+Long-running state lives in a service the job depends on, not on the job itself.
+
+## Why a scoped DI lifetime?
+
+```csharp
+services.AddScopedAsImplementedInterfaces<TJob>();
+```
+
+Every job run opens an `IServiceScope`, resolves the job, runs it, and disposes the scope. This means:
+
+- DbContexts, Entity Framework change trackers, and other "per unit of work" services are freshly created and disposed.
+- Singletons survive across runs (auth services, repository handles).
+- A misbehaving job can't accidentally hold onto request-scoped resources past completion.
+
+Mirrors the ASP.NET request-per-scope model — the same intuition transfers cleanly.
+
+## Per-platform engines, one surface
+
+| Platform | Implementation | What you get |
+|---|---|---|
+| **iOS / Mac Catalyst** | `BGTaskScheduler` (`BGProcessingTaskRequest`) + `BeginBackgroundTask` for `RunTask` | True OS-scheduled background launches. Requires `BGTaskSchedulerPermittedIdentifiers` in `Info.plist`. Simulator returns `NotSupported`. |
+| **Android** | `WorkManager` (`PeriodicWorkRequest`, 15-min floor) + optional wake-locks for `RunTask` | True OS-scheduled background launches with battery-aware throttling. Doze-aware. |
+| **Windows** | COM-activated background tasks (`Microsoft.Windows.ApplicationModel.Background`) | OS-scheduled in-process tasks. Requires `windows.comServer` manifest entry and a one-time `RegisterComServer()` call. |
+| **Linux / macOS / base .NET** | In-process `System.Timers.Timer` (default 30 s, configurable 15 s – 5 min) + `IBattery` / `IConnectivity` gates | Runs only while the process is alive. Constraint checks enforced in `CanRun`. No external scheduler. |
+| **Blazor WebAssembly** | Same in-process scheduler + `Shiny.Core.Blazor` for `IBattery` / `IConnectivity` | Runs only while the tab is open. State persists to `localStorage` (or filesystem) via Shiny repositories. |
+
+The `AbstractJobManager` base class owns registration storage, batch execution, and logging. Each platform subclass owns dispatch, scheduling, and constraint translation. The user-facing surface — `AddJob<T>`, `RunJob`, `RunAll`, `RunTask` — is identical on every target.
+
+## Why `RunJob` and `RunTask` are separate
+
+`RunJob` is for **registered** jobs. The manager already knows the type, the constraints, and how to resolve it from DI. You pass the type; the manager handles the rest.
+
+`RunTask` is for **ad-hoc** background work — typically initiated from a UI event ("uploading this file, please don't kill me yet"):
+
+```csharp
+jobManager.RunTask("UploadAvatar", async ct =>
+{
+    await uploader.UploadAsync(ct);
+});
+```
+
+On iOS this wraps the call in `BeginBackgroundTask` (the OS extends your foreground execution time by ~30 s when the app is backgrounded). On Android with the `WAKE_LOCK` permission, it grabs a partial wake-lock. Everywhere else it just runs. The same idea, two different surfaces: one for "register this, OS will pick it up later"; one for "I started this now, don't kill me until it's done."
+
+`RunTask` is **not** a registered job — it doesn't have constraints, doesn't get DI scoping, and doesn't show up in `GetJobs()`.
+
+## Why does iOS need an Info.plist entry?
+
+The simulator can't run background tasks. Devices require:
+
+```xml
+<key>UIBackgroundModes</key>
+<array>
+    <string>processing</string>
+</array>
+<key>BGTaskSchedulerPermittedIdentifiers</key>
+<array>
+    <string>shiny.jobs.none</string>
+    <string>shiny.jobs.charging</string>
+    <string>shiny.jobs.network</string>
+    <string>shiny.jobs.charging.network</string>
+</array>
+```
+
+These identifiers are the four buckets above. The job manager calls `BGTaskScheduler.Register(identifier, ...)` at startup; if the identifier isn't in `Info.plist`, iOS throws and the manager logs a critical error. `RequestAccess()` returns `NotSetup` when this happens — check it during onboarding to catch misconfiguration before users do.
+
+## Why Windows uses COM activation
+
+Modern Windows ships UWP-style background tasks through `BackgroundTaskBuilder`. Pre-WinUI 3, those tasks lived in their own process via a separate `IBackgroundTask` implementation. Modern Windows apps run them in-process through **COM activation**: the OS instantiates a COM class registered against your CLSID and routes the trigger into your running app.
+
+`Shiny.Jobs` exposes this as `ShinyJobsBackgroundTask` — a COM class registered against a fixed CLSID. Your `App` constructor calls `RegisterComServer()` once; your `appx`/`msix` manifest declares the `windows.comServer` extension; the OS does the rest.
+
+Why this and not a simple timer? Because Windows otherwise doesn't wake your app when it's suspended. COM activation is the only path that gets execution time back from the system on modern Windows.
+
+## Why the .NET / Linux / macOS / Blazor scheduler is just a timer
+
+None of these targets has an OS-level scheduler that wakes a suspended process. So the library doesn't pretend to have one. It runs a `System.Timers.Timer` (default every 30 seconds) while the process is alive, checks each registered job's constraints (`IBattery`, `IConnectivity`, `RunOnForeground`), and calls `RunJob` for the ones that qualify.
+
+The interval is tunable via `JobManager.Interval` (15 s minimum, 5 min maximum). Going below 15 s would prevent real jobs from completing before the next tick fires; going above 5 min defeats the point of periodic checks.
+
+On Blazor WASM specifically — Service Worker Periodic Background Sync looked like the right primitive but the Service Worker has no access to the Blazor runtime, so it can't invoke any C# code. The library uses the same in-process timer there; for "wake me when the app is closed", use [Push Notifications](/push/) instead.
+
+## Why constraints are checked twice
+
+Constraints flow through two layers:
+
+1. **At registration**, the platform manager translates them into the OS scheduler's vocabulary — `BGProcessingTaskRequest.RequiresNetworkConnectivity`, `WorkManager.Constraints.SetRequiredNetworkType`, `SystemCondition.InternetAvailable`, etc. The OS won't wake the bucket if these aren't satisfied.
+2. **At dispatch**, the in-process / .NET / Blazor / macOS / Linux runner re-checks the constraints via `IBattery` and `IConnectivity` before running each job — because *that* path has no OS scheduler enforcing them.
+
+Both layers enforce the same intent. The duplication isn't accidental — it lets the same `JobRegistration` work everywhere without per-platform branching in your app code.
+
+## Why a `JobRegistrar` collected at host build time?
+
+The platforms (iOS / Android / Windows) need the full list of registered jobs **before** they can register the OS-level buckets. So all `AddJob<T>` calls go into a `JobRegistrar` collected at `services.BuildServiceProvider()` time, and the platform `IShinyStartupTask.Start()` reads them once to register the buckets with the OS.
+
+Adding a job *after* startup wouldn't propagate to the OS scheduler. The library uses the standard Shiny pattern: declarative registration during host build, eager OS wiring during the first lifecycle tick.
+
+## What `Shiny.Jobs` deliberately does not do
+
+| Not built in | Why |
+|---|---|
+| Per-job interval / cron expressions | Mobile OSes don't honour them. Use constraints. |
+| Job priority / queueing | iOS / Android don't expose it. The "RunAll" sequential flag is the only sequencing knob. |
+| Distributed coordination | Single-device runtime. For server-side jobs use [Mediator](/mediator/middleware/scheduling) or Quartz / Hangfire. |
+| Persistent state on `IJob` itself | Jobs are scoped, transient. Persist state to a Shiny store, EF, or your own repository. |
+| Job retries | If your job throws, the next OS wake re-runs it. App-level retry inside `Run` is your call — model it as a state machine in the store. |
+
+## When **not** to use `Shiny.Jobs`
+
+- **You need exact-time scheduling.** Use [Local Notifications](/notifications/) with a scheduled trigger to wake the user, not the OS to wake your code.
+- **You need a long-running computation while the user is in another app.** Mobile OSes won't allow it. Either move it to the server or break it into short jobs that resume from persisted state.
+- **You need pub/sub across devices.** Use [Push Notifications](/push/) to deliver a wake signal; have the push delegate call `RunJob` if needed.
+- **Server-side workloads.** Background services in ASP.NET (`IHostedService`, Hangfire, Quartz) are the right tools — the constraints model here is about device-aware execution.
+
+If your work needs to *survive app kill* and respond to network / charging conditions on real mobile devices — that is what this library is for.

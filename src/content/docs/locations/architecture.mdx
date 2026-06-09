@@ -1,0 +1,308 @@
+---
+title: Architecture
+---
+
+`Shiny.Locations` exposes two abstractions — `IGpsManager` and `IGeofenceManager` — and routes every platform to whatever the OS actually offers for location services. GPS and geofencing share the same persistence layer, the same access model, and (in the GPS-direct fallback) the same dispatch loop. This page explains why the surface is split into two managers, why each platform has the implementation it has, and what the library deliberately doesn't try to solve.
+
+If you've read [`Shiny.Jobs` architecture](/jobs/architecture), the playbook is similar — one DI registration, constraint-shaped requests, platform-tiered engines under a uniform surface.
+
+## TL;DR — the shape
+
+```
+   App code ──► AddGps<TGpsDelegate>()
+                AddGeofencing<TGeofenceDelegate>()
+                          │
+                          ▼
+                 DI registration (singleton)
+                          │
+                          ▼
+          ┌───────────────┴───────────────────┐
+          │                                   │
+          ▼                                   ▼
+    IGpsManager                       IGeofenceManager
+    StartListener(GpsRequest)         StartMonitoring(GeofenceRegion)
+    GetLastReading()                  GetMonitorRegions()
+    GpsReadingReceived (foreground)   RequestState()
+          │                                   │
+          │   ┌───────────────────────────────┤
+          ▼   ▼                               ▼
+   ┌──────────────────┐         ┌────────────────────────────┐
+   │     iOS / Mac    │         │ iOS 18+ : CLMonitor        │
+   │  CLLocationUpdater│        │ iOS <18 : CLLocationManager│
+   │  CLServiceSession │        │   (region monitoring)      │
+   │  CLBackgroundActivity      │ Android : Google Play      │
+   └──────────────────┘         │           Geofencing API   │
+   ┌──────────────────┐         │           ▼ (fallback)     │
+   │     Android      │         │           GPS-direct       │
+   │  FusedLocation   │         │ Windows : Windows.Devices  │
+   │  ProviderClient  │         │           .Geofencing      │
+   │  ShinyGpsService │         └────────────────────────────┘
+   │   (foreground)   │                       │
+   └──────────────────┘                       ▼
+   ┌──────────────────┐               Repository<GeofenceRegion>
+   │     Windows      │              (auto-restore on launch)
+   │  Geolocator      │
+   └──────────────────┘
+   ┌──────────────────┐
+   │  Blazor (WASM)   │
+   │ navigator.       │
+   │  geolocation     │
+   └──────────────────┘
+```
+
+Five design pillars:
+
+1. **Two managers, one persistence layer.** GPS and geofencing are separate problems with separate OS APIs, but both lean on the same `IRepository` for restore-on-launch. Re-registering regions or re-starting a GPS listener after the OS reboots the app is the library's job, not yours.
+2. **Requests describe *what* you want, not *when*.** `GpsRequest.BackgroundMode` and `GeofenceRegion.NotifyOnEntry/Exit` express intent; each platform translates that intent into the right OS primitive. There is no per-listener interval contract — mobile OSes don't honour them.
+3. **Delegates run in the background, events run in the foreground.** `IGpsDelegate` / `IGeofenceDelegate` are DI-resolved singletons that fire from OS-driven background dispatch. `GpsReadingReceived` is a plain `EventHandler` for in-app UI. The split is intentional — the OS can't reach `+=` handlers when your app is suspended.
+4. **GPS-direct geofencing is a real fallback, not a toy.** On Android without Google Play Services, the library transparently switches geofencing to a realtime background GPS loop. The same path is also opt-in via `AddGpsDirectGeofencing<T>()` when you need it.
+5. **`Position`, `Distance`, and `GpsReading` are the lingua franca.** The same struct/record shapes flow from native APIs into your delegate everywhere. No platform-specific reading types leak through the public surface; platform-specific *requests* (`AndroidGpsRequest`, `AppleGpsRequest`) extend the base record without breaking it.
+
+## Why two managers instead of one?
+
+You could imagine an `ILocationManager` with `StartGps` and `StartGeofencing` on it. The library doesn't do that, for two reasons.
+
+**The OS APIs are different shapes.** GPS is a *stream* — start a listener, get readings until you stop. Geofencing is a *set* — register regions, get callbacks when boundaries are crossed. iOS gives you `CLLocationUpdater` for the first and `CLMonitor` (or legacy `CLLocationManager.StartMonitoringRegion`) for the second. Android gives you `FusedLocationProviderClient` for the first and `GeofencingClient` for the second. The OS distinguishes them; the library does too.
+
+**They scale differently.** A single GPS listener costs the same as a thousand readings. Each geofence region costs platform budget — iOS caps you at 20 simultaneous monitored regions, Android at 60. Forcing both behind one interface would either limit GPS to the geofence ceiling or hide the geofence ceiling behind a stream-shaped API that quietly drops regions. Two managers, two cost models.
+
+The one place they merge is `GpsGeofenceManagerImpl` — the fallback that implements `IGeofenceManager` by running an `IGpsManager` underneath. That's an internal implementation detail; the surface stays separated.
+
+## Why `GpsRequest` is shaped around `GpsBackgroundMode` instead of intervals
+
+```csharp
+public record GpsRequest(
+    GpsBackgroundMode BackgroundMode = GpsBackgroundMode.None,
+    bool RequestPreciseAccuracy = false,
+    bool AutoRestart = true
+);
+
+public enum GpsBackgroundMode { None, Standard, Realtime }
+```
+
+Three modes, not three thousand knobs. Each one maps cleanly onto each platform's actual capability:
+
+| Mode | iOS | Android | Windows | Blazor |
+|---|---|---|---|---|
+| `None` | `CLLocationUpdater` in-process (foreground) | `FusedLocationProviderClient` (foreground) | `Geolocator` (foreground) | `navigator.geolocation` (foreground only) |
+| `Standard` | Significant location changes (~hourly) | `FusedLocation` with relaxed interval (~3–4 readings/hour) | Not supported | Silently degraded to `None` with a logged warning |
+| `Realtime` | `CLBackgroundActivitySession` + full background updates (~1/sec) | `ShinyGpsService` foreground service + 1-sec interval | Not supported | Silently degraded to `None` with a logged warning |
+
+Per-listener intervals exist on Android (`LocationRequest.Builder.IntervalMillis`) but not on iOS — `Standard` background mode is whatever the OS decides "significant" means today. The library doesn't lie about this. If you genuinely need a tunable interval *and you're on Android*, drop down to `AndroidGpsRequest` which exposes it directly. Cross-platform code stays at the `GpsRequest` level.
+
+`AutoRestart = true` (the default) is the iOS / Android contract for surviving force-quit. The platform manager persists `CurrentSettings` to the Shiny key/value store on `StartListener`, reads it back on `Start()` (the `IShinyStartupTask` hook), and re-issues `RequestLocationUpdates` so the OS picks the listener back up.
+
+## Why platform-specific request types extend `GpsRequest`
+
+```csharp
+record GpsRequest(GpsBackgroundMode BackgroundMode, ...);
+record AndroidGpsRequest(GpsBackgroundMode BackgroundMode, ...) : GpsRequest(...);
+record AppleGpsRequest(GpsBackgroundMode BackgroundMode, ...) : GpsRequest(...);
+```
+
+C# record inheritance, used deliberately. App code can pass `GpsRequest` everywhere and the listener works on every platform. App code that needs to reach the Android-specific `IntervalMillis` / `DistanceFilterMeters` / `GpsPriority` knobs — or the iOS `StationaryMetersThreshold` / `AllowsBackgroundLocationUpdates` knobs — passes the platform record instead, guarded by `#if ANDROID` / `#if IOS`.
+
+The platform manager's `StartListenerInternal` unwraps the base record into the platform record (with defaults) so the path is the same either way:
+
+```csharp
+if (request is not AndroidGpsRequest android)
+    android = new AndroidGpsRequest(request.BackgroundMode);
+```
+
+No reflection, no attribute scanning. The contract is the type system.
+
+## Why geofencing has four engines under one surface
+
+`IGeofenceManager` looks identical on every platform. Behind it are four very different implementations:
+
+| Platform | Engine | Why |
+|---|---|---|
+| **iOS 18+ / Mac Catalyst 18+** | `CLMonitor` with `CLMonitorConfiguration` + `MonitorEvents` async iterator | The modern, deprecation-safe geofencing API on Apple platforms. Pure async — no delegate callbacks. Needs a `CLServiceSession` to deliver events while the app is suspended. |
+| **iOS / Mac Catalyst < 18** | `CLLocationManager.StartMonitoring(CLCircularRegion)` + `CLLocationManagerDelegate` | The legacy API. Still works. The library auto-selects it based on `OperatingSystem.IsIOSVersionAtLeast(18)`. |
+| **Android with Google Play Services** | `GeofencingClient` + `GeofenceBroadcastReceiver` | Native OS geofencing with battery-aware throttling. Uses a `PendingIntent` so geofence transitions wake the app via broadcast even after process death. |
+| **Android without Google Play Services** | `GpsGeofenceManagerImpl` — realtime background GPS + in-process region check | The fallback. When `GoogleApiAvailability.IsGooglePlayServicesAvailable` returns `ServiceMissing`, `AddGeofencing` silently rewires to `AddGpsDirectGeofencing` so the API contract holds. |
+| **Windows** | `Windows.Devices.Geolocation.Geofencing.GeofenceMonitor` | Native OS geofencing. No region cap. |
+
+The selection happens at DI registration time inside `AddGeofencing<T>()` — no runtime branching in your delegate, no per-platform code in your app.
+
+## Why the geofence repository is the source of truth
+
+```csharp
+public record GeofenceRegion(...) : IRepositoryEntity;
+```
+
+Geofence regions are first-class persisted records. Every `StartMonitoring(region)` call writes to the Shiny `IRepository<GeofenceRegion>` *before* the native API is hit. The native API holds the OS-level monitor; the repository holds the canonical list.
+
+This is the only sane model when:
+
+- The OS reboots and the app needs to re-register monitors on next launch. `IShinyStartupTask.Start()` reads the repository and rehydrates the native monitor set.
+- The native API forgets regions during a force-update or system upgrade. The repository persists across these; reconciliation on next start re-pushes them.
+- A geofence is reported by the OS that the app doesn't know about (stale install, renamed identifier). The handler looks up the identifier in the repository — and if it's not there, logs a warning and ignores the trigger rather than crashing.
+
+The iOS 18 `GeofenceManager` makes the symmetry explicit with a `Reconcile` step on `Start()`: it diffs `mon.MonitoredIdentifiers` against the repository, drops orphans from the OS, and adds missing regions. Same pattern works on Android and Windows.
+
+## Why iOS 18+ uses `CLMonitor` instead of staying on `CLLocationManager`
+
+Apple deprecated region monitoring on `CLLocationManager` in iOS 17 and replaced it with `CLMonitor`. The legacy API still works but you're on borrowed time, and Mac Catalyst on Sequoia (15.0+) requires `CLMonitor` for new monitor types.
+
+`CLMonitor` is a cleaner shape too:
+
+- No `CLLocationManagerDelegate` plumbing — events arrive via an async iterator (`MonitorEvents`).
+- Monitor conditions are declarative — `CLMonitor.SetCondition(CLMonitorConfiguration)`.
+- The event stream surfaces *why* the system thinks a transition happened (enter, exit, unmonitored), so you can log meaningfully on edge cases.
+
+The legacy `CLLocationGeofenceManager` is kept for iOS 15/16/17 and pre-Sequoia Mac Catalyst. Both implementations write to the same repository; switching iOS versions doesn't drop your regions.
+
+## Why GPS-direct geofencing exists at all
+
+OS geofencing is what you want. It's battery-efficient (the radio is woken by motion + cell-tower transitions, not a constant GPS fix), it survives app kill, and it ships with each platform's tuning.
+
+But you can't always have it:
+
+1. **Android without Google Play Services.** Huawei devices, Amazon Fire tablets, AOSP builds — Google's geofencing API isn't there. The library still has to return *something* from `AddGeofencing<T>()`. So it transparently rewires to GPS-direct.
+2. **Apps that already run realtime background GPS.** If the GPS listener is already burning the battery for navigation or route tracking, you might as well let the in-process loop also check geofence transitions instead of paying for the OS geofencing API on top.
+3. **More than 20/60 regions.** iOS caps at 20, Android at 60. GPS-direct has no cap because regions live in your `IRepository`, not in the OS monitor set. (For very large region sets, [Spatial Geofencing](/spatial/geofencing) with an R*Tree index is the better answer — GPS-direct walks all regions linearly per reading.)
+
+`GpsGeofenceManagerImpl` implements `IGeofenceManager` by:
+
+1. Starting a `Realtime` background GPS listener the first time a region is monitored.
+2. Persisting the region to `IRepository<GeofenceRegion>`.
+3. On every GPS reading, walking the region list and calling `region.IsPositionInside(reading.Position)`.
+4. Tracking last-known `GeofenceState` per region in `GpsGeofenceDelegate.CurrentStates` so the delegate fires *only on transition*, not on every reading inside the region.
+
+This is the same delegate contract (`IGeofenceDelegate.OnStatusChanged`) — your app code can't tell which engine is underneath, by design.
+
+The trade-off — and it's a real one — is that realtime GPS is the most battery-hostile mode the library exposes. The XML doc on the method is blunt: *"DO NOT USE THIS IF YOU DON'T KNOW WHAT YOU ARE DOING."*
+
+## Why stationary detection lives in the library, not in the delegate
+
+`GpsReading.IsStationary` is set *before* the reading reaches your delegate or `GpsReadingReceived` handler. Three reasons:
+
+1. **iOS 18+ has it natively** via `CLLocationUpdater` stationary detection. The library reads `CLLocationUpdate.Stationary` and flows it straight through.
+2. **iOS legacy and Android don't** — but the OS isn't going to start reporting it just because we'd like it. The library runs `StationaryDetector` against incoming readings:
+
+   ```csharp
+   if (distance < metersThreshold && (now - lastMovement) >= secondsThreshold)
+       IsStationary = true;
+   ```
+
+   Defaults: 10 m / 30 s. Configurable per request.
+
+3. **Doing this once, in the library, means every consumer sees the same flag**. If every app reimplemented "are we stationary?" against the raw reading stream, every app would get it slightly wrong, especially around GPS jitter and apparent movement at low speed. The thresholds are exposed (`StationaryMetersThreshold`, `StationarySecondsThreshold`) for the cases where 10 m / 30 s doesn't fit.
+
+## Why `GpsDelegate` exists with AND minimums / OR maximums
+
+Raw GPS streams arrive at whatever rate the platform chooses. iOS doesn't honour your time/distance filter perfectly. Android's `setMinUpdateDistanceMeters` works but interacts with the foreground service notification cadence. So the in-library `GpsDelegate` base class does the filtering for you:
+
+```csharp
+class MyGpsDelegate : GpsDelegate
+{
+    public MyGpsDelegate(ILogger log) : base(log)
+    {
+        MinimumDistance = Distance.FromMeters(200);   // AND
+        MinimumTime = TimeSpan.FromMinutes(1);        // AND
+        MaximumDistance = Distance.FromKilometers(2); // OR — bypasses minimums
+        MaximumTime = TimeSpan.FromMinutes(10);       // OR — bypasses minimums
+    }
+    protected override Task OnGpsReading(GpsReading r) { ... }
+}
+```
+
+The semantics are deliberate:
+
+- **Minimums are ANDed.** When both `MinimumDistance` and `MinimumTime` are set, *both* must be satisfied before `OnGpsReading` fires. This is what every "log a position every km, but not more than once a minute" app actually wants. OR-on-minimums would fire on whichever threshold tripped first, defeating the throttle.
+- **Maximums are ORed and they override.** If you've moved 2 km *or* 10 minutes have elapsed, the reading fires regardless of minimums. This is the safety valve — without it, sitting still inside the minimum-distance bubble for hours would suppress every reading. Apps that need to know "where is the user right now, eventually" can't tolerate that.
+- **A `SemaphoreSlim` serializes calls** so two readings can't race into `OnGpsReading` concurrently. The delegate is a singleton across the app; concurrent reads happen.
+
+The base class exposes `LastReading` (last reading that *fired*) and `MostRecentReading` (last reading regardless of filtering) so derived classes can introspect both without re-wiring the stream.
+
+## Why `GpsReadingReceived` is a plain event, not Rx
+
+`Shiny.Locations` used to ship `IObservable<GpsReading>`. It doesn't anymore. The event is a plain `event EventHandler<GpsReading>`:
+
+```csharp
+public event EventHandler<GpsReading> GpsReadingReceived;
+```
+
+Three reasons:
+
+1. **Background dispatch.** The OS reaches `IGpsDelegate` via DI when the app is suspended. It can't reach `+=` subscribers in any meaningful sense — they're in-process state. The delegate model is the correct contract for background work; the event is the correct contract for "while the page is open."
+2. **Rx pulls in `System.Reactive` (~500 KB).** For a stream that fires at most once a second, a `+= handler / -= handler` pair is enough.
+3. **It composes with `IGpsDelegate` cleanly.** The manager raises the event *and* dispatches to delegates. UI subscribers see both; background delegates see what the OS routes to them.
+
+Remember to `-=` your handler on view disappear/dispose. There is no automatic weak-event plumbing.
+
+## Why the GPS-direct geofence delegate de-dupes states
+
+`GpsGeofenceDelegate.OnReading` is called once per GPS reading and walks every monitored region. Without state tracking, every reading inside region `A` would fire `OnStatusChanged(Entered, A)`. That's wrong twice over: the OS geofencing path only fires on transition, and the delegate is supposed to be a transition signal.
+
+So the delegate tracks `Dictionary<string, GeofenceState> CurrentStates` and only invokes `IGeofenceDelegate.OnStatusChanged` when `state != current`. Entering region `A` fires once; leaving fires once; staying inside fires zero times.
+
+The state map is in-memory only — it rebuilds on next launch from the first reading after the GPS listener restarts. The OS path doesn't have this rebuild step because the OS itself owns transition tracking; the in-process path inherits the responsibility along with the implementation.
+
+## Per-platform engines, one surface — the GPS table
+
+| Platform | GPS Engine | Background guarantees |
+|---|---|---|
+| **iOS 18+ / Mac Catalyst 18+** | `CLLocationUpdater` + `CLServiceSession` (`Always` or `WhenInUse`) + `CLBackgroundActivitySession` for `Realtime` | OS-scheduled. `CLBackgroundActivitySession` keeps the process alive for realtime; `Standard` mode uses significant-location-change wakeups. |
+| **iOS / Mac Catalyst < 18** | `CLLocationManager` + `AllowsBackgroundLocationUpdates` | Same OS guarantees; older delegate-shaped API. Auto-selected for iOS 15–17. |
+| **Android** | `FusedLocationProviderClient` (Google Play Services) or `LocationManager` (fallback) | Foreground service (`ShinyGpsService`, `ForegroundServiceType = TypeLocation`) for `Realtime`; passive intervals for `Standard`. Doze-aware. |
+| **Windows** | `Windows.Devices.Geolocation.Geolocator` | Foreground only. |
+| **Blazor WASM** | `navigator.geolocation.watchPosition` via JS interop | Foreground only. Tab must be alive and focused. |
+
+Note the **two Android GPS managers**: `GooglePlayServiceGpsManager` (preferred, uses Fused Location) and `LocationServicesGpsManager` (fallback, raw `LocationManager`). Selection happens in `AddGps` based on `GoogleApiAvailability` — same pattern as geofencing.
+
+## Why Android `Realtime` mode requires a foreground service
+
+Android killed truly invisible background GPS in API 26. The only contract that survives Doze and battery-saver is a foreground service with a user-visible notification.
+
+`ShinyGpsService` extends `ShinyAndroidForegroundService<IGpsManager, IGpsDelegate>` with `ForegroundServiceType = TypeLocation`. The service:
+
+1. Starts when `GpsRequest.BackgroundMode == Realtime`.
+2. Subscribes to `GpsReadingReceived` and fans readings out to every registered `IGpsDelegate`.
+3. Stops when `StopListener` is called or (optionally) when the app's foreground task is removed.
+
+The notification content is customisable via `IAndroidForegroundServiceDelegate` — see the [GPS page](/locations/gps#controlling-gps-notification-on-android).
+
+Without this service, `Realtime` GPS would die the moment the screen turned off. The notification is the price of the guarantee.
+
+## Why a Blazor target at all, and why it silently degrades background modes
+
+`Shiny.Locations.Blazor` exists because foreground GPS in the browser is a real use case — map pickers, "find nearby" queries, fitness apps running in PWAs. The implementation wraps `navigator.geolocation.watchPosition`.
+
+What it doesn't do:
+
+- **Background GPS.** The browser has no API for it. The Service Worker can't reach the Blazor runtime, and `Background Sync` doesn't carry GPS payloads.
+- **Geofencing.** Browsers don't expose a geofencing API at all. `Shiny.Locations.Blazor` ships no `IGeofenceManager`.
+
+Setting `GpsBackgroundMode.Standard` or `Realtime` on a Blazor `GpsRequest` is silently treated as `None`, with a warning logged. Logging-instead-of-throwing is deliberate — cross-platform code that uses `AddGps()` with a `Realtime` request shouldn't crash on the web build; it should just behave like foreground.
+
+The architectural answer for region-based behaviour on the web is server-side: have the client report foreground GPS, evaluate regions on the backend, and notify the user via Web Push.
+
+## What `Shiny.Locations` deliberately does not do
+
+| Not built in | Why |
+|---|---|
+| Per-listener cron / interval scheduling | iOS doesn't honour intervals on `Standard` mode. Use platform-specific records on Android if you need it. |
+| Geofence regions persisted to remote storage | Repository is local. Sync via `Shiny.Data.Sync` or your own API if you need cloud-managed regions. |
+| Polygon / arbitrary-shape geofences | The OS APIs are circular-only on iOS and Android. For polygons / R*Tree spatial queries, use [Spatial Geofencing](/spatial/geofencing). |
+| Indoor positioning (beacons, Wi-Fi triangulation) | Out of scope. Use Bluetooth LE scanning or `Shiny.Beacons` (deprecated; community fork available). |
+| Route playback / mock readings | Use the OS simulator / emulator GPS tools. Mocking belongs in tests, not the library. |
+| Reverse geocoding | `Shiny.Maui.Controls.AddressEntry` integrates with `Microsoft.Maui.Devices.Sensors.Geocoding`. The Locations library deals in coordinates only. |
+| Geofence persistence on Blazor | No geofencing on web — see above. |
+
+## When **not** to use `Shiny.Locations`
+
+- **You need a one-shot location read for a form.** Use the MAUI Essentials `Geolocation.GetLocationAsync()` API directly — no listener, no DI, no Shiny.
+- **You need to monitor thousands of regions.** OS geofencing caps you (20 on iOS, 60 on Android). Use [Spatial Geofencing](/spatial/geofencing) with an R*Tree-indexed database; the foreground/background semantics are yours to wire.
+- **You need indoor positioning.** Bluetooth LE proximity, beacon ranging, or Wi-Fi RTT are different libraries. Shiny GPS is meters-of-accuracy, not centimeters.
+- **You need exact-time geofence triggers (`"alert me at 6pm when I'm near home"`).** Combine with [Local Notifications](/notifications/) — geofencing tells you *where*, notifications tell you *when*.
+- **You need server-side region evaluation.** Stream foreground GPS to your backend and evaluate there. The library doesn't replace a server-side pipeline.
+
+If your work needs background location streams that survive suspension on iOS and Android, geofence transitions that survive process kill, and a fallback path when Google Play Services is missing — that is what this library is for.
+
+## Related
+
+- [`Shiny.Spatial` geofencing](/spatial/geofencing) — R*Tree-indexed polygon geofences for region counts above the OS limits.
+- [`Shiny.Jobs` architecture](/jobs/architecture) — for deferred work that a geofence transition might trigger (sync, upload, notification).
+- [Motion Activity](/locations/motionactivity) — pairs naturally with GPS for "stationary vs walking vs driving" inference.

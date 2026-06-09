@@ -1,0 +1,294 @@
+---
+title: Architecture
+---
+
+`Shiny.Push` exposes one abstraction — `IPushManager` + `IPushDelegate` + an optional `IPushProvider` — and routes every platform to whatever the OS actually offers for server-driven message delivery. This page explains the design choices that get you there, what each tier buys you, and where the seams are.
+
+## TL;DR — the shape
+
+```
+   App code ──► AddPush<TDelegate>()
+                          │
+                          ▼
+                  IPushManager (DI singleton)
+                          │
+                ┌─────────┴───────────────────────────┐
+                │  Native channel (APNs/FCM/WNS/WP)   │  ──► native token
+                └─────────┬───────────────────────────┘
+                          │
+                          ▼
+                 Optional IPushProvider
+                  (Azure Notification Hubs,
+                   custom backend, etc.)               ──► registration token
+                          │
+                          ▼
+                 Persisted via IKeyValueStore
+                          │
+                          ▼
+          ┌───────────────┴──────────────────────────────┐
+          │   IPushDelegate fan-out via RunDelegates     │
+          │   - OnNewToken / OnUnRegistered              │
+          │   - OnReceived (foreground or background)    │
+          │   - OnEntry (user tapped)                    │
+          └───────────────┬──────────────────────────────┘
+                          │
+   ┌──────────────────────┼──────────────────────┐
+   │                      │                      │
+   ▼                      ▼                      ▼
+ iOS / Mac              Android               Windows
+ APNs +                 FCM via               WNS via
+ UNUserNotification     Firebase              PushNotificationChannel
+                        Messaging             Manager
+                          │
+                          ▼
+                 Blazor WebAssembly
+                 Web Push (VAPID) +
+                 Service Worker
+```
+
+Five immutable design pillars:
+
+1. **One `IPushDelegate` contract, one DI registration call.** Adding push is `services.AddPush<TDelegate>()`. The platform host wires up the native channel; you only write callbacks.
+2. **Native token vs registration token.** The OS-issued token (`NativeRegistrationToken`) is *always* exposed, but the value you send to your backend (`RegistrationToken`) is whatever the active `IPushProvider` returns — which may be the native token, an Azure Notification Hubs install id, or a custom server-issued handle.
+3. **The provider is the only swappable layer.** Native channel acquisition is fixed per platform (APNs on iOS, FCM on Android, WNS on Windows, Web Push on Blazor). The provider that translates the native token into a routable id is pluggable.
+4. **Tokens are persisted before delegates fire.** Every token mutation goes through `IKeyValueStore` first so a cold-start auto-resume sees the same value the server has. Delegate fan-out happens afterwards.
+5. **Delegates are resolved per event from the root provider.** Push events fire from the OS at arbitrary times — including before the app has any UI scope. `RunDelegates<IPushDelegate>` resolves every registered delegate from the root `IServiceProvider`, runs each one inside a try/catch, and logs failures.
+
+## Why two tokens?
+
+```csharp
+public interface IPushManager
+{
+    string? RegistrationToken { get; }        // what your backend uses
+    string? NativeRegistrationToken { get; }  // raw APNs/FCM/WNS/Web Push token
+    ...
+}
+```
+
+The Apple, Google, and Microsoft channels each issue a token that uniquely identifies *this install on this device*. That token is what the OS will route a push to. But almost nobody sends pushes by hitting APNs directly — they send through Azure Notification Hubs, AWS SNS, OneSignal, or a custom backend that fans pushes out to many devices. Those services issue their *own* identifier (an install id, a subscription handle) that maps to the underlying native token.
+
+So `Shiny.Push` keeps both:
+
+- `NativeRegistrationToken` — the raw OS token. Useful for debugging, for direct APNs/FCM sends, and for backends that just want the device token verbatim.
+- `RegistrationToken` — the value the `IPushProvider` returns. If no provider is registered, this equals the native token. If Azure Notification Hubs is registered, this is the ANH installation id. If you write a custom provider, it's whatever your server hands back.
+
+Your delegate's `OnNewToken(string token)` always receives the *registration* token — the one your backend cares about. Two slots in storage so a token-refresh story doesn't need branching for "did I register through a provider?"
+
+## Why is `IPushProvider` the only swappable layer?
+
+Native channel acquisition is not pluggable. On iOS the path is `RegisterForRemoteNotifications` → `OnRegistered(NSData)`. On Android it's `FirebaseMessaging.Instance.GetToken()`. On Windows it's `PushNotificationChannelManager.GetDefault().CreatePushNotificationChannelForApplicationAsync()`. On Blazor it's `serviceWorkerReg.pushManager.subscribe(...)`. None of these has a meaningful alternative on the platform — the OS is the only source of the token.
+
+What *is* pluggable is what you do with that token once you have it. `IPushProvider` has a single platform-flavored `Register(nativeToken)` that returns a string:
+
+```csharp
+// Android / Windows / Blazor
+Task<string> Register(string nativeToken);
+
+// Apple
+Task<string> Register(NSData nativeToken);
+```
+
+The provider can:
+
+- Wrap the native token in a server-side installation record (Azure Notification Hubs does this — it creates an `Installation` row with the native token as the `PushChannel`).
+- Maintain provider-specific state like tags (`IPushTagSupport` is opt-in on top of `IPushProvider`).
+- Issue its own opaque handle that abstracts the native token from your backend.
+
+If you register no provider, the manager treats `IPushProvider?` as null and uses the native token directly as the registration token. Most apps that talk straight to APNs/FCM from their own backend run in exactly that mode.
+
+## Why no `IPushProvider` interface on Blazor?
+
+The Blazor `PushManager` is the only one that doesn't take an `IPushProvider`. Web Push subscriptions are themselves the routable handle — the subscription JSON (endpoint + p256dh + auth keys) is what a backend POSTs to in order to deliver a push. There is no second indirection to plug into. Tags / install records on top of Web Push are a server-side concern, not a client one, so the abstraction doesn't appear here.
+
+If you need ANH-style tags from a Blazor client, send them to your own backend over a normal HTTP call after `RequestAccess` returns — the Web Push subscription is what gets routed to.
+
+## Why per-platform `PushManager` classes instead of a shared base?
+
+Unlike `Shiny.Jobs` (where every platform shares an `AbstractJobManager` and only overrides scheduling), the four push managers don't share a base class. The reason is that the *shape* of the platform integration is too different to factor out:
+
+| Platform | Surface | What the manager hooks |
+|---|---|---|
+| **Apple (iOS / Mac Catalyst)** | `IIosLifecycle.IOnFinishedLaunching`, `IRemoteNotifications`, `INotificationHandler` | `application:didRegisterForRemoteNotifications…`, `application:didReceiveRemoteNotification…`, `UNUserNotificationCenter` delegate callbacks. Token acquisition is async via `TaskCompletionSource<NSData>` tied to `OnRegistered`. |
+| **Android** | `IAndroidLifecycle.IOnActivityOnCreate`, `IOnActivityNewIntent`, `IShinyStartupTask` | `FirebaseMessaging.Instance.GetToken()` plus a hooked `FirebaseMessagingService` whose static `MessageReceived` / `NewToken` callbacks route into the manager. Tap detection via intent action filter. |
+| **macOS (AppKit)** | Same as iOS minus the `UIApplication` hooks | `NSApplication.RegisterForRemoteNotifications`, `UNUserNotificationCenter`. |
+| **Windows** | `PushNotificationChannel` event subscription | Single channel object, `PushNotificationReceived` event for all four notification types (Toast / Tile / Badge / Raw). |
+| **Blazor WASM** | `IJSObjectReference` + `DotNetObjectReference<PushManager>` | `push.js` module owns the Service Worker registration and the `PushManager.subscribe` call; pushes arrive via Service Worker `postMessage` and round-trip back into C# via `[JSInvokable]`. |
+
+There is no shared scheduler abstraction here because each platform's push pipeline *is* the platform integration. Factoring a base class would just push the platform-specific bits into a sea of `#if` blocks. Keeping each manager whole makes the per-platform behaviour readable.
+
+## Why is the Apple manager wired to three different lifecycle interfaces?
+
+The Apple platform fires push events down three different paths and Shiny needs to intercept all of them:
+
+1. **`IOnFinishedLaunching`** — when the app is launched *from* a notification tap (cold start). The launch options dictionary contains the remote notification payload; that's the only place to detect "user tapped the notification while the app wasn't running."
+2. **`IRemoteNotifications`** — `application:didRegisterForRemoteNotificationsWithDeviceToken:` (token issued), `application:didFailToRegisterForRemoteNotificationsWithError:` (token request failed), `application:didReceiveRemoteNotification:fetchCompletionHandler:` (background data push arrived).
+3. **`INotificationHandler`** — `UNUserNotificationCenterDelegate` callbacks for `willPresentNotification` (foreground push) and `didReceiveNotificationResponse` (user tapped a presented notification).
+
+Each path produces a different `PushNotification` payload and a different delegate event. `OnEntry` can fire from path 1 (cold tap) or path 3 (warm tap). `OnReceived` can fire from path 2 (silent / data push) or path 3 (presented push). They are deliberately separate methods so your delegate can tell *which* path delivered the event.
+
+## Why does the Android manager statically wire into `FirebaseMessagingService`?
+
+FCM delivers messages to a `Service` subclass declared in the manifest, not to a running activity. `ShinyFirebaseService` is that subclass — a manifest-registered service with `<intent-filter android:name="com.google.firebase.MESSAGING_EVENT" />` baked in.
+
+But FCM instantiates the service itself, with no access to DI. So `ShinyFirebaseService` exposes two static `Action<>` slots:
+
+```csharp
+internal static Action<RemoteMessage>? MessageReceived { get; set; }
+internal static Action<string>? NewToken { get; set; }
+```
+
+The `PushManager` assigns these during `DoInit()`. When FCM wakes the service and `OnMessageReceived` fires, the static action routes the message into the manager's scope, which then runs the `IPushDelegate` fan-out.
+
+The static hand-off is the only working pattern on Android. FCM's contract is "subclass this `Service` and override these methods" — there's no DI hook. The two-static pattern keeps the boundary thin: the `Service` knows nothing about Shiny, and the manager doesn't need a separate hook for the service lifecycle.
+
+## Why does the Windows manager treat WNS channels as the source of truth?
+
+`PushNotificationChannel.Uri` *is* the registration token on Windows. There is no Firebase-style "request a token then refresh later" flow — the channel object owns the URI, and the OS may rotate it. `RequestAccess()` calls `CreatePushNotificationChannelForApplicationAsync()` (which prompts the OS for the channel), wires `PushNotificationReceived`, persists the URI to the store, and runs `OnNewToken`. `UnRegister` closes the channel and clears the URI.
+
+A WNS push arrives as one of four notification types (`Toast`, `Tile`, `Badge`, `Raw`) — each carries different content. The handler stuffs the type plus the raw content into the `PushNotification.Data` dictionary so your delegate can branch on `data["type"]`. There's no provider abstraction for this — WNS payload shapes are platform-specific in a way APNs/FCM data dictionaries are not.
+
+## Why does the Blazor manager round-trip through a Service Worker?
+
+Web Push requires a Service Worker because pushes can arrive while the tab is closed and only the Service Worker has the lifecycle to receive them. The Shiny package ships two JS files:
+
+- `push.js` — runs in the page. Owns `Notification.requestPermission()`, `serviceWorker.register()`, and `pushManager.subscribe()`. Holds a `DotNetObjectReference<PushManager>` so it can call back into C#.
+- `push-sw.js` — runs in the Service Worker. Listens for `push` and `notificationclick` events. When one fires, it `postMessage`s the page (or any controlled client) with the data; `push.js` translates that into a JSInvokable call.
+
+Round-trip:
+
+```
+APNs/FCM/Web Push backend
+        │
+        ▼
+Browser push service (Mozilla autopush / Apple APNs bridge / Google FCM bridge)
+        │
+        ▼
+Service Worker (push-sw.js)  ──► postMessage to controlled client
+                                       │
+                                       ▼
+                              push.js handleServiceWorkerMessage
+                                       │
+                                       ▼
+                              dotNetRef.invokeMethodAsync(
+                                "OnPushReceived" |
+                                "OnNotificationClicked" |
+                                "OnSubscriptionChanged"
+                              )
+                                       │
+                                       ▼
+                              PushManager runs IPushDelegate
+```
+
+`OnSubscriptionChanged` is the Web Push equivalent of FCM token refresh — the browser silently rotates the subscription. The Service Worker captures it, the page is notified, and the C# layer fires `OnNewToken` with the new value. Same model as Android, different transport.
+
+## Why is permission asked from inside `RequestAccess`?
+
+Each platform's permission API has a different shape:
+
+- iOS / macOS — `UNUserNotificationCenter.RequestAuthorizationAsync(UNAuthorizationOptions)` returns `(bool granted, NSError error)`.
+- Android 13+ — `POST_NOTIFICATIONS` runtime permission via `IPlatform.RequestAccess(Manifest.Permission.PostNotifications)`. Pre-13: always granted.
+- Windows — implicit; the OS prompts on `CreatePushNotificationChannelForApplicationAsync()`. There is no separate permission API.
+- Blazor — `Notification.requestPermission()` in JS.
+
+`RequestAccess` rolls all four into one promise that returns `PushAccessState(AccessState, registrationToken?)`. If permission is denied at the OS level, you get `PushAccessState.Denied` (a cached static). If permission is granted, the manager continues into native-token acquisition + provider registration + storage + delegate fan-out — and the same `PushAccessState` is returned with the registration token populated.
+
+`GetCurrentAccess` is the read-only counterpart: it returns the current OS permission state without prompting and without touching the channel. Use it during app launch to decide whether you can auto-call `RequestAccess` silently or need to show onboarding UI first.
+
+## Why does the iOS manager auto-restart push during `Start()`?
+
+```csharp
+public void Start()
+{
+    if (this.RegistrationToken.IsEmpty())
+        return;
+
+    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+    this.RequestAccess(cts.Token).ContinueWith(...);
+}
+```
+
+The APNs device token can change across launches — iOS may issue a new one after an OS upgrade, a backup restore, or after the user reinstalls the app. If your app once held a registration, Shiny tries to re-acquire on every launch so a rotated token gets forwarded to your backend via `OnNewToken` immediately.
+
+There's a 10-second timeout because `RegisterForRemoteNotifications` can hang if the app delegate hooks aren't wired (see the FAQ). Failing fast and logging beats hanging silently.
+
+Android applies the same idea but inverted: `ShinyFirebaseService.OnNewToken` fires from FCM whenever the token rotates, the manager re-registers with the provider, and `IPushDelegate.OnNewToken` runs. No polling required.
+
+## Why is `IKeyValueStore` the persistence layer?
+
+Three reasons:
+
+1. **Survives app restart.** Tokens cost the OS work to issue — iOS rate-limits them, Azure Notification Hubs charges per install — so caching the value across cold starts matters.
+2. **Already wired everywhere.** `IKeyValueStore` ships with `Shiny.Core` and is the same store the rest of Shiny uses for cross-launch state. No need for a push-specific persistence layer.
+3. **Survives DI scope changes.** A delegate can wake from a Notification Service Extension, a Firebase service, or a Service Worker — none of which share scope with the app process. Persisting through the store means the next process to read `RegistrationToken` sees the right value regardless of which subprocess wrote it.
+
+The four persisted keys are intentional:
+
+| Component | Key | Lifetime |
+|---|---|---|
+| Platform `PushManager` | `Shiny.Push.PushManager.RegistrationToken` | Cleared on `UnRegister` |
+| Platform `PushManager` | `Shiny.Push.PushManager.NativeRegistrationToken` | Cleared on `UnRegister` |
+| Azure Notification Hubs | `Shiny.Push.AzureNotificationHubsPushProvider.InstallationId` | Cleared on provider `UnRegister` |
+| Azure Notification Hubs | `Shiny.Push.AzureNotificationHubsPushProvider.RegisteredTags` | Cleared on provider `UnRegister` / `ClearTags` |
+
+## Why are platform-specific notification subclasses used?
+
+`PushNotification` is the cross-platform payload — `Data` dictionary plus optional `Notification(title, body)`. But each platform delivers significantly more native context:
+
+- `AndroidPushNotification` exposes the raw `RemoteMessage` and offers `CreateBuilder()` / `Notify()` / `SendDefault()` so you can build an Android `NotificationCompat.Builder` from the incoming payload without re-parsing it.
+- `ApplePushNotification` exposes the raw APNs `NSDictionary` so you can read fields the data dictionary doesn't preserve (categories, mutable-content, custom keys with nested objects).
+
+The base `PushNotification` covers the common case (read `Data["foo"]`). The subclass lets you reach the native payload when you need to — same instance, downcast inside `OnReceived`. No second event channel, no parallel API surface.
+
+Apple ships a second optional contract — `IApplePushDelegate` — that the iOS / macOS manager looks for on every registered delegate:
+
+```csharp
+public interface IApplePushDelegate
+{
+    UNNotificationPresentationOptions? GetPresentationOptions(PushNotification notification);
+    UIBackgroundFetchResult? GetFetchResult(PushNotification notification);
+}
+```
+
+When the OS asks "should I show this push as a banner / sound / list?" or "what fetch result do you want to report?", iOS-specific logic answers via the same delegate class. Returning `null` means "use the Shiny default" (banner + list for presentation, `NewData` for fetch).
+
+## Why does the Android manager handle activity intents instead of just FCM?
+
+FCM delivers two distinct event categories:
+
+1. **Notification messages** — Firebase displays the notification itself in the system tray (when the app is backgrounded). Tapping it launches your activity with an intent carrying the data payload as `Bundle` extras.
+2. **Data messages** — Firebase delivers the payload to `ShinyFirebaseService.OnMessageReceived` directly, app foregrounded or backgrounded.
+
+The first path is why `PushManager` implements `IOnActivityOnCreate` and `IOnActivityNewIntent`. When the user taps a Firebase-displayed notification, the activity launches with an intent whose action matches `ShinyPushIntents.NotificationClickAction` (or your configured `FirebaseConfig.IntentAction`). The manager walks the `Extras` bundle, builds a `PushNotification`, and fires `OnEntry`.
+
+This is why your `MainActivity` needs the `[IntentFilter]` declaration in the getting-started guide. Without it, the intent never reaches your activity and `OnEntry` never fires from Firebase-displayed notifications.
+
+## Why is delegate dispatch via `RunDelegates<IPushDelegate>`?
+
+Pushes can arrive before the first MAUI page exists — before any scope you'd create at request time. `RunDelegates<IPushDelegate>(services, callback, logger)` resolves *every* registered `IPushDelegate` from the root provider and invokes the callback against each one inside a try/catch.
+
+Three properties this gives you:
+
+1. **Multiple delegates compose.** Register more than one `AddPush<T>` and all of them fire on every event. Useful for split responsibilities (analytics delegate + business-logic delegate + Apple-specific presentation delegate).
+2. **One failing delegate doesn't kill the others.** Exceptions are logged via `ILogger<PushManager>` and the next delegate runs.
+3. **No scope leak.** Singletons are resolved from the root, the callback completes, and there is no per-event `IServiceScope` to clean up.
+
+The trade-off is that delegates are *singletons*. If you need scoped state (a fresh `DbContext` per push), open the scope inside the delegate method explicitly.
+
+## What `Shiny.Push` deliberately does not do
+
+| Not built in | Why |
+|---|---|
+| Send-side APIs | Sending pushes is a server concern. The client library acquires tokens and dispatches events. |
+| Per-platform send abstractions | The four cloud APIs (APNs HTTP/2, FCM v1, WNS XML, Web Push) are not even slightly unifiable on the wire. Use Azure Notification Hubs, OneSignal, or a custom backend. |
+| Notification scheduling | That is [Local Notifications](/notifications/). Push notifications come from your server. |
+| Reliable delivery / queueing | None of APNs / FCM / WNS / Web Push are reliable transports — they all "best-effort". For at-least-once delivery, use [HTTP Transfers](/httptransfers/) for the data and Push for the wake signal. |
+| Linux push | There is no consumer-facing OS push channel on Linux desktops. The library throws `NotSupported` rather than pretending. |
+
+## When **not** to use `Shiny.Push`
+
+- **You want to send pushes from your app to another device.** Push notifications are server-driven — APNs / FCM / WNS will only accept them from authenticated server endpoints, not from a client app. Build a server that accepts your client's request and forwards it.
+- **You want to wake your own app on a wall-clock schedule.** Push needs a server somewhere. For device-local wake-ups use [Local Notifications](/notifications/) (user-visible) or [Jobs](/jobs/) (background work under OS constraints).
+- **You need at-least-once delivery.** APNs, FCM, WNS and Web Push are best-effort. If a device is offline, the platform retains the message for a TTL and drops it. Use the push as a wake signal that triggers a [Job](/jobs/) or [HTTP Transfer](/httptransfers/) to pull the durable payload.
+- **You're on Linux.** No push channel exists there.
+
+If your work requires *the server* to wake the device and route a message to your app — that is what this library is for.
