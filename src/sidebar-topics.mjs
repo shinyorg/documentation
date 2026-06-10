@@ -455,6 +455,7 @@ export const sidebarTopics = [
               { label: 'PostgreSQL', link: 'documentdb/postgresql' },
               { label: 'SQL Server', link: 'documentdb/sqlserver' },
               { label: 'MySQL', link: 'documentdb/mysql' },
+              { label: 'Oracle', link: 'documentdb/oracle' },
               { label: 'DuckDB', link: 'documentdb/duckdb' },
               { label: 'Azure Cosmos DB', link: 'documentdb/cosmosdb' },
               { label: 'MongoDB', link: 'documentdb/mongodb' },

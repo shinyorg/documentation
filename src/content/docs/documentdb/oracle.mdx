@@ -1,0 +1,143 @@
+---
+title: Oracle
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.Oracle` package provides an Oracle Database-backed document store using [`Oracle.ManagedDataAccess.Core`](https://www.nuget.org/packages/Oracle.ManagedDataAccess.Core) (ODP.NET). Documents are stored as `IS JSON`-checked `CLOB` columns with full LINQ-to-SQL translation and function-based JSON indexes.
+
+<NugetBadge name="Shiny.DocumentDb.Oracle" showLabel={true} />
+
+:::note
+Requires **Oracle Database 23ai or later** — the provider relies on multi-row `INSERT ... VALUES`, `CREATE INDEX IF NOT EXISTS`, the `JSON()` constructor, and SQL `BOOLEAN` literals, all introduced in 23ai. The free [`gvenzl/oracle-free`](https://hub.docker.com/r/gvenzl/oracle-free) container images (including arm64) work out of the box.
+:::
+
+## When to Use
+
+- Existing Oracle estate on 23ai+
+- ASP.NET / server workloads using Oracle as primary storage
+- Full feature parity with the other SQL providers (except spatial, vector, native change feeds, and `Backup()`)
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.Oracle
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.Oracle;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new OracleDatabaseProvider(
+           "User Id=myuser;Password=pass;Data Source=localhost:1521/FREEPDB1")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new OracleDatabaseProvider(
+           "User Id=myuser;Password=pass;Data Source=localhost:1521/FREEPDB1");
+   });
+   ```
+</Steps>
+
+## Storage Layout
+
+```sql
+CREATE TABLE "documents" (
+    Id        VARCHAR2(255) NOT NULL,
+    TypeName  VARCHAR2(255) NOT NULL,
+    Data      CLOB CHECK (Data IS JSON),
+    CreatedAt TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    UpdatedAt TIMESTAMP(6) WITH TIME ZONE NOT NULL,
+    CONSTRAINT pk_documents PRIMARY KEY (Id, TypeName)
+);
+```
+
+The `Data` column is a `CLOB` with an `IS JSON` check constraint. Property access translates to `JSON_VALUE(Data, '$.path')` (with `RETURNING NUMBER` for numeric comparisons).
+
+## Dialect Adaptation
+
+The core library authors SQL with `@name` placeholders and name-bound parameters — conventions Oracle does not accept. The provider wraps every connection in a dialect adapter that rewrites commands just before execution:
+
+- `@name` placeholders become `:name`
+- parameters bind **by name** (ODP.NET defaults to positional binding)
+- trailing semicolons are stripped (illegal in plain SQL through ODP.NET; preserved for PL/SQL blocks)
+- `FROM`-less `SELECT CASE ...` expressions gain `FROM DUAL`
+- strings past the `VARCHAR2` bind limit are bound as `CLOB`
+
+This is invisible in normal use — it only matters when reading the `Logging` callback output, which shows the pre-rewrite SQL.
+
+## Upsert (RFC 7396 Deep Merge)
+
+Oracle exposes the native `JSON_MERGEPATCH` function, so `Upsert` runs entirely server-side with true RFC 7396 deep merge semantics:
+
+```sql
+MERGE INTO "documents" t
+USING (SELECT :id AS Id, :typeName AS TypeName FROM DUAL) src
+ON (t.Id = src.Id AND t.TypeName = src.TypeName)
+WHEN MATCHED THEN
+    UPDATE SET t.Data = JSON_MERGEPATCH(t.Data, :data RETURNING CLOB), t.UpdatedAt = :now
+WHEN NOT MATCHED THEN
+    INSERT (Id, TypeName, Data, CreatedAt, UpdatedAt)
+    VALUES (:id, :typeName, :data, :now, :now);
+```
+
+Null properties are stripped recursively before sending — unset nullable C# properties do not accidentally delete stored fields.
+
+## SetProperty / RemoveProperty
+
+Oracle's `JSON_TRANSFORM` only accepts **literal** path expressions — it cannot take the path as a bind variable. The provider creates two small PL/SQL helper functions alongside each table (`shiny_json_set`, `shiny_json_remove`) that inline the path into a dynamic `JSON_TRANSFORM` statement:
+
+```sql
+UPDATE "documents"
+SET Data = shiny_json_set(Data, :path, :value), UpdatedAt = :now
+WHERE Id = :id AND TypeName = :typeName;
+```
+
+Function creation is automatic and idempotent (`CREATE OR REPLACE`); the connecting user needs `CREATE PROCEDURE` privilege.
+
+## Indexes
+
+`CreateIndexAsync<T>(x => x.Prop)` emits a function-based index on the extracted property. Index names are quoted to preserve the library's lowercase naming (unquoted Oracle identifiers fold to uppercase, which would break index discovery):
+
+```sql
+CREATE INDEX "idx_json_User_name" ON "documents" (JSON_VALUE(Data, '$.name'));
+```
+
+Composite indexes emit one `JSON_VALUE` expression per path in a single index. Oracle has no partial-index equivalent, so the index spans all rows in the table rather than being filtered by `TypeName`.
+
+## Raw SQL
+
+Write `@name` parameters as with every other SQL provider — the dialect adapter rewrites them to `:name` before execution:
+
+```csharp
+var results = await store.Query<User>(
+    "JSON_VALUE(Data, '$.name') = @name",
+    parameters: new { name = "Alice" });
+```
+
+## Limitations
+
+- **Oracle 23ai or later only** — older versions fail at table creation or batch insert.
+- **No spatial** — `WithinRadius`, `WithinBoundingBox`, `NearestNeighbors` throw `NotSupportedException`. Oracle has native spatial (SDO_GEOMETRY) but the provider does not wrap it.
+- **No vector search** — `NearestVectors` throws `NotSupportedException`. Oracle 23ai has a native `VECTOR` type that the provider does not yet wrap.
+- **No native change feed** — `SubscribeChanges<T>` throws `NotSupportedException`. In-process change monitoring (`NotifyOnChange`) is fully supported.
+- **No `Backup()`** — use RMAN or Data Pump from your operations tooling.
+
+## Notes
+
+- Identifier quoting uses double quotes (`"`); table names are case-preserved.
+- Optimistic concurrency works via `MapVersionProperty` on `DocumentStoreOptions`.
+- Connections are pooled per-operation like the other server SQL providers — a single store instance serves concurrent callers without a semaphore.
+- Multi-tenancy (`TenantIdAccessor`) is fully supported.

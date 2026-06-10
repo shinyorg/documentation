@@ -22,11 +22,11 @@ DocumentDB is a **document store**, not a relational ORM. A few things follow fr
 - **Two types cannot map to the same custom table.** Throws `InvalidOperationException` at registration.
 - **`SetProperty` is scalar-only.** Supported value types: `string`, `int`, `long`, `double`, `float`, `decimal`, `bool`, `null`. To replace a nested object or collection, use `Update` (full replacement) or `Upsert` (merge — see provider note below).
 - **`UnitOfWork` is not thread-safe.** Use one instance per logical operation / request scope.
-- **Streaming methods on shared-connection providers hold the internal semaphore** for the duration of enumeration. Do not interleave other store operations inside the same `await foreach` against SQLite, SQLCipher, or DuckDB stores. Server SQL providers (Postgres / MySQL / SQL Server) open the streaming connection from the driver pool and do not block other callers.
+- **Streaming methods on shared-connection providers hold the internal semaphore** for the duration of enumeration. Do not interleave other store operations inside the same `await foreach` against SQLite, SQLCipher, or DuckDB stores. Server SQL providers (Postgres / MySQL / SQL Server / Oracle) open the streaming connection from the driver pool and do not block other callers.
 
 ## Indexing
 
-- `CreateIndexAsync` only exists on the **concrete SQL `DocumentStore` types** (SQLite, SQLCipher, PostgreSQL, SQL Server, MySQL, DuckDB). It is not on `IDocumentStore`.
+- `CreateIndexAsync` only exists on the **concrete SQL `DocumentStore` types** (SQLite, SQLCipher, PostgreSQL, SQL Server, MySQL, Oracle, DuckDB). It is not on `IDocumentStore`.
 - **No `INCLUDE` columns, no filtered indexes** beyond the automatic `WHERE TypeName = '...'` filter applied by the library.
 - **CosmosDB, MongoDB, LiteDB, IndexedDB** do not expose `CreateIndexAsync`. CosmosDB indexes everything automatically (tune via container indexing policy). MongoDB indexes are managed with native Mongo tooling. LiteDB does not configure indexes. IndexedDB indexes are fixed at object-store creation time (when you bump `Version`).
 
@@ -58,6 +58,7 @@ Full matrix on [Provider Reference](/documentdb/providers/). The most consequent
 | **PostgreSQL** | `Upsert` is **shallow merge only**, not RFC 7396 deep merge. No spatial. No `Backup()`. |
 | **SQL Server** | Same shallow `Upsert`. Requires SQL Server **2025+** / Azure SQL with native `JSON` type. No spatial. No `Backup()`. |
 | **MySQL** | No spatial. No `Backup()`. |
+| **Oracle** | Requires Oracle Database **23ai+**. No spatial. No vector search. No native change feed. No `Backup()`. `SetProperty`/`RemoveProperty` go through PL/SQL helper functions (the connecting user needs `CREATE PROCEDURE`). |
 | **CosmosDB** | No `Backup()`. No `CreateIndexAsync` (tune indexing policy on the container). Cost model is RU-per-operation — full scans over unindexed paths get expensive fast. |
 | **MongoDB** | No raw SQL. No spatial. No `CreateIndexAsync` (manage indexes with native Mongo tooling). Transactions are **compensating** on single-node deployments — only inserts are tracked and rolled back; updates and removes are not. Use a replica set + custom `IClientSessionHandle` for true ACID. |
 | **DuckDB** | Single-process / writer-one (like SQLite). No spatial. No `Backup()` (copy the file directly or use DuckDB `EXPORT DATABASE`). `SetProperty`/`RemoveProperty` go through `json_merge_patch` rather than `json_set`/`json_remove`. |
@@ -67,7 +68,7 @@ Full matrix on [Provider Reference](/documentdb/providers/). The most consequent
 ## Concurrency & transactions
 
 - **SQLite / DuckDB** stores keep a single long-lived connection and serialize every operation through a `SemaphoreSlim` — embedded engines lock the whole database on writes, so multi-flighting buys nothing. Two simultaneous callers queue.
-- **Postgres / MySQL / SQL Server** stores open a fresh `DbConnection` per operation and let the ADO.NET driver pool multiplex callers. A single store instance is safe to share across threads and operations execute concurrently up to the pool size.
+- **Postgres / MySQL / SQL Server / Oracle** stores open a fresh `DbConnection` per operation and let the ADO.NET driver pool multiplex callers. A single store instance is safe to share across threads and operations execute concurrently up to the pool size.
 - **LiteDB** is single-process: opening the same file from two processes fails.
 - **IndexedDB** is effectively single-tab — multi-tab writes can interleave non-deterministically.
 - **CosmosDB / MongoDB** use their respective documented thread-safe clients (`CosmosClient`, `IMongoClient`) and pool internally.
@@ -88,6 +89,7 @@ There is no built-in cap on document size, but each provider has practical limit
 | PostgreSQL `JSONB` | 255 MB (toasted) |
 | SQL Server `JSON` | 2 GB (`max` size) |
 | MySQL `JSON` | 1 GB |
+| Oracle `CLOB` | Effectively unbounded (terabyte-class LOB limits) |
 | DuckDB `JSON` | Practically bounded by available memory during reads (vectorized engine) |
 | CosmosDB | 2 MB per document — **the hard one to plan around** |
 | MongoDB BSON | 16 MB per document — hard server limit |
