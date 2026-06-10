@@ -168,7 +168,7 @@ const MauiProgram = (props: Props) => {
   }
   if (has('di')) {
     src += `
-      builder.Services.AddShinyServiceRegistry();`;
+      builder.Services.AddGeneratedServices();`;
   }
   if (has('mauihost')) {
     src += `

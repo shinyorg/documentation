@@ -66,7 +66,7 @@ public static class MauiProgram
   }
   if (has('di')) {
     src += `
-        builder.Services.AddShinyServiceRegistry();`;
+        builder.Services.AddGeneratedServices();`;
   }
   // Reflector is attribute-based only
 

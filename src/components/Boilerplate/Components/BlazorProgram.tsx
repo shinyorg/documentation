@@ -99,7 +99,7 @@ public class Program
   }
   if (has('di')) {
     src += `
-        builder.Services.AddShinyServiceRegistry();`;
+        builder.Services.AddGeneratedServices();`;
   }
   if (has('ble')) {
     src += `

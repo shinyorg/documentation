@@ -133,21 +133,41 @@ For multi-select:
 
 ## Drag & Drop Reorder
 
+Drag/drop runs on **native HTML5 drag events** registered by a small JS module that loads automatically when `EnableDragDrop="true"` — not Blazor's synthetic events, which can't call `dataTransfer.setData()` and therefore break Safari and Firefox.
+
+`ItemDropped` receives `TreeItemDroppedEventArgs<TItem>` with `SourceItem`, `TargetItem`, and `Position` (`BlazorTreeDropPosition.Above` / `Below` to reorder among siblings, `Into` to move into a folder). Rows show drop indicators while dragging: a horizontal line for above/below, a highlight for into.
+
 ```razor
 <TreeView TItem="FileNode"
+          @ref="tree"
           EnableDragDrop="true"
           ItemDropped="OnDropped"
           ItemsSource="rootItems"
           ChildrenSelector="@(n => n.Children)" />
 
 @code {
-    void OnDropped(TreeItemDroppedEventArgs<FileNode> e)
+    TreeView<FileNode>? tree;
+
+    async Task OnDropped(TreeItemDroppedEventArgs<FileNode> e)
     {
         var srcList = FindParentList(e.SourceItem);
-        var tgtList = FindParentList(e.TargetItem);
-        srcList.Remove(e.SourceItem);
-        tgtList.Insert(tgtList.IndexOf(e.TargetItem) + 1, e.SourceItem);
-        StateHasChanged();
+        if (e.Position == BlazorTreeDropPosition.Into)
+        {
+            srcList.Remove(e.SourceItem);
+            e.TargetItem.Children ??= new();
+            e.TargetItem.Children.Add(e.SourceItem);
+        }
+        else
+        {
+            var tgtList = FindParentList(e.TargetItem);
+            srcList.Remove(e.SourceItem);
+            var idx = tgtList.IndexOf(e.TargetItem);
+            tgtList.Insert(e.Position == BlazorTreeDropPosition.Above ? idx : idx + 1, e.SourceItem);
+        }
+
+        await tree!.ReloadAsync();   // rebuilds while preserving expansion/selection
+        if (e.Position == BlazorTreeDropPosition.Into)
+            await tree!.ExpandAsync(e.TargetItem);
     }
 }
 ```
@@ -182,7 +202,8 @@ The Blazor TreeView is focusable (`tabindex="0"`) and supports:
 | `ChevronSize` | `double` | `14` | Pixels |
 | `ChevronColor` | `string` | `"#666"` | CSS color used for glyph fallbacks |
 | `ShowGuideLines` | `bool` | `false` | Vertical connector lines |
-| `EnableDragDrop` | `bool` | `false` | Enables HTML5 drag/drop with `ItemDropped` event |
+| `EnableDragDrop` | `bool` | `false` | Enables native HTML5 drag/drop (via JS interop) with the `ItemDropped` event |
+| `ItemDropped` | `EventCallback<TreeItemDroppedEventArgs<TItem>>` | — | Fires after a drop with `SourceItem` / `TargetItem` / `Position` |
 | `CssClass` | `string?` | — | Extra class added to the root `<div>` |
 
 ## Public Methods
@@ -193,5 +214,6 @@ await tree.CollapseAsync(item);
 await tree.ExpandAllAsync();
 tree.CollapseAll();
 await tree.RefreshAsync(item);   // drops cache for this node
-await tree.ReloadAsync();        // re-runs RootLoader or rebinds ItemsSource
+await tree.ReloadAsync();        // rebuilds from data, preserving expansion/selection for items that still exist
+var node = tree.FindNode(item);  // locate the wrapper node for any source item
 ```

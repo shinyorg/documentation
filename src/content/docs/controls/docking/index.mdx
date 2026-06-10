@@ -38,11 +38,11 @@ var builder = MauiApp.CreateBuilder();
 builder
     .UseMauiApp<App>()
     .UseShinyDocking()
-    .AddDockPanel<SolutionExplorerPanel>("solution-explorer")
+    .AddDockPanel<SolutionExplorerPanel>("solution-explorer", displayName: "Explorer", icon: "📁")
     .AddDockPanel<OutputPanel>("output");
 ```
 
-Each `AddDockPanel<TView>("id")` call registers `TView` as a transient service and an `IDockableContentFactory` keyed to your stable string ID. Persisted layouts reference panels by that ID, so you can rename the C# class without breaking saved layouts.
+Each `AddDockPanel<TView>("id")` call registers `TView` as a transient service and an `IDockableContentFactory` keyed to your stable string ID. Persisted layouts reference panels by that ID, so you can rename the C# class without breaking saved layouts. The optional `displayName` sets the tab title (defaults to the panel ID) and `icon` sets an emoji / unicode glyph shown on tabs and collapsed edge bars; a panel that implements `IDockableContent` overrides both per-instance.
 
 Attach the host inside any existing `ContentPage` — `DockHostView` is a `ContentView`, not a `ContentPage` subclass. You keep full control of your Shell / page architecture:
 
@@ -51,9 +51,14 @@ Attach the host inside any existing `ContentPage` — `DockHostView` is a `Conte
              xmlns:docking="clr-namespace:Shiny.Maui.Controls.Desktop.Docking;assembly=Shiny.Maui.Controls.Desktop"
              x:Class="MyApp.DockingShellPage"
              Title="IDE">
-    <docking:DockHostView InitialLayout="{Binding StartupLayout}" />
+    <docking:DockHostView x:Name="Dock"
+                          InitialLayout="{Binding StartupLayout}"
+                          LayoutStore="{Binding LayoutStore}"
+                          IsLocked="{Binding IsLayoutLocked}" />
 </ContentPage>
 ```
+
+`DockHostView` implements `IDockHost` directly — call `Dock.ShowPanelAsync(...)` / `Dock.ResetLayoutAsync()` and subscribe to `Dock.Events` from code-behind. Bindable properties: `InitialLayout` (`DockRoot?` — the layout built when no persisted layout loads), `LayoutStore` (`IDockLayoutStore?` — loaded at startup, auto-saved with debouncing on every layout change), and `IsLocked` (`bool`).
 
 A dockable panel is just a regular `View`:
 
@@ -84,7 +89,7 @@ using Shiny.Blazor.Controls.Kiosk.Docking;
 
 builder.Services
     .AddShinyDocking()
-    .AddDockPanel<SolutionExplorerPanel>("solution-explorer")
+    .AddDockPanel<SolutionExplorerPanel>("solution-explorer", displayName: "Explorer", icon: "📁")
     .AddDockPanel<OutputPanel>("output");
 ```
 
@@ -97,10 +102,41 @@ builder.Services
 Any razor page:
 
 ```razor
-<DockHost />
+<DockHost @ref="host"
+          InitialLayout="@layout"
+          LayoutStore="@layoutStore"
+          IsLocked="@locked" />
 ```
 
+Component parameters: `InitialLayout` (`DockRoot?`), `IsLocked` (`bool`), `LayoutStore` (`IDockLayoutStore?` — loaded at startup, auto-saved with debouncing), and `BackgroundColor` (CSS color override). The component implements `IDockHost` — capture it with `@ref` to call `ShowPanelAsync` / `ResetLayoutAsync` / `Snapshot` and subscribe to `Events` (e.g. in `OnAfterRender`).
+
 Each panel is a regular Razor component. Blazor docking supports in-app floating; popping panels out into separate browser windows is not supported (Blazor runtime instances cannot share component instances across windows).
+
+### Defining an initial layout
+
+```csharp
+readonly DockRoot layout = new()
+{
+    MainWindow = new DockWindowState
+    {
+        LeftRail = new DockGroup { Tabs = { new DockTab { PanelTypeId = "solution-explorer" } } },
+        DocumentArea = new DockSplit
+        {
+            Orientation = DockOrientation.Vertical,
+            Ratio = 0.7,
+            First = new DockGroup
+            {
+                Tabs =
+                {
+                    new DockTab { PanelTypeId = "editor" },
+                    new DockTab { PanelTypeId = "readme" }
+                }
+            },
+            Second = new DockGroup { Tabs = { new DockTab { PanelTypeId = "output" } } }
+        }
+    }
+};
+```
 
 ## Layout Schema
 
@@ -117,14 +153,18 @@ DockWindowState
 ├── bool IsMaximized + bool IsFullScreen
 ├── DockNode DocumentArea                         (structurally distinct document well)
 ├── DockNode? LeftRail + TopRail + RightRail + BottomRail
+├── double? LeftRailSize + TopRailSize + RightRailSize + BottomRailSize
+├── List<DockArea> CollapsedRails                 (legacy whole-rail collapse — converted to per-panel on load)
+├── List<DockCollapsedPanel> CollapsedTabs        (per-panel edge-bar collapse: which panel, which edge)
 └── string? ActivePanelId                         (for focus restoration on load)
 
 DockNode = DockSplit | DockGroup | DockEmpty       (polymorphic, $kind discriminator)
 DockSplit  { Orientation, Ratio (0..1), First, Second }
-DockGroup  { GroupId, List<DockTab> Tabs, int ActiveTabIndex, List<int> FocusHistory (MRU) }
+DockGroup  { GroupId, List<DockTab> Tabs, int ActiveTabIndex, List<int> FocusHistory (MRU), bool IsCollapsed }
 DockEmpty  { }
 
-DockTab    { PanelTypeId, PanelInstanceId, bool IsPinned }
+DockTab            { PanelTypeId, PanelInstanceId, bool IsPinned }
+DockCollapsedPanel { DockArea Area, DockTab Tab }
 ```
 
 Schema versioning is built in from day one: bump `SchemaVersion`, register an `IDockLayoutMigrator` for each step, and stored layouts migrate forward as your app upgrades. Unknown `PanelTypeId`s on load land in a **missing-panels tray** rather than silently dropping — so a removed feature gracefully degrades instead of corrupting the layout.
@@ -149,6 +189,7 @@ public interface IDockHost
     Task HidePanelAsync(string panelInstanceId, CancellationToken ct = default);
     Task ActivatePanelAsync(string panelInstanceId, CancellationToken ct = default);
     Task ResetLayoutAsync(CancellationToken ct = default);
+    Task SetRailCollapsedAsync(DockArea area, bool collapsed, CancellationToken ct = default);
 }
 ```
 
@@ -160,6 +201,8 @@ Registered by `AddDockPanel<T>("id")` — resolves the stable string ID to a `Vi
 public interface IDockableContentFactory
 {
     string PanelTypeId { get; }
+    string DisplayName => PanelTypeId;     // tab title (default interface member)
+    string? Icon => null;                  // optional emoji / unicode glyph
     Task<View> CreateAsync(string instanceId, CancellationToken ct = default);
 }
 ```
@@ -186,7 +229,7 @@ public interface IDockableContent
 
 ### `IDockLayoutStore` (bring-your-own)
 
-Persistence is consumer-supplied — no default implementation ships. Two minimal patterns:
+Persistence is consumer-supplied — no default implementation ships. Hand your store to the host (`LayoutStore` bindable property on `DockHostView`, `LayoutStore` parameter on `<DockHost>`): it loads at startup (falling back to `InitialLayout` when the store returns `null`) and auto-saves every layout change, debounced by `SaveDebounceMs`. Two minimal patterns:
 
 ```csharp
 // File-backed
@@ -258,6 +301,21 @@ public interface IDockCommandScope
     string? ActivePanelInstanceId { get; }
 }
 ```
+
+## Interactions
+
+Everything below ships working end-to-end on both hosts:
+
+- **Tab drag** — drop on another group's center to merge, on a group edge (left/right/top/bottom) to split, within the tab strip to reorder, or outside the host to tear off a floating window. Drop zones render as a colored overlay while dragging.
+- **Floating windows** — independent dockable windows with their own bounds, persisted in `DockRoot.FloatingWindows`. Move via the header, resize via the corner grip, re-dock with the ⇤ button, close with ×.
+- **Splitters** — drag to resize; `DockSplit.Ratio` persists and is clamped to 0.08–0.92 so neither side can vanish.
+- **Per-panel collapse** — collapse a tab to a slim edge bar (icon + rotated title); click to restore. `SetRailCollapsedAsync(area, collapsed)` collapses or restores a whole rail at once. Collapsed state persists via `CollapsedTabs`.
+- **Locked mode** — `IsLocked = true` disables drag, resize, collapse, and close; switching between existing tabs still works. Ideal for kiosk and demo scenarios.
+- **Events** — wire `host.Events.LayoutChanged / PanelActivated / DragStarted / DragCompleted / DragCancelled` for telemetry, autosave hooks, or undo stacks.
+
+## Panel lifecycle
+
+Every tab in the layout has a unique `PanelInstanceId` (GUID). The host creates content once per instance via the factory and keeps the same view/component instance alive as it moves between groups, rails, and floating windows.
 
 ## Disposal contract
 

@@ -56,7 +56,7 @@ builder.Services.AddDocumentStore(opts =>
   }
   if (has('di')) {
     src += `
-builder.Services.AddShinyServiceRegistry();`;
+builder.Services.AddGeneratedServices();`;
   }
   if (has('webhost')) {
     src += `
