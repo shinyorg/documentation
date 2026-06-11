@@ -659,7 +659,7 @@ export const sidebarTopics = [
   },
   {
     label: 'Blazor Playgrounds',
-    link: '/playground/',
+    link: '/playground/index.html',
     icon: 'laptop',
     items: [
       { label: 'AI Conversation + Speech', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
