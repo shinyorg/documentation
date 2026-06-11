@@ -31,6 +31,62 @@ Designate a different property as the Id with `MapIdProperty<T>(x => x.MyPropert
 
 When `Insert` is called with a default Id, the store auto-generates one for `Guid`, `int`, and `long` types and writes it back to the object. For `string` Ids, a default value throws an `InvalidOperationException` — you must always supply an explicit Id. When a non-default Id is provided, it is used as-is.
 
+### Custom Id types
+
+To use an Id type beyond the four built-ins — a `Ulid`, or a strongly-typed wrapper such as `record struct OrderId(Guid Value)` — register a converter with `MapIdType` on the store options. The Id is still stored as a string in every provider, so there is no schema or on-disk change; the converter just defines how that string round-trips.
+
+```csharp
+public readonly record struct OrderId(Guid Value)
+{
+    public static OrderId New() => new(Guid.NewGuid());
+}
+
+// Inline delegates:
+options.MapIdType(
+    toString:  (OrderId id) => id.Value.ToString("N"),
+    parse:     s => new OrderId(Guid.ParseExact(s, "N")),
+    isDefault: id => id.Value == Guid.Empty,   // when to auto-generate on Insert
+    generate:  OrderId.New);                   // optional; omit to require explicit Ids
+
+// …or a reusable class deriving from DocumentIdConverter<TId>:
+public sealed class OrderIdConverter : DocumentIdConverter<OrderId>
+{
+    public override string  ToStorageString(OrderId id) => id.Value.ToString("N");
+    public override OrderId FromStorageString(string s)  => new(Guid.ParseExact(s, "N"));
+    public override bool    IsDefault(OrderId id) => id.Value == Guid.Empty;
+    public override bool    TryGenerate(out OrderId id) { id = OrderId.New(); return true; }
+}
+options.MapIdType(new OrderIdConverter());
+```
+
+```csharp
+public class Order
+{
+    public OrderId Id { get; set; }      // default-named "Id" — no MapIdProperty needed
+    public string Customer { get; set; } = "";
+}
+
+var order = new Order { Customer = "Alice" };
+await store.Insert(order);                       // Id auto-generated via TryGenerate/generate
+var fetched = await store.Get<Order>(order.Id);  // Get/Update/Remove accept the typed Id
+```
+
+`MapIdType` is available on every provider's options class. The built-in `Guid`/`int`/`long`/`string` types need no registration and are unchanged.
+
+:::caution[Two places the Id lives]
+A document Id is stored in both the provider's `Id` column/field **and** inside the serialized JSON `Data` blob. `MapIdType` controls the column/field; the JSON form is produced by `System.Text.Json`. Give a custom Id type a matching `JsonConverter` so both render the same string — otherwise LINQ predicates on the Id (`Where(x => x.Id == value)`, which compare against the JSON) won't line up.
+:::
+
+### Sortable (version 7) Guid Ids
+
+For time-ordered, append-friendly Guid Ids, call `UseGuidV7Ids()` to auto-generate **version 7** GUIDs (`Guid.CreateVersion7()`) instead of the default random version 4. No extra dependency — it's BCL — and the storage format is unchanged, so it is a drop-in for existing Guid-keyed data (only newly generated Ids differ).
+
+```csharp
+options.UseGuidV7Ids();   // every `Guid Id` now auto-generates a sortable v7 GUID
+```
+
+If you only want a non-Guid integral key, note `long` is already a built-in Id type (auto-generated as `MAX(id) + 1` per type).
+
 ## Insert a document
 
 ```csharp
