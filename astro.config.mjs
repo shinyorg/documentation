@@ -353,15 +353,8 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'mauishell-60',
-              content: 'Shiny.Maui.Shell v6 support for AI routing tools',
-              variant: 'tip',
-              link: { text: 'Learn More', href: '/mauishell/ai/' },
-              dismissable: false
-            },
-            {
-              id: 'mediator64-1',
-              content: 'Mediator 6.4: AI Tool Generation!',
+              id: 'mediator66-1',
+              content: 'Mediator 6.6: AI Tool Generation and More AOT generation',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
               dismissable: false
@@ -378,13 +371,6 @@ export default defineConfig({
               content : 'Controls: Haptic Feedback Anywhere, TableView, Scheduler, ChatView, ImageEditor, and more for MAUI & Blazor!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/controls/' },
-              dismissable: false
-            },
-            {
-              id: 'health-1',
-              content: 'Shiny.Health v1: Cross-platform /w Read, Write, & Monitor for steps, heart rate, sleep, and more.',
-              variant: 'tip',
-              link: { text: 'Learn More', href: '/health/' },
               dismissable: false
             },
             {
