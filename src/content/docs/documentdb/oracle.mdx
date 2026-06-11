@@ -16,7 +16,8 @@ Requires **Oracle Database 23ai or later** — the provider relies on multi-row 
 
 - Existing Oracle estate on 23ai+
 - ASP.NET / server workloads using Oracle as primary storage
-- Full feature parity with the other SQL providers (except spatial, vector, native change feeds, and `Backup()`)
+- Full feature parity with the other SQL providers (except spatial, native change feeds, and `Backup()`)
+- Vector / ANN search via Oracle 23ai's native AI Vector Search
 
 ## Installation
 
@@ -127,11 +128,61 @@ var results = await store.Query<User>(
     parameters: new { name = "Alice" });
 ```
 
+## Vector / ANN Search
+
+Oracle 23ai ships native **AI Vector Search**, and the provider wraps it through the standard [`MapVectorProperty<T>` / `NearestVectors`](/documentdb/vector/) API. Map an embedding property and query the same way as every other vector-capable provider:
+
+```csharp
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = new OracleDatabaseProvider(connectionString)
+}.MapVectorProperty<Document>(
+    d => d.Embedding,
+    dimensions: 1536,
+    metric: VectorDistance.Cosine));
+
+var hits = await store.Query<Document>()
+    .Where(d => d.Tenant == tenantId)
+    .NearestVectors(queryEmbedding, k: 10);
+```
+
+Embeddings live in a per-type sidecar table (`"{table}_vec_{type}"`) with a native `VECTOR(n, FLOAT32)` column:
+
+```sql
+CREATE TABLE "documents_vec_Document" (
+    docId     VARCHAR2(255) NOT NULL,
+    typeName  VARCHAR2(255) NOT NULL,
+    embedding VECTOR(1536, FLOAT32) NOT NULL,
+    CONSTRAINT pk_documents_vec_Document PRIMARY KEY (docId)
+);
+```
+
+Ranking uses `VECTOR_DISTANCE(embedding, TO_VECTOR(@query), <metric>)` with `Cosine`, `Euclidean`, and `DotProduct` supported (`Hamming` throws — it is for binary vectors). `Where(...)` predicates pre-filter via a JOIN back to the documents table.
+
+### Vector indexes
+
+`VectorIndexKind.Hnsw` and `VectorIndexKind.Ivf` emit a `CREATE VECTOR INDEX`:
+
+- **HNSW** → `ORGANIZATION INMEMORY NEIGHBOR GRAPH` (`NEIGHBORS` ← `HnswM`, `EFCONSTRUCTION` ← `HnswEfConstruction`)
+- **IVF** → `ORGANIZATION NEIGHBOR PARTITIONS` (`NEIGHBOR PARTITIONS` ← `IvfLists`)
+
+When an index kind is requested, queries use `FETCH APPROX FIRST k ROWS ONLY` so Oracle can use the index; with `VectorIndexKind.None` (the default) they fall back to an exact `FETCH FIRST k ROWS ONLY`.
+
+:::caution[Vector indexes need a memory pool]
+Oracle's HNSW/IVF vector indexes require the database's vector pool to be configured:
+
+```sql
+ALTER SYSTEM SET vector_memory_size = 1G SCOPE=SPFILE;
+-- then restart the instance
+```
+
+If the pool isn't configured, index creation is **silently skipped** (it's wrapped in an exception handler) and queries fall back to an exact sequential scan — still correct, just unindexed. Exact `VECTOR_DISTANCE` search works out of the box with no configuration, which is why the default mapping uses `VectorIndexKind.None`.
+:::
+
 ## Limitations
 
 - **Oracle 23ai or later only** — older versions fail at table creation or batch insert.
 - **No spatial** — `WithinRadius`, `WithinBoundingBox`, `NearestNeighbors` throw `NotSupportedException`. Oracle has native spatial (SDO_GEOMETRY) but the provider does not wrap it.
-- **No vector search** — `NearestVectors` throws `NotSupportedException`. Oracle 23ai has a native `VECTOR` type that the provider does not yet wrap.
 - **No native change feed** — `SubscribeChanges<T>` throws `NotSupportedException`. In-process change monitoring (`NotifyOnChange`) is fully supported.
 - **No `Backup()`** — use RMAN or Data Pump from your operations tooling.
 

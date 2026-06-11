@@ -2,7 +2,7 @@
 title: Vector / ANN Search
 ---
 
-Vector queries let you find documents by **embedding similarity** — the nearest k documents to a query vector under a configurable distance metric. The library exposes a single `NearestVectors` API that runs on top of each provider's native ANN engine: `pgvector` on PostgreSQL, the `VECTOR` type on SQL Server 2025, DiskANN on CosmosDB, Atlas `$vectorSearch` on MongoDB, the `vss` extension on DuckDB, and `sqlite-vec` on SQLite. LiteDB, IndexedDB, and MySQL throw `NotSupportedException` because they have no comparable engine.
+Vector queries let you find documents by **embedding similarity** — the nearest k documents to a query vector under a configurable distance metric. The library exposes a single `NearestVectors` API that runs on top of each provider's native ANN engine: `pgvector` on PostgreSQL, the `VECTOR` type on SQL Server 2025, the native `VECTOR` type on Oracle 23ai, DiskANN on CosmosDB, Atlas `$vectorSearch` on MongoDB, the `vss` extension on DuckDB, and `sqlite-vec` on SQLite. LiteDB, IndexedDB, and MySQL throw `NotSupportedException` because they have no comparable engine.
 
 The shape mirrors the spatial API: register a property with `MapVectorProperty<T>(...)`, then query with `store.Query<T>().NearestVectors(queryEmbedding, k: 10)`.
 
@@ -44,8 +44,8 @@ public enum VectorIndexKind
 {
     None,            // flat scan
     Flat,            // explicit flat index where the provider distinguishes
-    Hnsw,            // pgvector, DuckDB vss, Atlas — default
-    Ivf,             // pgvector ivfflat
+    Hnsw,            // pgvector, DuckDB vss, Atlas, Oracle 23ai — default
+    Ivf,             // pgvector ivfflat, Oracle 23ai
     DiskAnn,         // SQL Server 2025, CosmosDB
     QuantizedFlat    // CosmosDB
 }
@@ -139,6 +139,7 @@ if (store.SupportsVector)
 |---|---|
 | PostgreSQL (pgvector) | `true` |
 | SQL Server 2025 | `true` |
+| Oracle 23ai (native `VECTOR`) | `true` |
 | DuckDB (vss extension) | `true` |
 | CosmosDB | `true` (when vector properties are mapped) |
 | MongoDB (Atlas Vector Search) | `true` (when vector properties are mapped) |
@@ -180,7 +181,7 @@ var scopedHits = await store.NearestVectors<Document>(
 
 The contract is "matches the `Where` predicates AND is in the top-k nearest". The order of operations is provider-dependent and documented per backend below.
 
-- **CosmosDB, pgvector, SQL Server, Atlas, DuckDB** — pre-filter inside the ANN search. Result count == k unless fewer documents match.
+- **CosmosDB, pgvector, SQL Server, Oracle, Atlas, DuckDB** — pre-filter inside the ANN search. Result count == k unless fewer documents match.
 - **SQLite (sqlite-vec)** — ANN candidates are produced first, then the predicate is applied. The library pulls `k * sqlite.postFilterMultiplier` candidates so the post-filter doesn't starve the result set (default multiplier 4).
 
 ## Auto-embed on Insert
@@ -254,6 +255,15 @@ Unknown keys are silently ignored per provider.
 ### SQL Server 2025 — native `VECTOR(n)`
 
 Sidecar table with a `VECTOR(n)` column. `VECTOR_DISTANCE('cosine' | 'euclidean' | 'dot', col, @v)` powers the ranking, and `CREATE VECTOR INDEX ... WITH (METRIC = ..., TYPE = DISKANN)` is attempted under a `TRY/CATCH` so older SQL Server versions degrade to sequential scan rather than failing table init. Hamming throws.
+
+### Oracle 23ai — native `VECTOR(n, FLOAT32)`
+
+Sidecar table with a native `VECTOR(n, FLOAT32)` column. `VECTOR_DISTANCE(col, TO_VECTOR(@v), COSINE | EUCLIDEAN | DOT)` powers the ranking — Hamming throws (it is for binary vectors). The query vector is bound as a JSON-array string and parsed by `TO_VECTOR`; long embeddings cross the `VARCHAR2` bind limit and are sent as `CLOB`, which `TO_VECTOR` also accepts.
+
+- `VectorIndexKind.Hnsw` → `CREATE VECTOR INDEX ... ORGANIZATION INMEMORY NEIGHBOR GRAPH DISTANCE <metric> PARAMETERS (TYPE HNSW, NEIGHBORS …, EFCONSTRUCTION …)`.
+- `VectorIndexKind.Ivf` → `... ORGANIZATION NEIGHBOR PARTITIONS DISTANCE <metric> PARAMETERS (TYPE IVF, NEIGHBOR PARTITIONS …)`.
+- Index creation is wrapped in a PL/SQL exception handler — Oracle's vector indexes require the `vector_memory_size` pool, so where it isn't configured the index is silently skipped and queries fall back to an exact sequential scan.
+- `FETCH APPROX FIRST k ROWS ONLY` is emitted only when an index kind is requested (so Oracle can use the index); `VectorIndexKind.None` uses an exact `FETCH FIRST k ROWS ONLY`. Pre-filter via the `JOIN` back to the documents table. See [Oracle › Vector](/documentdb/oracle/#vector--ann-search).
 
 ### CosmosDB — embedding policy + `VectorDistance()`
 
