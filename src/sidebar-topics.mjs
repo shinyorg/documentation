@@ -24,6 +24,7 @@ export const sidebarTopics = [
         ]
       },
       { label: 'AI Skills', link: 'foundation/ai-skills' },
+      { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps' },
     ],
   },
   {
@@ -43,7 +44,7 @@ export const sidebarTopics = [
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
           { label: 'Wake Word', link: 'aiconversation/wake-word' },
           { label: 'AI Tools', link: 'aiconversation/ai-tools' },
-          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/aiconversation/', attrs: { target: '_blank' } },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },
       {
@@ -361,6 +362,7 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/fab/blazor' },
         ]
       },
+      { label: 'Toolbar & TabBar (Blazor Only)', link: 'controls/toolbar-tabbar/', jumpTo: true },
       {
         label: 'Mermaid Diagrams',
         jumpTo: true,
@@ -657,16 +659,14 @@ export const sidebarTopics = [
   },
   {
     label: 'Blazor Playgrounds',
-    link: 'https://shinyorg.github.io/shiny/',
+    link: '/playground/',
     icon: 'laptop',
-    attrs: { target: '_blank' },
     items: [
-      { label: 'AI Conversation', link: 'https://shinyorg.github.io/aiconversation/', attrs: { target: '_blank' } },
+      { label: 'AI Conversation + Speech', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
       { label: 'Controls',        link: 'https://shinyorg.github.io/controls/',       attrs: { target: '_blank' } },
       { label: 'DocumentDb',      link: 'https://shinyorg.github.io/DocumentDb/',     attrs: { target: '_blank' } },
       { label: 'Mediator',        link: 'https://shinyorg.github.io/mediator/',       attrs: { target: '_blank' } },
       { label: 'Shiny Core',      link: 'https://shinyorg.github.io/shiny/',          attrs: { target: '_blank' } },
-      { label: 'Speech',          link: 'https://shinyorg.github.io/speech/',         attrs: { target: '_blank' } },
     ],
   }
 ];

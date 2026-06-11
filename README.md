@@ -36,14 +36,14 @@ Each library demo lives in its own sibling repo and deploys to its own GitHub Pa
 
 | Library            | URL                                            | Source repo                                     |
 | :----------------- | :--------------------------------------------- | :---------------------------------------------- |
-| AI Conversation    | https://shinyorg.github.io/aiconversation/     | [shinyorg/aiconversation][r-ai]                 |
+| AI Conversation    | https://shinyorg.github.io/speech/             | [shinyorg/speech][r-ai]                         |
 | Controls           | https://shinyorg.github.io/controls/           | [shinyorg/controls][r-ctl]                      |
 | DocumentDb         | https://shinyorg.github.io/DocumentDb/         | [shinyorg/DocumentDb][r-db]                     |
 | Mediator           | https://shinyorg.github.io/mediator/           | [shinyorg/mediator][r-med]                      |
 | Shiny Core         | https://shinyorg.github.io/shiny/              | [shinyorg/shiny][r-sh]                          |
 | Speech             | https://shinyorg.github.io/speech/             | [shinyorg/speech][r-sp]                         |
 
-[r-ai]: https://github.com/shinyorg/aiconversation/tree/main/samples/Sample.Blazor
+[r-ai]: https://github.com/shinyorg/speech/tree/v2/samples/BlazorSample
 [r-ctl]: https://github.com/shinyorg/controls/tree/main/samples/Sample.Blazor
 [r-db]:  https://github.com/shinyorg/DocumentDb/tree/v6/samples/Sample.Blazor
 [r-med]: https://github.com/shinyorg/mediator/tree/main/samples/Sample.Blazor
