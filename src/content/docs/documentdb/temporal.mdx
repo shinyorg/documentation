@@ -3,7 +3,7 @@ title: Temporal Support
 description: Append-only system-time history for documents — point-in-time reads, audit trails, restore, and version diffing.
 ---
 
-Temporal support records a versioned snapshot of a document on **every** mutation, so you can read its state as it was at any point in time, audit who changed what and when, restore a prior version, and diff between versions. History is **opt-in per type** and append-only: writes go to a `{table}_history` sidecar table alongside the live row.
+Temporal support records a versioned snapshot of a document on **every** mutation, so you can read its state as it was at any point in time, audit who changed what and when, restore a prior version, and diff between versions. History is **opt-in per type** and append-only: writes go to a per-type history sidecar alongside the live data.
 
 It is the system-time ("transaction-time") model — the database records the interval during which each version was the current truth. Enable it with `MapTemporal<T>`:
 
@@ -25,26 +25,33 @@ Every `Insert`, `Update`, `Upsert`, `Remove`, `SetProperty`, `RemoveProperty`, a
 
 ## Provider support
 
-Temporal history is implemented on the relational `DocumentStore` providers:
+Temporal history is implemented on **every** provider — the relational stores and the document/NoSQL stores. Each persists versions to its own sidecar:
 
-| Provider | Temporal |
-|---|---|
-| SQLite | ✅ |
-| SQLCipher | ✅ |
-| PostgreSQL | ✅ |
-| SQL Server | ✅ |
-| MySQL | ✅ |
-| Oracle | ✅ |
-| DuckDB | ✅ |
-| Cosmos DB / MongoDB / LiteDB / IndexedDB | ❌ |
+| Provider | Temporal | History sidecar |
+|---|---|---|
+| SQLite | ✅ | `{table}_history` table |
+| SQLCipher | ✅ | `{table}_history` table |
+| PostgreSQL | ✅ | `{table}_history` table |
+| SQL Server | ✅ | `{table}_history` table |
+| MySQL | ✅ | `{table}_history` table |
+| Oracle | ✅ | `{table}_history` table |
+| DuckDB | ✅ | `{table}_history` table |
+| LiteDB | ✅ | `{collection}_history` collection |
+| MongoDB | ✅ | `{collection}_history` collection |
+| Cosmos DB | ✅ | `{container}_history` container (partitioned by `/typeName`) |
+| IndexedDB | ✅ | `{store}_history` object store |
 
-The history-query methods live on the concrete `DocumentStore` class (not the `IDocumentStore` interface), matching the `Backup` / `ClearAllAsync` precedent. When resolving from DI, resolve or cast to `DocumentStore`:
+## Why the history methods aren't on `IDocumentStore`
+
+History is an **optional capability**, not part of the universal CRUD contract, so it lives on its own interface — `ITemporalDocumentStore : IDocumentStore` — the same way observation lives on `IObservableDocumentStore` and the native change feed on `IChangeFeedDocumentStore`. Promoting `History` / `AsOf` / `Restore` / … to `IDocumentStore` would force every consumer of a plain store to see seven methods that throw far more often than they work (they require the type to be `MapTemporal`-mapped), and force every backend to implement them whether the concept applies or not. Asking for `ITemporalDocumentStore` instead makes "this store does history" a compile-time, discoverable fact. It also follows the same precedent as `Backup` / `ClearAllAsync`, which sit outside the universal interface for the same reason.
+
+Every store implements `ITemporalDocumentStore` (and a temporal store *is* a full document store, since the interface extends `IDocumentStore`). Resolve or cast to it:
 
 ```csharp
-var store = serviceProvider.GetRequiredService<DocumentStore>();
+var store = serviceProvider.GetRequiredService<ITemporalDocumentStore>();
 ```
 
-Calling a history method on a provider without temporal support throws `NotSupportedException`; calling one for a type that wasn't passed to `MapTemporal<T>` throws `InvalidOperationException`.
+Calling a history method for a type that wasn't passed to `MapTemporal<T>` throws `InvalidOperationException`.
 
 ## DocumentVersion&lt;T&gt;
 
@@ -146,17 +153,20 @@ On mobile/embedded SQLite especially, set at least one — unbounded history gro
 
 ## How it works
 
-- A sidecar `{table}_history` table is created automatically (idempotently) when a temporal type is first touched, with primary key `(Id, TypeName, Version)` plus secondary indexes on `(TypeName, ValidFrom, ValidTo)` and `(TypeName, Actor)` to back the fleet-wide queries.
-- On each mutation the currently-open version's `ValidTo` is stamped, then a new open version is appended with the next version number computed atomically.
+- A per-type history sidecar is created automatically (idempotently) when a temporal type is first touched. On the relational providers it's a `{table}_history` table with primary key `(Id, TypeName, Version)` plus secondary indexes on `(TypeName, ValidFrom, ValidTo)` and `(TypeName, Actor)` to back the fleet-wide queries; the document stores hold the same versions in a native sidecar collection / container / object store and compute the point-in-time selection in the provider.
+- Each version row carries `Id`, `Version`, `ValidFrom`/`ValidTo`, `Operation`, `Actor`, and the post-image. On each mutation the currently-open version's `ValidTo` is stamped, then a new open version is appended with the next version number.
 - For `Update` the full post-image is recorded directly. For merge/partial paths (`Upsert`, `SetProperty`, `RemoveProperty`) the resulting document is read back so history always stores the true post-image — this read-back cost is incurred **only** for temporal-mapped types.
 - `Remove` records a null-body tombstone, so `AsOf` correctly returns `null` after a deletion while the timeline stays continuous.
+
+### IndexedDB: bump the database version
+
+Because temporal adds new object stores, IndexedDB only creates them during a schema upgrade. A **fresh** database picks them up automatically; for an **already-deployed** one, increment `options.Version` when you add `MapTemporal` so the upgrade runs and creates the `{store}_history` object stores.
 
 ## Limitations
 
 - **`Clear<T>` does not record per-document history** — it's a bulk delete. Use `Remove<T>` per document when you need a deletion tracked.
-- History methods are on `DocumentStore`, not `IDocumentStore`.
+- History methods are on `ITemporalDocumentStore`, not the base `IDocumentStore` (see [above](#why-the-history-methods-arent-on-idocumentstore)).
 - Documents written **before** a type was made temporal have no prior history; their first subsequent update starts the timeline at version 1.
-- Not supported on the document/NoSQL providers (Cosmos DB, MongoDB, LiteDB, IndexedDB).
 
 ## AOT
 
