@@ -454,6 +454,7 @@ export const sidebarTopics = [
           { label: 'Spatial', link: 'documentdb/spatial' },
           { label: 'Vector / ANN Search', link: 'documentdb/vector' },
           { label: 'Temporal Support', link: 'documentdb/temporal' },
+          { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           {
             label: 'Providers',

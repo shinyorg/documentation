@@ -1,0 +1,90 @@
+---
+title: Telemetry & Diagnostics
+description: OpenTelemetry-native metrics and distributed tracing for any DocumentDb provider via a drop-in instrumentation decorator.
+---
+
+`Shiny.DocumentDb.Diagnostics` adds **OpenTelemetry-native** metrics and distributed tracing to any provider. It wraps the registered `IDocumentStore` in a decorator that emits a metric and a trace span for every operation — built on the standard .NET primitives (`System.Diagnostics.Metrics.Meter` and `ActivitySource`), so it plugs straight into OpenTelemetry, the .NET Aspire dashboard, Application Insights, Prometheus/Grafana, or anything else that listens.
+
+It is **zero-cost when nobody is listening**: with no meter subscriber the instruments no-op, and with no `ActivityListener` the spans are never allocated. That matters on mobile/embedded — instrumentation only costs something once you opt in.
+
+## Install & register
+
+```bash
+dotnet add package Shiny.DocumentDb.Diagnostics
+```
+
+Register a store as usual, then add instrumentation **after** it, and point your OpenTelemetry pipeline at the meter / source named `Shiny.DocumentDb`:
+
+```csharp
+services.AddDocumentStore(o => o.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db"));
+services.AddDocumentStoreInstrumentation();
+
+services.AddOpenTelemetry()
+    .WithMetrics(m => m.AddMeter("Shiny.DocumentDb"))
+    .WithTracing(t => t.AddSource("Shiny.DocumentDb"));
+```
+
+`AddDocumentStoreInstrumentation()` decorates the non-keyed `IDocumentStore` registration (preserving its lifetime) and re-points `ITemporalDocumentStore` at the same decorated instance. It works for every provider — the `db.system.name` tag is derived from the wrapped store, so SQLite, PostgreSQL, MongoDB, CosmosDB, and the rest are all reported correctly with no per-provider configuration.
+
+### Without a container
+
+The decorator is a plain class — you can wrap a store directly:
+
+```csharp
+var metrics = new DocumentStoreMetrics(meterFactory);            // IMeterFactory from DI, or your own
+ITemporalDocumentStore store = new InstrumentedDocumentStore(innerStore, metrics);
+```
+
+## What it emits
+
+### Metrics
+
+Instrument names and tags follow the [OpenTelemetry database client semantic conventions](https://opentelemetry.io/docs/specs/semconv/database/), so any OTel backend understands them without custom mapping.
+
+| Instrument | Kind | Unit | Meaning |
+|---|---|---|---|
+| `db.client.operation.duration` | Histogram | `s` | Duration of each operation — the primary signal (latency percentiles, throughput, error rate all derive from it). |
+| `db.client.operations` | Counter | `{operation}` | Count of operations executed. |
+| `db.client.response.returned_rows` | Histogram | `{row}` | Documents returned or affected (e.g. `BatchInsert` count, query result size, `Get` hit/miss as 1/0). |
+
+Every measurement is tagged with:
+
+| Tag | Example | Notes |
+|---|---|---|
+| `db.system.name` | `sqlite`, `postgresql`, `mongodb`, `cosmosdb` | Derived from the wrapped store. |
+| `db.operation.name` | `insert`, `get`, `query.to_list`, `history` | The store operation. |
+| `db.collection.name` | `Order` | The document type name (low-cardinality). |
+| `outcome` | `success` / `error` | |
+| `error.type` | `System.InvalidOperationException` | Present only on failures. |
+
+### Traces
+
+Each operation starts an `ActivityKind.Client` span named `{system}.{operation}` (e.g. `sqlite.insert`) carrying the same tags. On failure the span status is set to `Error` and the exception is recorded on the span. Spans nest naturally — operations performed inside a `RunInTransaction` callback are **child spans** of the enclosing `{system}.transaction` span.
+
+## Coverage
+
+Instrumented:
+
+- All CRUD — `Insert`, `BatchInsert`, `Update`, `Upsert`, `SetProperty`, `RemoveProperty`, `Get`, `GetDiff`, `Remove`, `Clear`.
+- String `Query`/`QueryStream`, `Count`, spatial (`WithinRadius`/`WithinBoundingBox`/`NearestNeighbors`) and vector (`NearestVectors`).
+- The **fluent query** terminals — `ToList`, `ToAsyncEnumerable`, `Count`, `Any`, `ExecuteDelete`, `ExecuteUpdate`, `Max`/`Min`/`Sum`/`Average`, and query-terminal `NearestVectors` (the builder operators do no I/O and are not traced).
+- All **temporal** operations from [`ITemporalDocumentStore`](/documentdb/temporal/) — `History`, `AsOf`, `AsOfAll`, `ChangesByActor`, `ChangesBetween`, `Restore`, `GetDiffBetween`.
+- `RunInTransaction` (as a parent span over the inner operations).
+
+Not instrumented (by design):
+
+- `NotifyOnChange` and `SubscribeChanges` — long-lived subscriptions, passed through without per-event telemetry.
+- Provider internals the `IDocumentStore` boundary can't see — raw SQL text, connection-pool acquisition, retries, Cosmos request-charge (RU). For those, layer provider-specific instrumentation alongside (the `Logging` option on each provider already exposes raw SQL).
+
+## Privacy
+
+Only metadata is recorded — operation, document **type** name, outcome, and counts. Document bodies, ids, and parameter values are **never** put on spans or metric tags. `db.collection.name` is the bounded set of your mapped types, so metric cardinality stays low; never add a document id or tenant id as a tag yourself.
+
+## A faithful decorator
+
+`InstrumentedDocumentStore` implements `IDocumentStore`, `ITemporalDocumentStore`, `IObservableDocumentStore`, and `IChangeFeedDocumentStore`, so a cast or pattern-match keeps working after wrapping. If you call an optional capability the underlying provider doesn't support, it throws `NotSupportedException` — the same convention the library uses elsewhere. The original store is reachable via the `Inner` property.
+
+## Caveats
+
+- Keyed registrations (the named `AddDocumentStore(name, …)` overload) are not auto-decorated — wrap those stores manually with `new InstrumentedDocumentStore(inner, metrics)`.
+- The fluent **builder** operators (`Where`, `OrderBy`, `Select`, …) are not spans; the **terminal** that executes the query is.

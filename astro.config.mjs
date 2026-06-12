@@ -340,7 +340,7 @@ export default defineConfig({
           announcements: [
             {
               id: 'docdb-v7',
-              content: 'Document DB v7: Temporal Support',
+              content: 'Document DB v7: Temporal Support and Telemetry Collections!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false
