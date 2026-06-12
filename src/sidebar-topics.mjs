@@ -626,6 +626,13 @@ export const sidebarTopics = [
           { label: 'App Store', link: 'mauihost/appstore' },
           { label: 'Release Notes', link: 'mauihost/release-notes' }
         ]
+      },
+      {
+        label: 'Blazor Hosting',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'blazorhost/' }
+        ]
       }
     ]
   },
