@@ -453,6 +453,7 @@ export const sidebarTopics = [
           { label: 'Query Filters', link: 'documentdb/query-filters' },
           { label: 'Spatial', link: 'documentdb/spatial' },
           { label: 'Vector / ANN Search', link: 'documentdb/vector' },
+          { label: 'Temporal Support', link: 'documentdb/temporal' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           {
             label: 'Providers',

@@ -339,24 +339,10 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'aiconversations-1',
-              content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',
-              variant: 'tip',
-              link: { text: 'Learn More', href: '/aiconversation/' },
-              dismissable: false
-            },          
-            {
-              id: 'docdb-v6',
-              content: 'Document DB v6: More New Providers, Change Tracking, Global Query Filters, & Vector Support!',
+              id: 'docdb-v7',
+              content: 'Document DB v7: Temporal Support',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
-              dismissable: false
-            },
-            {
-              id: 'mediator66-1',
-              content: 'Mediator 6.6: AI Tool Generation and More AOT generation',
-              variant: 'tip',
-              link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
               dismissable: false
             },
             {
@@ -365,7 +351,22 @@ export default defineConfig({
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
+            },            
+            {
+              id: 'aiconversations-1',
+              content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/aiconversation/' },
+              dismissable: false
+            },          
+            {
+              id: 'mediator66-1',
+              content: 'Mediator 6.6: AI Tool Generation and More AOT generation',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
+              dismissable: false
             },
+
             {
               id: 'controls1-1',
               content : 'Controls: Haptic Feedback Anywhere, TableView, Scheduler, ChatView, ImageEditor, and more for MAUI & Blazor!',
