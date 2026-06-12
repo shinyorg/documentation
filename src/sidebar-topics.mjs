@@ -292,6 +292,13 @@ export const sidebarTopics = [
     items:[
       { label: 'Getting Started', link: 'controls/' },
       {
+        label: 'Theming',
+        items:[
+          { label: 'Overview', link: 'controls/theming/' },
+          { label: 'Theme Creator', link: 'controls/theming/creator', badge: { text: 'New', variant: 'success' } },
+        ],
+      },
+      {
         label: 'TableView',
         jumpTo: true,
         items:[
