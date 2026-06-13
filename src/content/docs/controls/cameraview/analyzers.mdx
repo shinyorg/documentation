@@ -1,69 +1,72 @@
 ---
 title: CameraView Frame Analyzers
-description: Pluggable frame-analysis pipeline for the Shiny CameraView — barcode, face, motion, and OCR analyzers with bounding-box overlay and an invoice/label extraction hook
+description: Pluggable frame-analysis pipeline for the Shiny CameraView — barcode, face, motion, OCR, and document analyzers, each with its own strongly-typed event/Command and a styled bounding-box overlay
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 
-The CameraView streams frames to a pipeline of **analyzers**. Each analyzer implements `IFrameAnalyzer`, runs off the UI thread with per-analyzer back-pressure (a slow analyzer is simply skipped for a frame rather than backing up the camera), and returns `Detection`s in normalized, upright image space. The view aggregates them and a built-in `CameraOverlayDrawable` draws the boxes.
+The CameraView streams frames to a pipeline of **analyzers**. Each analyzer runs off the UI thread with per-analyzer back-pressure (a slow analyzer is simply skipped for a frame rather than backing up the camera). It surfaces its result through its **own strongly-typed event** (or a bindable `Command`) and returns the styled bounding boxes to draw as `OverlayBox`es in normalized, upright image space. The built-in `CameraOverlayView` draws them.
+
+Two channels per analyzer:
+
+- **Semantic result** → a typed `event` (e.g. `BarcodeDetected`) or a bindable `Command`, raised on the UI thread.
+- **Presentation** → the boxes returned from `AnalyzeAsync`. A returned set persists until the analyzer returns a different set (replace) or `null` (clear).
 
 ## The pipeline
 
 ```csharp
-camera.Analyzers.Add(new BarcodeAnalyzer());
-camera.Analyzers.Add(new MotionAnalyzer());
-camera.Analyzers.Add(new FaceAnalyzer());
+var barcode = new BarcodeAnalyzer();
+barcode.BarcodeDetected += (_, e) => status = $"{e.Format}: {e.Value}";
+
+var motion = new MotionAnalyzer();
+motion.MotionChanged += (_, e) => status = e.InMotion ? "Motion" : "Still";
+
+camera.Analyzers.Add(barcode);
+camera.Analyzers.Add(motion);
 ```
 
-Add or remove analyzers at any time — the running session picks up the change. Results arrive on the UI thread via `DetectionsChanged`:
+Add or remove analyzers at any time — the running session picks up the change. Analyzer events are raised on the UI thread (the pipeline marshals them), so handlers can touch UI directly.
+
+## Declaring analyzers in XAML (+ Commands)
+
+Analyzers are `BindableObject`s, so you can declare them inside `<cam:CameraView>` (its content property is `Analyzers`) under the one `cam:` prefix, and bind each analyzer's **`…Command`** to a ViewModel. They inherit the camera's `BindingContext`, and each command fires with the same args as its event.
+
+```xml
+<cam:CameraView Facing="Back" Filter="Chrome">
+    <cam:BarcodeAnalyzer BarcodeDetectedCommand="{Binding ScanCommand}" />
+    <cam:InvoiceAnalyzer DocumentDetectedCommand="{Binding InvoiceCommand}" />
+    <!-- run an analyzer for its command only, no box: -->
+    <cam:MotionAnalyzer MotionChangedCommand="{Binding MotionCommand}" ShowBoundingBox="False" />
+</cam:CameraView>
+```
 
 ```csharp
-camera.DetectionsChanged += (_, e) =>
-{
-    foreach (var d in e.Detections)
-        Console.WriteLine($"{d.Type}: {d.Value} @ {d.BoundingBox}");
-};
+public ICommand ScanCommand { get; } =
+    new Command<BarcodeDetectedEventArgs>(e => /* e.Format, e.Value, e.BoundingBox */);
 ```
-
-### `Detection`
-
-| Member | Description |
-|---|---|
-| `Type` | `Barcode` / `Face` / `Text` / `Motion` / `DocumentField` / `Custom` |
-| `BoundingBox` | Normalized `RectF` (0..1), upright, mirror-corrected |
-| `Label` | Human label / field name (e.g. `"QR"`, `"Total"`) |
-| `Value` | Decoded payload / recognized text / field value |
-| `Confidence` | 0..1 |
-| `Landmarks` | Optional feature points (face landmarks, code corners) |
 
 ## Drawing the overlay
 
-Layer a `GraphicsView` over the `CameraView` and point it at a `CameraOverlayDrawable`:
+Drop a `CameraOverlayView` over the `CameraView` in the same cell and point it at the camera — it auto-subscribes to the aggregated boxes and redraws. Each analyzer styles its own boxes (color / text); `DefaultBoxColor` / `DefaultTextColor` fill in anything unset.
 
 ```xml
 <Grid>
     <cam:CameraView x:Name="Camera" ScaleMode="AspectFill" />
-    <GraphicsView x:Name="Overlay" InputTransparent="True" />
+    <cam:CameraOverlayView Camera="{x:Reference Camera}" InputTransparent="True" />
 </Grid>
 ```
 
-```csharp
-readonly CameraOverlayDrawable overlay = new();
+### Controlling the overlay per analyzer
 
-public CameraPage()
-{
-    InitializeComponent();
-    Overlay.Drawable = overlay;
-    Camera.DetectionsChanged += (_, e) =>
-    {
-        overlay.Detections = e.Detections;
-        overlay.ImageAspect = (float)e.ImageWidth / e.ImageHeight;
-        overlay.ScaleMode = Camera.ScaleMode;
-        Overlay.Invalidate();
-    };
-}
+- **`ShowBoundingBox`** (bool, default `true`) — set `False` to run an analyzer purely for its event/command and draw nothing.
+- **`OverlayProvider`** (code-level `Func<TArgs, IReadOnlyList<OverlayBox>?>`) — return the exact boxes to draw for a detection, or `null` for none. When unset, the analyzer draws its own default styled box.
+
+```csharp
+barcode.OverlayProvider = e => e.Value.StartsWith("OK")
+    ? [ new OverlayBox(e.BoundingBox, Colors.Lime, e.Value) ]
+    : null;   // don't box anything that doesn't start with "OK"
 ```
 
-`CoordinateTransform` (in `Shiny.Controls.Camera`) maps normalized detections into view space accounting for aspect-fill crop, rotation and front-camera mirroring — the same helper the drawable uses.
+`CoordinateTransform` (in `Shiny.Controls.Camera`) maps normalized boxes into view space accounting for aspect-fill crop, rotation and front-camera mirroring — the same helper the overlay uses.
 
 ## Analyzer packages
 
@@ -76,22 +79,27 @@ Each analyzer ships as its own package so apps pull only what they need. The str
 ```csharp
 using Shiny.Maui.Controls.Camera.Barcode;
 
-camera.Analyzers.Add(new BarcodeAnalyzer());
+var barcode = new BarcodeAnalyzer();
+barcode.BarcodeDetected += (_, e) =>
+    Console.WriteLine($"{e.Format}: {e.Value}");   // e.BoundingBox is normalized upright
+camera.Analyzers.Add(barcode);
 ```
 
-Decodes 1D/2D barcodes and QR codes with ZXing.Net over the frame's luminance plane — works on every platform with no native dependency. `Detection.Value` is the decoded payload; `Detection.Label` is the format.
+Decodes 1D/2D barcodes and QR codes with ZXing.Net over the frame's luminance plane — works on every platform with no native dependency. `BarcodeDetectedEventArgs` carries the `Format` (ZXing `BarcodeFormat`), `Value`, and `BoundingBox`.
 
 ### Face
 
 - <NugetDownloads name="Shiny.Maui.Controls.Camera.Face" />
 
 ```csharp
-using FaceAnalyzer = Shiny.Maui.Controls.Camera.Face.FaceAnalyzer;
+using Shiny.Maui.Controls.Camera.Face;
 
-camera.Analyzers.Add(new FaceAnalyzer());
+var faces = new FaceAnalyzer();
+faces.FacesDetected += (_, e) => Console.WriteLine($"{e.Faces.Count} face(s)");
+camera.Analyzers.Add(faces);
 ```
 
-Apple Vision (iOS / Mac Catalyst / macOS), Android MLKit, and `Windows.Media.FaceAnalysis`.
+Apple Vision (iOS / Mac Catalyst / macOS), Android MLKit, and `Windows.Media.FaceAnalysis`. `FacesDetectedEventArgs.Faces` is a list of `DetectedFace` (bounds, confidence, optional landmarks).
 
 ### Motion
 
@@ -100,68 +108,137 @@ Apple Vision (iOS / Mac Catalyst / macOS), Android MLKit, and `Windows.Media.Fac
 ```csharp
 using Shiny.Maui.Controls.Camera.Motion;
 
-camera.Analyzers.Add(new MotionAnalyzer
+var motion = new MotionAnalyzer
 {
     PixelThreshold = 25,   // per-pixel luma delta to count as changed
     AreaThreshold = 0.04   // fraction of pixels that must change
-});
+};
+motion.MotionChanged += (_, e) => { /* e.InMotion, e.Region, e.Intensity */ };
+camera.Analyzers.Add(motion);
 ```
 
-Pure-managed luminance frame-differencing — cross-platform, no native dependency. Emits a `Motion` detection bounding the changed region and raises `MotionDetectedChanged`.
+Pure-managed luminance frame-differencing — cross-platform, no native dependency. Raises `MotionChanged` when motion starts and stops, and boxes the changed region while it continues.
 
-### OCR & document parsing
+### OCR
 
 - <NugetDownloads name="Shiny.Maui.Controls.Camera.Ocr" />
-
-Recognizes text (Apple Vision / Android MLKit / `Windows.Media.Ocr`) as `Text` detections, and exposes an `IDocumentAnalyzer` hook to turn those text blocks into structured **fields** — the seam for invoice / receipt / label parsing.
 
 ```csharp
 using Shiny.Maui.Controls.Camera.Ocr;
 
-// Raw OCR only
-camera.Analyzers.Add(new OcrAnalyzer());
-
-// With structured extraction
-camera.Analyzers.Add(new OcrAnalyzer(new InvoiceAnalyzer()) { IncludeTextBlocks = false });
+var ocr = new OcrAnalyzer();
+ocr.TextRecognized += (_, e) =>
+{
+    foreach (var block in e.Blocks)        // RecognizedText { Text, BoundingBox, Confidence }
+        Console.WriteLine(block.Text);
+};
+camera.Analyzers.Add(ocr);
 ```
+
+Recognizes text with Apple Vision / Android MLKit / `Windows.Media.Ocr`. The reusable text recognizer is shared with the document analyzers below.
+
+### Documents — invoices, IDs, cards, passports
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Documents" />
+
+Structured extraction, where **each document type is its own analyzer with its own strongly-typed event** (`DocumentDetected`, typed to the document). Every payload is a strong record with **nullable fields** — only what was found is populated. Ships analyzers for **invoices** (`Invoice`, with order lines), **driver's licenses** (`DriversLicense`), **health cards** (`HealthCard`), **credit cards** (`CreditCard`), and **passports** (`Passport`).
 
 ```csharp
-public partial class InvoiceAnalyzer : IDocumentAnalyzer
-{
-    [GeneratedRegex(@"(total|amount|due)\D{0,12}(\$?\s?\d[\d.,]+)", RegexOptions.IgnoreCase)]
-    private static partial Regex TotalRegex();
+using Shiny.Maui.Controls.Camera.Documents;
 
-    public ValueTask<IReadOnlyList<Detection>> ExtractAsync(IReadOnlyList<Detection> textBlocks, CancellationToken ct)
-    {
-        var fields = new List<Detection>();
-        foreach (var block in textBlocks)
-        {
-            if (block.Value is { } line && TotalRegex().Match(line) is { Success: true } m)
-                fields.Add(block with { Type = DetectionType.DocumentField, Label = "Total", Value = m.Groups[2].Value.Trim() });
-        }
-        return new ValueTask<IReadOnlyList<Detection>>(fields);
-    }
-}
+var invoice = new InvoiceAnalyzer();
+invoice.DocumentDetected += (_, e) =>
+{
+    Invoice doc = e.Document;
+    Console.WriteLine($"#{doc.Number} total {doc.Total} — {doc.Lines.Count} line(s)");
+    foreach (var line in doc.Lines)        // InvoiceLine { Description, Quantity, UnitPrice, Amount }
+        Console.WriteLine($"  {line.Quantity} x {line.Description} = {line.Amount}");
+};
+
+var license = new DriversLicenseAnalyzer();   // deterministic — no ML
+license.DocumentDetected += (_, e) =>
+    Console.WriteLine($"{e.Document.FirstName} {e.Document.LastName} — {e.Document.Number}");
+
+camera.Analyzers.Add(invoice);
+camera.Analyzers.Add(license);
 ```
 
-`ExtractAsync` gets every recognized text block (value + box) for a frame; return `DocumentField` detections. Back it with rules, a cloud Document AI, or a vision LLM — the camera ships the OCR and the seam, you choose the extractor.
+- **`DriversLicenseAnalyzer`** decodes the **PDF417** barcode on the back of US/Canadian licenses and parses the **AAMVA** record into a strongly-typed `DriversLicense` (number, names, DOB, expiry, address) — deterministic, no ML.
+- **`PassportAnalyzer`** locates and parses the passport **MRZ** (the two `<<<` lines, ICAO TD3) into a `Passport` (number, surname, given names, nationality, issuing country, DOB, expiry, sex) — the MRZ parse is deterministic, only locating the lines depends on OCR.
+- **`CreditCardAnalyzer`** reads the front of a payment card into a `CreditCard`. The **brand** (`CreditCardType` — Visa, Mastercard, Amex, …) and number validity are derived deterministically from the number's IIN prefix + Luhn; name / expiry / company are best-effort OCR. (`Cvv` is on the back signature panel and PCI-sensitive — it is almost always `null` from a front scan.)
+- **`InvoiceAnalyzer`** / **`HealthCardAnalyzer`** are OCR + best-effort rules. Swap the rules on any OCR-backed analyzer by supplying a custom `IDocumentParser<T>` to the constructor (`new InvoiceAnalyzer(new MyInvoiceParser())`), where `TryParse` returns the typed payload plus the boxes to draw — back it with rules, a cloud Document AI, or a vision LLM.
+
+```csharp
+var card = new CreditCardAnalyzer();
+card.DocumentDetected += (_, e) =>
+    Console.WriteLine($"{e.Document.Type} {e.Document.Number} exp {e.Document.Expiry:MM/yy}");
+
+var passport = new PassportAnalyzer();    // deterministic MRZ parse
+passport.DocumentDetected += (_, e) =>
+    Console.WriteLine($"{e.Document.GivenNames} {e.Document.Surname} ({e.Document.Nationality})");
+```
+
+The reusable building blocks (`RecognizedText`, `DocumentField`, `DocumentLineItem`, `DocumentDetectedEventArgs<T>`, `IDocumentParser<T>`) live in `Shiny.Controls.Camera`.
+
+#### Document payloads
+
+Every document analyzer hands back a **strongly-typed record**. Every data property is **nullable** (or a `Unknown`/`Unspecified` enum) — only what was found is populated, so check before use.
+
+```csharp
+record Invoice(string? Number, DateOnly? Date, decimal? Total,
+               IReadOnlyList<InvoiceLine> Lines, IReadOnlyList<DocumentField> Fields);
+record InvoiceLine(string? Description, decimal? Quantity, decimal? UnitPrice, decimal? Amount, RectF? Bounds);
+
+record DriversLicense(string? Number, string? FirstName, string? LastName,
+                      DateOnly? DateOfBirth, DateOnly? Expiry, string? Address,
+                      IReadOnlyList<DocumentField> Fields);
+
+record HealthCard(string? Number, string? Name, DateOnly? Expiry, string? Issuer,
+                  IReadOnlyList<DocumentField> Fields);
+
+record CreditCard(CreditCardType Type, string? Number, DateOnly? Expiry,
+                  string? FirstName, string? LastName, string? CompanyName, string? Cvv,
+                  IReadOnlyList<DocumentField> Fields);
+enum CreditCardType { Unknown, Visa, Mastercard, Amex, Discover, DinersClub, JCB, UnionPay, Maestro }
+
+record Passport(string? Number, string? Surname, string? GivenNames,
+                string? Nationality, string? IssuingCountry,
+                DateOnly? DateOfBirth, DateOnly? Expiry, PassportSex Sex,
+                IReadOnlyList<DocumentField> Fields);
+enum PassportSex { Unspecified, Male, Female }
+
+// shared building block carried in each record's Fields bag
+record DocumentField(string Label, string? Value, RectF? Bounds, float Confidence);
+```
+
+Beyond the first-class properties, every payload also exposes a `Fields` list of `DocumentField` (label/value/box/confidence) carrying anything extra the parser recognized — including, for a custom `IDocumentParser<T>`, fields you don't model as typed properties.
 
 ## Writing your own analyzer
 
-Implement `IFrameAnalyzer`. Use `frame.GetLuminance()` for a cached grayscale plane (ideal for managed CV), or down-cast `CameraFrame` to the platform frame (`AppleCameraFrame`, `AndroidCameraFrame`, `WindowsCameraFrame`) to feed a native ML SDK with zero copies.
+Derive from `FrameAnalyzer` (it implements `IFrameAnalyzer`, makes the analyzer a `BindableObject`, marshals events/commands to the UI thread, and adds `ShowBoundingBox` + `OverlayProvider`). Use `frame.GetLuminance()` for a cached grayscale plane (ideal for managed CV), or down-cast `CameraFrame` to the platform frame (`AppleCameraFrame`, `AndroidCameraFrame`, `WindowsCameraFrame`) to feed a native ML SDK with zero copies.
 
 ```csharp
-public class GreenScreenAnalyzer : IFrameAnalyzer
+public class GreenScreenAnalyzer : FrameAnalyzer
 {
-    public string Id => "myapp.greenscreen";
+    public override string Id => "myapp.greenscreen";
 
-    public ValueTask<DetectionResult?> AnalyzeAsync(CameraFrame frame, CancellationToken ct)
+    public event EventHandler<GreenScreenEventArgs>? Detected;
+
+    public override ValueTask<IReadOnlyList<OverlayBox>?> AnalyzeAsync(CameraFrame frame, CancellationToken ct)
     {
         var luma = frame.GetLuminance();   // ReadOnlySpan<byte>, Width x Height
         // ... your detection logic ...
-        return new ValueTask<DetectionResult?>(DetectionResult.Empty(Id));
+        if (/* nothing found */ true)
+            return default;                 // null -> clear this analyzer's boxes
+
+        var args = new GreenScreenEventArgs(/* ... */);
+        this.Emit(() => this.Detected?.Invoke(this, args), /* command */ null, args);
+
+        return new ValueTask<IReadOnlyList<OverlayBox>?>(
+            this.ResolveOverlay(args, /* OverlayProvider */ null,
+                () => new[] { new OverlayBox(box) }));
     }
 }
 ```
 
-Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once every analyzer finishes.
+`Emit(raiseEvent, command, args)` raises your event and invokes a bound `Command` (both on the UI thread); `ResolveOverlay(args, provider, defaultBoxes)` honors `ShowBoundingBox` and any `OverlayProvider`. Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once every analyzer finishes.
