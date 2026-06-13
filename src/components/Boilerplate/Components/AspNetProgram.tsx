@@ -54,6 +54,12 @@ builder.Services.AddDocumentStore(opts =>
     opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=localhost;Database=mydb;Username=postgres;Password=pass;");
 });`;
   }
+  if (has('documentdb-diagnostics')) {
+    src += `
+// OpenTelemetry metrics + tracing — call AFTER registering a store.
+// Subscribe from your OTel pipeline with .AddMeter("Shiny.DocumentDb") / .AddSource("Shiny.DocumentDb")
+builder.Services.AddDocumentStoreInstrumentation();`;
+  }
   if (has('di')) {
     src += `
 builder.Services.AddGeneratedServices();`;

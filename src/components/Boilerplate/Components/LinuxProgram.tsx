@@ -64,6 +64,12 @@ public static class MauiProgram
             opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
         });`;
   }
+  if (has('documentdb-diagnostics')) {
+    src += `
+        // OpenTelemetry metrics + tracing — call AFTER registering a store.
+        // Subscribe from your OTel pipeline with .AddMeter("Shiny.DocumentDb") / .AddSource("Shiny.DocumentDb")
+        builder.Services.AddDocumentStoreInstrumentation();`;
+  }
   if (has('di')) {
     src += `
         builder.Services.AddGeneratedServices();`;

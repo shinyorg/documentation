@@ -9,10 +9,10 @@ export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.6.1',
     shinyShell: '6.2.0',
-    shinyControls: '1.0.1-beta-0102',
+    shinyControls: '1.0.1-beta-0110',
     // Shiny — client packages that share the core release train
-    shinyClient: '5.0.0-beta-0135',
-    shinyConfiguration: '5.0.0-beta-0135',
+    shinyClient: '5.0.0-beta-0137',
+    shinyConfiguration: '5.0.0-beta-0137',
     shinyLocalization: '2.0.1',
     shinyStores: '5.0.0',
     shinyReflector: '5.0.0',
@@ -23,9 +23,10 @@ export const VERSIONS = {
     shinyAiConversation: '1.0.0-beta-0050',
     shinyMusic: '3.0.1',
     shinyHealth: '1.0.0',
-    shinyDocumentDb: '6.1.0',
+    shinyDocumentDb: '7.0.0',
     shinyMauiHosting: '5.0.0',
     shinyWebHosting: '5.0.0',
+    shinyBlazorHosting: '5.1.0-beta-0052',
 
     // MAUI tooling
     devflow: '0.1.0-preview.10.26274.3',
@@ -374,6 +375,10 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'documentdb', label: 'Document DB', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.shinyDocumentDb,
         description: 'Document-oriented database on SQLite https://shinylib.net/documentdb/' },
+    { id: 'documentdbdiagnostics', label: 'DocumentDB Telemetry', type: 'bool', defaultValue: false, category: 'storage',
+        version: VERSIONS.shinyDocumentDb,
+        description: 'OpenTelemetry-native metrics & distributed tracing for the document store (Shiny.DocumentDb.Diagnostics) https://shinylib.net/documentdb/diagnostics/',
+        visibleWhen: (s) => !!s.documentdb },
     { id: 'sqlite', label: 'SQLite-net-pcl', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.sqliteNetPcl,
         description: 'SQLite.NET-PCL by Frank Krueger https://github.com/praeclarum/sqlite-net' },
@@ -447,6 +452,8 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
     s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
+    // Telemetry only emitted when a store is actually present.
+    s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
     s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aiconversation);
     s.communitytoolkit = !!(s.mediaelement || s.cameraview || s.usecsharpmarkup);
     return s;
@@ -504,6 +511,10 @@ const ASPNET_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyDocumentDb,
         description: 'Exposes document store operations as AI tools https://shinylib.net/documentdb/ai-tools/',
         visibleWhen: (s) => s.documentdb !== 'none' },
+    { id: 'documentdbdiagnostics', label: 'DocumentDB Telemetry', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyDocumentDb,
+        description: 'OpenTelemetry-native metrics & distributed tracing for the document store (Shiny.DocumentDb.Diagnostics) https://shinylib.net/documentdb/diagnostics/',
+        visibleWhen: (s) => s.documentdb !== 'none' },
     { id: 'connectionstring', label: 'Connection String', type: 'string', defaultValue: '', category: 'data',
         description: 'The database connection string',
         visibleWhen: (s) => s.ef !== 'none' || (s.documentdb !== 'none' && s.documentdb !== 'litedb') },
@@ -560,6 +571,8 @@ function computeAspNetSymbols(state: TemplateState): Record<string, boolean | st
     s.docdbmongo = s.documentdb === 'mongodb';
     s.docdblitedb = s.documentdb === 'litedb';
     s.docdbduckdb = s.documentdb === 'duckdb';
+    // Telemetry only emitted when a store provider is actually selected.
+    s.documentdbdiagnostics = !!(state.documentdb !== 'none' && state.documentdbdiagnostics);
     // Any data layer active (EF or DocumentDB) — used by auth handlers
     s.useanydata = s.ef !== 'none' || s.documentdb !== 'none';
     // Auth handlers (Handlers/Auth/*) use Shiny.Mediator — force it on when jwtauth is enabled.
@@ -611,6 +624,9 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'di', label: 'Shiny DI', type: 'bool', defaultValue: false, category: 'extensions',
         version: VERSIONS.shinyDI,
         description: 'Attribute-driven, source-generated DI registration https://shinylib.net/extensions/di/' },
+    { id: 'blazorhost', label: 'Blazor App Support', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyBlazorHosting,
+        description: 'Device/browser info + culture & time-zone change notifications for Blazor WASM (Shiny.Extensions.BlazorHosting)' },
 
     // Services
     { id: 'shinymediator', label: 'Shiny Mediator', type: 'bool', defaultValue: true, category: 'services',
@@ -633,6 +649,10 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'documentdb', label: 'Document DB (IndexedDB)', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.shinyDocumentDb,
         description: 'Document-oriented store backed by browser IndexedDB https://shinylib.net/documentdb/' },
+    { id: 'documentdbdiagnostics', label: 'DocumentDB Telemetry', type: 'bool', defaultValue: false, category: 'storage',
+        version: VERSIONS.shinyDocumentDb,
+        description: 'OpenTelemetry-native metrics & distributed tracing for the document store (Shiny.DocumentDb.Diagnostics) https://shinylib.net/documentdb/diagnostics/',
+        visibleWhen: (s) => !!s.documentdb },
 
     // AI
     { id: 'aiconversation', label: 'AI Conversation', type: 'bool', defaultValue: false, category: 'ai',
@@ -665,6 +685,8 @@ function computeBlazorSymbols(state: TemplateState): Record<string, boolean | st
     s.useui = s.uilibrary !== 'None';
     // AI Conversation pulls in Speech automatically.
     s.shinyspeech = !!(s.shinyspeech || s.aiconversation);
+    // Telemetry only emitted when the IndexedDB store is enabled.
+    s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
     return s;
 }
 

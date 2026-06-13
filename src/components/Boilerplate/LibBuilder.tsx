@@ -39,6 +39,7 @@ const LibBuilder = (props: Props) => {
   const isMaui = mode === 'maui';
   const showPlatformConfig = hasPlatformConfig(components);
   const hasMediator = props.componentName === 'mediator';
+  const hasBlazorScripts = hasMediator || props.componentName === 'blazorhost';
 
   const renderTabs = () => {
     if (mode === 'blazor') {
@@ -48,7 +49,7 @@ const LibBuilder = (props: Props) => {
             <Tab>NuGet Packages</Tab>
             <Tab>Project File</Tab>
             <Tab>Program.cs</Tab>
-            {hasMediator && <Tab>index.html</Tab>}
+            {hasBlazorScripts && <Tab>index.html</Tab>}
           </TabList>
           <TabPanel>
             <NugetList components={components} mode="blazor" />
@@ -59,8 +60,8 @@ const LibBuilder = (props: Props) => {
           <TabPanel>
             <BlazorProgram components={components} />
           </TabPanel>
-          {hasMediator &&
-            <TabPanel><BlazorIndexHtml /></TabPanel>
+          {hasBlazorScripts &&
+            <TabPanel><BlazorIndexHtml components={components} /></TabPanel>
           }
         </Tabs>
       );

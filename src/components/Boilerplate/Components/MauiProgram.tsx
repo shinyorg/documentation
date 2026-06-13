@@ -158,6 +158,12 @@ const MauiProgram = (props: Props) => {
           opts.DatabaseProvider = new SqlCipherDatabaseProvider("mydata.db", "mySecretKey");
       });`;
   }
+  if (has('documentdb-diagnostics')) {
+    src += `
+      // OpenTelemetry metrics + tracing — call AFTER registering a store.
+      // Subscribe from your OTel pipeline with .AddMeter("Shiny.DocumentDb") / .AddSource("Shiny.DocumentDb")
+      builder.Services.AddDocumentStoreInstrumentation();`;
+  }
   if (has('contactstore')) {
     src += `
       builder.Services.AddContactStore();`;
