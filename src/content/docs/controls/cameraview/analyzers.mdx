@@ -1,0 +1,167 @@
+---
+title: CameraView Frame Analyzers
+description: Pluggable frame-analysis pipeline for the Shiny CameraView — barcode, face, motion, and OCR analyzers with bounding-box overlay and an invoice/label extraction hook
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+The CameraView streams frames to a pipeline of **analyzers**. Each analyzer implements `IFrameAnalyzer`, runs off the UI thread with per-analyzer back-pressure (a slow analyzer is simply skipped for a frame rather than backing up the camera), and returns `Detection`s in normalized, upright image space. The view aggregates them and a built-in `CameraOverlayDrawable` draws the boxes.
+
+## The pipeline
+
+```csharp
+camera.Analyzers.Add(new BarcodeAnalyzer());
+camera.Analyzers.Add(new MotionAnalyzer());
+camera.Analyzers.Add(new FaceAnalyzer());
+```
+
+Add or remove analyzers at any time — the running session picks up the change. Results arrive on the UI thread via `DetectionsChanged`:
+
+```csharp
+camera.DetectionsChanged += (_, e) =>
+{
+    foreach (var d in e.Detections)
+        Console.WriteLine($"{d.Type}: {d.Value} @ {d.BoundingBox}");
+};
+```
+
+### `Detection`
+
+| Member | Description |
+|---|---|
+| `Type` | `Barcode` / `Face` / `Text` / `Motion` / `DocumentField` / `Custom` |
+| `BoundingBox` | Normalized `RectF` (0..1), upright, mirror-corrected |
+| `Label` | Human label / field name (e.g. `"QR"`, `"Total"`) |
+| `Value` | Decoded payload / recognized text / field value |
+| `Confidence` | 0..1 |
+| `Landmarks` | Optional feature points (face landmarks, code corners) |
+
+## Drawing the overlay
+
+Layer a `GraphicsView` over the `CameraView` and point it at a `CameraOverlayDrawable`:
+
+```xml
+<Grid>
+    <cam:CameraView x:Name="Camera" ScaleMode="AspectFill" />
+    <GraphicsView x:Name="Overlay" InputTransparent="True" />
+</Grid>
+```
+
+```csharp
+readonly CameraOverlayDrawable overlay = new();
+
+public CameraPage()
+{
+    InitializeComponent();
+    Overlay.Drawable = overlay;
+    Camera.DetectionsChanged += (_, e) =>
+    {
+        overlay.Detections = e.Detections;
+        overlay.ImageAspect = (float)e.ImageWidth / e.ImageHeight;
+        overlay.ScaleMode = Camera.ScaleMode;
+        Overlay.Invalidate();
+    };
+}
+```
+
+`CoordinateTransform` (in `Shiny.Controls.Camera`) maps normalized detections into view space accounting for aspect-fill crop, rotation and front-camera mirroring — the same helper the drawable uses.
+
+## Analyzer packages
+
+Each analyzer ships as its own package so apps pull only what they need. The strategy is **hybrid**: native ML where available, managed fallback elsewhere.
+
+### Barcode
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Barcode" />
+
+```csharp
+using Shiny.Maui.Controls.Camera.Barcode;
+
+camera.Analyzers.Add(new BarcodeAnalyzer());
+```
+
+Decodes 1D/2D barcodes and QR codes with ZXing.Net over the frame's luminance plane — works on every platform with no native dependency. `Detection.Value` is the decoded payload; `Detection.Label` is the format.
+
+### Face
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Face" />
+
+```csharp
+using FaceAnalyzer = Shiny.Maui.Controls.Camera.Face.FaceAnalyzer;
+
+camera.Analyzers.Add(new FaceAnalyzer());
+```
+
+Apple Vision (iOS / Mac Catalyst / macOS), Android MLKit, and `Windows.Media.FaceAnalysis`.
+
+### Motion
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Motion" />
+
+```csharp
+using Shiny.Maui.Controls.Camera.Motion;
+
+camera.Analyzers.Add(new MotionAnalyzer
+{
+    PixelThreshold = 25,   // per-pixel luma delta to count as changed
+    AreaThreshold = 0.04   // fraction of pixels that must change
+});
+```
+
+Pure-managed luminance frame-differencing — cross-platform, no native dependency. Emits a `Motion` detection bounding the changed region and raises `MotionDetectedChanged`.
+
+### OCR & document parsing
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Ocr" />
+
+Recognizes text (Apple Vision / Android MLKit / `Windows.Media.Ocr`) as `Text` detections, and exposes an `IDocumentAnalyzer` hook to turn those text blocks into structured **fields** — the seam for invoice / receipt / label parsing.
+
+```csharp
+using Shiny.Maui.Controls.Camera.Ocr;
+
+// Raw OCR only
+camera.Analyzers.Add(new OcrAnalyzer());
+
+// With structured extraction
+camera.Analyzers.Add(new OcrAnalyzer(new InvoiceAnalyzer()) { IncludeTextBlocks = false });
+```
+
+```csharp
+public partial class InvoiceAnalyzer : IDocumentAnalyzer
+{
+    [GeneratedRegex(@"(total|amount|due)\D{0,12}(\$?\s?\d[\d.,]+)", RegexOptions.IgnoreCase)]
+    private static partial Regex TotalRegex();
+
+    public ValueTask<IReadOnlyList<Detection>> ExtractAsync(IReadOnlyList<Detection> textBlocks, CancellationToken ct)
+    {
+        var fields = new List<Detection>();
+        foreach (var block in textBlocks)
+        {
+            if (block.Value is { } line && TotalRegex().Match(line) is { Success: true } m)
+                fields.Add(block with { Type = DetectionType.DocumentField, Label = "Total", Value = m.Groups[2].Value.Trim() });
+        }
+        return new ValueTask<IReadOnlyList<Detection>>(fields);
+    }
+}
+```
+
+`ExtractAsync` gets every recognized text block (value + box) for a frame; return `DocumentField` detections. Back it with rules, a cloud Document AI, or a vision LLM — the camera ships the OCR and the seam, you choose the extractor.
+
+## Writing your own analyzer
+
+Implement `IFrameAnalyzer`. Use `frame.GetLuminance()` for a cached grayscale plane (ideal for managed CV), or down-cast `CameraFrame` to the platform frame (`AppleCameraFrame`, `AndroidCameraFrame`, `WindowsCameraFrame`) to feed a native ML SDK with zero copies.
+
+```csharp
+public class GreenScreenAnalyzer : IFrameAnalyzer
+{
+    public string Id => "myapp.greenscreen";
+
+    public ValueTask<DetectionResult?> AnalyzeAsync(CameraFrame frame, CancellationToken ct)
+    {
+        var luma = frame.GetLuminance();   // ReadOnlySpan<byte>, Width x Height
+        // ... your detection logic ...
+        return new ValueTask<DetectionResult?>(DetectionResult.Empty(Id));
+    }
+}
+```
+
+Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once every analyzer finishes.

@@ -72,7 +72,7 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'documentdb-diagnostics', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'controls-kiosk', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'aiconversation', 'docking', 'osk'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'documentdb-diagnostics', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'controls-kiosk', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'aiconversation', 'docking', 'osk'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'documentdb-diagnostics', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-diagnostics', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'webhost'];
@@ -361,6 +361,46 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "1.0.1-beta-0110"
     },
     {
+        "id": "cameraview",
+        "nuget": "Shiny.Maui.Controls.Camera",
+        "blazorNuget": "Shiny.Blazor.Controls.Camera",
+        "description": "CameraView",
+        "category": "controls",
+        "version": "1.0.1-beta-0110"
+    },
+    {
+        "id": "camera-motion",
+        "nuget": "Shiny.Maui.Controls.Camera.Motion",
+        "description": "CameraView Motion Analyzer",
+        "category": "controls",
+        "version": "1.0.1-beta-0110",
+        "hideFromAppBuilder": true
+    },
+    {
+        "id": "camera-barcode",
+        "nuget": "Shiny.Maui.Controls.Camera.Barcode",
+        "description": "CameraView Barcode Analyzer",
+        "category": "controls",
+        "version": "1.0.1-beta-0110",
+        "hideFromAppBuilder": true
+    },
+    {
+        "id": "camera-face",
+        "nuget": "Shiny.Maui.Controls.Camera.Face",
+        "description": "CameraView Face Analyzer",
+        "category": "controls",
+        "version": "1.0.1-beta-0110",
+        "hideFromAppBuilder": true
+    },
+    {
+        "id": "camera-ocr",
+        "nuget": "Shiny.Maui.Controls.Camera.Ocr",
+        "description": "CameraView OCR Analyzer",
+        "category": "controls",
+        "version": "1.0.1-beta-0110",
+        "hideFromAppBuilder": true
+    },
+    {
         "id": "trayicon",
         "nuget": "Shiny.Maui.Controls.Desktop",
         "description": "Tray Icon (Desktop)",
@@ -408,9 +448,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -418,9 +458,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
         "description": "Document DB (SqlCipher)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -428,9 +468,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.SqlServer",
         "description": "Document DB (SQL Server)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -438,9 +478,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.MySql",
         "description": "Document DB (MySQL)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -448,9 +488,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.PostgreSql",
         "description": "Document DB (PostgreSQL)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -458,9 +498,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.CosmosDb",
         "description": "Document DB (Cosmos DB)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -468,9 +508,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.MongoDb",
         "description": "Document DB (MongoDB)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -478,9 +518,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.LiteDb",
         "description": "Document DB (LiteDB)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -488,9 +528,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.DuckDb",
         "description": "Document DB (DuckDB)",
         "category": "storage",
-        "version": "7.0.0",
+        "version": "7.1.1",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.0.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "7.1.1" }
         ]
     },
     {
@@ -499,7 +539,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.DocumentDb.IndexedDb",
         "description": "Document DB (IndexedDB)",
         "category": "storage",
-        "version": "7.0.0"
+        "version": "7.1.1"
     },
     {
         "id": "documentdb-diagnostics",
@@ -507,7 +547,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.DocumentDb.Diagnostics",
         "description": "Document DB Telemetry & Diagnostics (OpenTelemetry)",
         "category": "storage",
-        "version": "7.0.0"
+        "version": "7.1.1"
     },
     {
         "id": "reflector",

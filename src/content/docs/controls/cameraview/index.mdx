@@ -1,0 +1,178 @@
+---
+title: CameraView
+description: Cross-platform .NET MAUI & Blazor camera preview with zoom, torch, lens selection, photo + video capture, live filters, and a pluggable frame-analysis pipeline (barcode, face, motion, OCR)
+---
+import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+`Shiny.Maui.Controls.Camera` is a cross-platform `CameraView` for .NET MAUI — live preview with **zoom, torch, lens selection, photo & video capture, and live color filters** — backed by AVFoundation (iOS / Mac Catalyst / macOS AppKit), CameraX (Android) and Media Capture (Windows). A matching `Shiny.Blazor.Controls.Camera` brings the same control to Blazor WebAssembly via `getUserMedia`.
+
+What sets it apart from other camera controls is the **pluggable frame-analysis pipeline**: drop one or more analyzers onto the view and it streams frames to them off the UI thread, aggregates their results, and draws bounding boxes over the preview. Ships with analyzers for **barcode/QR scanning, face detection, motion detection, and OCR** — plus an `IDocumentAnalyzer` hook for invoice / label field extraction.
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Camera" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} />
+
+<LibBuilder componentName="cameraview" client:load />
+
+## Features
+
+- **Live preview** with `AspectFill` / `AspectFit` scaling.
+- **Lens & device selection** — `Facing` (Back / Front) or pick an exact device (multiple back lenses, USB webcams on macOS) via `GetAvailableCamerasAsync()` + `CameraId`.
+- **Zoom** (clamped to the device's reported range) and **torch / flashlight**.
+- **Photo capture** → JPEG bytes, and **video recording** with optional audio.
+- **Live color filters** — Mono, Noir, Sepia, Invert, Vivid, Cool, Warm (Apple Core Image, Android RenderEffect, Blazor CSS).
+- **Frame-analysis pipeline** — pluggable `IFrameAnalyzer`s with per-analyzer back-pressure (drop-on-busy), results drawn by a built-in `CameraOverlayDrawable`. See [Frame Analyzers](/controls/cameraview/analyzers/).
+- **Modular analyzer packages** — add only what you need: `.Camera.Barcode`, `.Camera.Face`, `.Camera.Motion`, `.Camera.Ocr`.
+
+## AI Skill
+
+<AiSkill skill="shiny-controls" />
+
+## Installation
+
+### .NET MAUI
+
+```bash
+dotnet add package Shiny.Maui.Controls.Camera
+```
+
+Register the handler alongside `UseShinyControls()`:
+
+```csharp
+builder
+    .UseShinyControls()
+    .UseShinyCamera();
+```
+
+```xml
+xmlns:cam="http://shiny.net/maui/camera"
+```
+
+Add the platform permissions your app needs:
+
+- **iOS / Mac Catalyst / macOS** — `NSCameraUsageDescription` (and `NSMicrophoneUsageDescription` for video with audio) in `Info.plist`; the macOS camera entitlement when sandboxed.
+- **Android** — `<uses-permission android:name="android.permission.CAMERA" />` (and `RECORD_AUDIO` for video with audio). Minimum SDK **23** (CameraX requirement).
+- **Windows** — the `webcam` (and `microphone`) capability in `Package.appxmanifest`.
+
+### Blazor
+
+```bash
+dotnet add package Shiny.Blazor.Controls.Camera
+```
+
+```razor
+@using Shiny.Blazor.Controls.Camera
+@using Shiny.Controls.Camera
+```
+
+See [Blazor Usage](/controls/cameraview/blazor/) for the WebAssembly specifics.
+
+## Quick Start — MAUI
+
+```xml
+<cam:CameraView x:Name="Camera"
+                Facing="Back"
+                ScaleMode="AspectFill"
+                Zoom="1"
+                IsTorchOn="False"
+                Filter="None" />
+```
+
+```csharp
+protected override async void OnAppearing()
+{
+    base.OnAppearing();
+    if (await this.Camera.RequestPermissionAsync())
+        await this.Camera.StartAsync();
+}
+
+protected override async void OnDisappearing()
+{
+    base.OnDisappearing();
+    await this.Camera.StopAsync();
+}
+
+// Capture a still
+var photo = await this.Camera.CapturePhotoAsync();
+await File.WriteAllBytesAsync(path, photo.Data);
+
+// Flip the lens
+this.Camera.Facing = this.Camera.Facing == CameraFacing.Back
+    ? CameraFacing.Front
+    : CameraFacing.Back;
+```
+
+## Video Recording
+
+`VideoRecordingOptions.IncludeAudio` defaults to `true`; the audio permission is requested only when audio is requested.
+
+```csharp
+await this.Camera.StartVideoRecordingAsync(new VideoRecordingOptions { IncludeAudio = true });
+// ... later ...
+var video = await this.Camera.StopVideoRecordingAsync();   // CameraVideo { FilePath, Duration }
+```
+
+> On **Android**, CameraX allows a limited number of concurrent use-cases, so video recording and the analysis pipeline are mutually exclusive — `StartVideoRecordingAsync` throws a clear error while analyzers are attached. Clear `CameraView.Analyzers` to record.
+
+## Live Filters
+
+```xml
+<cam:CameraView Filter="Noir" />
+```
+
+`Filter` accepts `None`, `Mono`, `Noir`, `Sepia`, `Invert`, `Vivid`, `Cool`, `Warm`. Filtering is applied to the live preview (Apple `CIFilter`, Android `RenderEffect` on API 31+, Blazor CSS); on Windows it is best-effort.
+
+## Selecting a Camera
+
+`Facing` picks by position, but you can enumerate every physical camera and pin an exact one — essential for phones with multiple back lenses or desktops with several webcams:
+
+```csharp
+var cameras = await this.Camera.GetAvailableCamerasAsync();
+// CameraInfo { Id, Name, Facing, IsDefault }
+this.Camera.CameraId = cameras.First(c => c.Name.Contains("USB")).Id;
+```
+
+Set `CameraId` back to `null` to fall back to `Facing`.
+
+## Properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `Facing` | `CameraFacing` | `Back` | `Back` / `Front` / `External` lens position |
+| `CameraId` | `string?` | `null` | Exact device id from `GetAvailableCamerasAsync()`; overrides `Facing` |
+| `IsActive` | `bool` | `true` | Whether the session is running |
+| `Zoom` | `double` | `1` | Zoom factor, clamped to `MinZoom`..`MaxZoom` |
+| `MinZoom` / `MaxZoom` | `double` | `1` | Supported zoom range (reported by the handler) |
+| `IsTorchOn` | `bool` | `false` | Continuous flashlight/torch |
+| `FlashMode` | `CameraFlashMode` | `Off` | Flash behaviour for still capture (`Off`/`On`/`Auto`) |
+| `ScaleMode` | `PreviewScaleMode` | `AspectFill` | How the preview fills the view |
+| `Filter` | `CameraFilter` | `None` | Live color filter |
+| `ShowDetectionOverlay` | `bool` | `true` | Whether detections are surfaced for the overlay |
+| `Analyzers` | `IList<IFrameAnalyzer>` | empty | Frame analyzers — see [Frame Analyzers](/controls/cameraview/analyzers/) |
+| `IsRecording` | `bool` (read-only) | `false` | Whether a recording is in progress |
+| `Detections` | `IReadOnlyList<Detection>` | empty | Latest aggregated detections |
+
+### Methods & Events
+
+| Member | Description |
+|---|---|
+| `RequestPermissionAsync()` | Request camera permission |
+| `StartAsync()` / `StopAsync()` | Start / stop the session |
+| `CapturePhotoAsync()` | Capture a still → `CameraPhoto` |
+| `StartVideoRecordingAsync()` / `StopVideoRecordingAsync()` | Record video → `CameraVideo` |
+| `GetAvailableCamerasAsync()` | Enumerate cameras → `IReadOnlyList<CameraInfo>` |
+| `MediaCaptured` / `VideoCaptured` | Raised after a photo / video is captured |
+| `DetectionsChanged` | Raised with the latest detection set |
+| `CameraError` | Raised on a camera or pipeline error |
+
+## When to Use What
+
+- **Scan a barcode / QR** → add a `BarcodeAnalyzer` ([Frame Analyzers](/controls/cameraview/analyzers/)).
+- **Detect / box faces** → add a `FaceAnalyzer`.
+- **Trigger on movement** → add a `MotionAnalyzer`.
+- **Read text / parse an invoice** → add an `OcrAnalyzer` with your own `IDocumentAnalyzer`.
+- **Just take a photo or record video** → no analyzers required; use `CapturePhotoAsync` / `StartVideoRecordingAsync`.

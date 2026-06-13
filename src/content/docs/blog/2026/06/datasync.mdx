@@ -1,0 +1,131 @@
+---
+title: "Shiny.Data.Sync — Offline-First Record Sync, Built on Jobs & HTTP Transfers"
+date: 2026-06-13
+authors:
+  - allanritchie
+tags:
+  - datasync
+  - jobs
+  - httptransfers
+  - release
+excerpt: "Shiny.Data.Sync is a background-capable, bidirectional record-sync engine. It doesn't reinvent background execution — it stands on the same playbook as Shiny Jobs and Shiny.Net.Http, moving records where transfers move files and riding the Jobs scheduler for periodic pulls."
+---
+
+Shiny already had two answers for "do work when the app isn't in the foreground":
+
+- **[Shiny Jobs](/jobs/)** runs *periodic background tasks* — WorkManager on Android, BGTaskScheduler on iOS, an in-process timer everywhere else.
+- **[Shiny.Net.Http](/httptransfers/)** moves *files* in the background — `NSURLSession` on iOS, a foreground service on Android, a connectivity-driven `HttpClient` loop elsewhere.
+
+There was a gap in the middle: **records**. Not a 40 MB video, not a timer that fires every hour — the dozen `Create` / `Update` / `Delete` operations a user generates offline that need to reach a REST API reliably, survive an app kill, and come back with the server's changes.
+
+`Shiny.Data.Sync` fills that gap. The important part of this post isn't "here's a new library" — it's that **Data Sync deliberately doesn't reinvent background execution**. It rides the exact same OS playbook Jobs and HTTP Transfers already proved out.
+
+## Three libraries, one background playbook
+
+iOS and Android take cross-platform "background" promises away from you. Shiny's answer has always been to match what each OS actually allows rather than pretend a single mechanism works everywhere. All three libraries land on the same per-platform tiers:
+
+| Platform | Jobs | HTTP Transfers | Data Sync |
+|---|---|---|---|
+| iOS / Mac Catalyst | BGTaskScheduler | Background `NSURLSession` | Background `NSURLSession` (upload + download tasks) |
+| Android | WorkManager | Foreground service + `HttpClient` | Foreground service + `HttpClient` |
+| Windows / Linux / macOS | In-process timer | `HttpClient` + connectivity loop | `HttpClient` + connectivity loop |
+| Blazor WASM | In-process (tab alive) | Service Worker Background Sync | `HttpClient` + `LocalStorage` (tab alive) |
+
+If you've shipped a background download with `Shiny.Net.Http`, you already understand Data Sync's runtime model — because it's the same model. The library description says it outright: where transfers move files, sync moves records, and the two **deliberately share their playbook, because the OS guarantees are the same**.
+
+## How Data Sync *uses* Jobs
+
+You don't wire up a background pull yourself. `AddDataSync<TDelegate>` registers a `SyncJob` with the Shiny Jobs scheduler for you:
+
+```csharp
+// This is effectively what AddDataSync does under the hood — no AddJob call required:
+services.AddJob<SyncJob>(r => r.WithInternet(InternetAccess.Any));
+```
+
+That means periodic inbox pulls keep happening on whatever background cadence the OS allows — WorkManager on Android, BGTaskScheduler on iOS — using the same `IJobManager` you'd use for any other Shiny job. The job respects each endpoint's `MinPullInterval` so it doesn't hammer your server, and because it's a normal job you can turn it off through the normal job API when your pulls are push-triggered instead:
+
+```csharp
+var jobs = host.Services.GetRequiredService<IJobManager>();
+await jobs.Cancel(nameof(Shiny.Data.Sync.SyncJob));
+```
+
+This is the win of building *on* Jobs rather than beside it: the scheduler, the runtime criteria (`WithInternet`, charging, battery), and the platform background hooks are already solved. Data Sync just registers a job and inherits all of it.
+
+## How Data Sync mirrors HTTP Transfers
+
+The architectural heart of `Shiny.Net.Http` is a **persistent queue drained by a platform-tiered transport**. A transfer is written to disk before any network call, so a process kill mid-transfer leaves the work intact and the next launch (or the OS itself, on iOS) resumes it.
+
+Data Sync uses the identical pattern for its **outbox**:
+
+```csharp
+public class TodosService(IDataSyncManager sync)
+{
+    public Task Create(TodoItem item) => sync.Queue(SyncVerb.Create, item);
+    public Task Update(TodoItem item) => sync.Queue(SyncVerb.Update, item);
+    public Task Delete(TodoItem item) => sync.Queue(SyncVerb.Delete, item);
+}
+```
+
+`Queue<T>` writes a durable `SyncOperation` to the Shiny repository **before** touching the network, then returns immediately — the caller never blocks on the round-trip. From there it's pure HTTP Transfers thinking:
+
+- On **iOS / Mac Catalyst**, queued ops drive `NSURLSession` upload tasks. Even if Shiny's in-process queue dies, the OS keeps its own queue and drives the upload to completion, waking the app to dispatch the result — exactly how background file uploads survive suspension.
+- On **Android**, ops drain inside a foreground service that spawns on `Queue<T>` and dies when the queue empties — the same foreground-service contract transfers use to stay alive while work is pending.
+- On **Windows / Linux / macOS / Blazor**, an in-process `HttpClient` loop drains the queue, woken by `IConnectivity.Changed`, app startup, and `Queue<T>` itself — the same connectivity loop that drives transfers off-Apple.
+
+`Attempts` and `NextAttemptAt` are persisted alongside each op, so even the exponential-backoff window survives a restart. None of that is new machinery — it's the transfers playbook applied to records.
+
+Where it goes *beyond* a file transfer is the second direction: an **inbox** that pulls server deltas keyed by an opaque cursor, draining pages until the server says `hasMore: false`. A file transfer is one-way; a record sync is two-way, so Data Sync adds the inbox, tombstone streams, conflict resolution, and an operation coalescer on top of the shared foundation.
+
+## Setup, end to end
+
+```csharp
+// 1. Entity — one property
+public record TodoItem(string Identifier, string Title, bool Completed) : ISyncEntity;
+
+// 2. AOT-safe JSON, once per app
+[ShinyJsonContext]
+[JsonSerializable(typeof(TodoItem))]
+public partial class AppJsonContext : JsonSerializerContext;
+
+// 3. Register — picks the transport for the TFM AND auto-registers SyncJob
+builder.Services.AddDataSync<MyDataSyncDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos", ep =>
+    {
+        ep.Direction = SyncDirection.Both;            // PullOnly / PushOnly also valid
+        ep.Batch = true;                              // coalesce redundant ops per round-trip
+        ep.MinPullInterval = TimeSpan.FromMinutes(5); // throttle the scheduled SyncJob
+        ep.MaxAttempts = 8;
+        ep.DefaultConflictPolicy = ConflictPolicy.ServerWins;
+    });
+});
+```
+
+Your one `IDataSyncDelegate` is the integration seam — `OnSent`, `OnError`, `OnReceived`, `OnConflict`. Received items arrive already deserialized and strongly typed; you apply them to whatever local store you like (Data Sync is a transport, not a database — pair it with [DocumentDB](/documentdb/) inside `OnReceived` if you want local query).
+
+## So which one do I reach for?
+
+This is the question the three libraries answer together:
+
+| You need to… | Use | Why |
+|---|---|---|
+| Run a periodic background task (cleanup, refresh, telemetry flush) | **[Jobs](/jobs/)** | A scheduler with runtime criteria. No queue, no HTTP shape. |
+| Move a large file up or down, resumable, in the background | **[HTTP Transfers](/httptransfers/)** | Range-aware resume for multi-megabyte blobs. One-way. |
+| Reliably push record CRUD and pull deltas, offline-first | **[Data Sync](/datasync/)** | Persistent outbox + cursor inbox, drain-on-reconnect, conflict handling. |
+
+They compose rather than compete. A real offline-first app often uses all three: **Jobs** for the periodic housekeeping, **HTTP Transfers** for the user's photo attachments, and **Data Sync** for the records those photos belong to — every one of them riding the same `NSURLSession` / foreground-service / connectivity-loop tiering under the hood.
+
+And the boundary is explicit. Data Sync's own docs tell you when to step *out* of it: large blobs go to HTTP Transfers, realtime streams go to SignalR or Push, and a client-of-record backup is a file push, not a sync. Moving records — `Create` / `Update` / `Delete` queued on failure, drained on reconnect, pulled back as deltas — is the lane it's built for.
+
+## Get started
+
+```bash
+dotnet add package Shiny.Data.Sync
+```
+
+- [Data Sync — Getting Started](/datasync/)
+- [Architecture](/datasync/architecture) — why outbox + inbox, why platform-tiered transports
+- [Platform Behavior](/datasync/platform-behavior) — what survives an app kill, and the Info.plist / manifest bits
+- [Jobs](/jobs/) and [HTTP Transfers](/httptransfers/) — the two libraries it builds on
+
+If you already know how Shiny runs work in the background, you already know how Data Sync runs. It just moves records.

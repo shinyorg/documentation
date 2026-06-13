@@ -382,6 +382,15 @@ export const sidebarTopics = [
       },
       { label: 'Barcodes & QR Codes', link: 'controls/barcodes/', jumpTo: true },
       {
+        label: 'CameraView',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/cameraview/' },
+          { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
+          { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
+        ]
+      },
+      {
         label: 'TreeView',
         jumpTo: true,
         items:[
