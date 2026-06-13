@@ -208,8 +208,29 @@ Membership needs real cross-document transactions, so it is supported only on ba
 
 > **System-store compatibility:** reminders ✅ and grain directory ✅ run on any backend (relational built-in, or NoSQL via `StoreFactory`); membership requires transactions (relational / Mongo replica set, **not** Cosmos). All three are covered by PostgreSQL integration tests (`ReminderTableTests`, `MembershipTableTests`, `GrainDirectoryTests`).
 
+## Source-generated (reflection-free) serialization
+
+The provider's own envelope/document types (grain-state record, reminders, membership, grain-directory rows) are **always** source-generated — the store serializes them without reflection. The one piece that can fall back to reflection is your **grain state** `T`, because the provider is generic over it. Assign a `JsonSerializerContext` covering your grain-state types as the `TypeInfoResolver`, and grain-state (de)serialization becomes source-generated too:
+
+```csharp
+[JsonSerializable(typeof(CartState))]
+[JsonSerializable(typeof(UserPrefs))]
+public partial class GrainStateContext : JsonSerializerContext;
+
+siloBuilder.AddDocumentDbGrainStorage("Default", o =>
+{
+    o.DatabaseProvider     = new PostgreSqlDatabaseProvider(cs);
+    o.JsonSerializerOptions = new JsonSerializerOptions { TypeInfoResolver = GrainStateContext.Default };
+    o.UseReflectionFallback = false;   // throw on an unregistered state type instead of reflecting
+});
+```
+
+With `UseReflectionFallback = false`, an unregistered grain-state type throws a clear exception at write/read time rather than silently using reflection. The same `JsonSerializerOptions` / `UseReflectionFallback` knobs exist on the reminder, clustering, and grain-directory options. Leaving the defaults (`UseReflectionFallback = true`, no context) keeps the previous reflection-based behavior, so this is purely opt-in.
+
+> The grain-state JSON path used by [queries](#query-grain-state-without-activating-grains) follows your context's naming policy — set `PropertyNamingPolicy = JsonNamingPolicy.CamelCase` on the options for predictable, camelCase `$.state.…` paths.
+
 ## Limitations
 
 - **Membership requires multi-document transactions** — relational or MongoDB replica set only; not Cosmos (see the [clustering](#cluster-membership--clustering-imembershiptable) note). Grain storage, reminders, and grain directory have no such requirement.
-- **Reflection-based serialization** — grain state and system-store documents are (de)serialized via reflective `System.Text.Json`; this is a server-side provider and is not an AOT/trim target like the rest of the stack.
+- **The silo host itself is not an AOT target** — grain-state and system-store *serialization* is reflection-free when you configure a `JsonSerializerContext` (above), but `Microsoft.Orleans.Runtime` is reflection/codegen-heavy, so a fully AOT-published silo is not a goal of this package.
 - **Cosmos partitioning** — see the compatibility note above.
