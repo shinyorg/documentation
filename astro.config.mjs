@@ -339,12 +339,19 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'docdb-v7',
-              content: 'Document DB v7: Temporal Support and Telemetry Collections!',
+              id: 'docdb-v71',
+              content: 'Document DB v7.1: Temporal Support, Telemetry Collection, & Orleans Storage Providers!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false
             },
+            {
+              id: 'controls1-2',
+              content : 'Controls: The biggest control suite for MAUI & Blazor!',
+              variant: 'tip',
+              link: { text: 'Learn More', href: '/controls/' },
+              dismissable: false
+            },            
             {
               id: 'mobilev5-1',
               content: 'Client v5 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
@@ -364,14 +371,6 @@ export default defineConfig({
               content: 'Mediator 6.6: AI Tool Generation and More AOT generation',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
-              dismissable: false
-            },
-
-            {
-              id: 'controls1-1',
-              content : 'Controls: Haptic Feedback Anywhere, TableView, Scheduler, ChatView, ImageEditor, and more for MAUI & Blazor!',
-              variant: 'tip',
-              link: { text: 'Learn More', href: '/controls/' },
               dismissable: false
             },
             {

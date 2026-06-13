@@ -5,6 +5,38 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 7.1 - June 13, 2026
+<RN type="feature">
+**Orleans grain storage (`Shiny.DocumentDb.Orleans`)** — a Microsoft Orleans `IGrainStorage` (+ `PubSubStore`) provider implemented entirely against the backend-agnostic `IDocumentStore`, so one implementation runs on every DocumentDb backend. The Orleans contract maps cleanly onto the store: the document key is `"{stateName}|{grainId}"`, the ETag is a `GrainStateRecord.Version` mapped via `MapVersionProperty`, and a `ConcurrencyException` surfaces as Orleans' `InconsistentStateException`. Grain state is persisted as structured, nested JSON — so you can **query grain state directly without activating the grains** (`json_extract(Data, '$.state.…')` against the grain-state table — reporting/dashboards/admin over the persisted read model, which Orleans' point-key storage contract can't do) — and the envelope can opt into `MapTemporal<GrainStateRecord>` for a free audit trail of every state mutation, neither of which Orleans' built-in providers offer.
+
+```csharp
+// Relational backends — built-in path
+siloBuilder.AddDocumentDbGrainStorage("Default", o =>
+    o.DatabaseProvider = new PostgreSqlDatabaseProvider(connectionString));
+```
+
+First-class companion packages **`Shiny.DocumentDb.Orleans.MongoDb`** and **`Shiny.DocumentDb.Orleans.CosmosDb`** wire the store, grain-state mapping, and version property for you (`siloBuilder.AddMongoDbGrainStorage(...)` / `AddCosmosDbGrainStorage(...)`); a `StoreFactory` escape hatch covers any other backend (LiteDB, IndexedDB, …). Compatibility tiers: **Recommended** PostgreSQL / SQL Server / MySQL / Oracle (atomic `UPDATE … WHERE` CAS, honored even during failover duplicate-activation windows); **Supported** MongoDB (atomic version-predicate filter); **Limited/dev** SQLite, LiteDB, IndexedDB, DuckDB; **Use with care** Cosmos DB (CAS is correct, but it partitions by `typeName` — weigh the 20 GB logical-partition limit for large single-type grain populations). Covered by integration tests on PostgreSQL + MongoDB, including a stale-write CAS conflict. There is no first-party Orleans MongoDB provider, so this fills a real gap. See [Orleans Provider](/documentdb/orleans/)
+</RN>
+<RN type="feature">
+**Orleans system stores — reminders, clustering & grain directory** — the Orleans persistence stack on `Shiny.DocumentDb.Orleans` now goes beyond grain storage. Each is registered with its own silo-builder extension and shares the same `OrleansStoreOptions` shape (relational `DatabaseProvider` built-in path, or a `StoreFactory` escape hatch for MongoDB / Cosmos / others); per-row optimistic concurrency rides on the same version-property CAS.
+
+```csharp
+siloBuilder
+    .AddDocumentDbReminders(o      => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbClustering(o     => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbGrainDirectory("Default", o => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs));
+```
+
+- **Reminders (`IReminderTable`)** — `AddDocumentDbReminders(...)` (also calls Orleans' `AddReminders()`), default table `orleans_reminders`. Hash-ring range reads via a fluent query on the stored `GrainHash`; per-row version CAS. No multi-document transaction required, so it works on any backend.
+- **Cluster membership (`IMembershipTable`)** — `AddDocumentDbClustering(...)`, default table `orleans_membership`. Per-silo rows and a global table-version row are updated together inside `RunInTransaction`, each CAS-gated. **Requires multi-document transactions → relational or MongoDB replica set; Cosmos is not supported** (single-partition batches only).
+- **Grain directory (`IGrainDirectory`)** — `AddDocumentDbGrainDirectory("Default", ...)`, default table `orleans_graindirectory`. Per-row version CAS for register/unregister races; no transaction required.
+
+Covered by PostgreSQL integration tests (`ReminderTableTests`, `MembershipTableTests`, `GrainDirectoryTests`). See [Orleans Provider › System stores](/documentdb/orleans/#system-stores-reminders-clustering-grain-directory)
+</RN>
+<RN type="fix">
+**Atomic optimistic-concurrency CAS on MongoDB and Cosmos DB** — the version-checked `Update`/`Upsert` paths previously read the stored version, compared it in memory, then wrote — a non-atomic read-then-write that could lose a concurrent writer's update in the window between read and write (the failover edge case that bites Orleans grain storage). Both providers now perform a server-side atomic compare-and-swap: **MongoDB** folds the expected version into the `UpdateOne` filter (`MatchedCount == 0` → `ConcurrencyException`), and **Cosmos DB** uses a native `IfMatchEtag` precondition on the replace (HTTP 412 → `ConcurrencyException`). Scoped to version-mapped types only; non-versioned writes keep last-write-wins, matching the relational providers (which were already atomic via `UPDATE … WHERE version = @expected`).
+</RN>
+
 ## 7.0 - June 12, 2026
 <RN type="feature">
 **Temporal support (system-time history)** — opt a document type into append-only versioning with `options.MapTemporal<T>(o => { ... })`. Every `Insert`, `Update`, `Upsert`, `Remove`, `SetProperty`, `RemoveProperty`, and `BatchInsert` (including writes inside `RunInTransaction`) records a versioned snapshot to a per-type history sidecar, so a document's state can be read back as of any point in time.

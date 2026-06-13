@@ -1,0 +1,215 @@
+---
+title: Orleans Provider
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Tabs, TabItem } from '@astrojs/starlight/components';
+
+A full Microsoft Orleans persistence stack — **grain storage**, **reminders**, **cluster membership (clustering)**, and **grain directory** — built entirely on the backend-agnostic `IDocumentStore` abstraction. One set of implementations runs on every Shiny.DocumentDb backend, and because everything is persisted as **structured, queryable JSON** you get two things Orleans' built-in providers can't offer: you can **query grain state directly — without activating the grains** — and you can keep a free audit trail of every state mutation via `MapTemporal<T>`.
+
+<NugetBadge name="Shiny.DocumentDb.Orleans" showLabel={true} />
+<NugetBadge name="Shiny.DocumentDb.Orleans.MongoDb" showLabel={true} />
+<NugetBadge name="Shiny.DocumentDb.Orleans.CosmosDb" showLabel={true} />
+
+## When to Use
+
+- You already use Shiny.DocumentDb (or one of its backends) and want grain persistence on the same store.
+- You want to **query grain state without activating grains** — reporting, dashboards, admin/ops tooling, and analytics over live grain state, straight from the store. See [Query grain state without activating grains](#query-grain-state-without-activating-grains).
+- You want a **free audit trail** of grain-state history via `MapTemporal<T>`.
+- You want the **whole Orleans persistence stack on one store** — grain storage plus [reminders, clustering, and grain directory](#system-stores-reminders-clustering-grain-directory) — instead of stitching together separate provider packages.
+- You want one storage abstraction that can move between PostgreSQL, SQL Server, MongoDB, Cosmos, and the rest without rewriting the provider.
+
+There is no first-party Orleans MongoDB provider, so this fills a real gap there. For Cosmos, weigh the partitioning note in [Provider Compatibility](#provider-compatibility) before large-scale production.
+
+## How it maps
+
+Orleans grain storage is a versioned key/value contract — `Read`/`Write`/`Clear` keyed by `(stateName, grainId)` with an ETag for optimistic concurrency. That maps cleanly onto `IDocumentStore`:
+
+| Orleans | Shiny.DocumentDb |
+|---|---|
+| document key | `Id = "{stateName}\|{grainId}"` |
+| ETag | `GrainStateRecord.Version` (mapped via `MapVersionProperty`) |
+| concurrency conflict | `ConcurrencyException` → `InconsistentStateException` |
+| state blob | nested `JsonElement` (stays queryable, not opaque) |
+
+Because the runtime binds only to `IDocumentStore`, the same code path serves all backends. The ETag is honored by each provider's atomic compare-and-swap: the relational providers fold the version check into `UPDATE … WHERE`, MongoDB uses an atomic version-predicate filter, and Cosmos uses a native `IfMatchEtag` — so a stale write loses the race and surfaces as an `InconsistentStateException`, even during a failover duplicate-activation window.
+
+## Installation
+
+```bash
+# Core provider (relational backends built in)
+dotnet add package Shiny.DocumentDb.Orleans
+
+# First-class companion packages (optional)
+dotnet add package Shiny.DocumentDb.Orleans.MongoDb
+dotnet add package Shiny.DocumentDb.Orleans.CosmosDb
+```
+
+## Setup
+
+<Tabs>
+<TabItem label="Relational">
+
+The built-in path — the provider builds and owns its `DocumentStore`, wiring the grain-state type/table and version mapping for you. Covers SQLite, SQL Server, PostgreSQL, MySQL, Oracle, and DuckDB.
+
+```csharp
+siloBuilder.AddDocumentDbGrainStorage("Default", o =>
+{
+    o.DatabaseProvider = new PostgreSqlDatabaseProvider(connectionString);
+    // o.TableName = "orleans_default";   // default: "orleans_{providerName}"
+    // o.DeleteStateOnClear = true;        // default
+});
+```
+
+</TabItem>
+<TabItem label="MongoDB / Cosmos">
+
+The companion packages wire the store, the grain-state mapping, and the version property for you:
+
+```csharp
+// Shiny.DocumentDb.Orleans.MongoDb
+siloBuilder.AddMongoDbGrainStorage("Default", connectionString, databaseName: "orleans");
+
+// Shiny.DocumentDb.Orleans.CosmosDb
+siloBuilder.AddCosmosDbGrainStorage("Default", connectionString, databaseName: "orleans");
+```
+
+Both also have an overload taking a `Func<…DocumentStoreOptions>` when you need to set a pooled client, `JsonSerializerOptions`, `DefaultThroughput`, etc.:
+
+```csharp
+siloBuilder.AddMongoDbGrainStorage(
+    "Default",
+    () => new MongoDbDocumentStoreOptions { MongoClient = sharedClient, DatabaseName = "orleans" });
+```
+
+</TabItem>
+<TabItem label="Any backend">
+
+The generic escape hatch — you build a fully-configured `IDocumentStore` with `GrainStateRecord` mapped (type→table/collection/container **and** `MapVersionProperty`). Use this for LiteDB, IndexedDB, or any other backend.
+
+```csharp
+siloBuilder.AddDocumentDbGrainStorage("Default", o =>
+{
+    o.StoreFactory = sp =>
+    {
+        var opts = new LiteDbDocumentStoreOptions { ConnectionString = "Filename=grains.db" };
+        opts.MapVersionProperty<GrainStateRecord>(x => x.Version);
+        return new LiteDbDocumentStore(opts);
+    };
+});
+```
+
+For the relational options shape, `DocumentDbGrainStorage.ConfigureGrainState(options, tableName)` applies both mappings in one call.
+
+</TabItem>
+</Tabs>
+
+`AddDocumentDbGrainStorageAsDefault(...)` registers under Orleans' default provider name, and the same provider backs the streaming `PubSubStore` when named accordingly.
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `DatabaseProvider` | `IDatabaseProvider?` | `null` | A relational backend. When set, the provider builds its own `DocumentStore` with `GrainStateRecord` mapped to `TableName` and its version mapped. Ignored when `StoreFactory` is set. |
+| `StoreFactory` | `Func<IServiceProvider, IDocumentStore>?` | `null` | Generic escape hatch returning a fully-configured store. The factory must map `GrainStateRecord` (type→table/container + version property). |
+| `TableName` | `string?` | `"orleans_{providerName}"` | Table/collection/container name for the grain-state envelope. |
+| `DeleteStateOnClear` | `bool` | `true` | When `true`, `ClearStateAsync` deletes the row. When `false`, it writes a tombstone (null state) and bumps the version, preserving the ETag chain. |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON options used to (de)serialize grain state into the envelope's nested document. |
+| `InitStage` | `int` | `ApplicationServices` | Silo lifecycle stage at which the store is initialized (fail-fast on a misconfigured store). |
+
+## Query grain state without activating grains
+
+This is the headline feature. Orleans grain storage is a point key/value contract — `Read`/`Write`/`Clear` by grain id, with **no query surface**. To inspect grain state you normally have to *activate* the grain: a silo round-trip that places the grain, deserializes its state, and runs `OnActivateAsync`. There is no built-in way to ask *"which grains have state matching X?"* — and the first-party providers persist state as an opaque serialized blob, so you can't query the database directly either.
+
+Because this provider stores each grain's state as **structured JSON** in an ordinary table/collection (`Data` column, under `$.state`), you can run the normal document query API straight against the grain-state table — **no grains are activated, no silo is involved**. Point a read-only `IDocumentStore` at the same database and table (`DocumentDbGrainStorage.ConfigureGrainState` applies the type→table + version mapping), then query:
+
+```csharp
+// A read-only store pointed at the same database + grain-state table.
+// Set JsonSerializerOptions so the stored JSON path casing is predictable.
+var opts = new DocumentStoreOptions
+{
+    DatabaseProvider   = new PostgreSqlDatabaseProvider(connectionString),
+    JsonSerializerOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+};
+DocumentDbGrainStorage.ConfigureGrainState(opts, "orleans_default");
+var readStore = new DocumentStore(opts);
+
+// Every ShoppingCart grain whose persisted total exceeds 1000 — without activating a single grain.
+var bigCarts = await readStore.Query<GrainStateRecord>(
+    "json_extract(Data, '$.state.total') > @min",       // SQLite/MySQL/Oracle; PG/SQL Server use their JSON funcs
+    parameters: new { min = 1000 });
+
+foreach (var rec in bigCarts)
+{
+    // rec.Id == "cart|{grainId}", rec.State is the nested JSON state element
+    var total = rec.State.GetProperty("total").GetDecimal();
+}
+```
+
+Grain state lives under the `$.state` path; the inner field names follow the `JsonSerializerOptions` you configure on the grain-storage options (default is the .NET property name — set `PropertyNamingPolicy = JsonNamingPolicy.CamelCase`, as above, to make the paths predictable and match the envelope). Filtering by the `Id` prefix (`"{stateName}|…"`) scopes a query to one grain type. Use the LINQ `Query<T>()` overload on backends without raw SQL (MongoDB, LiteDB, IndexedDB).
+
+:::caution[It's the last *persisted* state — a read model, not the live grain]
+These queries see what was last written to the store. An activated grain may hold newer in-memory state it hasn't flushed yet (Orleans persists only when the grain calls `WriteStateAsync`), and queries take no grain locks and don't serialize with grain turns. Treat this as an **eventually-consistent read model** — ideal for reporting, dashboards, admin/ops, analytics, and bulk inspection — not a substitute for calling the grain when you need authoritative live state.
+:::
+
+## State-history audit trail
+
+Opt the envelope into [temporal history](/documentdb/temporal/) for a full, queryable audit trail of every grain-state mutation (who/when/what), on top of the same store:
+
+```csharp
+o.StoreFactory = sp =>
+{
+    var opts = new DocumentStoreOptions { DatabaseProvider = new PostgreSqlDatabaseProvider(cs) };
+    DocumentDbGrainStorage.ConfigureGrainState(opts, "orleans_default");
+    opts.MapTemporal<GrainStateRecord>(t => t.MaxVersions = 100);  // audit trail
+    return new DocumentStore(opts);
+};
+
+// later, against a store mapped to the same table:
+var history = await temporalStore.History<GrainStateRecord>("cart|user-42");
+```
+
+## Provider Compatibility
+
+| Tier | Backends | Notes |
+|---|---|---|
+| **Recommended** | PostgreSQL ✅, SQL Server, MySQL, Oracle | Atomic CAS: the version check is folded into `UPDATE … WHERE` and row-count-verified, so the ETag is honored even during failover duplicate-activation windows. |
+| **Supported** | MongoDB ✅ | Good key distribution (`_id` embeds the grain key). Atomic CAS via the version-predicate update filter. |
+| **Limited / dev** | SQLite, LiteDB, IndexedDB, DuckDB | Single-writer / embedded / analytical engines — fine for dev, single-silo, or edge. |
+| **Use with care** | Cosmos DB | CAS is correct (native `IfMatchEtag`), but the provider partitions by `typeName`, putting all state of a grain type in one logical partition (20 GB cap + hot-partition). Fine for modest grain populations; weigh partitioning before large-scale production. |
+
+✅ = covered by automated integration tests (`tests/Shiny.DocumentDb.Orleans.Tests`, PostgreSQL + MongoDB Read/Write/Clear + stale-write CAS conflict).
+
+## System stores (reminders, clustering, grain directory)
+
+Beyond grain storage, the same `IDocumentStore` foundation backs the rest of the Orleans persistence stack. Each store has its own silo-builder extension and its own default table, and all share the same `OrleansStoreOptions` shape — supply a relational `DatabaseProvider` (the document type + version mappings are wired for you) **or** a `StoreFactory` that returns a fully-configured store (the escape hatch for MongoDB / Cosmos / others). Per-row optimistic concurrency rides on the same version-property CAS as grain storage.
+
+```csharp
+siloBuilder
+    .AddDocumentDbReminders(o      => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbClustering(o     => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbGrainDirectory("Default", o => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs));
+```
+
+### Reminders (`IReminderTable`)
+
+`AddDocumentDbReminders(...)` registers a reminder table (and calls Orleans' `AddReminders()` for you). Default table `orleans_reminders`. Each reminder is a queryable `ReminderDocument` keyed by `{serviceId}|{grainId}|{reminderName}`; the hash-ring range reads Orleans needs are served by a fluent query on the stored `GrainHash` (exclusive begin / inclusive end, with ring-wrap handled), and each row's ETag is the document version (per-row CAS). No multi-document transaction is required, so reminders work on **any** backend — relational built-in, or MongoDB / Cosmos / others via `StoreFactory`.
+
+### Cluster membership / clustering (`IMembershipTable`)
+
+`AddDocumentDbClustering(...)` registers cluster membership. Default table `orleans_membership`. The per-silo rows and a single global table-version row are updated **together inside `RunInTransaction`**, each gated on its own version (CAS) — this is how Orleans' table-version protocol is honored.
+
+:::caution[Requires multi-document transactions]
+Membership needs real cross-document transactions, so it is supported only on backends that provide them: the **relational** providers (PostgreSQL, SQL Server, MySQL, Oracle) or **MongoDB on a replica set**. **Cosmos DB is not supported** for membership — its transactional batches are single-partition only. Reminders and grain directory have no such requirement.
+:::
+
+### Grain directory (`IGrainDirectory`)
+
+`AddDocumentDbGrainDirectory("Default", ...)` registers a named grain directory (a distributed grain-activation registry). Default table `orleans_graindirectory`. Each registration is a `GrainDirectoryDocument` with per-row version CAS for register/unregister races; no multi-document transaction is required, so it runs on any backend.
+
+> **System-store compatibility:** reminders ✅ and grain directory ✅ run on any backend (relational built-in, or NoSQL via `StoreFactory`); membership requires transactions (relational / Mongo replica set, **not** Cosmos). All three are covered by PostgreSQL integration tests (`ReminderTableTests`, `MembershipTableTests`, `GrainDirectoryTests`).
+
+## Limitations
+
+- **Membership requires multi-document transactions** — relational or MongoDB replica set only; not Cosmos (see the [clustering](#cluster-membership--clustering-imembershiptable) note). Grain storage, reminders, and grain directory have no such requirement.
+- **Reflection-based serialization** — grain state and system-store documents are (de)serialized via reflective `System.Text.Json`; this is a server-side provider and is not an AOT/trim target like the rest of the stack.
+- **Cosmos partitioning** — see the compatibility note above.

@@ -456,6 +456,7 @@ export const sidebarTopics = [
           { label: 'Temporal Support', link: 'documentdb/temporal' },
           { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
+          { label: 'Orleans Provider', link: 'documentdb/orleans' },
           {
             label: 'Providers',
             collapsed: true,
