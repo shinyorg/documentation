@@ -12,6 +12,7 @@ The fluent query builder is the primary way to query documents. Start with `stor
 |---|---|
 | `.Where(predicate)` | Filter by LINQ expression. Multiple calls combine with AND. |
 | `.Where(filter[, jsonTypeInfo])` | Filter by a runtime filter string (e.g. `"Age >= 30 and Status == 'open'"`) — AOT-safe. Supports `and`/`or`/`not`, comparisons, `is [not] null`, `in (…)`, `contains/startsWith/endsWith`. |
+| `.WhereIn(selector, values[, nulls])` / `.WhereNotIn(selector, values[, nulls])` | Set-membership filter (`IN` / `NOT IN`) from an in-memory collection, lowered to each store's native construct. `nulls` is a `NullHandling` (`Ignore` default / `Raw` / `Match`). Empty set ⇒ `WhereIn` matches nothing, `WhereNotIn` matches everything. A `string` property-name overload mirrors string `OrderBy`/`Where`. |
 | `.OrderBy(selector)` / `.OrderByDescending(selector)` | Sort by property (expression). |
 | `.OrderBy(name[, jsonTypeInfo])` / `.OrderByDescending(name[, jsonTypeInfo])` | Sort by property name (string) — AOT-safe via `JsonTypeInfo<T>`. Supports dotted paths. |
 | `.OrderBy(name, direction[, jsonTypeInfo])` | Sort by property name with a runtime direction string (`"asc"`/`"ascending"`/`"desc"`/`"descending"`, case-insensitive; empty defaults to ascending). |
@@ -199,6 +200,63 @@ Supported syntax:
 - String functions `contains(field, 'x')`, `startsWith(field, 'x')`, `endsWith(field, 'x')`.
 
 Field names follow the same rules as the string `OrderBy` (case-insensitive CLR or JSON name, dotted paths). String literals use single or double quotes; double the quote to escape (`'O''Brien'`). Literals are coerced to each field's CLR type. Syntax errors and unknown fields throw `ArgumentException`.
+
+#### Interpolated filters (parameterized values)
+
+When the filter *shape* is fixed but its *values* come from code, use an interpolated string. Each `{value}` hole is captured as a strongly-typed argument and bound as a parameter — never formatted into the filter text — so you don't quote strings, you don't escape embedded quotes, and a hostile value can't tamper with the filter (the InterpolatedSql / Dapper pattern):
+
+```csharp
+var status = request.Query["status"];   // e.g. "open"
+var minAge = 30;
+
+var open = await store.Query<User>()
+    .Where($"Age >= {minAge} and Status == {status}", ctx.User)
+    .ToList();
+```
+
+`{status}` is treated as a literal value, so a value like `open' or '1'=='1` matches a *status equal to that string* rather than rewriting the predicate. Holes are valid anywhere a literal would appear — a comparison right-hand side, an `in (...)` list, or a string-function argument (`contains(Email, {fragment})`) — but never as a field name. Each value is coerced to the field's CLR type (a `string` hole into a `Guid`/`DateTime`/enum field parses just as a quoted literal would; a `null` value becomes an `is null` check).
+
+An interpolated string literal binds to this overload in preference to the raw `Where(string)` overload, so the two coexist: pass a plain `string` variable (e.g. the raw `?filter=` text) to use the parsed-string form, and an interpolated `$"..."` to capture values safely.
+
+## Set membership — `WhereIn` / `WhereNotIn`
+
+`WhereIn(selector, values)` filters to documents whose property is one of an **in-memory collection** of values (the `IN` pattern); `WhereNotIn` is its complement (`NOT IN`). The collection is passed as a single value and lowered to each store's native construct — relational `IN (…)`, Cosmos `IN`, MongoDB `$in`, LiteDB/IndexedDB in-memory — rather than being expanded into the query text, so one call behaves identically across every provider.
+
+```csharp
+var statuses = new[] { "Open", "Pending", "Review" };
+
+var open = await store.Query<Order>()
+    .WhereIn(o => o.Status, statuses)
+    .ToList();
+
+var rest = await store.Query<Order>()
+    .WhereNotIn(o => o.Status, statuses)
+    .ToList();
+```
+
+### Null handling
+
+The optional `NullHandling` argument controls how `null`s in the value set are treated (default `Ignore`):
+
+| `NullHandling` | Effect |
+|---|---|
+| `Ignore` *(default)* | Strip `null`s from the set. Removes the classic `NOT IN (…, NULL)` "matches no rows" trap; a `null` field simply never matches. |
+| `Match` | A `null` in the set is explicit intent about `null` **fields**: `WhereIn` *also* matches rows whose field is `null` (`… OR field IS NULL`); `WhereNotIn` *also* excludes them (`… AND field IS NOT NULL`). |
+| `Raw` | Pass the set through untouched and inherit the store's native three-valued logic. Faithful to raw SQL, but a `null` in the set means different things across providers — prefer `Ignore`/`Match`. |
+
+```csharp
+// alice's rows, plus rows with no assignee
+var mine = await store.Query<Order>()
+    .WhereIn(o => o.AssignedTo, new string?[] { "alice", null }, NullHandling.Match)
+    .ToList();
+```
+
+### Notes
+
+- **Value types**: works with `string`, numeric types (`int`/`long`/`decimal`/…), `Guid`, `enum`, and `DateTime`/`DateTimeOffset` — the same scalar types a `==` comparison supports. Guids are matched as their JSON string form and enums as their underlying numeric value, consistently across providers.
+- **Empty set** is well-defined: `WhereIn` matches nothing, `WhereNotIn` matches everything (no `IN ()` syntax error).
+- A **`string` property-name overload** — `WhereIn("Status", values)` — mirrors the string `OrderBy`/`Where` helpers for runtime-chosen fields.
+- The string filter's `field in (…)` form lowers through the **same** path, so `Where("Status in ('Open','Pending')")` and `WhereIn(o => o.Status, …)` produce identical native queries.
 
 ## Pagination
 

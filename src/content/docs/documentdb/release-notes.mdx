@@ -7,6 +7,21 @@ import RN from '/src/components/ReleaseNote.astro';
 
 ## 7.2 - June 14, 2026
 <RN type="feature">
+**Set-membership queries — `WhereIn` / `WhereNotIn`** — filter to documents whose property is (or isn't) one of an in-memory collection of values. The collection is passed as a single value and lowered to each store's native construct (relational `IN (…)`, Cosmos `IN`, MongoDB `$in`, LiteDB/IndexedDB in-memory) rather than expanded into the query text, so one call behaves identically across every provider. `null` handling is explicit via a `NullHandling` argument (`Ignore` default / `Match` / `Raw`), an empty set is well-defined (`WhereIn` matches nothing, `WhereNotIn` everything), and a `string` property-name overload mirrors the string `OrderBy`/`Where` helpers.
+
+```csharp
+var statuses = new[] { "Open", "Pending", "Review" };
+var open = await store.Query<Order>()
+    .WhereIn(o => o.Status, statuses)
+    .ToList();
+```
+
+The string filter's `field in (…)` form now lowers through the same path, so `Where("Status in ('Open','Pending')")` and `WhereIn(o => o.Status, …)` produce identical native queries. See [Querying › Set membership](/documentdb/querying/#set-membership--wherein--wherenotin)
+</RN>
+<RN type="fix">
+**`Guid` and `enum` field comparisons bind correctly across providers** — predicates over a `Guid` property (e.g. `Where(x => x.Ref == id)`) or an `enum` property now match reliably on every relational provider. Previously a boxed `Guid` or `enum` parameter was bound in a provider-dependent shape that didn't match the value's JSON representation (notably `Guid` on SQLite and `enum` on DuckDB silently returned no rows). Guids are now bound as their `System.Text.Json` string form and enums as their underlying numeric value, so the comparison is identical to the corresponding string/number field. Applies to `Where`, `WhereIn`/`WhereNotIn`, and the string filter.
+</RN>
+<RN type="feature">
 **Optional `JsonTypeInfo` on the string query helpers** — `Where(string)`, `OrderBy(string)` / `OrderByDescending(string)` (incl. the direction overload), and `Project(string)` no longer require a `JsonTypeInfo` argument. When omitted, the query reuses the metadata it already resolved at creation (from `Query(ctx.User)` or the registered `JsonSerializerContext`), so the common case loses the redundant re-passing:
 
 ```csharp
@@ -28,6 +43,18 @@ var open = await store.Query<User>()
 ```
 
 It parses to the same expression tree a compiled predicate produces and runs through the existing translator, so it never calls `Compile()` and resolves fields through `JsonTypeInfo` — fully AOT/trim-safe. See [Querying › String-based Where](/documentdb/querying/#string-based-where-dynamic-filter)
+</RN>
+<RN type="enhancement">
+**Interpolated `Where($"…")` — parameterized filter values** — supply runtime values to a string filter as an interpolated string and each `{value}` hole is captured as a typed argument and bound as a parameter rather than formatted into the filter. You no longer quote string values or escape embedded quotes, and a hostile value can't tamper with the filter (the Dapper / InterpolatedSql pattern). Holes are valid anywhere a literal would appear — comparison right-hand side, `in (...)` list, or `contains`/`startsWith`/`endsWith` argument — but never as a field name; values are coerced to the field's CLR type and a `null` becomes an `is null` check.
+
+```csharp
+var status = request.Query["status"];
+var open = await store.Query<User>()
+    .Where($"Age >= {minAge} and Status == {status}", ctx.User)
+    .ToList();
+```
+
+An interpolated literal binds to this overload in preference to the raw `Where(string)` overload, so both coexist — pass a plain `string` (the raw `?filter=` text) for the parsed form, an interpolated `$"..."` to capture values. Shares the same AOT-safe expression-tree path as `Where(string)`. See [Querying › Interpolated filters](/documentdb/querying/#interpolated-filters-parameterized-values)
 </RN>
 <RN type="feature">
 **Runtime field projection — `Project(fields, JsonTypeInfo<T>)`** — project a runtime-chosen field list into `IDocumentQuery<JsonObject>` with no result DTO, the natural fit for REST sparse fieldsets (`?fields=name,email`). Rows come back as reflection-free `JsonObject`; pagination, `Count`, `Any`, and streaming all work on the projected query.
