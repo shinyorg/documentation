@@ -83,20 +83,23 @@ See [Blazor Usage](/controls/cameraview/blazor/) for the WebAssembly specifics.
 ```
 
 ```csharp
-protected override async void OnAppearing()
+// The preview auto-starts when the view is added (IsActive defaults true) and the control requests camera
+// permission itself — handle a denial (or any error) via CameraError. Toggle IsActive for lifecycle.
+this.Camera.CameraError += (_, e) => status = e.Message;   // e.g. "Camera permission denied"
+
+protected override void OnAppearing()
 {
     base.OnAppearing();
-    if (await this.Camera.RequestPermissionAsync())
-        await this.Camera.StartAsync();
+    this.Camera.IsActive = true;    // resume (no-op on first show — it already auto-started)
 }
 
-protected override async void OnDisappearing()
+protected override void OnDisappearing()
 {
     base.OnDisappearing();
-    await this.Camera.StopAsync();
+    this.Camera.IsActive = false;   // release the camera while off-screen
 }
 
-// Capture a still
+// Capture a still — the current Filter is baked into the JPEG, so preview and photo match
 var photo = await this.Camera.CapturePhotoAsync();
 await File.WriteAllBytesAsync(path, photo.Data);
 
@@ -105,6 +108,10 @@ this.Camera.Facing = this.Camera.Facing == CameraFacing.Back
     ? CameraFacing.Front
     : CameraFacing.Back;
 ```
+
+:::caution[Don't gate startup on RequestPermissionAsync()]
+`RequestPermissionAsync()` / `StartAsync()` / `GetAvailableCamerasAsync()` route through the platform handler and **no-op (return `false`/empty) if the handler isn't connected yet** — e.g. when called in `OnAppearing` on first show. Gating startup on `RequestPermissionAsync()` there yields a false "permission denied" (and leaves the lens list empty) even though the preview works. Rely on auto-start + `CameraError`, and call `GetAvailableCamerasAsync()` once the view is loaded.
+:::
 
 ## Video Recording
 
@@ -116,7 +123,9 @@ await this.Camera.StartVideoRecordingAsync(new VideoRecordingOptions { IncludeAu
 var video = await this.Camera.StopVideoRecordingAsync();   // CameraVideo { FilePath, Duration }
 ```
 
-> On **Android**, CameraX allows a limited number of concurrent use-cases, so video recording and the analysis pipeline are mutually exclusive — `StartVideoRecordingAsync` throws a clear error while analyzers are attached. Clear `CameraView.Analyzers` to record.
+> On **Android**, CameraX allows a limited number of concurrent use-cases, so video recording and the analysis pipeline are mutually exclusive — `StartVideoRecordingAsync` throws a clear error while an **enabled** analyzer is attached. Disable every analyzer (`IsEnabled = false`) or clear `CameraView.Analyzers` to record; the camera rebinds automatically.
+>
+> Recorded video is **not** filtered — it records the raw feed even when a `Filter` is set (filters apply to the preview and captured photos only).
 
 ## Live Filters
 
@@ -125,6 +134,8 @@ var video = await this.Camera.StopVideoRecordingAsync();   // CameraVideo { File
 ```
 
 `Filter` accepts `None`, `Mono`, `Noir`, `Sepia`, `Invert`, `Vivid`, `Cool`, `Warm`, `Fade`, `Chrome`, `Instant`, `Tonal`. Filtering is applied to the live preview (Apple `CIFilter` — the `Fade`/`Chrome`/`Instant`/`Tonal` set maps to the Core Image `CIPhotoEffect*` filters; Android `RenderEffect` color matrix on API 31+; Blazor CSS); on Windows it is best-effort.
+
+The same filter is also baked into **captured photos** (`CapturePhotoAsync`) on Apple and Android, so a still matches the preview. **Recorded video is not filtered** (it records the raw feed), and Windows photos are unfiltered (it has no live filter).
 
 ## Selecting a Camera
 
@@ -150,9 +161,9 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `IsTorchOn` | `bool` | `false` | Continuous flashlight/torch |
 | `FlashMode` | `CameraFlashMode` | `Off` | Flash behaviour for still capture (`Off`/`On`/`Auto`) |
 | `ScaleMode` | `PreviewScaleMode` | `AspectFill` | How the preview fills the view |
-| `Filter` | `CameraFilter` | `None` | Live color filter |
+| `Filter` | `CameraFilter` | `None` | Color filter — applied to the preview and captured photos (not recorded video; no-op on Windows) |
 | `ShowDetectionOverlay` | `bool` | `true` | Whether overlay boxes are surfaced for the overlay |
-| `Analyzers` | `IList<IFrameAnalyzer>` | empty | Frame analyzers (also the XAML content property) — see [Frame Analyzers](/controls/cameraview/analyzers/) |
+| `Analyzers` | `IList<IFrameAnalyzer>` | empty | Frame analyzers (also the XAML content property); add/remove live or toggle one via its `IsEnabled` — see [Frame Analyzers](/controls/cameraview/analyzers/) |
 | `IsRecording` | `bool` (read-only) | `false` | Whether a recording is in progress |
 | `Overlays` | `IReadOnlyList<OverlayBox>` | empty | Latest aggregated overlay boxes (read-only) |
 

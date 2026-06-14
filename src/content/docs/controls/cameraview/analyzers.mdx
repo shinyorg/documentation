@@ -55,9 +55,20 @@ Drop a `CameraOverlayView` over the `CameraView` in the same cell and point it a
 </Grid>
 ```
 
+### Enabling / disabling analyzers
+
+`Analyzers` is an observable collection — **add or remove at runtime and the running pipeline picks it up live** (seamless on Apple/Windows; Android rebinds its capture use-cases automatically). To turn an analyzer off *without losing its bindings or internal state*, set **`FrameAnalyzer.IsEnabled`** (bool, default `true`) instead of removing it — it resumes instantly when re-enabled. When **every** analyzer is disabled the camera behaves as if it had none (so, e.g., Android can record video again).
+
+```xml
+<!-- toggle live from a switch; the analyzer's command binding + state are preserved while off -->
+<cam:BarcodeAnalyzer BarcodeDetectedCommand="{Binding ScanCommand}"
+                     IsEnabled="{Binding IsToggled, Source={x:Reference ScanSwitch}}" />
+```
+
 ### Controlling the overlay per analyzer
 
-- **`ShowBoundingBox`** (bool, default `true`) — set `False` to run an analyzer purely for its event/command and draw nothing.
+- **`IsEnabled`** (bool, default `true`) — run the analyzer or not (see above).
+- **`ShowBoundingBox`** (bool, default `true`) — set `False` to run an analyzer purely for its event/command and draw nothing. Honored by every built-in analyzer.
 - **`OverlayProvider`** (code-level `Func<TArgs, IReadOnlyList<OverlayBox>?>`) — return the exact boxes to draw for a detection, or `null` for none. When unset, the analyzer draws its own default styled box.
 
 ```csharp
@@ -111,13 +122,16 @@ using Shiny.Maui.Controls.Camera.Motion;
 var motion = new MotionAnalyzer
 {
     PixelThreshold = 25,   // per-pixel luma delta to count as changed
-    AreaThreshold = 0.04   // fraction of pixels that must change
+    AreaThreshold = 0.04,  // fraction of pixels that must change to trigger
+    GridColumns = 16,      // grid resolution used to split motion into regions
+    CellThreshold = 0.10   // fraction of a cell that must change to box it
 };
-motion.MotionChanged += (_, e) => { /* e.InMotion, e.Region, e.Intensity */ };
+// e.Regions = a box per distinct moving area; e.Region = their union; e.Intensity = 0..1
+motion.MotionChanged += (_, e) => { /* e.InMotion, e.Regions, e.Region, e.Intensity */ };
 camera.Analyzers.Add(motion);
 ```
 
-Pure-managed luminance frame-differencing — cross-platform, no native dependency. Raises `MotionChanged` when motion starts and stops, and boxes the changed region while it continues.
+Pure-managed luminance frame-differencing — cross-platform, no native dependency. Raises `MotionChanged` when motion starts and stops, and **clusters motion into separate regions** so movement in two spots draws two boxes rather than one box spanning both. `MotionEventArgs.Regions` carries one normalized `RectF` per moving area (with `Region` as their union for back-compat); tune how finely motion is split with `GridColumns` / `CellThreshold`.
 
 ### OCR
 
@@ -215,7 +229,7 @@ Beyond the first-class properties, every payload also exposes a `Fields` list of
 
 ## Writing your own analyzer
 
-Derive from `FrameAnalyzer` (it implements `IFrameAnalyzer`, makes the analyzer a `BindableObject`, marshals events/commands to the UI thread, and adds `ShowBoundingBox` + `OverlayProvider`). Use `frame.GetLuminance()` for a cached grayscale plane (ideal for managed CV), or down-cast `CameraFrame` to the platform frame (`AppleCameraFrame`, `AndroidCameraFrame`, `WindowsCameraFrame`) to feed a native ML SDK with zero copies.
+Derive from `FrameAnalyzer` (it implements `IFrameAnalyzer`, makes the analyzer a `BindableObject`, marshals events/commands to the UI thread, and adds `IsEnabled` + `ShowBoundingBox` + `OverlayProvider`). Use `frame.GetLuminance()` for a cached grayscale plane (ideal for managed CV), or down-cast `CameraFrame` to the platform frame (`AppleCameraFrame`, `AndroidCameraFrame`, `WindowsCameraFrame`) to feed a native ML SDK with zero copies.
 
 ```csharp
 public class GreenScreenAnalyzer : FrameAnalyzer
