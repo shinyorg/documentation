@@ -256,3 +256,119 @@ public class GreenScreenAnalyzer : FrameAnalyzer
 ```
 
 `Emit(raiseEvent, command, args)` raises your event and invokes a bound `Command` (both on the UI thread); `ResolveOverlay(args, provider, defaultBoxes)` honors `ShowBoundingBox` and any `OverlayProvider`. Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once every analyzer finishes.
+
+## Writing a custom document analyzer
+
+For an **OCR-backed document** you don't derive from `FrameAnalyzer` directly — derive from **`DocumentAnalyzer<TDocument>`** and supply an **`IDocumentParser<TDocument>`**. The base class does the heavy lifting: it runs the shared OCR recognizer each frame, hands the recognized text to your parser, raises the typed `DocumentDetected` event (and the bound `DocumentDetectedCommand`) on the UI thread, draws the parser's boxes, and honors `IsEnabled` / `ShowBoundingBox` / `OverlayProvider`. You only write **what counts as your document and how to pull its fields out of text**.
+
+A parser is the single seam — it turns the OCR'd lines into a typed payload plus the boxes to draw:
+
+```csharp
+public interface IDocumentParser<TDocument>
+{
+    // true + populated outputs on success; false when the text isn't this document (analyzer clears its overlay)
+    bool TryParse(IReadOnlyList<RecognizedText> text,
+                  out TDocument document,
+                  out IReadOnlyList<OverlayBox> boxes);
+}
+```
+
+`RecognizedText` (`Text`, `BoundingBox`, `Confidence`) is already in normalized **upright** image space, so boxes you build from `.BoundingBox` line up with the overlay automatically.
+
+### Option A — swap the parser on an existing analyzer
+
+The quickest customization: keep the built-in analyzer (and its payload type) but replace the rules — pass your own `IDocumentParser<T>` to its constructor. Back it with stricter rules, a cloud Document AI, or a vision LLM without touching the rest of the pipeline.
+
+```csharp
+camera.Analyzers.Add(new InvoiceAnalyzer(new MyInvoiceParser()));   // IDocumentParser<Invoice>
+```
+
+### Option B — a brand-new document type
+
+Three pieces: a **payload record**, a **parser**, and a one-line **analyzer** that wires them. Here's a business-card scanner end to end:
+
+```csharp
+using System.Text.RegularExpressions;
+using Microsoft.Maui.Graphics;
+using Shiny.Controls.Camera;                  // RecognizedText, DocumentField, IDocumentParser<T>, OverlayBox
+using Shiny.Maui.Controls.Camera.Documents;   // DocumentAnalyzer<T>
+
+// 1) payload — nullable fields (only what was found is set) + a Fields bag for extras
+public record BusinessCard(
+    string? Name, string? Company, string? Email, string? Phone,
+    IReadOnlyList<DocumentField> Fields);
+
+// 2) parser — pull fields out of the OCR'd lines
+public sealed partial class BusinessCardParser : IDocumentParser<BusinessCard>
+{
+    [GeneratedRegex(@"[\w.+-]+@[\w-]+\.[\w.-]+")] private static partial Regex Email();
+    [GeneratedRegex(@"\+?\d[\d ().-]{7,}\d")]     private static partial Regex Phone();
+
+    public bool TryParse(
+        IReadOnlyList<RecognizedText> text,
+        out BusinessCard document,
+        out IReadOnlyList<OverlayBox> boxes)
+    {
+        document = null!;
+        boxes = [];
+
+        // a cheap "is this my document?" signal first — an email line. Bail fast otherwise so the
+        // analyzer doesn't misfire on every frame of unrelated text.
+        var emailLine = text.FirstOrDefault(t => Email().IsMatch(t.Text));
+        if (emailLine is null)
+            return false;
+
+        var phoneLine = text.FirstOrDefault(t => Phone().IsMatch(t.Text));
+        var name = text.FirstOrDefault()?.Text;                       // first line is usually the name
+        var company = text.Skip(1).FirstOrDefault(t =>               // next non-contact line ≈ company
+            !Email().IsMatch(t.Text) && !Phone().IsMatch(t.Text))?.Text;
+
+        var fields = new List<DocumentField>
+        {
+            new("Name", name, text.FirstOrDefault()?.BoundingBox),
+            new("Company", company),
+            new("Email", Email().Match(emailLine.Text).Value, emailLine.BoundingBox),
+            new("Phone", phoneLine is null ? null : Phone().Match(phoneLine.Text).Value, phoneLine?.BoundingBox),
+        };
+
+        document = new BusinessCard(fields[0].Value, company, fields[2].Value, fields[3].Value, fields);
+
+        // box each field we actually located
+        boxes = fields
+            .Where(f => f.Bounds is not null)
+            .Select(f => new OverlayBox(f.Bounds!.Value, Colors.Lime, f.Label))
+            .ToList();
+        return true;
+    }
+}
+
+// 3) analyzer — the base does OCR + threading + events + overlay
+public sealed class BusinessCardAnalyzer : DocumentAnalyzer<BusinessCard>
+{
+    public BusinessCardAnalyzer() : base(new BusinessCardParser()) { }
+    public BusinessCardAnalyzer(IDocumentParser<BusinessCard> parser) : base(parser) { }  // allow swap-in too
+
+    public override string Id => "myapp.camera.businesscard";
+}
+```
+
+Use it like any other analyzer — code or XAML (it inherits `DocumentDetectedCommand`, `IsEnabled`, `ShowBoundingBox`, and `OverlayProvider` from the base):
+
+```csharp
+var cards = new BusinessCardAnalyzer();
+cards.DocumentDetected += (_, e) => status = $"{e.Document.Name} — {e.Document.Email}";
+camera.Analyzers.Add(cards);
+```
+
+```xml
+<my:BusinessCardAnalyzer DocumentDetectedCommand="{Binding CardCommand}"
+                         IsEnabled="{Binding ScanCards}" />
+```
+
+:::note[Things to keep in mind]
+- **`TryParse` runs on the analysis thread**, once per frame the recognizer produces text. Keep it fast and allocation-light, and do no UI work — the base marshals `DocumentDetected` to the UI thread for you.
+- **Return `false` for "not my document."** Lead with a cheap signal check (a keyword, an email, an MRZ line) so you don't emit a half-parsed result on every frame of unrelated text.
+- **OCR is native** (Apple Vision / Android MLKit / `Windows.Media.Ocr`), so a `DocumentAnalyzer<T>` produces results on iOS / Android / Windows / macOS — not on bare `net10.0`.
+- **A remote/LLM parser is fine** — the pipeline runs one analysis at a time per analyzer and drops frames while busy, so a slow `TryParse` just lowers that analyzer's throughput rather than backing up the camera. Throttle or cache if the call is expensive.
+- **Consumers can still override the boxes** without touching your parser via the analyzer's `OverlayProvider` (`Func<TDocument, IReadOnlyList<OverlayBox>?>`).
+:::
