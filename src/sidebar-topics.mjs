@@ -452,6 +452,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'documentdb/' },
+          { label: 'Why DocumentDb', link: 'documentdb/comparison' },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
           { label: 'Querying', link: 'documentdb/querying' },

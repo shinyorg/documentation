@@ -57,6 +57,27 @@ The SQL output below shows SQLite syntax — other providers generate equivalent
 | `x => new R { N = x.Lines.Min(l => l.Price) }` | `(SELECT MIN(json_extract(value, '$.price')) FROM json_each(...))` |
 | `x => new R { N = x.Lines.Average(l => l.Price) }` | `(SELECT AVG(json_extract(value, '$.price')) FROM json_each(...))` |
 
+## Runtime field projection (string-based)
+
+When the fields are chosen at runtime — a REST sparse fieldset (`?fields=name,email`), a configurable export — use `Project(fields, JsonTypeInfo<T>)`. It returns `IDocumentQuery<JsonObject>`, so no result DTO is needed; rows come back as `System.Text.Json.Nodes.JsonObject` (reflection-free, AOT-safe).
+
+```csharp
+IReadOnlyList<JsonObject> rows = await store.Query<User>()
+    .Where("Age >= 30", ctx.User)
+    .OrderBy("Name", ctx.User)
+    .Project("Name, Email", ctx.User)
+    .ToList();
+
+var name = rows[0]["name"]!.GetValue<string>();
+
+// Pagination, Count, Any and streaming all work on the projected query.
+var page = await store.Query<User>().Project("name,email", ctx.User).PageResult(1, 20);
+```
+
+It emits a `json_object('name', json_extract(Data, '$.name'), …)` projection from the resolved JSON paths. Field names follow the same matching rules as the string `OrderBy`/`Where` (case-insensitive CLR or JSON name, dotted paths). Each output key is the **leaf JSON name** (so `ShippingAddress.City` → `city`); selecting two fields that resolve to the same leaf name throws `ArgumentException`.
+
+After `Project`, the query is terminal-shaped — `ToList`/`ToAsyncEnumerable`/`Count`/`Any`/`Paginate` are supported, while `Where`/`OrderBy`/`Select`/aggregates throw. `Project` is supported on the SQL providers; other providers throw `NotSupportedException`.
+
 ## Streaming
 
 Use `.ToAsyncEnumerable()` instead of `.ToList()` to stream results one-at-a-time without buffering the entire result set into memory.

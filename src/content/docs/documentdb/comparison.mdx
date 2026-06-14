@@ -1,0 +1,105 @@
+---
+title: Why DocumentDb
+description: How Shiny.DocumentDb compares to sqlite-net-pcl and Entity Framework Core — feature matrix and head-to-head benchmarks.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+If you are storing data in a .NET app today, you are most likely reaching for **sqlite-net-pcl** (the de-facto mobile SQLite ORM) or **Entity Framework Core** (the default relational stack on the server). Shiny.DocumentDb is a different shape of tool: a schema-free document store that persists entire object graphs — nested objects and child collections — as a single JSON document, queryable with LINQ, across ten database backends, under full AOT and trimming.
+
+This page lays out, honestly, where each tool fits and where DocumentDb pulls ahead.
+
+## Feature matrix
+
+| Capability | Shiny.DocumentDb | sqlite-net-pcl | EF Core |
+|---|---|---|---|
+| **Schema management** | Zero — store objects directly | Auto-creates flat tables from POCOs | Migrations (`Add-Migration` / `Update-Database`) |
+| **Nested objects & child collections** | One JSON document, one read/write | Not supported — separate tables + manual joins | Owned types / related entities + JOINs |
+| **LINQ on nested data** | `Where(o => o.Lines.Any(l => l.Price > 10))` | Not possible | Yes, via `Include()` + LINQ→SQL |
+| **Database providers** | SQLite, LiteDB, CosmosDB, MongoDB, DuckDB, IndexedDB, MySQL, SQL Server, PostgreSQL, Oracle | SQLite only | Many relational + CosmosDB |
+| **AOT / trimming** | First-class — source-generated JSON, zero reflection | Reflection-based; no AOT support | `[RequiresDynamicCode]` / `[RequiresUnreferencedCode]`; no full AOT |
+| **Migrations** | None — schema-free JSON | Manual (you own every `ALTER`) | First-class, but required for every schema change |
+| **Change tracking** | None — snapshot writes | None | Full graph tracking (powerful, but has a cost) |
+| **Compiled queries** | N/A — expressions compile to SQL strings via a visitor, no per-query JIT | N/A | Yes — `EF.CompileAsyncQuery` |
+| **Projections** | SQL-level `json_object` via `.Select()` | Manual | `.Select()` |
+| **Transactions** | `store.RunInTransaction(...)` | `RunInTransactionAsync` | `SaveChanges` / explicit transactions |
+| **Vector / ANN search** | Yes — cross-provider (pgvector, sqlite-vec, DiskANN, …) | No | Provider-specific only |
+| **Temporal history** | Yes — `MapTemporal` (history / as-of / diff / restore) | No | SQL Server temporal tables only |
+| **Telemetry** | Built-in OpenTelemetry metrics + spans | No | EF diagnostics / interceptors |
+| **Dependency footprint** | Core + one provider package | Single small package | Large transitive graph |
+| **Startup cost** | Open a connection and go | Open a connection and go | DbContext model building + migration checks |
+| **Best fit** | Object graphs, nested data, mobile/offline, multi-provider | Simple flat-table CRUD on mobile | Server-side relational apps |
+
+## Where DocumentDb wins
+
+**Nested data is free.** An order with a shipping address, line items, and tags is one document. One `Insert`, one `Get`, one round trip. sqlite-net forces you into three normalized tables with foreign keys and manual rehydration on every read; EF Core models the relationships for you but still pays for multi-table `JOIN`s and change-tracking graph fixup. The benchmarks below show this gap widening as the graph grows.
+
+**No migrations, no model building.** On a mobile device the database is created on first launch — there is no DBA, no staging environment, no rollback plan. EF Core's migration pipeline adds ceremony with no payoff in that world, and its `OnModelCreating` reflection runs at startup. DocumentDb opens a connection and is ready.
+
+**AOT and trimming actually work.** Apple platforms prohibit JIT outright; Android benefits heavily from AOT. EF Core is reflection- and dynamic-code-heavy and carries trim/AOT-hostile attributes throughout its API; sqlite-net relies on reflection too. DocumentDb uses source-generated `JsonTypeInfo<T>` on every API and translates LINQ to SQL with a visitor — no `Expression.Compile()`, no `Reflection.Emit`.
+
+**One API, ten backends.** The same code runs on SQLite on a phone and PostgreSQL on a server. sqlite-net is SQLite-only; EF Core spans relational engines but with provider-specific quirks and a heavier footprint.
+
+<Aside type="tip" title="Giving EF Core a fair fight">
+The benchmarks below run EF Core with **pre-compiled, no-tracking async queries** (`EF.CompileAsyncQuery` + `AsNoTracking`) — its fastest read configuration. Even tuned, the nested-graph reads stay multiples behind a single-document fetch.
+</Aside>
+
+## Benchmarks
+
+Measured with [BenchmarkDotNet](https://benchmarkdotnet.org/) v0.15.8 on Apple M5 Pro, .NET 10.0.8, macOS. All three libraries run against SQLite. EF Core uses its fastest read path: pre-compiled `EF.CompileAsyncQuery` queries with `AsNoTracking`. Source lives in the [`benchmarks/`](https://github.com/shinyorg/DocumentDb/tree/main/benchmarks) folder of the repo.
+
+### Flat POCO (single table)
+
+A plain `User { Id, Name, Age, Email }` — the case where sqlite-net and EF Core are at their strongest, because they read native indexed columns while the document store extracts from JSON.
+
+#### Insert (loop of single inserts)
+
+| Library | 10 | 100 | 1000 |
+|---|---|---|---|
+| **Shiny.DocumentDb** | **420 µs** | **3.59 ms** | **36.05 ms** |
+| EF Core | 873 µs | 7.49 ms | 115.70 ms |
+| sqlite-net | 1.72 ms | 17.22 ms | 190.47 ms |
+
+#### Read
+
+| Operation | Shiny.DocumentDb | EF Core (compiled) | sqlite-net |
+|---|---|---|---|
+| Get by Id | **2.79 µs** | 8.24 µs | 10.95 µs |
+| Get all (1000) | 502.58 µs | **319.84 µs** | 297.52 µs |
+| Query by name (1000) | 165.55 µs | **25.41 µs** | 30.53 µs |
+
+<Aside type="note">
+On flat single-column queries, native column access wins — this is expected. A JSON property index (`CreateIndexAsync`) closes the gap: an indexed equality query drops from ~159 µs to ~6 µs (~26x). The document store's structural advantage is nested data, below.
+</Aside>
+
+### Nested object graph (Order → Address + Order Lines + Tags)
+
+One order with a shipping address, three line items, and two tags. sqlite-net stores this across **3 tables** (6 inserts per order, 3 queries + manual rehydration per read). EF Core models it as related entities read with `Include`. DocumentDb stores it as **one JSON document**.
+
+#### Insert (nested)
+
+| Library | 10 | 100 | 1000 |
+|---|---|---|---|
+| **Shiny.DocumentDb** | **439 µs** | **3.83 ms** | **39.02 ms** |
+| EF Core (3 tables) | 4.00 ms | 24.74 ms | 661.10 ms |
+| sqlite-net (3 tables) | 11.94 ms | 123.33 ms | 2.52 s |
+
+At 1,000 orders the document store is **~17x faster than EF Core** and **~65x faster than sqlite-net**.
+
+#### Read (nested)
+
+| Operation | Shiny.DocumentDb | sqlite-net | EF Core (Include, compiled) |
+|---|---|---|---|
+| Get by Id | **3.62 µs** | 28.10 µs | 31.00 µs |
+| Get all (100) | **124.3 µs** | 207.8 µs | 1.14 ms |
+| Get all (1000) | **1.27 ms** | 1.78 ms | 11.89 ms |
+| Query by status (~500/1000) | **1.01 ms** | 1.41 ms | 5.82 ms |
+
+The document store wins every nested read — by **8–10x** against EF Core's `Include` joins — because the whole graph lives in one row and deserializes in a single pass, with no JOINs and no change-tracker graph fixup.
+
+## When to choose each
+
+- **Choose Shiny.DocumentDb** when your data is document-shaped (nested objects, child collections, variable structure), when you target .NET MAUI / AOT, when you want one storage API across multiple databases, or when you want vector search, temporal history, or built-in telemetry without bolting on more libraries.
+- **Choose sqlite-net-pcl** for the simplest possible flat-table CRUD on a single SQLite database, where every entity is a handful of scalar columns and you never store an object graph.
+- **Choose EF Core** for server-side relational applications with complex cross-entity queries, reporting, and a relational schema you genuinely want to model and migrate.
+
+DocumentDb is not trying to replace a relational mapper for relational problems. It is the right tool when your objects are the model and the database is just where they live.

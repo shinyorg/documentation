@@ -5,6 +5,53 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 7.2 - June 14, 2026
+<RN type="feature">
+**Optional `JsonTypeInfo` on the string query helpers** — `Where(string)`, `OrderBy(string)` / `OrderByDescending(string)` (incl. the direction overload), and `Project(string)` no longer require a `JsonTypeInfo` argument. When omitted, the query reuses the metadata it already resolved at creation (from `Query(ctx.User)` or the registered `JsonSerializerContext`), so the common case loses the redundant re-passing:
+
+```csharp
+var results = await store.Query(ctx.User)
+    .Where("Age >= 30")
+    .OrderBy("Name", "desc")
+    .ToList();
+```
+
+Pass one explicitly to override; reflection-only queries (no resolvable context) still require it.
+</RN>
+<RN type="feature">
+**Runtime string filters — `Where(string, JsonTypeInfo<T>)`** — filter with a human-friendly expression string supplied at runtime (a REST `?filter=`, a saved view, an admin search box) instead of a compiled lambda. Supports `and`/`or`/`not` with parentheses, comparisons (`==`/`=`, `!=`/`<>`, `>`, `>=`, `<`, `<=`), `field is [not] null`, `field in (a, b, c)`, and `contains`/`startsWith`/`endsWith(field, 'x')`. Field names match the string-`OrderBy` rules (case-insensitive CLR or JSON name, dotted paths) and literals are coerced to each field's CLR type.
+
+```csharp
+var open = await store.Query<User>()
+    .Where("Age >= 30 and Status == 'open'", ctx.User)
+    .ToList();
+```
+
+It parses to the same expression tree a compiled predicate produces and runs through the existing translator, so it never calls `Compile()` and resolves fields through `JsonTypeInfo` — fully AOT/trim-safe. See [Querying › String-based Where](/documentdb/querying/#string-based-where-dynamic-filter)
+</RN>
+<RN type="feature">
+**Runtime field projection — `Project(fields, JsonTypeInfo<T>)`** — project a runtime-chosen field list into `IDocumentQuery<JsonObject>` with no result DTO, the natural fit for REST sparse fieldsets (`?fields=name,email`). Rows come back as reflection-free `JsonObject`; pagination, `Count`, `Any`, and streaming all work on the projected query.
+
+```csharp
+IReadOnlyList<JsonObject> rows = await store.Query<User>()
+    .Where("Age >= 30", ctx.User)
+    .Project("Name, Email", ctx.User)
+    .ToList();
+```
+
+Emits a `json_object('name', json_extract(Data,'$.name'), …)` projection; each output key is the leaf JSON name (duplicate leaves throw). Supported on the SQL providers. See [Projections › Runtime field projection](/documentdb/projections/#runtime-field-projection-string-based)
+</RN>
+<RN type="feature">
+**Directional string sort — `OrderBy(name, direction, jsonTypeInfo)`** — supply the sort direction as a runtime string alongside the column, e.g. for `?sort=name&dir=desc`. Accepts `asc`/`ascending`/`desc`/`descending` (case-insensitive); an empty/null/whitespace direction defaults to ascending, and an unrecognized value throws. Delegates to the existing string `OrderBy`/`OrderByDescending` overloads, so it shares their AOT-safe resolution.
+
+```csharp
+var results = await store.Query<User>()
+    .OrderBy(request.Query["sort"], request.Query["dir"], ctx.User)
+    .ToList();
+```
+See [Querying › String-based OrderBy](/documentdb/querying/#string-based-orderby-dynamic-sort)
+</RN>
+
 ## 7.1 - June 13, 2026
 <RN type="feature">
 **Orleans grain storage (`Shiny.DocumentDb.Orleans`)** — a Microsoft Orleans `IGrainStorage` (+ `PubSubStore`) provider implemented entirely against the backend-agnostic `IDocumentStore`, so one implementation runs on every DocumentDb backend. The Orleans contract maps cleanly onto the store: the document key is `"{stateName}|{grainId}"`, the ETag is a `GrainStateRecord.Version` mapped via `MapVersionProperty`, and a `ConcurrencyException` surfaces as Orleans' `InconsistentStateException`. Grain state is persisted as structured, nested JSON — so you can **query grain state directly without activating the grains** (`json_extract(Data, '$.state.…')` against the grain-state table — reporting/dashboards/admin over the persisted read model, which Orleans' point-key storage contract can't do) — and the envelope can opt into `MapTemporal<GrainStateRecord>` for a free audit trail of every state mutation, neither of which Orleans' built-in providers offer.
