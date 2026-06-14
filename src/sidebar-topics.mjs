@@ -650,7 +650,8 @@ export const sidebarTopics = [
         label: 'Blazor Hosting',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'blazorhost/' }
+          { label: 'Getting Started', link: 'blazorhost/' },
+          { label: 'Release Notes', link: 'blazorhost/release-notes' }
         ]
       }
     ]
