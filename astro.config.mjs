@@ -354,7 +354,7 @@ export default defineConfig({
             },
             {
               id: 'health-2',
-              content: 'Shiny Health 2.0 - Every Health API you can think of, unified and simplified with a powerful new plugin system for extensibility!',
+              content: 'Shiny Health 2.0 - Every Health Metric shared between Apple & Google Health - NOW with AI Tools!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/health' },
               dismissable: false
