@@ -7,7 +7,7 @@ import RN from '/src/components/ReleaseNote.astro';
 
 ## 7.2 - June 14, 2026
 <RN type="feature">
-**Scalar functions, flag-enum & phonetic queries** — `Where` predicates now translate a library of scalar functions to native SQL across the relational providers: string functions (`ToLower`/`ToUpper`, `Length`, `Trim`/`TrimStart`/`TrimEnd`, `Substring`, `Replace`, `IndexOf`, `string.IsNullOrEmpty`, string concatenation), `Math.*` (`Abs`, `Round`, `Ceiling`, `Floor`, `Sqrt`, `Pow`, `Sign`), and **flag-enum tests** — `permissions.HasFlag(Permissions.Write)` and the `(x & flag) == flag` idiom both lower to a portable bitwise test (`BITAND` on Oracle). Phonetic search arrives via `DocumentFunctions.Soundex(...)`, translated to native `SOUNDEX()` (SQL Server / MySQL / Oracle) or a registered connection UDF (SQLite); the same canonical implementation runs in-memory on LiteDB/IndexedDB. Internally the `Where` translator was refactored onto a shared, AOT-safe query IR (recognition → per-provider emission), so every provider stays in lock-step.
+**Scalar functions, flag-enum & phonetic queries** — `Where` predicates now translate a library of scalar functions across **every** provider: string functions (`ToLower`/`ToUpper`, `Length`, `Trim`/`TrimStart`/`TrimEnd`, `Substring`, `Replace`, `IndexOf`, `string.IsNullOrEmpty`, string concatenation), `Math.*` (`Abs`, `Round`, `Ceiling`, `Floor`, `Sqrt`, `Pow`, `Sign`), date-part access (`Year`/`Month`/`Day`/…), and **flag-enum tests** — `permissions.HasFlag(Permissions.Write)` and the `(x & flag) == flag` idiom. The relational providers emit native SQL (`BITAND` on Oracle); MongoDB uses `$expr` aggregation (`$toLower`/`$strLenCP`/`$substrCP`/… and `$bitsAllSet` for flags); CosmosDB uses native NoSQL functions; LiteDB/IndexedDB evaluate in-memory. Phonetic search arrives via `DocumentFunctions.Soundex(...)`, translated to native `SOUNDEX()` (SQL Server / MySQL / Oracle) or a registered connection UDF (SQLite); the same canonical implementation runs in-memory. You can register your own translations with `options.MapFunctionTranslation(...)`. Internally the `Where` translator was refactored onto a shared, per-provider query IR. Soundex is also supported on PostgreSQL via the `fuzzystrmatch` extension, and on DuckDB/CosmosDB/MongoDB via a precomputed stored field (see [Querying › Phonetic search](/documentdb/querying/#phonetic-search--documentfunctionssoundex)).
 
 ```csharp
 var smiths = await store.Query<Account>()
@@ -18,6 +18,22 @@ var writers = await store.Query<Account>()
     .Where(a => a.Permissions.HasFlag(Permissions.Write))
     .ToList();
 ```
+</RN>
+<RN type="fix">
+**CosmosDB server-side filtering now works** — CosmosDB stored each document's body as an escaped JSON *string* in the `data` property, so `c.data.field` paths never resolved and **every `Where` predicate (and query filter) silently matched zero rows** server-side. Documents are now stored as nested JSON objects, so filtering, scalar functions, and flag-enum queries run on the server. A second bug that corrupted multi-parameter predicates (`Substring`, `WhereIn`) was fixed at the same time. **Migration:** documents written by earlier versions are still readable, but must be re-saved (e.g. `Update`/`Upsert`) to be matched by server-side filters — old rows keep the legacy string `data` until rewritten.
+</RN>
+<RN type="enhancement">
+**Scalar functions in the string `Where` & `Project` DSL** — the runtime string grammar (for REST `?filter=`/`?fields=`, saved views, admin search) now exposes the same scalar functions as the LINQ API: `lower`/`upper`, `length`, `trim`, `substring`, `replace`, `indexof`, `abs`/`round`/`ceiling`/`floor`/`sqrt`/`sign`, `year`/`month`/`day`/…, `soundex`, and the predicate forms `isnullorempty`/`hasflag` (alongside the existing `contains`/`startsWith`/`endsWith`). Functions nest and work on either side of a comparison. Projections add an `as alias` form for functions. Same AOT-safe translation as the compiled API.
+
+```csharp
+store.Query<User>().Where("year(created) = 2026 and lower(name) = 'alice'");
+store.Query<User>().Project("name, lower(email) as email, year(created) as yr");
+```
+
+`Project(string)` is now also supported on **CosmosDB, MongoDB, LiteDB, and IndexedDB** (previously SQL-only) — they project client-side via the same compile-free path that runs their in-memory predicates, so fields and scalar functions work everywhere.
+</RN>
+<RN type="enhancement">
+**Query surface is fully NativeAOT-safe** — the `Where` translator runs on a shared expression IR (no `Expression.Compile()`), and the in-memory providers (LiteDB/IndexedDB) plus client-side filters now use a compile-free tree-walking interpreter instead of `Expression.Compile()`, removing the last `RequiresDynamicCode` (IL3050) holes from the query path.
 </RN>
 <RN type="feature">
 **Set-membership queries — `WhereIn` / `WhereNotIn`** — filter to documents whose property is (or isn't) one of an in-memory collection of values. The collection is passed as a single value and lowered to each store's native construct (relational `IN (…)`, Cosmos `IN`, MongoDB `$in`, LiteDB/IndexedDB in-memory) rather than expanded into the query text, so one call behaves identically across every provider. `null` handling is explicit via a `NullHandling` argument (`Ignore` default / `Match` / `Raw`), an empty set is well-defined (`WhereIn` matches nothing, `WhereNotIn` everything), and a `string` property-name overload mirrors the string `OrderBy`/`Where` helpers.

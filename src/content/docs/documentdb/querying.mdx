@@ -19,7 +19,7 @@ The fluent query builder is the primary way to query documents. Start with `stor
 | `.GroupBy(selector)` | Group by property (for aggregate projections with `Sql.*` markers). |
 | `.Paginate(offset, take)` | Limit results with SQL `LIMIT`/`OFFSET`. |
 | `.Select(selector, resultTypeInfo?)` | Project into a different shape via JSON object construction. |
-| `.Project(fields[, jsonTypeInfo])` | Project a runtime-chosen field list (e.g. `"name,email"`) into `IDocumentQuery<JsonObject>` — AOT-safe. Ideal for REST sparse fieldsets; no DTO required. |
+| `.Project(fields[, jsonTypeInfo])` | Project a runtime-chosen field list (e.g. `"name,email"`) into `IDocumentQuery<JsonObject>` — AOT-safe. Ideal for REST sparse fieldsets; no DTO required. Supports scalar functions with an alias: `"name, lower(email) as email, year(created) as yr"` (all providers). |
 
 ### Terminal methods (execute SQL)
 
@@ -80,6 +80,95 @@ var upcoming = await store.Query<Event>().Where(e => e.StartDate > cutoff).ToLis
 // Captured variables
 var targetName = "Alice";
 var results = await store.Query<User>().Where(u => u.Name == targetName).ToList();
+```
+
+## Scalar functions in predicates
+
+`Where` predicates translate a library of scalar functions to each backend's native form — relational providers emit native SQL, MongoDB uses `$expr` aggregation, CosmosDB uses native NoSQL functions, and the in-memory providers (LiteDB/IndexedDB) evaluate them directly. The same C# works everywhere.
+
+### String functions
+
+```csharp
+.Where(u => u.Name.ToLower() == "alice")        // ToUpper, ToLowerInvariant, ToUpperInvariant
+.Where(u => u.Name.Length == 5)
+.Where(u => u.Name.Trim() == "Alice")           // TrimStart, TrimEnd (no-arg)
+.Where(u => u.Name.Substring(0, 3) == "Ali")    // Substring(start) or Substring(start, length)
+.Where(u => u.Name.Replace("i", "y") == "Alyce")
+.Where(u => u.Name.IndexOf("ice") == 2)
+.Where(u => string.IsNullOrEmpty(u.Name))
+.Where(u => (u.FirstName + u.LastName) == "AliceSmith")   // string concatenation
+```
+
+These compose with the existing `Contains`/`StartsWith`/`EndsWith` — e.g. `u.Name.ToLower().Contains("li")`.
+
+### Math functions
+
+```csharp
+.Where(p => Math.Abs(p.Balance) > 100)
+.Where(p => Math.Round(p.Price) == 10)
+// also: Ceiling, Floor, Sqrt, Pow, Sign
+```
+
+> **SQLite:** `Abs` and `Round` are always available; `Ceiling`/`Floor`/`Sqrt`/`Pow` require a SQLite build with math functions enabled.
+
+### Date and time parts
+
+```csharp
+.Where(e => e.StartDate.Year == 2026)
+.Where(e => e.StartDate.Month == 7)
+// also: Day, Hour, Minute, Second  (DateTime and DateTimeOffset)
+```
+
+### Flag enums
+
+Flag enums (stored numerically — the System.Text.Json default) support membership tests. `HasFlag` and the `(x & flag) == flag` idiom both lower to the same bitwise test (`BITAND` on Oracle, `$bitsAllSet` on MongoDB):
+
+```csharp
+[Flags] enum Permissions { None = 0, Read = 1, Write = 2, Delete = 4, Admin = Read | Write | Delete }
+
+.Where(a => a.Permissions.HasFlag(Permissions.Write))
+.Where(a => (a.Permissions & Permissions.Write) == Permissions.Write)
+```
+
+> Do **not** enable `JsonStringEnumConverter` if you query flags — bitwise tests require the numeric representation.
+
+### Phonetic search — `DocumentFunctions.Soundex`
+
+```csharp
+var smiths = await store.Query<Person>()
+    .Where(p => DocumentFunctions.Soundex(p.Name) == DocumentFunctions.Soundex("Smith"))
+    .ToList();   // matches "Smith", "Smyth", "Smithe", …
+```
+
+Soundex support per provider:
+
+| Provider | Mechanism |
+|---|---|
+| SQL Server, MySQL, Oracle | native `SOUNDEX()` |
+| SQLite | registered connection UDF (the bundled build omits `SQLITE_SOUNDEX`) |
+| PostgreSQL | native `soundex()` — set `EnableFuzzyStringMatch = true` on `PostgreSqlDatabaseProvider` to provision the `fuzzystrmatch` extension |
+| LiteDB, IndexedDB | the canonical C# implementation runs in-memory |
+| DuckDB, CosmosDB, MongoDB | no native/registered soundex — use the computed stored-field pattern below |
+
+**Computed stored-field pattern** (works on every provider, recommended for CosmosDB/MongoDB/DuckDB and at scale — the equality query is indexable). Store a precomputed Soundex key and query it, computing the search term's key in C# first:
+
+```csharp
+options.OnBeforeInsert<Person>((p, ct) => { p.NameSoundex = DocumentFunctions.Soundex(p.Name); return Task.CompletedTask; });
+
+var key = DocumentFunctions.Soundex("Smith");
+var matches = await store.Query<Person>().Where(p => p.NameSoundex == key).ToList();
+```
+
+### Custom function translations
+
+Register your own method → SQL function mapping for the relational providers. The exemplar captures the target method (so it stays trim/AOT-safe — no reflection by name):
+
+```csharp
+options.MapFunctionTranslation(() => MyFunctions.Reverse(default!), "REVERSE");
+
+// MyFunctions.Reverse has a real body, so LiteDB/IndexedDB run it directly;
+// the relational providers emit REVERSE(...). Ensure the function (or a UDF) exists on the database.
+var rev = await store.Query<Code>().Where(c => MyFunctions.Reverse(c.Value) == "ZYX").ToList();
 ```
 
 ## Counting
@@ -197,9 +286,18 @@ Supported syntax:
 - Comparisons `==` (or `=`), `!=` (or `<>`), `>`, `>=`, `<`, `<=`. Relational operators are rejected for `string`/`bool`/`Guid` fields.
 - `field is null` / `field is not null` (and `field == null` / `field != null`).
 - `field in (a, b, c)`.
-- String functions `contains(field, 'x')`, `startsWith(field, 'x')`, `endsWith(field, 'x')`.
+- Predicate functions `contains(field, 'x')`, `startsWith(field, 'x')`, `endsWith(field, 'x')`, `isnullorempty(field)`, `hasflag(field, 'Flag')`.
+- Scalar functions on either side of a comparison — `lower`/`upper`, `length`, `trim`/`ltrim`/`rtrim`, `substring(f, start[, len])`, `replace(f, 'a', 'b')`, `indexof(f, 'x')`, `abs`/`ceiling`/`floor`/`round`/`sqrt`/`sign`, `year`/`month`/`day`/`hour`/`minute`/`second`, `soundex` — and they nest:
 
-Field names follow the same rules as the string `OrderBy` (case-insensitive CLR or JSON name, dotted paths). String literals use single or double quotes; double the quote to escape (`'O''Brien'`). Literals are coerced to each field's CLR type. Syntax errors and unknown fields throw `ArgumentException`.
+```csharp
+.Where("lower(name) = 'alice'", ctx.User)
+.Where("length(trim(name)) > 5", ctx.User)
+.Where("year(startDate) = 2026", ctx.Event)
+.Where("hasflag(permissions, 'Write')", ctx.Account)
+.Where("soundex(name) = soundex('Smith')", ctx.Account)
+```
+
+Field names follow the same rules as the string `OrderBy` (case-insensitive CLR or JSON name, dotted paths). String literals use single or double quotes; double the quote to escape (`'O''Brien'`). Literals are coerced to each field's CLR type. The same grammar (and the same AOT-safe translation) backs every backend. Syntax errors and unknown fields throw `ArgumentException`.
 
 #### Interpolated filters (parameterized values)
 
@@ -424,6 +522,18 @@ The expression API is provider-agnostic. The SQL output below shows SQLite synta
 | `o.Lines.Count == 0` (property form) | `json_array_length(Data, '$.lines') = 0` |
 | `o.Lines.Count(l => l.Qty > 2)` | `(SELECT COUNT(*) FROM json_each(...) WHERE ...)` |
 | `e.StartDate > cutoff` | `json_extract(Data, '$.startDate') > @p0` (ISO 8601) |
+| `u.Name.ToLower() == "x"` | `LOWER(...) = @p0` (`ToUpper` → `UPPER`) |
+| `u.Name.Length == 5` | `LENGTH(...) = @p0` |
+| `u.Name.Trim() == "x"` | `TRIM(...)` (`TrimStart`→`LTRIM`, `TrimEnd`→`RTRIM`) |
+| `u.Name.Substring(0, 3)` | `SUBSTR(..., 0 + 1, 3)` (0-based normalized) |
+| `u.Name.Replace("a","b")` | `REPLACE(..., @p0, @p1)` |
+| `u.Name.IndexOf("x")` | `(INSTR(..., @p0) - 1)` |
+| `string.IsNullOrEmpty(u.Name)` | `(... IS NULL OR ... = @p0)` |
+| `Math.Abs(u.Score) > 5` | `ABS(...) > @p0` (also `Round`/`Ceiling`/`Floor`/`Sqrt`/`Pow`/`Sign`) |
+| `e.StartDate.Year == 2026` | `CAST(strftime('%Y', ...) AS INTEGER) = @p0` (also `Month`/`Day`/`Hour`/…) |
+| `a.Perms.HasFlag(Perms.Write)` | `((... & @p0) = @p0)` (`BITAND` on Oracle) |
+| `(a.Perms & Perms.Write) == Perms.Write` | same as `HasFlag` |
+| `DocumentFunctions.Soundex(u.Name)` | `soundex(...)` / native `SOUNDEX(...)` |
 
 ## Unsupported expressions
 
@@ -431,19 +541,15 @@ The expression visitor translates a subset of C#. Anything below throws `NotSupp
 
 | Pattern | Workaround |
 |---|---|
-| `u.Name.ToLower() == "alice"` | Lowercase in C# before the query: `var n = name.ToLower();` then compare exactly; or use raw SQL with `LOWER(...)`. |
-| `string.IsNullOrEmpty(u.Name)` | `u.Name == null \|\| u.Name == ""` |
-| `u.Name.Equals(other, StringComparison.OrdinalIgnoreCase)` | Raw SQL with `LOWER(...)`. |
-| `u.Name.Length`, `dict.Count` (not collection lengths) | These throw rather than silently emit a dead path. Use `.Count()` / `.Any()` for collection/array length; compute string length in C#. |
-| `Math.Abs(u.Score) > 5` | Move computation out: `Where(u => u.Score > 5 \|\| u.Score < -5)`. |
-| `u.CreatedAt.AddDays(7) > DateTime.UtcNow` | Compute the cutoff in C# first: `var cutoff = DateTime.UtcNow.AddDays(-7); Where(u => u.CreatedAt > cutoff);`. |
-| `(int)u.Age == 25` (explicit cast) | Drop the cast — the type is already `int`. Boxing via `Convert` is fine; explicit casts to a different type are not. |
+| `u.Name.Equals(other, StringComparison.OrdinalIgnoreCase)` | Compare `u.Name.ToLower() == other.ToLower()`. |
+| `dict.Count` (dictionary, not a collection length) | Throws rather than silently emit a dead path. Use `.Count()` / `.Any()` for collection/array length. |
+| `u.CreatedAt.AddDays(7) > DateTime.UtcNow` (date arithmetic) | Date *part* access (`.Year`, `.Month`, …) is supported, but date arithmetic isn't — compute the cutoff in C# first: `var cutoff = DateTime.UtcNow.AddDays(-7); Where(u => u.CreatedAt > cutoff);`. |
 | `Select(u => new { u.Name })` (anonymous type) | Use a named DTO: `Select(u => new UserName { Name = u.Name })`. |
 | `Select(u => (u.Name, u.Age))` (tuple) | Same — use a named DTO. |
 | `GroupBy(o => new { o.Status, o.Country })` (multi-key) | Single-key only. Concatenate or denormalize: `GroupBy(o => o.StatusCountryKey)`. |
 | `Join`, `SelectMany`, `Distinct`, `Union` | Not a relational store — embed the joined data on the document, or do the join in C# after two queries. |
-| `string.Format("{0}-{1}", a, b)`, interpolation | Build the string in C# before the predicate. |
-| Custom instance methods on your types | Inline the logic into the expression. The visitor only sees the methods listed in the supported table above. |
+| `string.Format("{0}-{1}", a, b)`, interpolation | Use `a + b` (translated) or build the string in C# before the predicate. |
+| Custom instance methods on your types | Register a translation with [`MapFunctionTranslation`](#custom-function-translations), or inline the logic into the expression. |
 
 ## Query cost — performant vs slow patterns
 
