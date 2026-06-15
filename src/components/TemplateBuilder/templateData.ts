@@ -22,7 +22,7 @@ export const VERSIONS = {
     shinySpeech: '2.1.0',
     shinyAiConversation: '1.0.0-beta-0050',
     shinyMusic: '3.0.1',
-    shinyHealth: '1.0.0',
+    shinyHealth: '1.1.0',
     shinyDocumentDb: '7.1.1',
     shinyMauiHosting: '5.0.0',
     shinyWebHosting: '5.0.0',

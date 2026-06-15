@@ -226,7 +226,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Health",
         "description": "Health Data",
         "category": "platformdata",
-        "version": "1.0.0"
+        "version": "1.1.0"
     },
     {
         "id": "config",

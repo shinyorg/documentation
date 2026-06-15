@@ -82,6 +82,7 @@ const AndroidManifest = (props: Props) => {
       <uses-permission android:name="android.permission.health.READ_OXYGEN_SATURATION" />
       <uses-permission android:name="android.permission.health.READ_SLEEP" />
       <uses-permission android:name="android.permission.health.READ_HYDRATION" />
+      <uses-permission android:name="android.permission.health.READ_MENSTRUATION" />
 
       <!-- Optional: include WRITE permissions for data types your app writes -->
       <uses-permission android:name="android.permission.health.WRITE_STEPS" />
@@ -96,6 +97,7 @@ const AndroidManifest = (props: Props) => {
       <uses-permission android:name="android.permission.health.WRITE_OXYGEN_SATURATION" />
       <uses-permission android:name="android.permission.health.WRITE_SLEEP" />
       <uses-permission android:name="android.permission.health.WRITE_HYDRATION" />
+      <uses-permission android:name="android.permission.health.WRITE_MENSTRUATION" />
 
       <queries>
           <package android:name="com.google.android.apps.healthdata" />
