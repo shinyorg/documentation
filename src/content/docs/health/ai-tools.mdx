@@ -1,0 +1,102 @@
+---
+title: AI Tools
+---
+import { Steps } from '@astrojs/starlight/components';
+
+Expose your health data as [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions that LLM agents can call directly — "How many steps did I take last week?", "Log a 45 minute run", "What was my average resting heart rate this month?". You opt-in exactly which areas the model can see, read-only by default.
+
+The AI layer (`Shiny.Health.Extensions.AI`) sits on top of `IHealthService` and does not change its behavior. It wraps the operations you opt-in to with a small set of **parameterized** `AIFunction` tools (one read tool covers all numeric metrics via an enum argument, rather than one tool per metric), which keeps the model's tool list short and its tool-selection accurate.
+
+## Setup
+
+<Steps>
+1. Install the AI extensions package
+
+   ```bash
+   dotnet add package Shiny.Health.Extensions.AI
+   ```
+
+2. Register the health integration and the AI tools
+
+   ```csharp
+   using Shiny.Health;
+   using Shiny.Health.Extensions.AI;
+
+   builder.Services.AddHealthIntegration();
+
+   builder.Services.AddHealthAITools(tools => tools
+       .AddAllMetrics()                                          // read every numeric metric
+       .AddMetric(DataType.Weight, HealthAICapabilities.ReadWrite)
+       .AddBloodPressure(HealthAICapabilities.ReadWrite)
+       .AddCycleTracking()
+       .AddWorkouts(HealthAICapabilities.ReadWrite)
+       .AddNutrition()
+   );
+   ```
+
+3. Resolve `HealthAITools` and hand `.Tools` to your chat client
+
+   ```csharp
+   var health = sp.GetRequiredService<HealthAITools>();
+
+   var response = await chatClient.GetResponseAsync(
+       messages,
+       new ChatOptions { Tools = [.. health.Tools] }
+   );
+   ```
+</Steps>
+
+:::caution[Request permissions first]
+The generated tools assume the relevant health permissions are **already granted** — they do not trigger the platform permission UI (which needs a foreground activity). Call `IHealthService.RequestPermissions(...)` from your app before invoking the agent.
+:::
+
+## Capabilities
+
+Each area defaults to `HealthAICapabilities.Read`. Pass `ReadWrite` (or `Write`) to also expose the matching write tool.
+
+```csharp
+[Flags]
+public enum HealthAICapabilities
+{
+    None = 0,
+    Read = 1 << 0,
+    Write = 1 << 1,
+    ReadWrite = Read | Write
+}
+```
+
+Anything you do not add is invisible to the model. A write tool is only generated when at least one item in that area was added with `Write`.
+
+## Builder Methods
+
+| Method | Exposes |
+|---|---|
+| `AddMetric(DataType, capabilities)` | One numeric metric (e.g. `StepCount`, `HeartRate`, `BloodGlucose`). Throws for non-numeric types. |
+| `AddAllMetrics(capabilities)` | Every numeric metric in one call. |
+| `AddBloodPressure(capabilities)` | Blood pressure (systolic/diastolic). |
+| `AddCycleTracking(capabilities)` | Reproductive/cycle records via one read tool; `Write` also adds menstruation-flow logging. |
+| `AddWorkouts(capabilities)` | Workout / exercise sessions. |
+| `AddNutrition(capabilities)` | Nutrition / food intake. |
+
+Calling `AddMetric` twice for the same metric merges capabilities (e.g. `Read` then `Write` becomes `ReadWrite`).
+
+## Generated Tools Reference
+
+Only the tools for areas you opted-in to are created; enum arguments are constrained to what you allowed.
+
+| Tool | Arguments | Notes |
+|---|---|---|
+| `get_health_metric` | `metric`, `start?`, `end?`, `interval?` | `metric` enum is limited to your readable metrics. Returns interval buckets with the metric's unit and aggregation. |
+| `write_health_metric` | `metric`, `value`, `start?`, `end?` | `metric` enum limited to writable metrics. |
+| `get_blood_pressure` | `start?`, `end?`, `interval?` | Returns systolic/diastolic per bucket (mmHg). |
+| `write_blood_pressure` | `systolic`, `diastolic`, `timestamp?` | |
+| `get_cycle_records` | `kind`, `start?`, `end?` | `kind` ∈ menstruation_flow, sexual_activity, ovulation_test, cervical_mucus, intermenstrual_bleeding. |
+| `write_menstruation_flow` | `flow`, `date?`, `is_cycle_start?` | Only created when cycle tracking has `Write`. |
+| `get_workouts` / `write_workout` | dates (+ `workout`, energy, distance, title on write) | `workout` enum is the cross-platform `WorkoutType` set. |
+| `get_nutrition` / `write_nutrition` | dates (+ `meal`, `name`, macros on write) | Masses in grams, energy in kcal. |
+
+Dates are ISO-8601 (`2026-06-14` or `2026-06-14T08:00:00Z`); `interval` is `minutes`, `hours`, or `days` (default `days`). Sensible defaults are applied when omitted (e.g. the last 24 hours).
+
+## AOT
+
+`Shiny.Health.Extensions.AI` is `IsAotCompatible` — tool schemas are hand-built and results are emitted as `JsonNode`, so there is no reflection-based serialization in the tool path.

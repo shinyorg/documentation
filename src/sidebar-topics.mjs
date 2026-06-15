@@ -269,6 +269,7 @@ export const sidebarTopics = [
           { label: 'Reading Data', link: 'health/reading' },
           { label: 'Writing Data', link: 'health/writing' },
           { label: 'Observing Data', link: 'health/observing' },
+          { label: 'AI Tools', link: 'health/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Platform Notes', link: 'health/platform-notes' },
           { label: 'Release Notes', link: 'health/release-notes' }
         ]

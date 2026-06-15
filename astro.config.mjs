@@ -339,26 +339,33 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'docdb-v71',
-              content: 'Document DB v7.1: Temporal Support, Telemetry Collection, & Orleans Storage Providers!',
+              id: 'docdb-v72',
+              content: 'Document DB v7.2: Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false
             },
             {
-              id: 'controls1-2',
-              content : 'Controls: The biggest control suite for MAUI & Blazor!',
+              id: 'controls1-3',
+              content : 'Controls: The biggest control suite for MAUI & Blazor + the ULTIMATE CameraView to end all others!',
               variant: 'tip',
               link: { text: 'Learn More', href: '/controls/' },
               dismissable: false
-            },            
+            },
+            {
+              id: 'health-2',
+              content: 'Shiny Health 2.0 - Every Health API you can think of, unified and simplified with a powerful new plugin system for extensibility!',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/health' },
+              dismissable: false
+            },                        
             {
               id: 'mobilev5-1',
               content: 'Client v5 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/ble' },
               dismissable: false
-            },            
+            },          
             {
               id: 'aiconversations-1',
               content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',

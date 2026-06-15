@@ -1,0 +1,184 @@
+---
+title: "Shiny Health 2.0 — The Ultimate Cross-Platform Health Library"
+date: 2026-06-15
+authors:
+  - allanritchie
+tags:
+  - health
+  - release
+  - AI
+excerpt: "One IHealthService for Apple HealthKit and Android Health Connect — 30+ data types across activity, body, vitals, nutrition, reproductive/cycle tracking, and workouts, real-time observation, and a brand-new Microsoft.Extensions.AI tool surface for LLM agents."
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.Health" showLabel={true} />
+
+Reading health data on .NET MAUI means two completely different worlds: Apple **HealthKit** with its `HKQuantityType`/`HKCategoryType`/`HKCorrelation` zoo, and Android **Health Connect** with its Kotlin record types, coroutine APIs, and per-record permissions. Shiny Health collapses both behind a single `IHealthService` — and **2.0** is a big one: 30+ cross-platform data types, dedicated records for the non-numeric stuff, and a new package that turns your health data into tools an LLM can call.
+
+This is our first proper write-up of the library, so let's cover the whole thing.
+
+## One Interface, Two Platforms
+
+```bash
+dotnet add package Shiny.Health
+```
+
+```csharp
+public static MauiApp CreateMauiApp()
+{
+    var builder = MauiApp.CreateBuilder().UseMauiApp<App>().UseShiny();
+    builder.Services.AddHealthIntegration();
+    return builder.Build();
+}
+```
+
+Inject `IHealthService`, request permissions, and query. Everything is `async`, cancellation-aware, and AOT-friendly (no reflection — the Android side bridges Kotlin coroutines through a hand-rolled `IContinuation`).
+
+```csharp
+public class DashboardViewModel(IHealthService health)
+{
+    public async Task LoadAsync()
+    {
+        await health.RequestPermissions(DataType.StepCount, DataType.HeartRate, DataType.Calories);
+
+        var end = DateTimeOffset.Now;
+        var start = end.AddDays(-1);
+
+        var steps = (await health.GetStepCounts(start, end, Interval.Hours)).Sum(x => x.Value);
+        var hr = (await health.GetAverageHeartRate(start, end, Interval.Hours)).Average(x => x.Value);
+        var kcal = (await health.GetCalories(start, end, Interval.Days)).Sum(x => x.Value);
+    }
+}
+```
+
+Numeric metrics are **time-bucketed**: you pick `Interval.Minutes`, `Hours`, or `Days` and get one result per bucket. Cumulative metrics (steps, calories, distance, hydration, sleep) you `.Sum()`; point-in-time metrics (heart rate, weight, body fat) you `.Average()`.
+
+## 30+ Data Types
+
+2.0 expanded the catalog dramatically. Numeric metrics — each with its own `Get…` method and full read/write/observe support:
+
+- **Activity** — step count, distance, active & basal energy, floors climbed, wheelchair pushes, speed, power
+- **Heart** — average heart rate, resting heart rate, heart rate variability
+- **Body** — weight, height, body fat %, lean body mass
+- **Vitals** — blood pressure, oxygen saturation, blood glucose, body temperature, basal body temperature, respiratory rate, VO2 max
+- **Lifestyle** — sleep duration, hydration
+
+Blood pressure is special — it carries two values, so it gets its own result type:
+
+```csharp
+var bp = await health.GetBloodPressure(start, end, Interval.Days); // BloodPressureResult
+var avgSystolic = bp.Average(x => x.Systolic);   // mmHg
+var avgDiastolic = bp.Average(x => x.Diastolic);
+```
+
+## Reproductive & Cycle Tracking
+
+These are categorical and event-based — no `Interval` bucketing, each with a dedicated record:
+
+```csharp
+await health.RequestPermissions(DataType.MenstruationFlow, DataType.OvulationTest);
+
+var flow = await health.GetMenstruationFlow(start, end);     // MenstrualFlow: None/Light/Medium/Heavy
+var ovulation = await health.GetOvulationTests(start, end);  // Positive/Negative/High/Inconclusive
+var mucus = await health.GetCervicalMucus(start, end);       // Dry/Sticky/Creamy/Watery/EggWhite
+var activity = await health.GetSexualActivity(start, end);   // Protected/Unprotected
+var spotting = await health.GetIntermenstrualBleeding(start, end);
+
+// logging
+await health.Write(new MenstruationFlowResult(DateTimeOffset.Now, DateTimeOffset.Now, MenstrualFlow.Medium, IsCycleStart: true));
+```
+
+## Workouts & Nutrition
+
+```csharp
+var workouts = await health.GetWorkouts(start, end);
+foreach (var w in workouts)
+    Console.WriteLine($"{w.Workout}: {w.TotalEnergyKilocalories} kcal over {w.End - w.Start}");
+
+await health.Write(new WorkoutResult(start, end, WorkoutType.Running, TotalEnergyKilocalories: 420, TotalDistanceMeters: 7500));
+
+await health.Write(new NutritionResult(
+    DateTimeOffset.Now, DateTimeOffset.Now,
+    Meal: MealType.Lunch, Name: "Chicken & rice",
+    EnergyKilocalories: 550, ProteinGrams: 40, CarbohydratesGrams: 60, TotalFatGrams: 12
+));
+```
+
+`WorkoutType` maps 21 activities that exist on **both** platforms (running, cycling, swimming, strength training, HIIT, yoga…); anything unmapped reads back as `Other`.
+
+## Writing Data
+
+Every numeric metric writes through `NumericHealthResult` — pass the `DataType` and value in its documented unit:
+
+```csharp
+await health.RequestPermissions(PermissionType.Write, DataType.Weight, DataType.Hydration);
+
+await health.Write(new NumericHealthResult(DataType.Weight, DateTimeOffset.Now, DateTimeOffset.Now, 75.0));   // kg
+await health.Write(new NumericHealthResult(DataType.Hydration, start, end, 0.5));                              // liters
+await health.Write(new BloodPressureResult(DateTimeOffset.Now, DateTimeOffset.Now, 120, 80));                  // mmHg
+```
+
+Permissions are granular: `PermissionType.Read`, `Write`, or `ReadWrite`, requestable uniformly or per-metric in a single call.
+
+## Real-Time Observation
+
+`Observe` streams new samples as they're recorded via `IAsyncEnumerable<HealthResult>` — push-based `HKAnchoredObjectQuery` on iOS, Health Connect change-token polling on Android (interval configurable):
+
+```csharp
+using var cts = new CancellationTokenSource();
+await foreach (var result in health.Observe(DataType.HeartRate, cancelToken: cts.Token))
+{
+    if (result is NumericHealthResult n)
+        Console.WriteLine($"❤️ {n.Value} bpm at {n.Start:T}");
+}
+```
+
+## New in 2.0: AI Tools
+
+<NugetBadge name="Shiny.Health.Extensions.AI" showLabel={true} />
+
+This is the headline feature. `Shiny.Health.Extensions.AI` exposes `IHealthService` as [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions, so an LLM agent can answer "How did I sleep last week?" or "Log a 45-minute run" by calling your health store directly.
+
+It uses a small set of **parameterized** tools — one `get_health_metric` tool covers all numeric metrics via a `metric` enum argument, instead of 25 separate tools — which keeps the model's tool list short and its selection accurate. Read-only by default; write is opt-in per area.
+
+```bash
+dotnet add package Shiny.Health.Extensions.AI
+```
+
+```csharp
+builder.Services.AddHealthIntegration();
+builder.Services.AddHealthAITools(tools => tools
+    .AddAllMetrics()                                          // read every numeric metric
+    .AddMetric(DataType.Weight, HealthAICapabilities.ReadWrite)
+    .AddBloodPressure(HealthAICapabilities.ReadWrite)
+    .AddCycleTracking()
+    .AddWorkouts(HealthAICapabilities.ReadWrite)
+    .AddNutrition()
+);
+
+// hand the tools to any IChatClient
+var tools = sp.GetRequiredService<HealthAITools>().Tools;
+var response = await chatClient.GetResponseAsync(messages, new ChatOptions { Tools = [.. tools] });
+```
+
+Only the areas you opt-in to are visible to the model, and enum arguments are constrained to exactly what you allowed. The whole thing is `IsAotCompatible` — schemas are hand-built and results are emitted as `JsonNode`, so there's no reflection in the tool path. Full details on the [AI Tools](/health/ai-tools) page.
+
+## Honest About the Platforms
+
+A unified API shouldn't pretend the platforms are identical. Where they differ, we document it rather than hide it:
+
+- **Heart rate variability** is **SDNN** on iOS and **RMSSD** on Android — both milliseconds, but different computations, so don't compare the numbers across platforms.
+- **Speed/Power** are generic on Health Connect; HealthKit has no generic equivalents, so `Speed` maps to walking speed and `Power` to cycling power.
+- A **`WorkoutResult`'s energy/distance are `null` on Android read** — Health Connect stores those as separate records from the exercise session.
+- `MenstrualFlow.None` and the `IsCycleStart` flag are iOS-only.
+
+See [Platform Notes](/health/platform-notes) for the full list.
+
+## Get Started
+
+```bash
+dotnet add package Shiny.Health
+dotnet add package Shiny.Health.Extensions.AI   # optional — for LLM agents
+```
+
+Then head to [Reading Data](/health/reading), [Writing Data](/health/writing), and [AI Tools](/health/ai-tools). One interface, both platforms, 30+ metrics, and now an agent that can read and write them for you.
