@@ -17,7 +17,6 @@ title: Architecture
           │       AbstractJobManager (shared)            │
           │   - RunJob(Type)                             │
           │   - RunAll(sequential|concurrent)            │
-          │   - RunTask(name, func)                      │
           │   - Registration/lookup, lifecycle hooks     │
           └───────────────┬──────────────────────────────┘
                           │
@@ -26,20 +25,19 @@ title: Architecture
    ▼                      ▼                      ▼
  iOS / Mac              Android               Windows
  BGTaskScheduler        WorkManager           COM-activated
- BeginBackgroundTask    Wake-lock             background tasks
+                                              background tasks
                           │
                           ▼
                  Linux / macOS / Blazor / base .NET
                  In-process Timer + Connectivity/Battery checks
 ```
 
-Five immutable design pillars:
+Four immutable design pillars:
 
 1. **One `IJob` contract, one DI registration call.** Adding a job is `services.AddJob<T>(r => r.WithInternet(...))`. The platform host picks the right scheduler.
 2. **Constraints, not schedules.** Jobs declare what they *need* (`WithInternet`, `WithCharging`, `WithBatteryNotLow`, `WithForeground`) — not when to run. The OS picks when.
 3. **Category-based dispatch.** Jobs are grouped into four constraint buckets, registered with the OS once, and dispatched to all matching jobs when the OS wakes the bucket.
 4. **Scoped resolution per run.** Every job execution gets a fresh DI scope. State that needs to survive runs is *your* responsibility, not the manager's.
-5. **`RunTask` and `RunJob` are different things.** `RunTask` is a one-off function you want to keep alive past app suspension. `RunJob` is a registered, OS-scheduled work unit.
 
 ## Why no schedules, only constraints?
 
@@ -117,30 +115,23 @@ Mirrors the ASP.NET request-per-scope model — the same intuition transfers cle
 
 | Platform | Implementation | What you get |
 |---|---|---|
-| **iOS / Mac Catalyst** | `BGTaskScheduler` (`BGProcessingTaskRequest`) + `BeginBackgroundTask` for `RunTask` | True OS-scheduled background launches. Requires `BGTaskSchedulerPermittedIdentifiers` in `Info.plist`. Simulator returns `NotSupported`. |
-| **Android** | `WorkManager` (`PeriodicWorkRequest`, 15-min floor) + optional wake-locks for `RunTask` | True OS-scheduled background launches with battery-aware throttling. Doze-aware. |
+| **iOS / Mac Catalyst** | `BGTaskScheduler` (`BGProcessingTaskRequest`) | True OS-scheduled background launches. Requires `BGTaskSchedulerPermittedIdentifiers` in `Info.plist`. Simulator returns `NotSupported`. |
+| **Android** | `WorkManager` (`PeriodicWorkRequest`, 15-min floor) | True OS-scheduled background launches with battery-aware throttling. Doze-aware. |
 | **Windows** | COM-activated background tasks (`Microsoft.Windows.ApplicationModel.Background`) | OS-scheduled in-process tasks. Requires `windows.comServer` manifest entry and a one-time `RegisterComServer()` call. |
 | **Linux / macOS / base .NET** | In-process `System.Timers.Timer` (default 30 s, configurable 15 s – 5 min) + `IBattery` / `IConnectivity` gates | Runs only while the process is alive. Constraint checks enforced in `CanRun`. No external scheduler. |
 | **Blazor WebAssembly** | Same in-process scheduler + `Shiny.Core.Blazor` for `IBattery` / `IConnectivity` | Runs only while the tab is open. State persists to `localStorage` (or filesystem) via Shiny repositories. |
 
-The `AbstractJobManager` base class owns registration storage, batch execution, and logging. Each platform subclass owns dispatch, scheduling, and constraint translation. The user-facing surface — `AddJob<T>`, `RunJob`, `RunAll`, `RunTask` — is identical on every target.
+The `AbstractJobManager` base class owns registration storage, batch execution, and logging. Each platform subclass owns dispatch, scheduling, and constraint translation. The user-facing surface — `AddJob<T>`, `RunJob`, `RunAll` — is identical on every target.
 
-## Why `RunJob` and `RunTask` are separate
+## Running a registered job on demand
 
-`RunJob` is for **registered** jobs. The manager already knows the type, the constraints, and how to resolve it from DI. You pass the type; the manager handles the rest.
-
-`RunTask` is for **ad-hoc** background work — typically initiated from a UI event ("uploading this file, please don't kill me yet"):
+`RunJob` is for **registered** jobs. The manager already knows the type, the constraints, and how to resolve it from DI. You pass the type; the manager runs it normally (inline) and hands back a `JobRunResult`:
 
 ```csharp
-jobManager.RunTask("UploadAvatar", async ct =>
-{
-    await uploader.UploadAsync(ct);
-});
+var result = await jobManager.RunJob(typeof(SyncJob));
 ```
 
-On iOS this wraps the call in `BeginBackgroundTask` (the OS extends your foreground execution time by ~30 s when the app is backgrounded). On Android with the `WAKE_LOCK` permission, it grabs a partial wake-lock. Everywhere else it just runs. The same idea, two different surfaces: one for "register this, OS will pick it up later"; one for "I started this now, don't kill me until it's done."
-
-`RunTask` is **not** a registered job — it doesn't have constraints, doesn't get DI scoping, and doesn't show up in `GetJobs()`.
+It does not wrap the run in any platform extended-execution / background-task mechanism — the job simply runs. (Earlier versions exposed a `RunTask` method and a `RunJob(..., runAsTask: true)` overload that wrapped runs in iOS `BeginBackgroundTask` / Android wake-locks; both were removed in v5 because the wrapping caused more problems than it solved.)
 
 ## Why does iOS need an Info.plist entry?
 

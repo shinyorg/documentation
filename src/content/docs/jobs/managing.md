@@ -9,11 +9,8 @@ title: Managing Jobs
 ```csharp
 public interface IJobManager
 {
-    void RunTask(string taskName, Func<CancellationToken, Task> task);
-
     Task<JobRunResult> RunJob(
         Type jobType,
-        bool runAsTask = false,
         CancellationToken cancellationToken = default
     );
 
@@ -66,26 +63,15 @@ foreach (var result in results)
 
 ### Run a Specific Job
 
-Pass the registered `IJob` implementation type. When `runAsTask: true`, the run is wrapped in platform-specific extended-execution semantics (iOS `BeginBackgroundTask`, Android partial wake-lock). When `false` (default), the job runs inline.
+Pass the registered `IJob` implementation type. The job runs normally (inline).
 
 ```csharp
-var result = await jobManager.RunJob(typeof(MySyncJob), runAsTask: true);
+var result = await jobManager.RunJob(typeof(MySyncJob));
 if (result.Success)
     Console.WriteLine("Job completed successfully");
 ```
 
 If the type was never registered, `RunJob` throws `InvalidOperationException`.
-
-### Run an Ad-Hoc Task
-
-`RunTask` is fire-and-forget. Use it for one-off async work that is **not** a registered job; you still get the platform extended-execution wrapping on iOS and Android.
-
-```csharp
-jobManager.RunTask("quick-sync", async cancelToken =>
-{
-    await SyncData(cancelToken);
-});
-```
 
 ## Querying Jobs
 
