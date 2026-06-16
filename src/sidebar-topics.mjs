@@ -424,6 +424,7 @@ export const sidebarTopics = [
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
+          { label: 'Carousel (Blazor)', link: 'controls/carousel/', jumpTo: true },
           { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
           { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
           { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
