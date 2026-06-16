@@ -79,6 +79,33 @@ barcode.OverlayProvider = e => e.Value.StartsWith("OK")
 
 `CoordinateTransform` (in `Shiny.Controls.Camera`) maps normalized boxes into view space accounting for aspect-fill crop, rotation and front-camera mirroring — the same helper the overlay uses.
 
+## Capture & stop on detection
+
+A common flow is "scan until you get a result, then freeze the preview and keep the photo." Every analyzer (it's on the `FrameAnalyzer` base) exposes two flags for this — no manual wiring:
+
+- **`CaptureOnDetection`** (bool, default `false`) — capture a full-res still the moment the analyzer **confirms** a detection.
+- **`StopOnDetection`** (bool, default `false`) — stop the capture session on a confirmed detection.
+
+The result is delivered on **`CameraView.DetectionCaptured`** (`DetectionCapturedEventArgs`: the `Analyzer`, the `Detection` payload, and the `Photo`):
+
+```xml
+<cam:CameraView x:Name="Camera" DetectionCaptured="OnDetectionCaptured">
+    <cam:PassportAnalyzer CaptureOnDetection="True" StopOnDetection="True" />
+</cam:CameraView>
+```
+
+```csharp
+void OnDetectionCaptured(object? sender, DetectionCapturedEventArgs e)
+{
+    var photo = e.Photo;                        // full-res still (null if only StopOnDetection)
+    if (e.Detection is Passport p) { /* use the merged document */ }
+}
+```
+
+"Confirmed" means the same thing the analyzer's typed event uses — for documents it's the **merged** record (after accumulation), for `MotionAnalyzer` it's motion **starting**. The trigger **latches** so a flurry of detections (or several analyzers firing at once) captures once; `StartAsync()` re-arms it. Capture-only (no stop) keeps firing on later detections.
+
+Prefer to drive it yourself? Call **`await Camera.CaptureAndStopAsync()`** from any handler — it grabs the full-res still and stops the session atomically, returning the `CameraPhoto`.
+
 ## Analyzer packages
 
 Each analyzer ships as its own package so apps pull only what they need. The strategy is **hybrid**: native ML where available, managed fallback elsewhere.
@@ -124,7 +151,9 @@ var motion = new MotionAnalyzer
     PixelThreshold = 25,   // per-pixel luma delta to count as changed
     AreaThreshold = 0.04,  // fraction of pixels that must change to trigger
     GridColumns = 16,      // grid resolution used to split motion into regions
-    CellThreshold = 0.10   // fraction of a cell that must change to box it
+    CellThreshold = 0.10,  // fraction of a cell that must change to box it
+    EnterFrames = 3,       // consecutive frames above threshold before reporting "started"
+    ExitFrames = 5         // consecutive frames below threshold before reporting "stopped"
 };
 // e.Regions = a box per distinct moving area; e.Region = their union; e.Intensity = 0..1
 motion.MotionChanged += (_, e) => { /* e.InMotion, e.Regions, e.Region, e.Intensity */ };
@@ -132,6 +161,8 @@ camera.Analyzers.Add(motion);
 ```
 
 Pure-managed luminance frame-differencing — cross-platform, no native dependency. Raises `MotionChanged` when motion starts and stops, and **clusters motion into separate regions** so movement in two spots draws two boxes rather than one box spanning both. `MotionEventArgs.Regions` carries one normalized `RectF` per moving area (with `Region` as their union for back-compat); tune how finely motion is split with `GridColumns` / `CellThreshold`.
+
+The event is **debounced** so it isn't twitchy: `MotionChanged` reports `InMotion=true` only after `EnterFrames` consecutive frames above threshold (default 3) and `InMotion=false` only after `ExitFrames` below it (default 5) — a single noisy frame or a brief pause mid-movement won't fire it. Raise `EnterFrames` if it's still too sensitive. The overlay boxes are **not** debounced, so they keep tracking each frame.
 
 ### OCR
 
@@ -156,6 +187,10 @@ Recognizes text with Apple Vision / Android MLKit / `Windows.Media.Ocr`. The reu
 - <NugetDownloads name="Shiny.Maui.Controls.Camera.Documents" />
 
 Structured extraction, where **each document type is its own analyzer with its own strongly-typed event** (`DocumentDetected`, typed to the document). Every payload is a strong record with **nullable fields** — only what was found is populated. Ships analyzers for **invoices** (`Invoice`, with order lines), **receipts** (`Receipt`, with line items + per-tax breakdown + totals), **driver's licenses** (`DriversLicense`), **health cards** (`HealthCard`), **credit cards** (`CreditCard`), and **passports** (`Passport`).
+
+:::tip[Fields accumulate across frames]
+As a document slides into focus its fields appear gradually — number first, then name, then expiry. Rather than firing `DocumentDetected` on every frame with a stream of partial objects, the analyzer **merges the reads over up to `AccumulationFrames` frames** (default 5) and fires **once** with the richest combined record. It fires early when the parse is complete, won't re-fire while the same document stays in view, and re-arms after `ResetAfterEmptyFrames` frames with nothing detected. Set `AccumulationFrames = 1` for the old fire-every-frame behavior. (`DriversLicenseAnalyzer` reads a PDF417 barcode — complete in one shot — so it isn't accumulated.)
+:::
 
 ```csharp
 using Shiny.Maui.Controls.Camera.Documents;
@@ -382,4 +417,5 @@ camera.Analyzers.Add(cards);
 - **OCR is native** (Apple Vision / Android MLKit / `Windows.Media.Ocr`), so a `DocumentAnalyzer<T>` produces results on iOS / Android / Windows / macOS — not on bare `net10.0`.
 - **A remote/LLM parser is fine** — the pipeline runs one analysis at a time per analyzer and drops frames while busy, so a slow `TryParse` just lowers that analyzer's throughput rather than backing up the camera. Throttle or cache if the call is expensive.
 - **Consumers can still override the boxes** without touching your parser via the analyzer's `OverlayProvider` (`Func<TDocument, IReadOnlyList<OverlayBox>?>`).
+- **Opt into frame accumulation** by overriding the two defaulted `IDocumentParser<T>` methods so the analyzer merges your document across frames before firing: `Merge(accumulated, incoming)` fills in fields seen on later frames (typically `accumulated.X ?? incoming.X`, returning `incoming` when it's a *different* document), and `IsComplete(document)` lets it fire early once the key fields are present. The defaults keep the old fire-every-frame behavior, so existing parsers need no changes.
 :::
