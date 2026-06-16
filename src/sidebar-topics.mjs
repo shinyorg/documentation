@@ -690,6 +690,7 @@ export const sidebarTopics = [
     label: 'Blazor Playgrounds',
     link: '/playground/index.html',
     icon: 'laptop',
+    homeNavOnly: true,
     items: [
       { label: 'AI Conversation + Speech', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
       { label: 'Controls',        link: 'https://shinyorg.github.io/controls/',       attrs: { target: '_blank' } },
@@ -702,12 +703,20 @@ export const sidebarTopics = [
 
 /**
  * Returns a deep copy of the topics with all `jumpTo` properties removed,
- * so the config passes Starlight's schema validation.
+ * so the config passes Starlight's schema validation. Any node flagged
+ * `homeNavOnly` is dropped entirely — it stays in the homepage menu
+ * (which reads the raw topics) but is excluded from the main sidebar.
  */
 export function cleanTopicsForStarlight(topics) {
-  return JSON.parse(JSON.stringify(topics, (key, value) => {
+  const stripHomeNavOnly = (nodes) =>
+    nodes
+      .filter(node => !node.homeNavOnly)
+      .map(node => (node.items ? { ...node, items: stripHomeNavOnly(node.items) } : node));
+
+  return JSON.parse(JSON.stringify(stripHomeNavOnly(topics), (key, value) => {
     if (key === 'jumpTo') return undefined;
     if (key === 'expandInHomenav') return undefined;
+    if (key === 'homeNavOnly') return undefined;
     return value;
   }));
 }
