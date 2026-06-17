@@ -311,6 +311,7 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/tableview/blazor' },
         ]
       },
+      { label: 'DataGrid', link: 'controls/datagrid/', jumpTo: true },
       {
         label: 'Scheduler',
         jumpTo: true,
@@ -430,6 +431,7 @@ export const sidebarTopics = [
           { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
           { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
+          { label: 'Dialogs', link: 'controls/dialogs/', jumpTo: true },
         ]
       },
       {

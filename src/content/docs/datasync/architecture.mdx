@@ -213,9 +213,15 @@ Two hooks for two scopes:
 
 Both compose because they are both `HttpRequestMessage` hooks. Endpoint-specific logic runs last so it wins on header conflicts — which is what most apps actually want.
 
-## Why `MinPullInterval` only throttles scheduled pulls?
+## Why `MinPullInterval` only affects scheduled pulls?
 
-`PullAll` and the auto-registered `SyncJob` run periodically and shouldn't hammer the server. `PullNow<T>()` is "the user just hit pull-to-refresh" — that should always go through. So the throttle is checked in `PullAll` / `SyncJob` and explicitly bypassed in `PullNow`. The check uses the persisted `SyncCursor.LastPulledAt` so it survives process restarts.
+`PullAll` and the auto-registered `SyncJob` run periodically and shouldn't hammer the server. `PullNow<T>()` is "the user just hit pull-to-refresh" — that should always go through. So `MinPullInterval` is honored in `PullAll` / `SyncJob` and explicitly bypassed in `PullNow`. The check uses the persisted `SyncCursor.LastPulledAt` so it survives process restarts.
+
+`MinPullInterval` has three modes: `TimeSpan.Zero` (the registration default) always pulls on scheduled passes; a positive value throttles to that interval; and `null` makes the endpoint **manual only** — scheduled passes skip it entirely and it pulls only via `PullNow<T>`. That last mode is useful for data you only refresh on demand (a detail screen, a push-triggered fetch) where you don't want the background job pulling on its own cadence.
+
+## Why overlapping pulls are coalesced?
+
+A pull for a given entity type can be triggered from several places at once — the `SyncJob`, a connectivity-restore event, and a user-initiated `PullNow<T>` could all fire within the same window. Running them concurrently would race on the same `SyncCursor` and waste requests. So the inbox tracks an in-flight set keyed by endpoint: if a pull for that type is already running, the duplicate is skipped (this applies even to `PullNow`). The slot is released when the pull completes, so the next trigger proceeds normally.
 
 ## Why three layered removal strategies?
 
