@@ -123,7 +123,16 @@ barcode.BarcodeDetected += (_, e) =>
 camera.Analyzers.Add(barcode);
 ```
 
-Decodes 1D/2D barcodes and QR codes with ZXing.Net over the frame's luminance plane — works on every platform with no native dependency. `BarcodeDetectedEventArgs` carries the `Format` (ZXing `BarcodeFormat`), `Value`, and `BoundingBox`.
+Decodes 1D/2D barcodes and QR codes with the **native scanner** — Apple Vision (`VNDetectBarcodesRequest`) on iOS / Mac Catalyst / macOS and Android MLKit (`BarcodeScanning`). A no-op on Windows and bare `net10.0` (no native barcode scanner). `BarcodeDetectedEventArgs` carries the `Format` (`Shiny.Controls.Camera.BarcodeFormat`), `Value`, and `BoundingBox`, and fires **once per barcode** in view.
+
+Restrict the scanned symbologies with `BarcodeAnalyzer.Formats` (`IList<BarcodeFormat>?`, null = all) — the filter is applied natively (Vision `Symbologies` / MLKit `SetBarcodeFormats`). In XAML it's settable inline as a case-insensitive, comma-separated list:
+
+```xml
+<cam:BarcodeAnalyzer BarcodeDetectedCommand="{Binding ScanCommand}"
+                     Formats="QrCode,Ean13,Code128" />
+```
+
+Set `Formats` before scanning starts (constructor / XAML); on Android the scanner client is built on the first frame, so changing it mid-session takes effect only after the analyzer is re-created.
 
 ### Face
 
@@ -188,6 +197,21 @@ Recognizes text with Apple Vision / Android MLKit / `Windows.Media.Ocr`. The reu
 
 Structured extraction, where **each document type is its own analyzer with its own strongly-typed event** (`DocumentDetected`, typed to the document). Every payload is a strong record with **nullable fields** — only what was found is populated. Ships analyzers for **invoices** (`Invoice`, with order lines), **receipts** (`Receipt`, with line items + per-tax breakdown + totals), **driver's licenses** (`DriversLicense`), **health cards** (`HealthCard`), **credit cards** (`CreditCard`), and **passports** (`Passport`).
 
+:::note[OCR runs once per frame]
+The document analyzers and `OcrAnalyzer` share a single OCR pass per frame (the recognizer caches its result on the frame instance), so enabling several document analyzers together does **one** recognition per frame, not one each. The shared pass runs with Vision language correction **off** — it otherwise corrupts structured fields (license/MRZ/card numbers, totals, dates) by snapping codes to dictionary words; the parsers fuzzy-match the raw text.
+:::
+
+:::tip[Documents are deskewed before OCR]
+The document analyzers detect the document, **perspective-correct (deskew) it**, then OCR the flat crop — flattening an angled card/ID dramatically improves accuracy, since keystoned text reads poorly. This happens **inside the live pipeline**, so your `CameraView` preview is untouched (it's not the modal document-scanner UI), and the overlay becomes the detected document outline (`DocumentAnalyzer.BoxColor`). Per platform:
+
+- **iOS / Mac Catalyst / macOS** — Vision (`VNDetectDocumentSegmentationRequest`) + Core Image `CIPerspectiveCorrection`
+- **Windows** — OpenCvSharp (Canny → largest convex 4-gon → `WarpPerspective`)
+- **Android** — a dependency-free managed detector (Otsu + largest bright region + extreme corners) plus a native `Matrix.setPolyToPoly` warp — no OpenCV, so the package stays trim/AOT-clean
+- **bare net10.0** — no-op
+
+When no document is found, all platforms fall back to whole-frame OCR.
+:::
+
 :::tip[Fields accumulate across frames]
 As a document slides into focus its fields appear gradually — number first, then name, then expiry. Rather than firing `DocumentDetected` on every frame with a stream of partial objects, the analyzer **merges the reads over up to `AccumulationFrames` frames** (default 5) and fires **once** with the richest combined record. It fires early when the parse is complete, won't re-fire while the same document stays in view, and re-arms after `ResetAfterEmptyFrames` frames with nothing detected. Set `AccumulationFrames = 1` for the old fire-every-frame behavior. (`DriversLicenseAnalyzer` reads a PDF417 barcode — complete in one shot — so it isn't accumulated.)
 :::
@@ -212,7 +236,7 @@ camera.Analyzers.Add(invoice);
 camera.Analyzers.Add(license);
 ```
 
-- **`DriversLicenseAnalyzer`** decodes the **PDF417** barcode on the back of US/Canadian licenses and parses the **AAMVA** record into a strongly-typed `DriversLicense` (number, names, DOB, expiry, address, `Jurisdiction`) — deterministic, no ML. It covers US states and the Canadian provinces that emit an AAMVA PDF417 (BC, AB, SK, MB, NS, NB, PEI, NL) and auto-detects Canadian `CCYYMMDD` date order from the country element or the province code (so dates parse correctly even when the country field is absent). **Ontario and Quebec licences do not carry a PDF417 barcode and therefore cannot be scanned this way** — back an OCR-based `DocumentAnalyzer` with a custom parser for those.
+- **`DriversLicenseAnalyzer`** reads the **PDF417** barcode on the back of US/Canadian licenses with the native scanner (Apple Vision / Android MLKit; a no-op on Windows and bare `net10.0`) and parses the **AAMVA** record into a strongly-typed `DriversLicense` (number, names, DOB, expiry, address, `Jurisdiction`) — the AAMVA parse is deterministic. It covers US states and the Canadian provinces that emit an AAMVA PDF417 (BC, AB, SK, MB, NS, NB, PEI, NL) and auto-detects Canadian `CCYYMMDD` date order from the country element or the province code (so dates parse correctly even when the country field is absent). **Ontario and Quebec licences do not carry a PDF417 barcode and therefore cannot be scanned this way** — back an OCR-based `DocumentAnalyzer` with a custom parser for those.
 - **`PassportAnalyzer`** locates and parses the passport **MRZ** (the two `<<<` lines, ICAO TD3) into a `Passport` (number, surname, given names, nationality, issuing country, DOB, expiry, sex) — the MRZ parse is deterministic, only locating the lines depends on OCR.
 - **`CreditCardAnalyzer`** reads the front of a payment card into a `CreditCard`. The **brand** (`CreditCardType` — Visa, Mastercard, Amex, …) and number validity are derived deterministically from the number's IIN prefix + Luhn; name / expiry / company are best-effort OCR. (`Cvv` is on the back signature panel and PCI-sensitive — it is almost always `null` from a front scan.)
 - **`ReceiptAnalyzer`** reads a point-of-sale receipt into a `Receipt` — merchant header, purchased line items (`Receipt.Lines`), a **per-tax breakdown** (`Receipt.Taxes`, each with an optional rate), plus `Subtotal` / `Tax` (the sum) / `Tip` / `Discount` / `Total` and best-effort `PaymentMethod` / `CardLast4` / `Currency` / `Date` / `Time`. OCR + best-effort rules.
