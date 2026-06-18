@@ -143,8 +143,8 @@ if (store.SupportsVector)
 | DuckDB (vss extension) | `true` |
 | CosmosDB | `true` (when vector properties are mapped) |
 | MongoDB (Atlas Vector Search) | `true` (when vector properties are mapped) |
-| SQLite (sqlite-vec) | `true` (when `EnableVectorExtension = true`) |
-| SQLCipher | `true` (inherits SQLite vec0 support) |
+| SQLite (sqlite-vec) | `true` (with the `Shiny.DocumentDb.Sqlite.VectorSupport` package, or `EnableVectorExtension` / `VectorExtensionPreloaded`) |
+| SQLCipher | `true` (same as SQLite — the `VectorSupport` package registers `vec0` against the `e_sqlcipher` engine) |
 | LiteDB | `false` |
 | IndexedDB | `false` |
 | MySQL | `false` |
@@ -285,6 +285,30 @@ Two sidecar tables per type — a `vec0` virtual table and an integer-rowid map 
 
 - Extension loading is **opt-in** via `SqliteDatabaseProvider.EnableVectorExtension = true`. The user must ship the native binary; the loader searches the standard OS paths and the app directory.
 - vec0 has no HNSW — searches are flat-scan. When a `Where(...)` filter is in play, the library asks vec0 for `k * postFilterMultiplier` candidates and then filters in the JOIN.
+
+:::tip[Mobile (iOS/Android): use `Shiny.DocumentDb.Sqlite.VectorSupport`]
+On iOS, `EnableVectorExtension` **cannot work** — Apple forbids `dlopen` of loose dynamic libraries and the bundled `e_sqlite3` disables runtime extension loading (Android usually fails too). Rather than hand-rolling the native setup, add the **`Shiny.DocumentDb.Sqlite.VectorSupport`** package: it ships the `sqlite-vec` native binaries (iOS static `xcframework`, Android `.so` per ABI, desktop/Mac Catalyst loadables) and a one-call registration helper.
+
+```csharp
+using Shiny.DocumentDb.Sqlite.VectorSupport;
+
+// registers vec0 as a SQLite auto-extension + returns a provider with VectorExtensionPreloaded set
+opts.DatabaseProvider = SqliteVec.CreateProvider($"Data Source={dbPath}");
+```
+
+Call it once at startup, before opening any connection. It works the same on iOS, Android, and desktop.
+
+**SQLCipher:** `RegisterAutoExtension()` registers `vec0` against whichever engine SQLitePCLRaw loaded — `e_sqlite3` or `e_sqlcipher` — so it works with encrypted databases too. `CreateProvider` returns a plain `SqliteDatabaseProvider`, so for SQLCipher call `SqliteVec.RegisterAutoExtension()` yourself and set the flag on your own provider:
+
+```csharp
+SqliteVec.RegisterAutoExtension();
+opts.DatabaseProvider = new SqlCipherDatabaseProvider(dbPath, password) { VectorExtensionPreloaded = true };
+```
+:::
+
+:::note[Wiring it yourself]
+If you provide your own `sqlite-vec` binary, statically link it and register via `sqlite3_auto_extension(sqlite3_vec_init)` at startup, then set `SqliteDatabaseProvider.VectorExtensionPreloaded = true` to skip the runtime load. `VectorExtensionPreloaded` makes `SupportsVector` return `true`; if both it and `EnableVectorExtension` are set, the preloaded path wins. On desktop/server you can instead keep `EnableVectorExtension` with a shipped binary.
+:::
 
 ### CRUD sync
 

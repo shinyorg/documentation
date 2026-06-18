@@ -5,6 +5,26 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 7.2.1 - June 18, 2026
+<RN type="feature">
+**Bundled sqlite-vec for iOS, Android & desktop — `Shiny.DocumentDb.Sqlite.VectorSupport`** — a new companion package ships the `sqlite-vec` native binaries (iOS static `xcframework`, Android `.so` per ABI, and macOS/Linux/Windows/Mac Catalyst loadables) **and** a one-call registration helper, so vector search works on every platform with no manual native setup. `SqliteVec.RegisterAutoExtension()` registers `vec0` as a SQLite auto-extension — the only mechanism that works on iOS, where loose extensions can't be `dlopen`ed — and `SqliteVec.CreateProvider(connectionString)` returns a ready provider with `VectorExtensionPreloaded` set. Registration is engine-aware, so it works with **SQLCipher** too (`vec0` is registered against the `e_sqlcipher` engine — set `VectorExtensionPreloaded = true` on your `SqlCipherDatabaseProvider`).
+
+```csharp
+// one PackageReference + one call, then map vectors as usual
+opts.DatabaseProvider = SqliteVec.CreateProvider($"Data Source={dbPath}");
+```
+</RN>
+<RN type="fix">
+**SQLite vector search on iOS** — `EnableVectorExtension` loads `sqlite-vec` via `sqlite3_load_extension`, which **cannot work on iOS** (Apple forbids `dlopen` of loose libraries, and the bundled `e_sqlite3` disables runtime extension loading) and usually fails on Android too. Previously this surfaced as a cryptic load failure. A new `SqliteDatabaseProvider.VectorExtensionPreloaded` flag supports the only workable mobile path: statically link `sqlite-vec` and register it once via `sqlite3_auto_extension(sqlite3_vec_init)` at startup, then set `VectorExtensionPreloaded = true` to skip the runtime load entirely. `SupportsVector` returns `true`, and if both flags are set the preloaded path wins. The load-failure exception now includes platform-specific guidance on iOS/Android. Most apps should use the new `Shiny.DocumentDb.Sqlite.VectorSupport` package instead of wiring this by hand.
+
+```csharp
+new SqliteDatabaseProvider(connectionString)
+{
+    VectorExtensionPreloaded = true   // vec0 statically linked + auto-registered
+};
+```
+</RN>
+
 ## 7.2 - June 14, 2026
 <RN type="feature">
 **Scalar functions, flag-enum & phonetic queries** — `Where` predicates now translate a library of scalar functions across **every** provider: string functions (`ToLower`/`ToUpper`, `Length`, `Trim`/`TrimStart`/`TrimEnd`, `Substring`, `Replace`, `IndexOf`, `string.IsNullOrEmpty`, string concatenation), `Math.*` (`Abs`, `Round`, `Ceiling`, `Floor`, `Sqrt`, `Pow`, `Sign`), date-part access (`Year`/`Month`/`Day`/…), and **flag-enum tests** — `permissions.HasFlag(Permissions.Write)` and the `(x & flag) == flag` idiom. The relational providers emit native SQL (`BITAND` on Oracle); MongoDB uses `$expr` aggregation (`$toLower`/`$strLenCP`/`$substrCP`/… and `$bitsAllSet` for flags); CosmosDB uses native NoSQL functions; LiteDB/IndexedDB evaluate in-memory. Phonetic search arrives via `DocumentFunctions.Soundex(...)`, translated to native `SOUNDEX()` (SQL Server / MySQL / Oracle) or a registered connection UDF (SQLite); the same canonical implementation runs in-memory. You can register your own translations with `options.MapFunctionTranslation(...)`. Internally the `Where` translator was refactored onto a shared, per-provider query IR. Soundex is also supported on PostgreSQL via the `fuzzystrmatch` extension, and on DuckDB/CosmosDB/MongoDB via a precomputed stored field (see [Querying › Phonetic search](/documentdb/querying/#phonetic-search--documentfunctionssoundex)).
