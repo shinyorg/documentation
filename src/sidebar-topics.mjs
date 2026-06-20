@@ -464,6 +464,7 @@ export const sidebarTopics = [
           { label: 'Aggregates', link: 'documentdb/aggregates' },
           { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
           { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
+          { label: 'Write Interceptors', link: 'documentdb/interceptors' },
           { label: 'Query Filters', link: 'documentdb/query-filters' },
           { label: 'Spatial', link: 'documentdb/spatial' },
           { label: 'Vector / ANN Search', link: 'documentdb/vector' },
@@ -490,6 +491,7 @@ export const sidebarTopics = [
             ]
           },
           { label: 'Performance', link: 'documentdb/performance' },
+          { label: 'FAQ & Decision Trees', link: 'documentdb/faq' },
           { label: 'Limitations', link: 'documentdb/limitations' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/DocumentDb/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'documentdb/release-notes' }

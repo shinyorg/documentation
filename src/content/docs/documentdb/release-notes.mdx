@@ -5,6 +5,30 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 8.0 TBD
+<RN type="fix">
+**Enum fields in `WhereIn` / comparisons on PostgreSQL & DuckDB** — the strict-typed providers extract JSON values with an explicit cast, but enum-typed fields fell through to a raw text extract, so `WhereIn(x => x.Status, [...])` (and `==` on an enum field) failed with `operator does not exist: text = integer`. Enum fields are now cast to their underlying numeric type, matching how enums are stored. Loose-typed providers (SQLite, etc.) were unaffected.
+</RN>
+<RN type="breaking">
+**`RunInTransaction` removed — use `UnitOfWork` + `SaveChanges`** — grouping writes into one transaction is now done through a unit of work created from the store, the single public way to open a transaction. `CreateUnitOfWork()` is a first-class method on `IDocumentStore` (the old `DocumentStoreExtensions.CreateUnitOfWork` extension is gone), and `UnitOfWork.Commit` is renamed to `SaveChanges` (a `[Obsolete]` `Commit` alias forwards for now). Contiguous same-type inserts in a unit are coalesced into the fast batch-insert path, so grouping inserts is as fast as `BatchInsert`. Migrate `store.RunInTransaction(tx => { await tx.Insert(a); await tx.Update(b); })` to:
+
+```csharp
+var uow = store.CreateUnitOfWork();
+uow.Add(a).Update(b);
+await uow.SaveChanges();
+```
+
+A unit is a write buffer, not a tracking context — reads don't see uncommitted buffered writes. For read-modify-write atomicity, use ETag/CAS (`IfMatch`) + retry. Applies to every provider.
+</RN>
+<RN type="feature">
+**Write interceptors** — register `IDocumentInterceptor` (per-document) and `IDocumentBulkInterceptor` (set-based) to observe and mutate writes. The after-hook runs **inside the transaction**, after the write succeeds and before commit, with the generated id/version populated — enabling transactional outbox patterns. Per-document interceptors fire for `Insert`/`BatchInsert` (per item)/`Update`/`Upsert`/`Remove`; bulk interceptors fire once for `ExecuteUpdate`/`ExecuteDelete`/`Clear`. `BeforeWrite` can mutate the document or throw to abort; temporal-driven writes (`Restore`) are flagged `Source = Temporal`. Register via `OnBeforeWrite<T>` / `OnAfterWrite<T>` lambdas or `AddInterceptor` / `AddBulkInterceptor`. Supported across every provider.
+
+```csharp
+opts.AddInterceptor(new AuditInterceptor());
+opts.OnBeforeWrite<Order>((ctx, ct) => { /* validate / mutate ctx.Document */ return Task.CompletedTask; });
+```
+</RN>
+
 ## 7.2.1 - June 18, 2026
 <RN type="feature">
 **Bundled sqlite-vec for iOS, Android & desktop — `Shiny.DocumentDb.Sqlite.VectorSupport`** — a new companion package ships the `sqlite-vec` native binaries (iOS static `xcframework`, Android `.so` per ABI, and macOS/Linux/Windows/Mac Catalyst loadables) **and** a one-call registration helper, so vector search works on every platform with no manual native setup. `SqliteVec.RegisterAutoExtension()` registers `vec0` as a SQLite auto-extension — the only mechanism that works on iOS, where loose extensions can't be `dlopen`ed — and `SqliteVec.CreateProvider(connectionString)` returns a ready provider with `VectorExtensionPreloaded` set. Registration is engine-aware, so it works with **SQLCipher** too (`vec0` is registered against the `e_sqlcipher` engine — set `VectorExtensionPreloaded = true` on your `SqlCipherDatabaseProvider`).

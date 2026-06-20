@@ -1,0 +1,97 @@
+---
+title: Write Interceptors
+---
+
+Interceptors let you observe and mutate writes as they happen. The after-hook runs **inside the same
+transaction** as the write — after it succeeds and before commit — so it sees the generated id/version
+and can perform transactional side effects (e.g. a transactional outbox).
+
+There are two granularities:
+
+- **Per-document** (`IDocumentInterceptor`) — fires for `Insert`, `BatchInsert` (per item), `Update`,
+  `Upsert`, and `Remove`.
+- **Bulk / set-based** (`IDocumentBulkInterceptor`) — fires once for `ExecuteUpdate`, `ExecuteDelete`,
+  and `Clear`, which never materialize the affected documents.
+
+:::note[Provider support]
+Interceptors are supported across every provider — the relational stores (SQLite, PostgreSQL, MySQL,
+SQL Server, Oracle, DuckDB) and the document stores (MongoDB, Cosmos DB, LiteDB, IndexedDB).
+:::
+
+## Per-document interceptors
+
+```csharp
+public sealed class AuditInterceptor : IDocumentInterceptor
+{
+    public Task BeforeWrite(DocumentWriteContext ctx, CancellationToken ct)
+    {
+        // ctx.Document is mutable here; ctx.Id may be unassigned for auto-generated ids.
+        // Throw to abort the write (and roll back the surrounding unit).
+        return Task.CompletedTask;
+    }
+
+    public Task AfterWrite(DocumentWriteContext ctx, CancellationToken ct)
+    {
+        // Runs inside the transaction with ctx.Id / ctx.Version populated.
+        Console.WriteLine($"{ctx.Operation} {ctx.TypeName} #{ctx.Id} (source: {ctx.Source})");
+        return Task.CompletedTask;
+    }
+}
+
+opts.AddInterceptor(new AuditInterceptor());
+```
+
+Or register type-scoped lambdas:
+
+```csharp
+opts.OnBeforeWrite<Order>((ctx, ct) =>
+{
+    if (ctx.Document is Order o && o.Total < 0)
+        throw new InvalidOperationException("Total cannot be negative");
+    return Task.CompletedTask;
+});
+
+opts.OnAfterWrite<Order>((ctx, ct) => outbox.Enqueue(ctx.Id, ctx.Operation, ct));
+```
+
+`DocumentWriteContext` carries `Operation` (`Insert`/`Update`/`Upsert`/`Delete`), `Source`
+(`Direct`/`Temporal`), `DocumentType`, `TypeName`, `Id`, mutable `Document` (null for delete-by-id),
+and `Version`.
+
+### Semantics
+
+- `BeforeWrite` runs before serialization. Mutations to `ctx.Document` are persisted. Throwing aborts
+  the write and propagates (there is no separate cancel flag).
+- `AfterWrite` runs after the core write succeeds, inside the transaction, before commit. If the write
+  throws, `AfterWrite` does **not** fire.
+- Multiple interceptors run in registration order.
+- A `Restore` (temporal) write fires interceptors with `Source == Temporal` so you can distinguish it
+  from a direct write — the internal history-table writes are not surfaced.
+
+## Bulk interceptors
+
+Set-based operations never load the affected documents, so per-document interceptors don't fire for
+them — they get their own interceptor with the translated predicate and affected count.
+
+```csharp
+public sealed class BulkAudit : IDocumentBulkInterceptor
+{
+    public Task BeforeBulkWrite(DocumentBulkContext ctx, CancellationToken ct) => Task.CompletedTask;
+
+    public Task AfterBulkWrite(DocumentBulkContext ctx, CancellationToken ct)
+    {
+        Console.WriteLine($"{ctx.Operation} {ctx.TypeName}: {ctx.AffectedCount} rows");
+        return Task.CompletedTask;
+    }
+}
+
+opts.AddBulkInterceptor(new BulkAudit());
+```
+
+`DocumentBulkContext` carries `Operation` (`Update`/`Delete`/`Clear`), `WhereClause` (the translated
+predicate, null for `Clear`-all), `Assignment` (for `ExecuteUpdate`), and `AffectedCount` (after only).
+
+:::caution[Per-document interceptors do not fire for set-based ops]
+This mirrors EF Core, where `ExecuteUpdate`/`ExecuteDelete` bypass the change tracker. If you need
+per-row hooks, load the documents and write them individually inside a `UnitOfWork`.
+:::

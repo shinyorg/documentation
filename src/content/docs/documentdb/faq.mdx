@@ -1,0 +1,115 @@
+---
+title: FAQ & Decision Trees
+---
+
+Common questions about how DocumentDb is designed and which API to reach for. If you're
+coming from Entity Framework, start with the write-model questions — the mental model is
+deliberately a little different.
+
+## Which write API should I use?
+
+DocumentDb gives you three ways to write, in increasing order of grouping. Pick the
+smallest one that fits.
+
+```text
+Are you writing more than one document?
+│
+├─ No  ── one document, write it now
+│        └─►  Insert / Update / Upsert / Remove        (auto-commit, one round trip)
+│
+└─ Yes
+   │
+   ├─ All the same type, and you just want them in fast?
+   │        └─►  BatchInsert(documents)                (single transaction, command reuse)
+   │
+   └─ Mixed operations / mixed types that must all
+      succeed or all fail together?
+            └─►  CreateUnitOfWork() → Add/Update/Remove → SaveChanges()
+```
+
+| You want to… | Use | Atomic? | Notes |
+| --- | --- | --- | --- |
+| Write a single document | `Insert` / `Update` / `Upsert` / `Remove` | n/a (one op) | Auto-commits. No setup. |
+| Insert many documents of one type, fast | `BatchInsert` | Yes — the whole batch | Auto-generates IDs; rolls the batch back on any failure. |
+| Group several writes (any mix) atomically | `UnitOfWork` + `SaveChanges` | Yes — the whole unit | Buffers `Add`/`Update`/`Upsert`/`Remove`, commits once. |
+
+```csharp
+// Single writes — just do them
+await store.Insert(user);
+await store.Update(order);
+
+// Bulk insert of one type — fastest path for "load these in"
+var count = await store.BatchInsert(users);
+
+// Several writes, all-or-nothing
+var uow = store.CreateUnitOfWork();
+uow.Add(order)
+   .Add(orderLine1)
+   .Add(orderLine2)
+   .Remove<Cart>(cartId);
+await uow.SaveChanges();   // one transaction; rolls back entirely on failure
+```
+
+:::tip[BatchInsert is just a specialized unit of work]
+A `UnitOfWork` coalesces a run of same-type inserts into the same fast multi-row path
+`BatchInsert` uses, so you don't lose bulk-insert speed by grouping inserts with other
+operations in a unit. Reach for `BatchInsert` when inserts are *all* you're doing — it's
+the shorter spelling of that case.
+:::
+
+## Why is `UnitOfWork` a separate object and not `IDocumentStore` itself?
+
+If you come from EF, the natural question is "why isn't the store itself the unit of work,
+like `DbContext`?" We looked hard at this and chose a separate, store-created handle on
+purpose.
+
+`DbContext` *can* be the unit of work because EF registers it **scoped** — one short-lived
+context per operation, never shared. The expensive parts (the model, internal services,
+connection pooling) live in singletons that the context borrows from.
+
+`IDocumentStore` is the opposite: it's **long-lived, shared infrastructure**. It owns the
+connection(s), the change-notification broadcaster and its subscribers, and the type/ID
+caches. On mobile it's effectively a singleton. Putting a mutable "pending writes" buffer
+on that shared object would mean:
+
+- **Concurrency hazards.** Two callers buffering writes would land in the *same* buffer;
+  whoever calls save first would flush the other's half-built work.
+- **Forgotten-flush footguns.** A long-lived object accumulates pending writes; a later,
+  unrelated save could flush stale ones.
+
+A `UnitOfWork` is per-operation, short-lived state — so it lives in its own object whose
+lifetime is bounded by your use of it. Abandon it and the buffer is simply collected.
+
+:::note[You still only inject `IDocumentStore`]
+The unit of work is **created from the store** (`store.CreateUnitOfWork()`), never
+registered in DI or injected. So this design costs you nothing in plumbing — you inject
+`IDocumentStore` everywhere, exactly as before, and ask it for a unit when you need one.
+:::
+
+## Can I read my own uncommitted writes from a `UnitOfWork`?
+
+No. A `UnitOfWork` is a **write buffer**, not a tracking context with an identity map.
+Reads (`Get`, `Query`, `Count`) always go live against the store and won't see writes that
+are still buffered in a unit. Call `SaveChanges` first if a later read needs to see them.
+
+This is a deliberate difference from EF's `DbContext`, which serves buffered changes back
+from its change tracker.
+
+## How do I run several operations in one transaction?
+
+Use a `UnitOfWork`. Everything you `Add`/`Update`/`Upsert`/`Remove` is applied inside a
+single transaction when you call `SaveChanges`, and rolled back as a whole if anything
+fails. There is no separate "begin transaction" call on the store — the unit of work *is*
+the transaction boundary, and it's the only place one opens.
+
+:::caution[Provider transaction support varies]
+On relational providers the unit commits as a native ACID transaction. On stores without
+multi-document transactions in a single-node setup (MongoDB, Cosmos DB) the unit uses a
+compensating pattern. See each provider's page for specifics.
+:::
+
+## Do I need to dispose a `UnitOfWork`?
+
+No. It holds no connection or transaction of its own until `SaveChanges` runs (which opens,
+commits, and closes its transaction internally). An un-saved unit is just an in-memory list
+of pending operations.

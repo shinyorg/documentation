@@ -117,15 +117,32 @@ var users = Enumerable.Range(1, 1000).Select(i => new User
 });
 
 var count = await store.BatchInsert(users); // single transaction, prepared command reused
-
-// Inside a transaction — uses the existing transaction (no nesting)
-await store.RunInTransaction(async tx =>
-{
-    await tx.BatchInsert(moreUsers);
-    await tx.Insert(singleUser);
-    // All committed or rolled back together
-});
 ```
+
+## Unit of work (grouping writes atomically)
+
+To apply several writes in a single transaction, create a `UnitOfWork`, queue operations, then call
+`SaveChanges`. Everything commits together or rolls back together. Contiguous same-type inserts are
+coalesced into the fast batch-insert path, so grouping inserts costs nothing versus `BatchInsert`.
+
+```csharp
+var uow = store.CreateUnitOfWork();
+uow.Add(order)
+   .AddRange(orderLines)        // coalesced into one batch insert
+   .Update(customer)
+   .Remove<Cart>(cartId);
+
+await uow.SaveChanges();        // one transaction; rolls back entirely on failure
+```
+
+You only ever inject `IDocumentStore` — the unit is created from it, never registered in DI. A unit is
+a write buffer, not a tracking context: reads don't see operations still buffered in an uncommitted unit.
+See the [FAQ](/documentdb/faq) for the full write-API decision tree.
+
+:::caution[Breaking change in 8.0]
+`RunInTransaction` has been removed. Replace `store.RunInTransaction(tx => …)` with a `UnitOfWork`:
+queue your `Add`/`Update`/`Upsert`/`Remove` calls and `await uow.SaveChanges()`.
+:::
 
 ## Upsert with JSON Merge Patch
 
