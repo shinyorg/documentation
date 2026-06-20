@@ -67,5 +67,6 @@ The real `dotnet new` templates live in the **sibling repo `~/Desktop/dev/templa
 So "update the templates from the builder" really means: apply the same edits (e.g. the version bumps above) to the template `.csproj` files, then **regenerate the builder so the two stay in sync**:
 
 1. Edit `~/Desktop/dev/templates/ProjectTemplates/{ShinyApp,ShinyAspNet,ShinyBlazor}/*.csproj`. Match by MSBuild property name (`<ShinyVersion>…`) or `PackageReference Include="…"` and set the target value — the templates can drift from the builder (e.g. an older `ShinyDocumentDbVersion`), so match by name, not by old value.
-2. From this repo, run `node scripts/extract-templates.mjs` to regenerate all three `templateFiles.<id>.ts`.
-3. `npm run build` here to confirm, and `git diff` both repos to review.
+2. Bump the NuGet package version: in `~/Desktop/dev/templates/Template.csproj` (the `Shiny.Templates` package project), increment `<PackageVersion>` by one **minor** (e.g. `7.0.0` → `7.1.0`).
+3. From this repo, run `node scripts/extract-templates.mjs` to regenerate all three `templateFiles.<id>.ts`.
+4. `npm run build` here to confirm, and `git diff` both repos to review.
