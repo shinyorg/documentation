@@ -113,3 +113,27 @@ await pushManager.Send(notification, new PushFilter { AppId = "driver", Tags = [
 
 Delivery runs with bounded concurrency — tune with `push.Configure(o => o.MaxDegreeOfParallelism = 25)`.
 Set it to `1` for repositories/providers that aren't thread-safe.
+
+## Batching (FCM multicast)
+
+When a transport implements `IPushBatchProvider`, the manager delivers devices that share the same
+notification in a single call instead of one request per device. The FCM provider does this — it packs up
+to 500 devices into one multipart `/batch` request — so broadcasts and topic fan-out use far fewer round
+trips. It's on by default and requires no change at the call site:
+
+```csharp
+// Hits one FCM /batch request per 500 Android devices instead of one request each:
+await pushManager.Broadcast(new PushNotification { Title = "Service back online" });
+
+// Opt out (force one request per device for every provider):
+push.Configure(o => o.EnableBatching = false);
+```
+
+Devices are grouped by the **identical notification instance**, so an interceptor that rewrites the
+notification per device (e.g. localization) naturally falls back to per-device sends for those devices.
+Per-device dead-token pruning, token rotation, metrics, and `OnSent`/`OnFailed` are all preserved. Batched
+sends emit a single `push.deliver.batch` trace span (tagged with `push.batch_size`).
+
+To make a custom transport batchable, implement `IPushBatchProvider` (`MaxBatchSize` plus a `SendBatch`
+that returns one result per registration, in the same order). Web Push has no multicast endpoint, so it
+stays one request per device (still fanned out concurrently by the manager).
