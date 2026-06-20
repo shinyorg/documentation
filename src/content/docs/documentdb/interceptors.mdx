@@ -95,3 +95,39 @@ predicate, null for `Clear`-all), `Assignment` (for `ExecuteUpdate`), and `Affec
 This mirrors EF Core, where `ExecuteUpdate`/`ExecuteDelete` bypass the change tracker. If you need
 per-row hooks, load the documents and write them individually inside a `UnitOfWork`.
 :::
+
+## Registering interceptors from DI
+
+In addition to `AddInterceptor` / `AddBulkInterceptor` on the options, interceptors can be registered
+in the service container — so they get **constructor-injected dependencies**. When you register the
+store with `AddDocumentStore`, it resolves every `IDocumentInterceptor` and `IDocumentBulkInterceptor`
+from the container and runs them alongside the options-registered ones.
+
+```csharp
+public sealed class OutboxInterceptor(IOutbox outbox, ILogger<OutboxInterceptor> logger) : IDocumentInterceptor
+{
+    public Task BeforeWrite(DocumentWriteContext ctx, CancellationToken ct) => Task.CompletedTask;
+
+    public Task AfterWrite(DocumentWriteContext ctx, CancellationToken ct)
+        => outbox.Enqueue(ctx.TypeName, ctx.Id, ctx.Operation, ct); // dependencies injected by DI
+}
+
+services.AddSingleton<IOutbox, Outbox>();
+services.AddSingleton<IDocumentInterceptor, OutboxInterceptor>();
+
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db");
+    opts.AddInterceptor(new AuditInterceptor()); // options-registered still works, runs first
+});
+```
+
+**Execution order is deterministic:** options-registered interceptors run first, then DI-registered
+ones (in container registration order). This applies to both per-document and bulk interceptors.
+
+:::note[Lifetime]
+DI interceptors are resolved once, from the store's service provider. Because the store is typically a
+singleton, register interceptors (and their dependencies) as **singletons** — a `Scoped` interceptor
+would be captured by the singleton store. If an interceptor needs per-operation scoped services, inject
+an `IServiceScopeFactory` and create a scope inside the hook.
+:::
