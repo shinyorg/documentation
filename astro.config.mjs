@@ -345,8 +345,8 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'docdb-v72',
-              content: 'Document DB v7.2: Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
+              id: 'docdb-v80',
+              content: 'Document DB v8.0 Interceptors, Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false
