@@ -660,6 +660,18 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'blazorhost/' },
           { label: 'Release Notes', link: 'blazorhost/release-notes' }
         ]
+      },
+      {
+        label: 'Push (Server)',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'extensions-push/' },
+          { label: 'Sending', link: 'extensions-push/sending' },
+          { label: 'APNs', link: 'extensions-push/apns' },
+          { label: 'Persistence', link: 'extensions-push/persistence' },
+          { label: 'Metrics', link: 'extensions-push/metrics' },
+          { label: 'Release Notes', link: 'extensions-push/release-notes' }
+        ]
       }
     ]
   },

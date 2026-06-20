@@ -1,0 +1,64 @@
+---
+title: Persistence
+---
+
+Device registrations are stored through `IPushRepository`. The default is in-memory; for production use the
+Shiny.DocumentDb-backed repository (or implement your own).
+
+## In-memory (default)
+
+If you don't configure a repository, a thread-safe in-memory store is used — ideal for tests, samples, and
+single-node development. Registrations are lost on restart.
+
+## Shiny.DocumentDb
+
+`Shiny.Extensions.Push.DocumentDb` implements `IPushRepository` over [Shiny.DocumentDb](/documentdb/), so it
+runs on any DocumentDb backend (SQLite, PostgreSQL, SQL Server, Cosmos, MongoDB, …).
+
+```csharp
+using Shiny.Extensions.Push.DocumentDb;
+using Shiny.DocumentDb.Sqlite;
+
+services.AddPushNotifications(push =>
+{
+    push.AddApns(o => { /* … */ });
+
+    // registers the document store for you
+    push.UseDocumentDb(o => o.DatabaseProvider = new SqliteDatabaseProvider("Data Source=push.db"));
+
+    // …or, if you already registered IDocumentStore via services.AddDocumentStore(…):
+    // push.UseDocumentDb();
+});
+```
+
+Switch backends by changing the `DatabaseProvider` — e.g. `new PostgreSqlDatabaseProvider("Host=…")`.
+
+### Behavior
+
+- **Token-keyed writes are O(1)** — save, remove, and token rotation are point operations keyed on
+  `{Platform}|{DeviceToken}`, the calls the manager makes constantly while pruning and rotating.
+- **Targeted sends stream the type and filter in-process.** This keeps the repository fully AOT-safe (no
+  JSON-path predicate translation, so no coupling to the store's serializer naming) and provider-agnostic.
+  For very large tables, pushing equality clauses down into the store query is a planned optimization.
+- **AOT-safe** — the repository ships its own source-generated JSON context and passes `JsonTypeInfo<T>` on
+  every store call.
+
+## Custom repository
+
+Implement `IPushRepository` and register it with `push.UseRepository<T>()`:
+
+```csharp
+public sealed class MyRepository : IPushRepository
+{
+    public Task Save(DeviceRegistration registration, CancellationToken ct = default) { /* upsert */ }
+    public Task<bool> Remove(string deviceToken, DevicePlatform platform, CancellationToken ct = default) { /* … */ }
+    public Task UpdateToken(string oldToken, DevicePlatform platform, string newToken, CancellationToken ct = default) { /* … */ }
+    public Task<IReadOnlyList<DeviceRegistration>> GetRegistrations(PushFilter filter, CancellationToken ct = default) { /* … */ }
+    public IAsyncEnumerable<DeviceRegistration> StreamRegistrations(PushFilter filter, CancellationToken ct = default) { /* … */ }
+}
+
+services.AddPushNotifications(push => push.UseRepository<MyRepository>());
+```
+
+Prefer a stable `DeviceId` on registrations so re-registration upserts instead of creating duplicates, and
+implement the repository to be safe for concurrent reads/writes (the manager prunes/rotates while iterating).

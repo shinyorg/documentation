@@ -1,0 +1,115 @@
+---
+title: Sending
+---
+
+`IPushManager` is the entry point. Every send returns a `PushSendResult` with a `BatchId` and per-device
+`Results`, plus rollup counts (`Sent`, `Failed`, `TokensRemoved`, `Skipped`). One device failing never
+aborts the batch.
+
+## Targeting
+
+```csharp
+await pushManager.SendToUser("user-42", notification);                 // all of a user's devices
+await pushManager.SendToTags(["sports"], notification, TagMatch.Any);  // by tag/segment
+await pushManager.SendToTokens(["tokenA", "tokenB"], notification);    // explicit tokens
+await pushManager.Broadcast(notification);                            // everyone
+```
+
+For anything more specific, use a `PushFilter` — all set clauses are AND-combined:
+
+```csharp
+await pushManager.Send(notification, new PushFilter
+{
+    Platforms   = [DevicePlatform.iOS],
+    Tags        = ["beta"],
+    TagMatch    = TagMatch.All,
+    Environment = PushEnvironment.Production,
+    AppId       = "consumer"        // multi-app servers (see below)
+});
+```
+
+`PushFilter` is a structured, declarative description of the audience — deliberately **not** an
+`Expression<Func<>>` so it stays AOT/trim-safe and translates cleanly to any repository backend.
+
+## The notification
+
+`PushNotification` carries cross-cutting fields; per-platform specifics live in option objects.
+
+```csharp
+new PushNotification
+{
+    Title    = "Title",
+    Message  = "Body",
+    Badge    = 1,
+    Sound    = "default",
+    DeepLink = "app://route",
+    CollapseId = "score-update",        // coalesce: newer replaces undelivered older
+    TimeToLive = TimeSpan.FromHours(1),
+    Priority   = PushPriority.High,
+    Data       = new Dictionary<string, string> { ["matchId"] = "123" },
+    Apple      = new ApplePushOptions { Subtitle = "Subtitle", ThreadId = "t1", Category = "MSG" }
+};
+```
+
+`Title`/`Message` are nullable on purpose — a **silent / background** push carries only data:
+
+```csharp
+new PushNotification
+{
+    Apple = new ApplePushOptions { ContentAvailable = true },   // low priority enforced automatically
+    Data  = new Dictionary<string, string> { ["sync"] = "inbox" }
+};
+```
+
+## Interceptors
+
+Implement `IPushInterceptor` and register additively with `push.AddInterceptor<T>()`; they run in order.
+Mutate the notification by replacing `context.Notification`, or return `InterceptorResult.Skip` to drop a
+device. `OnSent`/`OnFailed` are for analytics/receipts. Interceptor exceptions are caught and logged — they
+never break a batch.
+
+```csharp
+public sealed class LocalizationInterceptor : IPushInterceptor
+{
+    public Task<InterceptorResult> BeforeSend(PushSendContext context, CancellationToken ct = default)
+    {
+        if (context.Registration.Tags.Contains("opted-out"))
+            return Task.FromResult(InterceptorResult.Skip);
+
+        var title = Localize(context.Notification.Title, context.Registration.Locale);
+        context.Notification = context.Notification with { Title = title };
+        return Task.FromResult(InterceptorResult.Continue);
+    }
+
+    public Task OnSent(PushSendContext c, PushDeliveryResult r, CancellationToken ct = default) => Task.CompletedTask;
+    public Task OnFailed(PushSendContext c, PushDeliveryResult r, CancellationToken ct = default) => Task.CompletedTask;
+}
+```
+
+## Token hygiene
+
+Providers return a normalized `PushDeliveryStatus`. The manager automatically removes tokens reported
+`TokenExpired`/`InvalidToken` (e.g. APNs `410 Unregistered` / `BadDeviceToken`) and applies rotated tokens
+back to the repository. Disable via `PushManagerOptions.AutoPruneDeadTokens = false`.
+
+`RateLimited` is surfaced on the result but **not** retried — backoff is the caller's responsibility by
+design.
+
+## Multiple apps
+
+Register one keyed provider per app; devices carry the matching `AppId`; the manager routes by it.
+
+```csharp
+services.AddPushNotifications(push =>
+{
+    push.AddApns("consumer", o => { o.BundleId = "com.example.consumer"; /* … */ });
+    push.AddApns("driver",   o => { o.BundleId = "com.example.driver";   /* … */ });
+});
+
+await pushManager.Send(notification, new PushFilter { AppId = "driver", Tags = ["on-shift"] });
+```
+
+## Concurrency
+
+Delivery runs with bounded concurrency — tune with `push.Configure(o => o.MaxDegreeOfParallelism = 25)`.
+Set it to `1` for repositories/providers that aren't thread-safe.

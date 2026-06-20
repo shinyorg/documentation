@@ -1,0 +1,82 @@
+---
+title: APNs
+---
+
+`Shiny.Extensions.Push.Apns` talks to Apple Push Notification service **directly** — HTTP/2 with
+token-based (`.p8`) authentication. No FCM/Google dependency for Apple devices. It handles iOS and macOS
+registrations.
+
+## Configuration
+
+You need an APNs auth key (`.p8`) from the Apple Developer portal, its Key ID, your Team ID, and the app's
+bundle id.
+
+```csharp
+push.AddApns(o =>
+{
+    o.TeamId   = "ABCDE12345";          // 10-char Apple Team ID (JWT "iss")
+    o.KeyId    = "KEY1234567";          // 10-char Key ID of the .p8 (JWT "kid")
+    o.BundleId = "com.example.app";     // default apns-topic
+    o.PrivateKeyPath = "AuthKey_KEY1234567.p8";   // or o.PrivateKey = "<PEM contents>"
+    // o.ForceEnvironment = PushEnvironment.Sandbox;  // default: honour each registration
+});
+```
+
+The provider builds and **caches** its ES256 provider JWT (refreshed ~every 50 minutes — Apple rejects
+tokens regenerated too frequently) and reuses a single pooled HTTP/2 connection across all sends.
+
+## Sandbox vs production
+
+APNs tokens are **environment-specific** — a token registered against the sandbox (debug/TestFlight builds)
+is not valid in production and vice-versa. Set `DeviceRegistration.Environment` per device:
+
+```csharp
+await pushManager.RegisterDevice(new DeviceRegistration
+{
+    DeviceToken = "<token>",
+    Platform    = DevicePlatform.iOS,
+    Environment = PushEnvironment.Sandbox
+});
+```
+
+The provider routes each push to the correct host based on the registration. Use
+`ApnsOptions.ForceEnvironment` only if you want to pin every push to one environment.
+
+## Apple-specific payload options
+
+`ApplePushOptions` on the notification maps to the `aps` dictionary and APNs headers:
+
+```csharp
+new PushNotification
+{
+    Title = "Title",
+    Apple = new ApplePushOptions
+    {
+        Subtitle         = "Subtitle",
+        Category         = "MESSAGE_CATEGORY",   // actionable notifications
+        ThreadId         = "thread-1",           // grouping
+        MutableContent   = true,                 // Notification Service Extension
+        ContentAvailable = false,                // true => silent/background push
+        // TopicOverride / PushTypeOverride for VoIP / complication topics
+    }
+};
+```
+
+Common cross-cutting fields also map to APNs: `Badge`, `Sound`, `CollapseId` (`apns-collapse-id`),
+`TimeToLive` (`apns-expiration`), and `Priority` (10/5; forced to 5 for background pushes).
+
+## Failure handling
+
+The provider normalizes APNs responses to `PushDeliveryStatus`:
+
+| APNs result | Status | Manager action |
+|---|---|---|
+| `410 Unregistered` | `TokenExpired` | token pruned |
+| `BadDeviceToken` / `DeviceTokenNotForTopic` | `InvalidToken` | token pruned |
+| `429 TooManyRequests` | `RateLimited` | surfaced (no auto-retry) |
+| `ExpiredProviderToken` / `InvalidProviderToken` | `Error` | JWT cache invalidated |
+
+## Multiple apps
+
+Register one keyed provider per bundle id — see [Sending → Multiple apps](/extensions-push/sending). Each
+key gets its own options, `.p8` key, and JWT cache.

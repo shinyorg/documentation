@@ -4,45 +4,62 @@ description: Pluggable frame-analysis pipeline for the Shiny CameraView — barc
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 
-The CameraView streams frames to a pipeline of **analyzers**. Each analyzer runs off the UI thread with per-analyzer back-pressure (a slow analyzer is simply skipped for a frame rather than backing up the camera). It surfaces its result through its **own strongly-typed event** (or a bindable `Command`) and returns the styled bounding boxes to draw as `OverlayBox`es in normalized, upright image space. The built-in `CameraOverlayView` draws them.
+The CameraView streams frames to a pipeline of **analyzers**. Each analyzer runs off the UI thread with per-analyzer back-pressure (a slow analyzer is simply skipped for a frame rather than backing up the camera). It **always draws its bounding boxes**, but **only delivers a result while it is _armed_** — a gated "scan trigger" model, so you get live boxes without an event firehose. The built-in `CameraOverlayView` draws the boxes.
 
 Two channels per analyzer:
 
-- **Semantic result** → a typed `event` (e.g. `BarcodeDetected`) or a bindable `Command`, raised on the UI thread.
-- **Presentation** → the boxes returned from `AnalyzeAsync`. A returned set persists until the analyzer returns a different set (replace) or `null` (clear).
+- **Presentation** → the boxes returned from `AnalyzeAsync`, drawn every frame (never gated). A returned set persists until the analyzer returns a different set (replace) or `null` (clear).
+- **Semantic result** → delivered **only while armed**, on the UI thread, via the analyzer's typed `event` (e.g. `BarcodeDetected`), bindable `Command`, and/or an **`OnDetected`** continuation that decides whether to keep scanning.
+
+## Arming a scan (the trigger)
+
+Results are **pulled, not pushed**. Bind a button/Fab to **`CameraView.ScanCommand`** (or call **`CameraView.Scan()`**) to arm every *enabled* analyzer for one scan. The next confirmed detection is delivered once, then the analyzer disarms (**single-shot**). To control continuation, set a per-analyzer **`OnDetected`** — a `Func<TArgs, Task<bool>>` run on the UI thread; **`return true` to keep scanning** (stay armed), `false` to stop until the next `Scan()`. It can be async (validate, confirm) before deciding. `CameraView.StopScanning()` disarms everything.
+
+```xml
+<cam:CameraView x:Name="Camera">
+    <cam:BarcodeAnalyzer OnDetected="{Binding OnBarcode}" />
+</cam:CameraView>
+<shiny:Fab Icon="scan" Command="{Binding Source={x:Reference Camera}, Path=ScanCommand}" />
+```
+
+```csharp
+// return true => keep scanning, false => disarm
+public Func<BarcodeDetectedEventArgs, Task<bool>> OnBarcode => async e =>
+{
+    if (Codes.Contains(e.Value)) return true;   // dupe -> keep going
+    Codes.Add(e.Value);
+    return Codes.Count < 5;                      // stop after 5
+};
+```
+
+The typed `event` and bound `Command` still fire alongside `OnDetected`, but **only while armed** (passive observers — they can't influence continuation). A value lingering in view won't re-deliver (barcode/license dedupe until it leaves the frame).
 
 ## The pipeline
 
 ```csharp
 var barcode = new BarcodeAnalyzer();
-barcode.BarcodeDetected += (_, e) => status = $"{e.Format}: {e.Value}";
-
-var motion = new MotionAnalyzer();
-motion.MotionChanged += (_, e) => status = e.InMotion ? "Motion" : "Still";
+barcode.BarcodeDetected += (_, e) => status = $"{e.Format}: {e.Value}";   // fires while armed
 
 camera.Analyzers.Add(barcode);
-camera.Analyzers.Add(motion);
+camera.Scan();   // arm — next barcode fires once
 ```
 
-Add or remove analyzers at any time — the running session picks up the change. Analyzer events are raised on the UI thread (the pipeline marshals them), so handlers can touch UI directly.
+Add or remove analyzers at any time — the running session picks up the change. Delivery is on the UI thread (the pipeline marshals it), so handlers can touch UI directly.
 
-## Declaring analyzers in XAML (+ Commands)
+## Declaring analyzers in XAML (Commands & OnDetected)
 
-Analyzers are `BindableObject`s, so you can declare them inside `<cam:CameraView>` (its content property is `Analyzers`) under the one `cam:` prefix, and bind each analyzer's **`…Command`** to a ViewModel. They inherit the camera's `BindingContext`, and each command fires with the same args as its event.
+Analyzers are `BindableObject`s, so you can declare them inside `<cam:CameraView>` (its content property is `Analyzers`) under the one `cam:` prefix. Bind each analyzer's **`OnDetected`** (`Func<TArgs, Task<bool>>`) to decide continuation, and/or its **`…Command`** for a passive observer. Both inherit the camera's `BindingContext` and fire **only while armed**.
 
 ```xml
 <cam:CameraView Facing="Back" Filter="Chrome">
-    <cam:BarcodeAnalyzer BarcodeDetectedCommand="{Binding ScanCommand}" />
+    <cam:BarcodeAnalyzer OnDetected="{Binding OnBarcode}" />
     <cam:InvoiceAnalyzer DocumentDetectedCommand="{Binding InvoiceCommand}" />
-    <!-- run an analyzer for its command only, no box: -->
-    <cam:MotionAnalyzer MotionChangedCommand="{Binding MotionCommand}" ShowBoundingBox="False" />
+    <!-- run an analyzer for its result only, no box: -->
+    <cam:MotionAnalyzer OnDetected="{Binding OnMotion}" ShowBoundingBox="False" />
 </cam:CameraView>
 ```
 
-```csharp
-public ICommand ScanCommand { get; } =
-    new Command<BarcodeDetectedEventArgs>(e => /* e.Format, e.Value, e.BoundingBox */);
-```
+Each analyzer exposes the command matching its event (`BarcodeDetectedCommand`, `MotionChangedCommand`, `FacesDetectedCommand`, `TextRecognizedCommand`, `DocumentDetectedCommand`) — bind a `Command<T>` whose `T` is the event-args type. The command can't say "keep scanning"; for that use `OnDetected`, which returns a `Task<bool>`.
 
 ## Drawing the overlay
 
@@ -60,15 +77,15 @@ Drop a `CameraOverlayView` over the `CameraView` in the same cell and point it a
 `Analyzers` is an observable collection — **add or remove at runtime and the running pipeline picks it up live** (seamless on Apple/Windows; Android rebinds its capture use-cases automatically). To turn an analyzer off *without losing its bindings or internal state*, set **`FrameAnalyzer.IsEnabled`** (bool, default `true`) instead of removing it — it resumes instantly when re-enabled. When **every** analyzer is disabled the camera behaves as if it had none (so, e.g., Android can record video again).
 
 ```xml
-<!-- toggle live from a switch; the analyzer's command binding + state are preserved while off -->
-<cam:BarcodeAnalyzer BarcodeDetectedCommand="{Binding ScanCommand}"
+<!-- toggle live from a switch; the analyzer's binding + state are preserved while off -->
+<cam:BarcodeAnalyzer OnDetected="{Binding OnBarcode}"
                      IsEnabled="{Binding IsToggled, Source={x:Reference ScanSwitch}}" />
 ```
 
 ### Controlling the overlay per analyzer
 
 - **`IsEnabled`** (bool, default `true`) — run the analyzer or not (see above).
-- **`ShowBoundingBox`** (bool, default `true`) — set `False` to run an analyzer purely for its event/command and draw nothing. Honored by every built-in analyzer.
+- **`ShowBoundingBox`** (bool, default `true`) — set `False` to run an analyzer purely for its result and draw nothing. Honored by every built-in analyzer.
 - **`OverlayProvider`** (code-level `Func<TArgs, IReadOnlyList<OverlayBox>?>`) — return the exact boxes to draw for a detection, or `null` for none. When unset, the analyzer draws its own default styled box.
 
 ```csharp
@@ -79,32 +96,27 @@ barcode.OverlayProvider = e => e.Value.StartsWith("OK")
 
 `CoordinateTransform` (in `Shiny.Controls.Camera`) maps normalized boxes into view space accounting for aspect-fill crop, rotation and front-camera mirroring — the same helper the overlay uses.
 
-## Capture & stop on detection
+## Capture & stop on detection ("scan then freeze")
 
-A common flow is "scan until you get a result, then freeze the preview and keep the photo." Every analyzer (it's on the `FrameAnalyzer` base) exposes two flags for this — no manual wiring:
-
-- **`CaptureOnDetection`** (bool, default `false`) — capture a full-res still the moment the analyzer **confirms** a detection.
-- **`StopOnDetection`** (bool, default `false`) — stop the capture session on a confirmed detection.
-
-The result is delivered on **`CameraView.DetectionCaptured`** (`DetectionCapturedEventArgs`: the `Analyzer`, the `Detection` payload, and the `Photo`):
+A common flow is "scan until you get a result, then freeze the preview and keep the photo." Do it explicitly inside the analyzer's **`OnDetected`** — arm with `Scan()`, then on the confirmed detection capture and/or stop, and `return false` to disarm:
 
 ```xml
-<cam:CameraView x:Name="Camera" DetectionCaptured="OnDetectionCaptured">
-    <cam:PassportAnalyzer CaptureOnDetection="True" StopOnDetection="True" />
+<cam:CameraView x:Name="Camera">
+    <cam:PassportAnalyzer OnDetected="{Binding OnPassport}" />
 </cam:CameraView>
 ```
 
 ```csharp
-void OnDetectionCaptured(object? sender, DetectionCapturedEventArgs e)
+public Func<DocumentDetectedEventArgs<Passport>, Task<bool>> OnPassport => async e =>
 {
-    var photo = e.Photo;                        // full-res still (null if only StopOnDetection)
-    if (e.Detection is Passport p) { /* use the merged document */ }
-}
+    Passport p = e.Document;                          // the merged document
+    var photo = await Camera.CaptureAndStopAsync();   // full-res still, then stop the session
+    ShowThumbnail(photo);
+    return false;                                     // single-shot: disarm
+};
 ```
 
-"Confirmed" means the same thing the analyzer's typed event uses — for documents it's the **merged** record (after accumulation), for `MotionAnalyzer` it's motion **starting**. The trigger **latches** so a flurry of detections (or several analyzers firing at once) captures once; `StartAsync()` re-arms it. Capture-only (no stop) keeps firing on later detections.
-
-Prefer to drive it yourself? Call **`await Camera.CaptureAndStopAsync()`** from any handler — it grabs the full-res still and stops the session atomically, returning the `CameraPhoto`.
+The detection handed to `OnDetected` is the **confirmed** one — for documents the **merged** record (after accumulation), for `MotionAnalyzer` motion **starting**. **`CaptureAndStopAsync()`** grabs the full-res still and stops the session atomically, returning the `CameraPhoto` (which also raises `MediaCaptured`); use **`CapturePhotoAsync()`** to capture without stopping. To resume after a stop, call `Camera.StartAsync()` then `Camera.Scan()` to re-arm.
 
 ## Analyzer packages
 
@@ -308,6 +320,9 @@ public class GreenScreenAnalyzer : FrameAnalyzer
 
     public event EventHandler<GreenScreenEventArgs>? Detected;
 
+    // expose your own typed continuation so consumers can keep/stop scanning
+    public Func<GreenScreenEventArgs, Task<bool>>? OnDetected { get; set; }
+
     public override ValueTask<IReadOnlyList<OverlayBox>?> AnalyzeAsync(CameraFrame frame, CancellationToken ct)
     {
         var luma = frame.GetLuminance();   // ReadOnlySpan<byte>, Width x Height
@@ -316,7 +331,7 @@ public class GreenScreenAnalyzer : FrameAnalyzer
             return default;                 // null -> clear this analyzer's boxes
 
         var args = new GreenScreenEventArgs(/* ... */);
-        this.Emit(() => this.Detected?.Invoke(this, args), /* command */ null, args);
+        this.Deliver(args, () => this.Detected?.Invoke(this, args), /* command */ null, this.OnDetected);
 
         return new ValueTask<IReadOnlyList<OverlayBox>?>(
             this.ResolveOverlay(args, /* OverlayProvider */ null,
@@ -325,11 +340,11 @@ public class GreenScreenAnalyzer : FrameAnalyzer
 }
 ```
 
-`Emit(raiseEvent, command, args)` raises your event and invokes a bound `Command` (both on the UI thread); `ResolveOverlay(args, provider, defaultBoxes)` honors `ShowBoundingBox` and any `OverlayProvider`. Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once every analyzer finishes.
+`Deliver(args, raiseEvent, command, onDetected)` is gated by arming — it does nothing while disarmed, raises your event + bound `Command` (and awaits `onDetected`) only while armed, consumes the arm so a lingering detection won't re-fire, and re-arms when `onDetected` returns `true`. Boxes via `ResolveOverlay(args, provider, defaultBoxes)` draw every frame regardless (honoring `ShowBoundingBox` / `OverlayProvider`). Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once every analyzer finishes.
 
 ## Writing a custom document analyzer
 
-For an **OCR-backed document** you don't derive from `FrameAnalyzer` directly — derive from **`DocumentAnalyzer<TDocument>`** and supply an **`IDocumentParser<TDocument>`**. The base class does the heavy lifting: it runs the shared OCR recognizer each frame, hands the recognized text to your parser, raises the typed `DocumentDetected` event (and the bound `DocumentDetectedCommand`) on the UI thread, draws the parser's boxes, and honors `IsEnabled` / `ShowBoundingBox` / `OverlayProvider`. You only write **what counts as your document and how to pull its fields out of text**.
+For an **OCR-backed document** you don't derive from `FrameAnalyzer` directly — derive from **`DocumentAnalyzer<TDocument>`** and supply an **`IDocumentParser<TDocument>`**. The base class does the heavy lifting: it runs the shared OCR recognizer each frame, hands the recognized text to your parser, delivers the typed `DocumentDetected` event (the bound `DocumentDetectedCommand`, and `OnDetected`) while armed, draws the parser's boxes, and honors `IsEnabled` / `ShowBoundingBox` / `OverlayProvider`. You only write **what counts as your document and how to pull its fields out of text**.
 
 A parser is the single seam — it turns the OCR'd lines into a typed payload plus the boxes to draw:
 
