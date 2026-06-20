@@ -307,6 +307,12 @@ export default defineConfig({
         { icon: 'youtube', label: 'YouTube', href: 'https://www.youtube.com/@GoneDotnet' },
       ],
       head: [
+        // Default social share image (Open Graph + Twitter). Per-page frontmatter can override.
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png' } },
+        { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
+        { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny.NET — 30+ libraries, 40+ UI controls, built for AI' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png' } },
         // Adding google analytics
         {
           tag: 'script',
