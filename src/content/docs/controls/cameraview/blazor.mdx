@@ -4,7 +4,7 @@ description: Using the Shiny CameraView in Blazor WebAssembly — getUserMedia p
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 
-`Shiny.Blazor.Controls.Camera` brings the CameraView to Blazor WebAssembly using the browser's `getUserMedia` / `MediaRecorder` / `BarcodeDetector` APIs. All frame analysis runs **in JavaScript** — only flat, named DTOs (`CameraBarcode`, `CameraOverlayBox`) cross the interop boundary — so the camera stays fast and trim-safe.
+`Shiny.Blazor.Controls.Camera` brings the CameraView to Blazor WebAssembly using the browser's `getUserMedia` / `MediaRecorder` / `BarcodeDetector` APIs. Frame analysis runs **in JavaScript** — only flat, named DTOs (`CameraBarcode`, `CameraOverlayBox`) cross the interop boundary — so the camera stays fast and trim-safe. You select analysis by assigning an **`Analyzer`** (a `CameraAnalyzer?`); only `BarcodeAnalyzer` has a real in-browser engine (a placeholder `FaceAnalyzer` reports "not supported"). Face/motion/OCR/documents remain MAUI-only.
 
 - <NugetDownloads name="Shiny.Blazor.Controls.Camera" />
 
@@ -27,10 +27,10 @@ dotnet add package Shiny.Blazor.Controls.Camera
 <div style="position:relative;width:100%;max-width:480px;aspect-ratio:3/4;">
     <CameraView @ref="camera"
                 Facing="CameraFacing.Back"
-                EnableBarcode="true"
+                Analyzer="@analyzer"
                 ShowOverlay="true"
                 Filter="filter"
-                BarcodeDetected="OnBarcode"
+                BarcodesDetected="OnBarcodes"
                 OnError="msg => status = msg"
                 Style="width:100%;height:100%;" />
 </div>
@@ -48,6 +48,7 @@ dotnet add package Shiny.Blazor.Controls.Camera
 
 @code {
     CameraView? camera;
+    CameraAnalyzer? analyzer = new BarcodeAnalyzer();   // null = no analysis
     CameraFilter filter = CameraFilter.None;
     bool recording;
     string? status;
@@ -56,13 +57,14 @@ dotnet add package Shiny.Blazor.Controls.Camera
     // call it again in a loop to "keep scanning". Pass a CancellationToken to cancel a pending request.
     async Task Scan()
     {
-        var code = await camera!.RequestBarcodeAsync();
+        var code = await camera!.RequestBarcodeAsync();   // still returns the first CameraBarcode
         status = $"{code.Format}: {code.Value}";       // code.X/Y/W/H are normalized 0..1
     }
 
-    // optional passive observer — only fires while a RequestBarcodeAsync is outstanding (gated, quiet by default)
-    void OnBarcode(CameraBarcode code)
-        => status = $"{code.Format}: {code.Value}";
+    // optional passive observer — fires with EVERY code in the frame, only while a
+    // RequestBarcodeAsync is outstanding (gated, quiet by default)
+    void OnBarcodes(IReadOnlyList<CameraBarcode> codes)
+        => status = $"{codes.Count} code(s): {codes[0].Value}";
 
     async Task Capture()
     {
@@ -84,16 +86,16 @@ dotnet add package Shiny.Blazor.Controls.Camera
 |---|---|---|---|
 | `Facing` | `CameraFacing` | `Back` | `Front` maps to the browser `"user"` facing mode |
 | `CameraId` | `string?` | `null` | Exact device id from `GetAvailableCamerasAsync()`; overrides `Facing` when set |
-| `EnableBarcode` | `bool` | `true` | Run the in-browser barcode detector |
+| `Analyzer` | `CameraAnalyzer?` | `null` | The frame analyzer (assign a `BarcodeAnalyzer`; `null` = no analysis). Base type carries `ScanWindow` (`RectF?`) and `ShowBoundingBox` (bool) |
 | `ShowOverlay` | `bool` | `true` | Draw overlay boxes on the overlay canvas |
 | `AutoStart` | `bool` | `true` | Start the preview on first render |
 | `Filter` | `CameraFilter` | `None` | Live CSS filter on the `<video>` element (also baked into `CapturePhotoAsync` stills) |
 | `CssClass` / `Style` | `string?` | `null` | Host element styling |
-| `BarcodeDetected` | `EventCallback<CameraBarcode>` | — | A barcode was decoded (`Format`, `Value`, normalized box) — **gated**: fires only while a `RequestBarcodeAsync` is outstanding |
+| `BarcodesDetected` | `EventCallback<IReadOnlyList<CameraBarcode>>` | — | Every code decoded in the frame (each `Format`, `Value`, normalized box) — **gated**: fires only while a `RequestBarcodeAsync` is outstanding |
 | `OverlaysChanged` | `EventCallback<IReadOnlyList<OverlayBox>>` | — | Latest styled overlay boxes (presentation only) |
 | `OnError` | `EventCallback<string>` | — | Camera could not start (permission, no device, insecure context) |
 
-Changing `Facing`, `CameraId`, `EnableBarcode`, or `ShowOverlay` while running re-acquires the stream automatically (they're read when the camera starts); `Filter` updates live without a restart.
+Changing `Facing`, `CameraId`, `Analyzer`, or `ShowOverlay` while running re-acquires the stream automatically (they're read when the camera starts); `Filter` updates live without a restart. To change scan options live (e.g. a `ScanWindow` band), assign a **fresh `BarcodeAnalyzer` instance** — the component restarts on the reference change. Setting `BarcodeAnalyzer.ScanWindow` (`RectF?`, normalized `0..1`) restricts scanning to that region and the JS overlay dims outside it + draws a reticle.
 
 ### Methods
 

@@ -9,7 +9,7 @@ import AiSkill from '/src/components/AiSkill.astro';
 
 `Shiny.Maui.Controls.Camera` is a cross-platform `CameraView` for .NET MAUI — live preview with **zoom, torch, lens selection, photo & video capture, and live color filters** — backed by AVFoundation (iOS / Mac Catalyst / macOS AppKit), CameraX (Android) and Media Capture (Windows). A matching `Shiny.Blazor.Controls.Camera` brings the same control to Blazor WebAssembly via `getUserMedia`.
 
-What sets it apart from other camera controls is the **pluggable frame-analysis pipeline**: drop one or more analyzers onto the view and it streams frames to them off the UI thread. Each analyzer draws styled bounding boxes continuously (via the built-in `CameraOverlayView`) but delivers a result only on a **gated "scan trigger"** — arm with `Scan()` / `ScanCommand` and the next confirmed detection fires once (an `OnDetected` handler returning `true` keeps scanning). Analyzers can be **declared right in XAML**. Ships with analyzers for **barcode/QR scanning, face detection, motion detection, OCR**, and **structured documents** — invoices (with order lines), receipts (line items + per-tax breakdown + totals), AAMVA driver's licenses, Canadian-province-aware health cards, credit cards, and passports (MRZ). Each document is a strong record with nullable fields.
+What sets it apart from other camera controls is the **pluggable frame-analysis pipeline**: assign a single analyzer to the view and it streams frames to it off the UI thread. The analyzer draws styled bounding boxes continuously (via the built-in `CameraOverlayView`) but delivers a result only on a **gated "scan trigger"** — arm with `Scan()` / `ScanCommand` and the next confirmed detection fires once (an `OnDetected` handler returning `true` keeps scanning). The analyzer can be **declared right in XAML** (it's the content property of `CameraView`), and an optional **`ScanWindow`** restricts detection to a region and draws an aim reticle. Ships with analyzers for **barcode/QR scanning, face detection, motion detection, OCR**, and **structured documents** — invoices (with order lines), receipts (line items + per-tax breakdown + totals), AAMVA driver's licenses, Canadian-province-aware health cards, credit cards, and passports (MRZ). Each document is a strong record with nullable fields.
 
 - <NugetDownloads name="Shiny.Maui.Controls.Camera" />
 - <NugetDownloads name="Shiny.Blazor.Controls.Camera" />
@@ -25,7 +25,7 @@ What sets it apart from other camera controls is the **pluggable frame-analysis 
 - **Zoom** (clamped to the device's reported range) and **torch / flashlight**.
 - **Photo capture** → JPEG bytes, and **video recording** with optional audio.
 - **Live color filters** — Mono, Noir, Sepia, Invert, Vivid, Cool, Warm, Fade, Chrome, Instant, Tonal (Apple Core Image, Android RenderEffect, Blazor CSS).
-- **Frame-analysis pipeline** — pluggable `IFrameAnalyzer`s with per-analyzer back-pressure (drop-on-busy); boxes draw every frame, results are delivered on a gated scan trigger (`Scan()` / `OnDetected`). See [Frame Analyzers](/controls/cameraview/analyzers/).
+- **Frame-analysis pipeline** — a single pluggable `IFrameAnalyzer` with back-pressure (drop-on-busy); boxes draw every frame, results are delivered on a gated scan trigger (`Scan()` / `OnDetected`), optionally restricted to a `ScanWindow`. See [Frame Analyzers](/controls/cameraview/analyzers/).
 - **Modular analyzer packages** — add only what you need: `.Camera.Barcode`, `.Camera.Face`, `.Camera.Motion`, `.Camera.Ocr`, `.Camera.Documents`.
 
 ## AI Skill
@@ -123,7 +123,7 @@ await this.Camera.StartVideoRecordingAsync(new VideoRecordingOptions { IncludeAu
 var video = await this.Camera.StopVideoRecordingAsync();   // CameraVideo { FilePath, Duration }
 ```
 
-> On **Android**, CameraX allows a limited number of concurrent use-cases, so video recording and the analysis pipeline are mutually exclusive — `StartVideoRecordingAsync` throws a clear error while an **enabled** analyzer is attached. Disable every analyzer (`IsEnabled = false`) or clear `CameraView.Analyzers` to record; the camera rebinds automatically.
+> On **Android**, CameraX allows a limited number of concurrent use-cases, so video recording and the analysis pipeline are mutually exclusive — `StartVideoRecordingAsync` throws a clear error while an **enabled** analyzer is attached. Disable the analyzer (`IsEnabled = false`) or clear it (`CameraView.Analyzer = null`) to record; the camera rebinds automatically.
 >
 > Recorded video is **not** filtered — it records the raw feed even when a `Filter` is set (filters apply to the preview and captured photos only).
 
@@ -163,7 +163,8 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `ScaleMode` | `PreviewScaleMode` | `AspectFill` | How the preview fills the view |
 | `Filter` | `CameraFilter` | `None` | Color filter — applied to the preview and captured photos (not recorded video; no-op on Windows) |
 | `ShowDetectionOverlay` | `bool` | `true` | Whether overlay boxes are surfaced for the overlay |
-| `Analyzers` | `IList<IFrameAnalyzer>` | empty | Frame analyzers (also the XAML content property); add/remove live or toggle one via its `IsEnabled` — see [Frame Analyzers](/controls/cameraview/analyzers/) |
+| `Analyzer` | `IFrameAnalyzer?` | `null` | The single frame analyzer (also the XAML content property); swap live or toggle it via its `IsEnabled`, set `null` for no analysis — see [Frame Analyzers](/controls/cameraview/analyzers/) |
+| `ScanWindow` | `RectF?` (read-only) | `null` | Mirrors the active analyzer's `ScanWindow` (normalized 0..1; `null` = whole frame) |
 | `IsRecording` | `bool` (read-only) | `false` | Whether a recording is in progress |
 | `Overlays` | `IReadOnlyList<OverlayBox>` | empty | Latest aggregated overlay boxes (read-only) |
 
@@ -171,8 +172,8 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 
 | Member | Description |
 |---|---|
-| `Scan()` / `ScanCommand` | Arm every enabled analyzer for one scan (the trigger) |
-| `StopScanning()` | Disarm every analyzer |
+| `Scan()` / `ScanCommand` | Arm the analyzer for one scan (the trigger) |
+| `StopScanning()` | Disarm the analyzer |
 | `RequestPermissionAsync()` | Request camera permission |
 | `StartAsync()` / `StopAsync()` | Start / stop the session |
 | `CapturePhotoAsync()` | Capture a still → `CameraPhoto` |
@@ -182,17 +183,19 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `OverlaysChanged` | Raised with the latest aggregated overlay boxes (presentation only) |
 | `CameraError` | Raised on a camera or pipeline error |
 
-> For **results**, arm with `Scan()` / `ScanCommand`, then handle each analyzer's **`OnDetected`** (`Func<TArgs, Task<bool>>` — `return true` to keep scanning) or its typed event / `Command` (both gated by arming): `BarcodeDetected`, `FacesDetected`, `MotionChanged`, `TextRecognized`, `DocumentDetected`. `OverlaysChanged` is only the styled boxes for drawing (never gated).
+> For **results**, arm with `Scan()` / `ScanCommand`, then handle the analyzer's **`OnDetected`** (`Func<TArgs, Task<bool>>` — `return true` to keep scanning) or its typed event / `Command` (both gated by arming): `BarcodesDetected`, `FacesDetected`, `MotionChanged`, `TextRecognized`, `DocumentDetected`. Detection events that can hold several hits in one frame (barcode, face, motion) deliver an **array**. `OverlaysChanged` is only the styled boxes for drawing (never gated).
 
 ## When to Use What
 
-- **Scan a barcode / QR** → add a `BarcodeAnalyzer` ([Frame Analyzers](/controls/cameraview/analyzers/)).
-- **Detect / box faces** → add a `FaceAnalyzer`.
-- **Trigger on movement** → add a `MotionAnalyzer`.
-- **Read raw text** → add an `OcrAnalyzer` (`TextRecognized`).
-- **Parse an invoice** (header + order lines) → add an `InvoiceAnalyzer`.
-- **Parse a receipt** (line items, per-tax breakdown, subtotal/tip/total) → add a `ReceiptAnalyzer`.
-- **Scan a driver's license / health card** → add a `DriversLicenseAnalyzer` (deterministic AAMVA, incl. Canadian provinces + jurisdiction) or a Canadian-province-aware `HealthCardAnalyzer` from `.Camera.Documents`.
-- **Scan a passport** → add a `PassportAnalyzer` (deterministic MRZ → number, names, nationality, DOB, expiry).
-- **Read a credit card** → add a `CreditCardAnalyzer` (brand + number deterministic; name/expiry best-effort).
-- **Just take a photo or record video** → no analyzers required; use `CapturePhotoAsync` / `StartVideoRecordingAsync`.
+Assign the matching analyzer to `CameraView.Analyzer` (one runs at a time). To offer several detectors, build them up front and swap the chosen one into `Analyzer` (e.g. from a picker) — see [Frame Analyzers](/controls/cameraview/analyzers/).
+
+- **Scan a barcode / QR** → `BarcodeAnalyzer` ([Frame Analyzers](/controls/cameraview/analyzers/)).
+- **Detect / box faces** → `FaceAnalyzer`.
+- **Trigger on movement** → `MotionAnalyzer`.
+- **Read raw text** → `OcrAnalyzer` (`TextRecognized`).
+- **Parse an invoice** (header + order lines) → `InvoiceAnalyzer`.
+- **Parse a receipt** (line items, per-tax breakdown, subtotal/tip/total) → `ReceiptAnalyzer`.
+- **Scan a driver's license / health card** → `DriversLicenseAnalyzer` (deterministic AAMVA, incl. Canadian provinces + jurisdiction) or a Canadian-province-aware `HealthCardAnalyzer` from `.Camera.Documents`.
+- **Scan a passport** → `PassportAnalyzer` (deterministic MRZ → number, names, nationality, DOB, expiry).
+- **Read a credit card** → `CreditCardAnalyzer` (brand + number deterministic; name/expiry best-effort).
+- **Just take a photo or record video** → no analyzer required; use `CapturePhotoAsync` / `StartVideoRecordingAsync`.

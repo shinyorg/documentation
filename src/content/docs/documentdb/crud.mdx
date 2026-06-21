@@ -411,11 +411,67 @@ var liteStore = new LiteDbDocumentStore(new LiteDbDocumentStoreOptions
 await liteStore.Backup("/path/to/backup.db");
 ```
 
-## ClearAllAsync (SQLite only)
+## Clear the entire store (ClearAll)
 
-Deletes all documents across all tables in the SQLite database, including spatial sidecar tables. Only available on `SqliteDocumentStore`.
+`IDocumentMaintenance.ClearAll()` wipes **every** document type in the store — including temporal-history, spatial, and vector sidecars. It's intended for test and dev resets, not production use. Unlike `Clear<T>()` it is neither type- nor tenant-scoped; on a shared-table multi-tenant store it clears all tenants.
+
+It's an optional capability — probe for it with `is IDocumentMaintenance`:
 
 ```csharp
-var sqliteStore = new SqliteDocumentStore("Data Source=mydata.db");
-await sqliteStore.ClearAllAsync();
+if (store is IDocumentMaintenance maintenance)
+    await maintenance.ClearAll();
 ```
+
+Implemented on the relational `DocumentStore` (SQLite, SQL Server, PostgreSQL, MySQL, DuckDB, Oracle), MongoDB, and CosmosDB. Verified against the SQLite suite today; other backends follow the same tier-by-provider rollout as the temporal feature.
+
+:::note[`ClearAllAsync` on SQLite]
+`SqliteDocumentStore.ClearAllAsync()` still exists for back-compat and now simply delegates to `ClearAll()`.
+:::
+
+## Seeding initial data
+
+Register `IDocumentSeeder`s to populate initial data once. The store is schema-free, so seeding is just **idempotent writes** — there is no schema to reconcile, and the same seeder works against every provider.
+
+Run-once is versioned: each seeder records a `DocumentSeedMarker` keyed on its `Name`, and runs only when it has never run or when its `Version` is greater than the recorded one. Bump the version to re-run after changing seed data.
+
+```csharp
+public class CountrySeeder : IDocumentSeeder
+{
+    public string Name => "countries";
+    public int Version => 1;   // bump to re-run after editing the data below
+
+    public async Task SeedAsync(IDocumentStore store, CancellationToken ct)
+    {
+        // Upsert on a known Id keeps it idempotent across re-runs
+        await store.Upsert(new Country { Id = "CA", Name = "Canada" }, cancellationToken: ct);
+        await store.Upsert(new Country { Id = "US", Name = "United States" }, cancellationToken: ct);
+    }
+}
+```
+
+Register it with DI — it runs once at host startup via a hosted service:
+
+```csharp
+builder.Services.AddDocumentStore(o => o.DatabaseProvider = ...);
+builder.Services.AddDocumentSeeder<CountrySeeder>();
+
+// or inline, without a class:
+builder.Services.AddDocumentSeeder("settings", version: 1, async (store, ct) =>
+    await store.Upsert(new AppSettings { Id = "global", Theme = "dark" }, cancellationToken: ct));
+```
+
+To seed a **named (keyed) store** registered with `AddDocumentStore("reporting", ...)`, pass `storeName` — seeders are grouped by target store and run against the right one:
+
+```csharp
+builder.Services.AddDocumentSeeder<CountrySeeder>(storeName: "reporting");
+```
+
+Where there's no generic host (e.g. a MAUI app), run the seeders yourself:
+
+```csharp
+await DocumentSeedRunner.RunAsync(store, new IDocumentSeeder[] { new CountrySeeder() });
+```
+
+:::caution[AOT]
+The internal `DocumentSeedMarker` is read/written through the store like any document. Under Native AOT (no reflection fallback), pass its `JsonTypeInfo` via the `markerTypeInfo` parameter on `DocumentSeedRunner.RunAsync`.
+:::
