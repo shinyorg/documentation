@@ -52,7 +52,7 @@ CameraPhoto photo = await this.Camera.CapturePhotoAsync();
 
 // Video (audio optional). Recorded video records the raw, unfiltered feed.
 await this.Camera.StartVideoRecordingAsync(new VideoRecordingOptions { IncludeAudio = true });
-CameraVideo video = await this.Camera.StopVideoRecordingAsync();
+CameraVideo video = await this.Camera.StopVideoRecordingAsync();   // a file path you can stream
 ```
 
 ## Provider reach
@@ -86,43 +86,51 @@ Eleven filters ship — `Mono`, `Noir`, `Sepia`, `Invert`, `Vivid`, `Cool`, `War
 
 ## Frame analysis — the differentiator
 
-This is where `CameraView` stops being "a camera" and becomes a platform. Add `IFrameAnalyzer`s to `Camera.Analyzers` and the pipeline streams frames **off the UI thread** with per-analyzer **drop-on-busy back-pressure** (only one frame in flight per analyzer — it never backs up).
+This is where `CameraView` stops being "a camera" and becomes a platform. Assign an `IFrameAnalyzer` to `Camera.Analyzer` and the pipeline streams frames **off the UI thread** with **drop-on-busy back-pressure** (only one frame in flight — it never backs up). It's *one* analyzer at a time, and you **set or swap it freely while the camera is running**.
 
 Every analyzer has **two channels**:
 
-1. A **strongly-typed event** carrying the semantic result (the barcode value, the faces, the recognized text, the structured document).
+1. A **strongly-typed event** carrying the semantic result (the barcodes, the faces, the recognized text, the structured document).
 2. The **return value** of its analysis: styled `OverlayBox`es to draw. A returned set persists until the analyzer returns a different set (replace) or `null` (clear).
 
+The boxes draw live the whole time the analyzer runs; the typed event is **gated on a scan**. The analyzer stays quiet until you *arm* it — `Camera.Scan()`, or bind a shutter button / Fab to `Camera.ScanCommand` — and then it delivers its **next** confirmed detection exactly once. Single-shot is the default, which is usually what you want ("point, tap, get the code"). To keep scanning, give the analyzer an `OnDetected` handler that returns `true`:
+
 ```csharp
-var barcode = new BarcodeAnalyzer();                 // ZXing.Net over luminance — all platforms
-barcode.BarcodeDetected += (_, e) => status = $"{e.Format}: {e.Value}";
+var barcode = new BarcodeAnalyzer();                 // native — Apple Vision (iOS/macOS) / Android MLKit
+barcode.BarcodesDetected += (_, e) =>
+    status = $"{e.First.Format}: {e.First.Value}";    // e.Barcodes holds every code in the frame
+Camera.Analyzer = barcode;
 
-var faces = new FaceAnalyzer();                       // Apple Vision / Android MLKit / Windows.FaceAnalysis
-faces.FacesDetected += (_, e) => status = $"{e.Faces.Count} face(s)";
+Camera.Scan();                                        // arm — deliver the next decode, once
 
-var motion = new MotionAnalyzer();                    // pure-managed frame differencing
-motion.MotionChanged += (_, e) =>
-    status = e.InMotion ? $"Motion in {e.Regions.Count} area(s)" : "Still";
+// continuous: stay armed as long as the handler returns true
+barcode.OnDetected = async e => { await Save(e.First.Value); return true; };
+```
 
-Camera.Analyzers.Add(barcode);
-Camera.Analyzers.Add(faces);
-Camera.Analyzers.Add(motion);
+Swapping the analyzer is just an assignment — the running session picks it up:
+
+```csharp
+Camera.Analyzer = new FaceAnalyzer();                 // Apple Vision / Android MLKit / Windows.FaceAnalysis
+Camera.Analyzer = new MotionAnalyzer();               // pure-managed frame differencing — every platform
 ```
 
 Events are marshalled to the UI thread for you, so handlers can touch UI directly.
 
-`Analyzers` is observable — **add or remove analyzers at runtime and the live pipeline picks it up**. To switch one off *without* losing its bindings and state, set `FrameAnalyzer.IsEnabled = false` (it resumes instantly when re-enabled). That's distinct from `ShowBoundingBox` (run the analyzer, just draw nothing).
+To switch the analyzer off *without* dropping it (keeping its bindings and internal state), set `FrameAnalyzer.IsEnabled = false` — it resumes instantly when re-enabled, and while disabled the camera behaves as if it had no analyzer (so on Android you can record video). That's distinct from `ShowBoundingBox = false` (run and deliver, just draw nothing).
 
-### MVVM: declare analyzers in XAML, bind commands
+### MVVM: declare the analyzer in XAML, bind commands
 
-Analyzers are `BindableObject`s, and `CameraView`'s content property is `Analyzers`, so you can declare them inline under the one `cam:` prefix and bind each analyzer's `…Command` to your ViewModel — fired on the UI thread with the same args as the event:
+Analyzers are `BindableObject`s, and `CameraView`'s content property is `Analyzer`, so you can declare it inline under the one `cam:` prefix and bind its `…Command` to your ViewModel — fired on the UI thread with the same args as the event. Bind a shutter button to the camera's `ScanCommand` to arm it:
 
 ```xml
-<cam:CameraView Facing="Back" Filter="Chrome">
-    <cam:BarcodeAnalyzer BarcodeDetectedCommand="{Binding ScanCommand}" />
-    <cam:InvoiceAnalyzer DocumentDetectedCommand="{Binding InvoiceCommand}" />
-    <cam:MotionAnalyzer MotionChangedCommand="{Binding MotionCommand}" ShowBoundingBox="False" />
-</cam:CameraView>
+<Grid>
+    <cam:CameraView x:Name="Camera" Facing="Back" Filter="Chrome">
+        <cam:BarcodeAnalyzer BarcodesDetectedCommand="{Binding ScanResultCommand}" />
+    </cam:CameraView>
+    <Button Text="Scan"
+            Command="{Binding Source={x:Reference Camera}, Path=ScanCommand}"
+            VerticalOptions="End" />
+</Grid>
 ```
 
 ### Bounding boxes for free
@@ -136,11 +144,11 @@ Drop a `CameraOverlayView` over the `CameraView` in the same `Grid` cell — it 
 </Grid>
 ```
 
-`OverlayBox.Rect` is normalized (0..1), upright, and mirror-corrected — the overlay maps it into view space via `CoordinateTransform`, so you never deal in raw pixels. Want custom styling? Each analyzer exposes an `OverlayProvider` to return exactly the boxes you want (or `null` for none):
+`OverlayBox.Rect` is normalized (0..1), upright, and mirror-corrected — the overlay maps it into view space, so you never deal in raw pixels. Set the analyzer's `ScanWindow` to a normalized rectangle to restrict detection to a band: only detections centered inside it are reported and drawn, and the overlay dims everything outside it and frames a viewfinder reticle. Want custom styling? Each analyzer exposes an `OverlayProvider` to return exactly the boxes you want (or `null` for none):
 
 ```csharp
-barcode.OverlayProvider = e => e.Value.StartsWith("OK")
-    ? [ new OverlayBox(e.BoundingBox, Colors.Lime, e.Value) ]
+barcode.OverlayProvider = e => e.First.Value.StartsWith("OK")
+    ? [ new OverlayBox(e.First.BoundingBox, Colors.Lime, e.First.Value) ]
     : null;
 ```
 
@@ -148,7 +156,7 @@ barcode.OverlayProvider = e => e.Value.StartsWith("OK")
 
 ## Document analyzers — structured data, not just text
 
-The `Shiny.Maui.Controls.Camera.Documents` package turns the camera into a scanner that hands you **strongly-typed records**, not raw strings. Every document type is its own analyzer with its own typed `DocumentDetected` event, and every payload is a record with **nullable fields** — only what was actually found is set.
+The `Shiny.Maui.Controls.Camera.Documents` package turns the camera into a scanner that hands you **strongly-typed records**, not raw strings. Every document type is its own analyzer with its own typed `DocumentDetected` event, and every payload is a record with **nullable fields** — only what was actually found is set. Like every analyzer, delivery is arm-gated, so call `Camera.Scan()` (or bind `ScanCommand`) to capture the next read.
 
 ```bash
 dotnet add package Shiny.Maui.Controls.Camera.Documents
@@ -161,6 +169,8 @@ invoice.DocumentDetected += (_, e) =>
     Invoice doc = e.Document;
     status = $"Invoice {doc.Number} — total {doc.Total}, {doc.Lines.Count} line(s)";
 };
+Camera.Analyzer = invoice;
+Camera.Scan();                                        // arm — delivers the next parsed invoice
 
 var license = new DriversLicenseAnalyzer();           // PDF417 + AAMVA — deterministic, no ML
 license.DocumentDetected += (_, e) =>
@@ -172,7 +182,7 @@ What ships:
 - **`InvoiceAnalyzer`** → `Invoice` with order lines in `.Lines`.
 - **`ReceiptAnalyzer`** → `Receipt` with purchased line items (`.Lines`), a **per-tax breakdown** (`.Taxes`), and subtotal / tip / discount / total, plus best-effort payment method, last-4, currency, date/time.
 - **`DriversLicenseAnalyzer`** → `DriversLicense`, decoded from the **PDF417 barcode** on the back and parsed against the **AAMVA** standard — fully deterministic. Works for US states and the Canadian provinces that emit an AAMVA PDF417 (BC, AB, SK, MB, NS, NB, PEI, NL); dates auto-switch to Canadian `CCYYMMDD` order and the province surfaces as `Jurisdiction`. (Ontario and Quebec licences carry no PDF417, so they don't scan — use a custom OCR parser for those.)
-- **`HealthCardAnalyzer`** → `HealthCard`, OCR tuned for **Canadian** cards: it detects the issuing province from on-card keywords and applies that province's number format — Quebec/RAMQ, Ontario/OHIP, BC PHN, Alberta/AHCIP, etc. — surfacing `Province` and `Plan`.
+- **`HealthCardAnalyzer`** → `HealthCard`, OCR tuned for **Canadian** cards: it detects the issuing province from on-card keywords and applies that province's number format — Quebec/RAMQ, Ontario/OHIP, BC PHN, Alberta/AHCIP, etc. — surfacing `Province` and `Issuer`.
 - **`CreditCardAnalyzer`** → `CreditCard`: brand (`Visa`/`Mastercard`/`Amex`/…) and number validity from the IIN prefix + Luhn are deterministic; name/expiry are best-effort OCR. The CVV lives on the back, so a front scan almost always leaves it `null`.
 - **`PassportAnalyzer`** → `Passport`, parsed from the **MRZ** (the two `<<<` lines, ICAO TD3) — deterministic.
 
@@ -182,9 +192,11 @@ The deterministic ones (driver's license PDF417/AAMVA, passport MRZ, credit-card
 new InvoiceAnalyzer(new MyInvoiceParser());   // MyInvoiceParser : IDocumentParser<Invoice>
 ```
 
+A document analyzer accumulates reads across a few frames before it commits (`AccumulationFrames`, default 5) — handy when one frame catches half the card and the next catches the rest — and resets after a run of empty frames (`ResetAfterEmptyFrames`).
+
 ### Roll your own document type
 
-Need to scan something we don't ship — a business card, a shipping label, a lab form? Derive from `DocumentAnalyzer<TDocument>` and supply an `IDocumentParser<TDocument>`. The base class runs the shared OCR recognizer, calls your parser, raises the typed event (and command) on the UI thread, draws the boxes, and honours `IsEnabled` / `ShowBoundingBox` / `OverlayProvider`. You write the payload and the parse rules — nothing else:
+Need to scan something we don't ship — a business card, a shipping label, a lab form? Derive from `DocumentAnalyzer<TDocument>` and supply an `IDocumentParser<TDocument>`. The base class runs the shared OCR recognizer, calls your parser, raises the typed event (and command) on the UI thread, draws the boxes, and honours arming / `IsEnabled` / `ShowBoundingBox` / `OverlayProvider`. You write the payload and the parse rules — nothing else:
 
 ```csharp
 public record BusinessCard(string? Name, string? Company, string? Email, string? Phone, IReadOnlyList<DocumentField> Fields);
@@ -221,32 +233,36 @@ Because the parser is just an interface, an LLM- or service-backed parser is per
 
 | Analyzer | Package | Engine | Platforms |
 |---|---|---|---|
-| `BarcodeAnalyzer` | `.Camera.Barcode` | ZXing.Net (managed) | all (incl. Blazor) |
+| `BarcodeAnalyzer` | `.Camera.Barcode` | Apple Vision / Android MLKit (native) | iOS, Android, macOS |
 | `FaceAnalyzer` | `.Camera.Face` | Vision / MLKit / Windows.FaceAnalysis | iOS, Android, Windows, macOS |
 | `MotionAnalyzer` | `.Camera.Motion` | managed frame differencing | all |
-| `OcrAnalyzer` | `.Camera.Ocr` | native OCR | iOS, Android, Windows, macOS |
-| Document analyzers | `.Camera.Documents` | OCR + rules / PDF417 / MRZ | iOS, Android, Windows, macOS |
+| `OcrAnalyzer` | `.Camera.Ocr` | native OCR (Vision / MLKit / Windows.Media.Ocr) | iOS, Android, Windows, macOS |
+| Document analyzers | `.Camera.Documents` | OCR + rules / native PDF417 / MRZ | iOS, Android, Windows, macOS |
 
-Add only the packages you need. `BarcodeAnalyzer` and `DriversLicenseAnalyzer` are pure-managed; the face/OCR/document analyzers ride native ML so they produce results on the device platforms (not bare `net10.0`).
+Add only the packages you need. `MotionAnalyzer` is pure-managed and runs everywhere; the barcode / face / OCR / document analyzers ride native ML/vision, so they produce results on the device platforms (not bare `net10.0`) — barcode and the PDF417-based driver's license are iOS / macOS / Android.
 
 ## Blazor
 
-The Blazor component mirrors the MAUI control with the same concepts in component clothing:
+The Blazor component mirrors the MAUI control with the same concepts in component clothing — including the single `Analyzer` and the arm-to-scan model:
 
 ```razor
 <CameraView @ref="camera"
             Facing="CameraFacing.Back"
-            EnableBarcode="true"
+            Analyzer="barcode"
             ShowOverlay="true"
             Filter="filter"
-            BarcodeDetected="OnBarcode"
+            BarcodesDetected="OnBarcodes"
             OnError="m => status = m"
             Style="width:100%;height:100%;" />
 
 @code {
     CameraView? camera;
+    readonly BarcodeAnalyzer barcode = new();
     CameraFilter filter = CameraFilter.None;
-    void OnBarcode(CameraBarcode b) => status = $"{b.Format}: {b.Value}";
+
+    // await the next code (the gated equivalent of MAUI's Scan)
+    async Task Scan()  { var b = await camera!.RequestBarcodeAsync(); status = $"{b.Format}: {b.Value}"; }
+    void OnBarcodes(IReadOnlyList<CameraBarcode> codes) => status = $"{codes[0].Format}: {codes[0].Value}";
 
     async Task Photo() { var jpeg = await camera!.CapturePhotoAsync(); }          // byte[], filtered to match preview
     async Task Rec()   { await camera!.StartRecordingAsync(includeAudio: true); }
@@ -254,12 +270,12 @@ The Blazor component mirrors the MAUI control with the same concepts in componen
 }
 ```
 
-Preview, zoom, filters (CSS), photo, and video capture work in every browser. Barcode scanning uses the browser's native `BarcodeDetector` (Chromium today); on Firefox/Safari `OnError` fires once and preview continues, so feature-detect if you need universal coverage. Face/motion/OCR/document analyzers are MAUI-native.
+Preview, zoom, filters (CSS), photo, and video capture work in every browser. Barcode scanning uses the browser's native `BarcodeDetector` (Chromium today): assign a `BarcodeAnalyzer` and `await RequestBarcodeAsync()` for the next code, or handle `BarcodesDetected` for every code in a frame while a request is outstanding. On Firefox/Safari `OnError` fires once and preview continues, so feature-detect if you need universal coverage. Face/motion/OCR/document analyzers are MAUI-native.
 
 ## A few things to know
 
 - **Permissions are yours to declare** — `NSCameraUsageDescription` on Apple (omitting it crashes iOS instantly), the `CAMERA` permission on Android, the `webcam` capability on Windows. `getUserMedia` needs a secure context (HTTPS or `localhost`).
-- **Android: video vs. analyzers** — CameraX caps concurrent use-cases, so the camera binds *either* image analysis (while any analyzer is enabled) *or* video capture. Disable your analyzers (`IsEnabled = false`) to record; `StartVideoRecordingAsync` throws a clear error otherwise.
+- **Android: video vs. analyzers** — CameraX caps concurrent use-cases, so the camera binds *either* image analysis (while an analyzer is enabled) *or* video capture. Clear `Analyzer` or set `IsEnabled = false` to record; `StartVideoRecordingAsync` throws a clear error otherwise.
 - **Don't gate startup on `RequestPermissionAsync()`** — it routes through the handler and returns `false` before the view is connected (e.g. in `OnAppearing` on first show), which looks like a denial. Rely on auto-start + `CameraError`.
 
 Grab the packages, call `.UseShinyCamera()`, and you've got a real camera — preview to structured documents — on every platform you ship to. Full docs are in the [CameraView guide](https://shinylib.net/controls/cameraview/).

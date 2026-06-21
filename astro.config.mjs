@@ -345,8 +345,15 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'docdb-v80',
-              content: 'Document DB v8.0 Interceptors, Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
+              id: 'mobilev5-1',
+              content: 'Client v5: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
+              variant: 'tip',
+              link: { text: 'Check It Out', href: '/ble' },
+              dismissable: false
+            },
+            {
+              id: 'docdb-v81',
+              content: 'Document DB v8.1 Interceptors, Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
               variant: 'tip',
               link: { text: 'Feed The Machine Here', href: '/documentdb/' },
               dismissable: false
@@ -365,13 +372,6 @@ export default defineConfig({
               link: { text: 'Check It Out', href: '/health' },
               dismissable: false
             },                        
-            {
-              id: 'mobilev5-1',
-              content: 'Client v5 BETA: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
-              variant: 'tip',
-              link: { text: 'Check It Out', href: '/ble' },
-              dismissable: false
-            },          
             {
               id: 'aiconversations-1',
               content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',

@@ -36,6 +36,7 @@ The fluent query builder is the primary way to query documents. Start with `stor
 | `.Sum(selector)` | `Task<TValue>` | Sum of a property. |
 | `.Average(selector)` | `Task<double>` | Average of a property. |
 | `.PageResult(page, pageSize, zeroBased?)` | `Task<PagedResults<T>>` | Run the query and return records + total count in one call. 1-based by default. |
+| `.ToQueryString()` | `DocumentQueryString` | Build the SQL (or MongoDB BSON) the query would run **without executing it** — see [Inspecting the generated query](#inspecting-the-generated-query--toquerystring). |
 
 ## Expression-based queries
 
@@ -497,6 +498,41 @@ await foreach (var user in store.QueryStream<User>(
     Console.WriteLine(user.Name);
 }
 ```
+
+## Inspecting the generated query — `ToQueryString()`
+
+Call `.ToQueryString()` on any query to see the provider query it **would** run, without executing it — handy for debugging, logging, and learning how an expression translates. It works for both the LINQ and [string-based `Where`](#string-based-where-dynamic-filter) forms (they share the same pipeline).
+
+```csharp
+var qs = store.Query<User>()
+    .Where(u => u.Age > 28)
+    .OrderByDescending(u => u.Age)
+    .Paginate(0, 10)
+    .ToQueryString();
+
+qs.Sql;        // "SELECT Data FROM "documents" WHERE TypeName = @typeName AND
+               //  (json_extract(Data, '$.age') > @p0) ORDER BY json_extract(Data, '$.age') DESC LIMIT 10 OFFSET 0;"
+qs.Parameters; // { ["@typeName"] = "User", ["@p0"] = 28 }
+
+// ToString() renders the values as a comment header above the SQL — copy/paste ready:
+Console.WriteLine(qs);
+// -- @typeName='User'
+// -- @p0=28
+// SELECT Data FROM "documents" WHERE TypeName = @typeName AND (json_extract(Data, '$.age') > @p0) ...
+```
+
+`ToQueryString()` reflects the `.ToList()` form of the query — `.Where`, `.OrderBy`, `.Paginate`, `.Select(...)`, and `.Project("...")` are all included.
+
+**Provider support** (`DocumentQueryString`):
+
+| Provider | `Sql` contains | `Parameters` |
+|---|---|---|
+| SQLite, SQL Server, PostgreSQL, MySQL, Oracle, DuckDB | Parameterized SQL (provider JSON dialect) | name → value map |
+| Cosmos | Cosmos SQL | name → value map |
+| MongoDB | The rendered BSON filter as JSON (or the full find command when ordering/pagination is set) | empty (values are inlined in the BSON) |
+| LiteDB, IndexedDB | — | throws `NotSupportedException` (queries are evaluated in-memory, no query language) |
+
+The same `NotSupportedException` applies to client-side projections — after `.Select(...)`/`.Project("...")` on the document providers (MongoDB/Cosmos/LiteDB/IndexedDB), where the projection runs in C# rather than in the query.
 
 ## Supported Expression Reference
 
