@@ -8,25 +8,25 @@ import type { TemplateKind } from './templateFiles';
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.6.2',
-    shinyShell: '6.2.0',
-    shinyControls: '1.0.1-beta-0123',
+    shinyShell: '6.3.0',
+    shinyControls: '1.0.1-beta-0127',
     // Shiny — client packages that share the core release train
-    shinyClient: '5.0.0-beta-0140',
-    shinyConfiguration: '5.0.0-beta-0140',
+    shinyClient: '5.0.0',
+    shinyConfiguration: '5.0.0',
     shinyLocalization: '2.0.1',
-    shinyStores: '5.1.0',
-    shinyReflector: '5.1.0',
-    shinyDI: '5.1.0',
+    shinyStores: '5.1.1',
+    shinyReflector: '5.1.1',
+    shinyDI: '5.1.1',
     shinySpatial: '1.1.0',
     shinyContactStore: '1.0.1',
     shinySpeech: '2.1.0',
     shinyAiConversation: '1.0.0-beta-0050',
     shinyMusic: '3.0.1',
     shinyHealth: '2.0.0-beta-0004',
-    shinyDocumentDb: '8.0.0',
-    shinyMauiHosting: '5.1.0',
-    shinyWebHosting: '5.1.0',
-    shinyBlazorHosting: '5.1.0-beta-0052',
+    shinyDocumentDb: '8.2.0',
+    shinyMauiHosting: '5.1.1',
+    shinyWebHosting: '5.1.1',
+    shinyBlazorHosting: '5.1.1',
 
     // MAUI tooling
     devflow: '0.1.0-preview.10.26274.3',
@@ -64,7 +64,7 @@ export const VERSIONS = {
     sysLinqAsync: '7.0.1',
     refit: '11.2.0',
     orleans: '10.2.0',
-    scalar: '2.16.4',
+    scalar: '2.16.5',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';
