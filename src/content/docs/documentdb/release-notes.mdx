@@ -5,6 +5,36 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 8.2 - June 22, 2026
+
+<RN type="feature">
+**Batch upsert, update & remove** — `BatchUpsert<T>`, `BatchUpdate<T>` and `BatchRemove<T>` join `BatchInsert<T>` on `IDocumentStore`, collapsing many single-document round-trips into one set operation. They are **all-or-nothing**: on a versioned type the first version conflict throws `ConcurrencyException` and the whole batch rolls back. The win varies by backend (provider tier):
+
+- **SQLite & DuckDB** — `BatchUpsert` emits a single multi-row `INSERT … ON CONFLICT … DO UPDATE` that deep-merges (RFC 7396) every row in one statement.
+- **MongoDB** — `BatchUpsert`/`BatchUpdate` use one `BulkWrite`; `BatchRemove` uses one `DeleteMany`.
+- **Cosmos** — upsert/update/remove run as bounded-concurrency waves (parallel requests parallelize RU spend); same-type batches share one partition key.
+- **All relational** — `BatchRemove` issues a single `DELETE … WHERE Id IN (…)`; `BatchUpdate` loops per-row inside one transaction (heterogeneous-value updates have no clean multi-row form).
+- **Versioned, temporal, spatial, vector, multi-tenant, filtered, or interceptor-bound types** take a per-document loop inside one transaction — correct and atomic, just not the multi-row/bulk fast path.
+
+`UnitOfWork` now coalesces **contiguous same-type runs of upserts, updates, and removes** (not just inserts) into the matching batch method, so grouping like operations in a unit costs nothing versus calling the batch methods directly.
+
+```csharp
+await store.BatchUpsert(users);                          // one multi-row statement on SQLite/DuckDB
+await store.BatchRemove<User>(new object[] { 1, 2, 3 }); // one DELETE … IN (…)
+
+await store.CreateUnitOfWork()
+    .Upsert(a).Upsert(b).Upsert(c)   // → one BatchUpsert
+    .Remove<User>(staleId)           // → one BatchRemove
+    .SaveChanges();
+```
+</RN>
+<RN type="enhancement">
+**Cosmos bulk deletes** — `Clear<T>()` and `Query<T>().ExecuteDelete()` on the Cosmos provider previously deleted matched rows one HTTP request at a time. They now issue the deletes in bounded-concurrency waves, cutting wall-clock on large clears dramatically.
+</RN>
+<RN type="fix">
+**`ClearAll()` deleted system-catalog tables on PostgreSQL and MySQL** — `IDocumentMaintenance.ClearAll()` lists tables via `information_schema.tables`, which surfaces system tables too. On **PostgreSQL** those system catalogs are reported as `BASE TABLE`, so `ClearAll` issued `DELETE` against `pg_catalog`/`information_schema` — corrupting the connection's catalog cache (`cache lookup failed for type …`) and, with pooled connections, poisoning later operations on the reused connection (`type "text" does not exist`). On **MySQL**, whose `information_schema` is server-wide, it listed every schema's tables (`Table 'processlist' doesn't exist`). The default table listing now excludes the `pg_catalog`/`information_schema` system schemas, and the MySQL provider additionally scopes to the current database (`TABLE_SCHEMA = DATABASE()`). SQLite, Oracle, SQL Server, and DuckDB were unaffected.
+</RN>
+
 ## 8.1.1 - June 21, 2026
 <RN type="feature">
 **Inspect the generated query with `IDocumentQuery<T>.ToQueryString()`** — see the SQL (or MongoDB BSON) a query *would* run, without executing it — for debugging, logging, and learning how an expression translates. Works for both the LINQ and string-expression `Where` forms (they share one pipeline). Returns a `DocumentQueryString` exposing `Sql` and a `Parameters` name→value map; its `ToString()` renders the values as a comment header above the query for copy/paste. Reflects the `ToList()` form including `Where`/`OrderBy`/`Paginate`/`Select`/`Project`. Relational providers (SQLite, SQL Server, PostgreSQL, MySQL, Oracle, DuckDB) and Cosmos return their query text + parameters; MongoDB returns its rendered BSON filter (or full find command). The in-memory providers (LiteDB, IndexedDB) — and client-side projections after `Select`/`Project` on the document providers — throw `NotSupportedException`.

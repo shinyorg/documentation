@@ -119,11 +119,39 @@ var users = Enumerable.Range(1, 1000).Select(i => new User
 var count = await store.BatchInsert(users); // single transaction, prepared command reused
 ```
 
+## Batch upsert, update & remove
+
+`BatchUpsert`, `BatchUpdate`, and `BatchRemove` apply many writes as one set operation instead of one
+round-trip per document, and they are **all-or-nothing**: on a [versioned](#optimistic-concurrency-row-versioning)
+type the first version conflict throws `ConcurrencyException` and the whole batch rolls back.
+
+```csharp
+await store.BatchUpsert(users);                          // RFC 7396 merge-or-insert, many at once
+await store.BatchUpdate(users);                          // full replace, every doc must exist
+int removed = await store.BatchRemove<User>(new object[] { "u1", "u2", "u3" }); // ids that don't exist are ignored
+```
+
+How much you save depends on the backend (the **provider tier**):
+
+| Backend | `BatchUpsert` | `BatchUpdate` | `BatchRemove` |
+| --- | --- | --- | --- |
+| SQLite, DuckDB | single multi-row `INSERT … ON CONFLICT` (deep merge) | per-row in one transaction | single `DELETE … IN (…)` |
+| SQL Server, PostgreSQL, MySQL, Oracle | per-doc loop in one transaction¹ | per-row in one transaction | single `DELETE … IN (…)` |
+| MongoDB | one `BulkWrite` | one `BulkWrite` | one `DeleteMany` |
+| Cosmos | bounded-concurrency waves² | bounded-concurrency waves² | bounded-concurrency waves² |
+
+¹ These providers lack a native deep-merge function, so `BatchUpsert` reuses the per-document read-merge-write inside one transaction. ² Cosmos has no cross-document transaction; batches run as parallel request waves (best-effort, matching the provider's unit-of-work behaviour).
+
+A type that has a version mapping, temporal history, a spatial/vector sidecar, multi-tenancy, a query
+filter, or a per-document interceptor always takes the per-document loop inside one transaction —
+correct and atomic, just not the multi-row/bulk fast path.
+
 ## Unit of work (grouping writes atomically)
 
 To apply several writes in a single transaction, create a `UnitOfWork`, queue operations, then call
-`SaveChanges`. Everything commits together or rolls back together. Contiguous same-type inserts are
-coalesced into the fast batch-insert path, so grouping inserts costs nothing versus `BatchInsert`.
+`SaveChanges`. Everything commits together or rolls back together. Contiguous same-type runs of inserts,
+upserts, updates, and removes are each coalesced into the matching batch method, so grouping like
+operations in a unit costs nothing versus calling those methods directly.
 
 ```csharp
 var uow = store.CreateUnitOfWork();
@@ -224,6 +252,7 @@ Unlike `SetProperty`, `RemoveProperty` works on any property type — scalar, ne
 | `Update` | Replacing the entire document | Full replacement | Full control |
 | `Insert` | Inserting a new document | Strict insert, throws on duplicate | Throws for string default Ids |
 | `BatchInsert` | Inserting many documents efficiently | Single transaction, prepared command | Auto-generates IDs; atomic rollback |
+| `BatchUpsert` / `BatchUpdate` / `BatchRemove` | Applying many upserts / updates / removes at once | One set operation (multi-row or bulk where supported); all-or-nothing | Per-provider tier; ids missing on remove are ignored |
 | `GetDiff` | Diffing local changes vs stored state | Read-only; returns RFC 6902 patch | Deep nested diff; arrays replaced as whole |
 
 ## Optimistic Concurrency (Row Versioning)
@@ -256,6 +285,7 @@ All provider options classes support `MapVersionProperty`: `DocumentStoreOptions
 | `Update` | Reads the expected version from the object, checks it against the stored version, then increments. Throws `ConcurrencyException` on mismatch |
 | `Upsert` | Insert path sets version to 1. Update path checks and increments (only when the existing version > 0) |
 | `BatchInsert` | Version is set to 1 for each document |
+| `BatchUpsert` / `BatchUpdate` / `BatchRemove` | Same per-document version rules as `Upsert`/`Update`; the batch is all-or-nothing — the first conflict throws `ConcurrencyException` and rolls the whole batch back |
 
 ### Example
 
@@ -413,7 +443,7 @@ await liteStore.Backup("/path/to/backup.db");
 
 ## Clear the entire store (ClearAll)
 
-`IDocumentMaintenance.ClearAll()` wipes **every** document type in the store — including temporal-history, spatial, and vector sidecars. It's intended for test and dev resets, not production use. Unlike `Clear<T>()` it is neither type- nor tenant-scoped; on a shared-table multi-tenant store it clears all tenants.
+`IDocumentMaintenance.ClearAll()` wipes **every** document type in the store — including temporal-history, spatial, and vector sidecars. It's intended for test and dev resets, not production use. Unlike `Clear<T>()` it is neither type- nor tenant-scoped; on a shared-table multi-tenant store it clears all tenants. It targets only your own (user) tables in the current database — system catalog schemas are never touched.
 
 It's an optional capability — probe for it with `is IDocumentMaintenance`:
 
@@ -422,7 +452,7 @@ if (store is IDocumentMaintenance maintenance)
     await maintenance.ClearAll();
 ```
 
-Implemented on the relational `DocumentStore` (SQLite, SQL Server, PostgreSQL, MySQL, DuckDB, Oracle), MongoDB, and CosmosDB. Verified against the SQLite suite today; other backends follow the same tier-by-provider rollout as the temporal feature.
+Implemented on the relational `DocumentStore` (SQLite, SQL Server, PostgreSQL, MySQL, DuckDB, Oracle), MongoDB, and CosmosDB; verified across every provider suite.
 
 :::note[`ClearAllAsync` on SQLite]
 `SqliteDocumentStore.ClearAllAsync()` still exists for back-compat and now simply delegates to `ClearAll()`.
