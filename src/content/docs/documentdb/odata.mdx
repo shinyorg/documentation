@@ -1,0 +1,79 @@
+---
+title: OData Endpoints
+---
+
+Expose an `IDocumentStore` document type as an **OData v4 entity set** over HTTP. A client issues
+`GET /odata/customers?$filter=Country eq 'CA'&$orderby=Created desc&$top=20&$skip=40&$count=true&$select=Name,Country`
+and the library translates those system query options onto the fluent `IDocumentQuery<T>`, runs them
+against whatever provider is configured, and returns an OData-shaped JSON payload.
+
+This is a **read/query** integration. Two packages:
+
+```bash
+dotnet add package Shiny.DocumentDb.OData            # translator engine (dependency-free, AOT-clean)
+dotnet add package Shiny.DocumentDb.AspNetCore.OData # ASP.NET Core host (EDM + endpoints)
+```
+
+## Supported query options
+
+| Option | Maps to | Notes |
+|---|---|---|
+| `$filter` | `.Where(...)` | `eq ne gt ge lt le`, `and or not`, `contains`/`startswith`/`endswith`, null checks, nested paths |
+| `$orderby` | `OrderBy` / `OrderByDescending` (string) | `asc`/`desc`, dotted paths |
+| `$top` | `.Paginate(skip, top)` → take | |
+| `$skip` | `.Paginate(skip, top)` → offset | combined into one call |
+| `$count=true` | `.Count()` | returned as `@odata.count`, computed pre-paging |
+| `$select` | `.Project(fields)` | server-side sparse fieldsets |
+
+`$expand` returns `501 Not Implemented` — documents are self-contained JSON with no relationships, so
+there is no analog.
+
+## Hosting
+
+```csharp
+builder.Services
+    .AddDocumentStore(...)
+    .AddDocumentODataEndpoints(edm =>
+    {
+        edm.EntitySet<Customer>("customers");
+        edm.EntitySet<Order>("orders");
+    });
+
+app.MapDocumentODataEntitySet<Customer>("odata/customers");
+// GET odata/customers?$filter=Country eq 'CA'&$orderby=Created desc&$top=20&$count=true
+```
+
+The endpoint pulls the parsed query options from the request, converts them into the engine's
+provider-neutral `ODataQueryModel`, executes against the store, and serializes the OData envelope
+(`@odata.context`, `@odata.count`, `value`). The EDM key defaults to `Id`; for a custom key pass
+`keyProperty` — `edm.EntitySet<Customer>("customers", keyProperty: "CustomerId")` — so `@odata.id` links
+are correct.
+
+:::caution[Use one serializer]
+Inserts and OData reads must use the same serializer. In AOT / source-gen setups, set the store's
+`JsonSerializerOptions` to your `JsonSerializerContext.Default.Options` so the keys written on insert
+match the `JsonTypeInfo<T>` the query resolves members through.
+:::
+
+:::tip[Global query filters apply underneath]
+Any `AddQueryFilter` predicates (multi-tenant / soft-delete / "active only") run **beneath** the
+translated `$filter`, so a client cannot `$filter` its way out of them. This is the security property you
+want.
+:::
+
+## Architecture & AOT
+
+- **`Shiny.DocumentDb.OData`** — a reusable translator engine. It takes parsed OData query options + a
+  target type, drives an `IDocumentQuery<T>`, and materializes. It carries **no** `Microsoft.OData`
+  dependency and is AOT/trim-clean — usable on its own for filter translation.
+- **`Shiny.DocumentDb.AspNetCore.OData`** — the host. It uses `Microsoft.AspNetCore.OData` for full
+  `$metadata`/EDM/parse compliance and feeds the parsed filter tree into the same engine. Because the EDM
+  stack is reflection-heavy, **the host package is JIT-only (server-side)** — it does not carry the AOT
+  guarantee the engine does.
+
+## Capability tiers
+
+`$filter`/`$orderby`/`$top`/`$skip`/`$count`/`$select` work on **every** provider (they ride
+`.Where`/`.Paginate`/`.Project`/`.Count`). Spatial OData geo functions (where supported) require a
+spatial-capable provider; a spatial filter on a non-spatial provider returns `501` rather than silently
+dropping the predicate.

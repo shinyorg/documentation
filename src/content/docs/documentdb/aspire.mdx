@@ -1,0 +1,152 @@
+---
+title: Aspire Integration
+---
+
+These packages make "which database backs a DocumentDb store" and "how it gets seeded" **AppHost
+(deployment) decisions** instead of code, and give the consuming service a provider-agnostic one-liner
+that wires the store with health checks and OpenTelemetry already attached.
+
+- **`Shiny.DocumentDb.Aspire.Hosting`** — AppHost: model a DocumentDb store as a resource, pick its
+  backend, and gate seeding.
+- **`Shiny.DocumentDb.Aspire.Client`** — consuming service: `AddDocumentStore("name")` resolves the
+  injected provider + connection string and registers the store.
+- **`Shiny.DocumentDb.Aspire.Orleans`** — silo: back Orleans grain storage / reminders / clustering /
+  grain directory with the Aspire-provisioned store in one call (see [Orleans on DocumentDb](#orleans-on-documentdb)).
+
+:::note[Server-tier only]
+This is a server/cloud convenience built on .NET Aspire. It does nothing for DocumentDb's offline-first
+core (SQLite-on-device / LiteDB / IndexedDB) — those never touch an AppHost. **v1 covers the relational
+providers + SQLite** (Postgres, SQL Server, MySQL, SQLite). MongoDB and Cosmos are a planned follow-up.
+:::
+
+## AppHost — pick the backend + seed
+
+```csharp
+// AppHost Program.cs
+var store = builder
+    .AddPostgresDocumentStore("orders")          // provisions Postgres and models the store
+    .WithSeeder(async (ctx, ct) =>
+    {
+        // Runs once, after the DB is ready, before dependents start.
+        // ctx => (StoreName, Provider, ConnectionString). DocumentDb's seeder is idempotent,
+        // so this is the lifecycle gate, not the run-once guarantee.
+    });
+
+builder.AddProject<Projects.Api>("api")
+    .WithReference(store);                        // injects connection string + provider discriminator
+```
+
+Swap the backend by changing one call — the consuming service is untouched:
+
+```csharp
+builder.AddSqliteDocumentStore("orders", "orders.db");   // local dev — no container
+builder.AddSqlServerDocumentStore("orders");
+builder.AddMySqlDocumentStore("orders");
+```
+
+### Layer onto a DB resource you already declared
+
+If you already model the database, wrap it with `AsDocumentStore` (the provider is auto-detected from the
+resource, or pass it explicitly):
+
+```csharp
+var pg = builder.AddPostgres("orders-server").AddDatabase("orders-db");
+var store = pg.AsDocumentStore("orders");        // name MUST differ from the DB resource name
+```
+
+:::caution[Store name vs. backing-resource name]
+The store's `name` is the consumer-facing key the connection string is injected under, so it **must be
+distinct** from the backing DB resource's name (`AsDocumentStore` throws otherwise). The convenience
+`AddXDocumentStore` helpers handle this for you (they name the backend `<name>-server` / `<name>-db` /
+`<name>-sqlite`).
+:::
+
+## Consuming service — provider-agnostic
+
+```csharp
+// Api Program.cs
+builder.AddDocumentStore("orders", configureOptions: o => o.MapTypeToTable<Order>());
+```
+
+The store is registered **keyed** by name, so resolve it with `[FromKeyedServices]`:
+
+```csharp
+public class OrdersService([FromKeyedServices("orders")] IDocumentStore store)
+{
+    public Task<Order?> Get(string id) => store.Get<Order>(id);
+}
+```
+
+`AddDocumentStore` reads the connection string (`ConnectionStrings:orders`) and the provider discriminator
+(`Shiny:DocumentDb:orders:Provider`) the AppHost injects, selects the matching `IDatabaseProvider`, and —
+unless disabled — registers a health check and wires the `Shiny.DocumentDb` meter + `ActivitySource` into
+OpenTelemetry so query metrics and trace spans land in the Aspire dashboard.
+
+### Settings
+
+```csharp
+builder.AddDocumentStore("orders", settings =>
+{
+    settings.DisableHealthChecks = true;
+    settings.DisableTracing      = false;
+    settings.DisableMetrics      = false;
+    // settings.Provider / settings.ConnectionString override what the AppHost injected
+});
+```
+
+| Setting | Effect |
+|---|---|
+| `ConnectionString` | Overrides the injected connection string |
+| `Provider` | Overrides the injected `DocumentProviderKind` |
+| `DisableHealthChecks` | Skips the `SELECT 1` health probe registration |
+| `DisableTracing` | Skips wiring the `Shiny.DocumentDb` `ActivitySource` |
+| `DisableMetrics` | Skips wiring the `Shiny.DocumentDb` meter |
+
+## How the pieces connect
+
+- The hosting resource implements `IResourceWithConnectionString` over its backing DB and publishes a
+  **provider discriminator** to consumers via `WithReference`: env `Shiny__DocumentDb__<name>__Provider`
+  / config `Shiny:DocumentDb:<name>:Provider`, value = the `DocumentProviderKind` name.
+- The client reads both, maps the kind to a provider (`new PostgreSqlDatabaseProvider(conn)` etc.), and
+  registers the keyed store with the standard `Shiny.DocumentDb.Diagnostics` instrumentation decorator.
+- `WithSeeder` gates a callback on the backing resource's ready event — the same pattern the Shiny Aspire
+  Orleans integration uses for its database setup.
+
+This means the provider choice and seed strategy live in the AppHost, and the consuming code is a single
+provider-agnostic `AddDocumentStore("name")` that works regardless of which backend the AppHost picked.
+
+## Orleans on DocumentDb
+
+If you run [Orleans persistence on DocumentDb](/documentdb/orleans), `Shiny.DocumentDb.Aspire.Orleans`
+bridges the two: a silo backs all its Orleans system stores with the **same Aspire-provisioned, keyed
+store** in one call. Register the store on the host builder, then point Orleans at it by name:
+
+```csharp
+// Silo Program.cs
+builder.AddDocumentStore("orleans");   // Shiny.DocumentDb.Aspire.Client — keyed store + health + telemetry
+
+builder.UseOrleans(silo => silo
+    .UseAspireDocumentDb("orleans"));  // grain storage + reminders + clustering + grain directory
+```
+
+`UseAspireDocumentDb` wires each provider's `StoreFactory` to resolve the keyed `IDocumentStore`, so
+Orleans persistence shares the one Aspire-managed store (and its connection, health check, and telemetry).
+Select a subset of features and override the provider/directory names if needed:
+
+```csharp
+silo.UseAspireDocumentDb(
+    "orleans",
+    DocumentDbOrleansFeatures.GrainStorage | DocumentDbOrleansFeatures.Reminders,
+    grainStorageName: "Default");
+```
+
+On the AppHost, the silo project just references the store like any other consumer:
+
+```csharp
+var store = builder.AddPostgresDocumentStore("orleans");
+builder.AddProject<Projects.Silo>("silo").WithReference(store);
+```
+
+Because DocumentDb is schema-free, there are **no setup scripts** — the membership/storage tables are
+created on demand. (Clustering needs a backend with multi-document transactions — relational or MongoDB
+on a replica set.)

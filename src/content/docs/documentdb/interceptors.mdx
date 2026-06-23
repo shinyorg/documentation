@@ -131,3 +131,44 @@ singleton, register interceptors (and their dependencies) as **singletons** — 
 would be captured by the singleton store. If an interceptor needs per-operation scoped services, inject
 an `IServiceScopeFactory` and create a scope inside the hook.
 :::
+
+## The serialized JSON about to be written
+
+Inside `BeforeWrite`, `ctx.GetJson()` returns the **exact JSON** that will be persisted for
+`ctx.Document` — serialized with the store's own options / `JsonTypeInfo`, computed on first access and
+cached. If an earlier interceptor replaces `ctx.Document`, the cache is invalidated so a later
+interceptor always sees the current document. `ctx.GetJsonDocument()` returns a parsed `JsonDocument`
+(dispose it). Both return `null` for delete-by-id (no document).
+
+```csharp
+public Task BeforeWrite(DocumentWriteContext ctx, CancellationToken ct)
+{
+    var json = ctx.GetJson();                 // e.g. {"id":"u1","name":"Alice","age":30}
+    if (json != null && json.Contains("ssn"))
+        throw new InvalidOperationException("PII must be redacted before persistence.");
+    return Task.CompletedTask;
+}
+```
+
+This is the primitive [JSON Schema validation](/documentdb/validation) builds on — it's generally useful
+for auditing, redaction checks, and capturing the outbound payload for a transactional outbox.
+
+## Suppressing interceptors for a transaction
+
+Sometimes a write should carry **no** side effects — mirroring authoritative data in (offline sync inbound
+applies), a bulk import, a seed, or a migration. Commit a `UnitOfWork` with
+`SaveChanges(suppressInterceptors: true)` and **no** interceptor (per-document or bulk) fires for that
+transaction:
+
+```csharp
+var uow = store.CreateUnitOfWork();
+foreach (var item in importedBatch)
+    uow.Upsert(item);
+await uow.SaveChanges(suppressInterceptors: true);   // no AfterWrite, no validation, no audit
+```
+
+The suppression is **bounded by the commit** — writes outside the unit still fire interceptors normally,
+so it's a scoped switch, not a store-wide toggle. While suppressed, the multi-row batch fast path is
+re-enabled (it is only disabled to guarantee per-document interceptors fire — moot when none will). This
+is exactly how [`Shiny.DocumentDb.AppDataSync`](/documentdb/data-sync) applies pulled server changes without
+echoing them back to the server.

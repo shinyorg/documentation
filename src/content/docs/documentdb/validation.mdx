@@ -1,0 +1,146 @@
+---
+title: JSON Schema Validation
+---
+
+`Shiny.DocumentDb.JsonSchema` attaches a [JSON Schema](https://json-schema.org/) (draft 2020-12) to a
+document type and validates the **exact JSON about to be persisted** against it, just before the write.
+A document that fails aborts the write — throwing `DocumentSchemaValidationException` and rolling back the
+surrounding unit of work — exactly like a throwing `BeforeWrite` interceptor.
+
+Because the store is schema-free, there are no column types or `CHECK` constraints enforcing anything.
+A JSON Schema is the **only structural contract** a document store can give you — a last line of defense
+at the store boundary, regardless of which code path wrote the document.
+
+```bash
+dotnet add package Shiny.DocumentDb.JsonSchema
+```
+
+## Setup
+
+Map a schema to a type. No DI is required — `MapJsonSchema<T>` is an extension on `DocumentStoreOptions`,
+so it works against a hand-built store (`new DocumentStore(options)`) too. Repeated calls accumulate into a
+single validation interceptor.
+
+```csharp
+// On the store options (no DI) — reads like the other Map* methods
+var options = new DocumentStoreOptions { DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db") };
+options
+    .MapJsonSchema<Customer>("""
+    {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "email"],
+      "properties": {
+        "name":  { "type": "string", "minLength": 1, "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "age":   { "type": "integer", "minimum": 0, "maximum": 130 }
+      }
+    }
+    """)
+    .MapJsonSchema<Order>(orderSchema)
+    .ConfigureJsonSchemaValidation(s => s.EnableFormatAssertion = true);   // optional tweaks
+
+var store = new DocumentStore(options);
+```
+
+```csharp
+// DI flavour — same thing, resolved as an interceptor from the container
+builder.Services.AddDocumentStore(o => o
+    .UseSqlite("app.db")
+    .MapJsonSchema<Customer>(customerSchema));        // configure on the options, or:
+
+builder.Services.AddDocumentJsonSchema(o => o.MapJsonSchema<Customer>(customerSchema));
+```
+
+> The bulk form `options.AddJsonSchemaValidation(o => o.MapJsonSchema<T>(...))` is also available if you
+> prefer configuring the `JsonSchemaOptions` in one lambda.
+
+From then on, a write that violates the schema throws:
+
+```csharp
+await store.Insert(new Customer { Name = "", Email = null });
+// DocumentSchemaValidationException — write aborted, unit rolled back, nothing persisted
+
+try { await store.Upsert(customer); }
+catch (DocumentSchemaValidationException ex)
+{
+    foreach (var e in ex.Errors)            // SchemaValidationError(InstanceLocation, Keyword, Message)
+        ShowFieldError(e.InstanceLocation, e.Message);
+}
+```
+
+## Mapping schemas
+
+All overloads parse/load **once at registration** (fail-fast — a malformed schema or missing file throws
+at startup, never on the first write):
+
+| Method | Source |
+|---|---|
+| `MapJsonSchema<T>(JsonSchema schema)` | a pre-built `JsonSchema` |
+| `MapJsonSchema<T>(string schemaJson)` | JSON text |
+| `MapJsonSchema<T>(Stream schemaJson)` | a stream / embedded resource |
+| `MapJsonSchemaFromFile<T>(string path)` | a file path |
+| `Resolver = type => …` | dynamic fallback when no static map entry exists |
+
+:::caution[File paths aren't portable]
+`MapJsonSchemaFromFile` is fine on desktop/server, but Blazor WASM and mobile (bundled assets) usually
+have no real filesystem path. There, use the `Stream` overload — feed it an embedded resource or MAUI
+`FileSystem.OpenAppPackageFileAsync`.
+:::
+
+## Two things to get right
+
+### Schema names are the *serialized* names — camelCase by default
+
+The store serializes with `JsonNamingPolicy.CamelCase`, so a schema written against C# names
+(`"required": ["Email"]`) silently won't match the stored `"email"`. **Author schemas in camelCase**
+(matching the store's `JsonSerializerOptions`). The validator always checks the real serialized JSON, so
+the trap is purely in how you *write* the schema.
+
+### Validate what the C# type can't express
+
+The document is already a typed POCO, so `"type": "string"` just restates the type. JSON Schema earns its
+keep on constraints the type system can't enforce at runtime:
+
+- `minLength` / `maxLength`, numeric `minimum` / `maximum`
+- `pattern` (regex), `enum`, `const`
+- `additionalProperties: false`
+- required-ness of **reference-type** properties (C# nullable annotations aren't enforced at runtime, so
+  `string Email` can still be null — `required` catches it)
+
+## `format` is asserted by default
+
+The `format` keyword (`email`, `uuid`, `date-time`, `uri`, …) is **asserted** by default — a bad value
+fails — which is what most people expect when they write it. Set `EnableFormatAssertion = false` for
+spec-pure annotation-only behaviour (use `pattern` for real constraints instead).
+
+```csharp
+services.AddDocumentJsonSchema(o =>
+{
+    o.EnableFormatAssertion = false;       // format becomes annotation-only
+    o.MapJsonSchema<Customer>(schemaJson);
+});
+```
+
+## Scope
+
+- **Validated:** `Insert`, `Update`, `Upsert`, and each item of `BatchInsert`.
+- **Not validated:** `Remove` / delete-by-id (no document), and set-based `ExecuteUpdate` /
+  `ExecuteDelete` / `Clear` (never materialize a document) — out of scope by nature, not a gap.
+- **Unmapped types** pass straight through.
+- **Suppressed writes** — a unit committed with `SaveChanges(suppressInterceptors: true)` (e.g. the
+  inbound apply of [`Shiny.DocumentDb.AppDataSync`](/documentdb/data-sync), or a bulk import) runs no
+  interceptors, so the schema isn't enforced on that path. This is intentional: mirrored / authoritative
+  data isn't re-validated.
+
+## How it relates to other validation
+
+This isn't a replacement for input validation at the UI/API edge (DataAnnotations, FluentValidation) —
+keep those for good UX. The schema interceptor guarantees that nothing structurally broken ever lands in
+the store, no matter which code path wrote it. It composes with offline sync for free: validation runs on
+`BeforeWrite`, so an invalid document throws before it can reach the sync outbox.
+
+:::note[Provider tier & AOT]
+Works on **every** provider (it rides the shared interceptor path). The `JsonSchema.Net` dependency lives
+only in this opt-in package — the core stays dependency-free.
+:::

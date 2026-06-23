@@ -466,12 +466,18 @@ export const sidebarTopics = [
           { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
           { label: 'Write Interceptors', link: 'documentdb/interceptors' },
           { label: 'Query Filters', link: 'documentdb/query-filters' },
-          { label: 'Spatial', link: 'documentdb/spatial' },
-          { label: 'Vector / ANN Search', link: 'documentdb/vector' },
-          { label: 'Temporal Support', link: 'documentdb/temporal' },
           { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
-          { label: 'Orleans Provider', link: 'documentdb/orleans' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/DocumentDb/', attrs: { target: '_blank' } },
+          {
+            label: 'Spatial, Vector & Temporal',
+            collapsed: true,
+            items: [
+              { label: 'Spatial', link: 'documentdb/spatial' },
+              { label: 'Vector / ANN Search', link: 'documentdb/vector' },
+              { label: 'Temporal Support', link: 'documentdb/temporal' },
+            ]
+          },
           {
             label: 'Providers',
             collapsed: true,
@@ -490,11 +496,26 @@ export const sidebarTopics = [
               { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
             ]
           },
-          { label: 'Performance', link: 'documentdb/performance' },
-          { label: 'FAQ & Decision Trees', link: 'documentdb/faq' },
-          { label: 'Limitations', link: 'documentdb/limitations' },
-          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/DocumentDb/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'documentdb/release-notes' }
+          {
+            label: 'Integrations',
+            items: [
+              { label: 'JSON Schema Validation', link: 'documentdb/validation' },
+              { label: 'OData Endpoints', link: 'documentdb/odata' },
+              { label: 'Offline Sync (Shiny.Data.Sync)', link: 'documentdb/data-sync' },
+              { label: 'Orleans Persistence', link: 'documentdb/orleans' },
+              { label: 'Aspire', link: 'documentdb/aspire' },
+            ]
+          },
+          {
+            label: 'Reference & Support',
+            collapsed: true,
+            items: [
+              { label: 'Performance', link: 'documentdb/performance' },
+              { label: 'FAQ & Decision Trees', link: 'documentdb/faq' },
+              { label: 'Limitations', link: 'documentdb/limitations' },
+              { label: 'Release Notes', link: 'documentdb/release-notes' },
+            ]
+          }
         ]
       },
       {
@@ -676,7 +697,7 @@ export const sidebarTopics = [
     ]
   },
   {
-    label: 'Aspire',
+    label: 'Aspire/Orleans',
     link: '/aspire/orleans/',
     icon: 'cloud-download',
     items:[
@@ -688,6 +709,7 @@ export const sidebarTopics = [
           { label: 'Hosting (AppHost)', link: 'aspire/orleans/hosting' },
           { label: 'Server (Silo)', link: 'aspire/orleans/server' },
           { label: 'Client', link: 'aspire/orleans/client' },
+          { label: 'Database Providers', link: 'documentdb/orleans' },
           { label: 'Release Notes', link: 'aspire/orleans/release-notes' }
         ]
       },

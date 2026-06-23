@@ -5,8 +5,33 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
-## 8.2 - June 22, 2026
+## 9.0 - June 22, 2026
 
+<RN type="feature">
+**Offline-first sync (`Shiny.DocumentDb.AppDataSync`)** — make `IDocumentStore` the local cache of a backend that bidirectionally syncs over HTTP via [Shiny.Data.Sync](https://shinylib.net/client/data-sync). Register `AddDocumentStore(...)` + `AddDataSync<TDelegate>(...)` + `SyncDocumentStore(sync => sync.Sync<TodoItem>())`, and an ordinary document type becomes two-way synced with no manual `Queue`/delegate plumbing: local `Insert`/`Update`/`Upsert`/`Remove` auto-enqueue to the reliable, background-capable outbox, and pulled server changes auto-apply back into the store (Create/Update → `Upsert`, Delete → `Remove`). Inbound applies run through `SaveChanges(suppressInterceptors: true)`, so they never echo back to the server (loop guard) and fire no other interceptor. Synced types implement `Shiny.Data.Sync.ISyncEntity` (its string `Identifier`, conventionally `Id.ToString()`); the store and sync serializers are validated to share one JSON contract at startup. Set-based writes (`ExecuteUpdate`/`ExecuteDelete`/`Clear<T>`) throw `SyncBulkWriteNotSupportedException` on synced types (use `ClearAll` for a whole-store reset); batch writes enqueue each item. Client-tier providers (SQLite, LiteDB, IndexedDB).
+</RN>
+<RN type="feature">
+**OData v4 query endpoints (`Shiny.DocumentDb.OData` + `Shiny.DocumentDb.AspNetCore.OData`)** — expose a document type as an OData entity set. `$filter`/`$orderby`/`$top`/`$skip`/`$count`/`$select` translate onto the fluent `IDocumentQuery<T>` and run against any provider; `$expand` returns 501 (no relationships). `AddDocumentODataEndpoints(edm => edm.EntitySet<Customer>("customers"))` + `app.MapDocumentODataEntitySet<Customer>("odata/customers")`. The translator engine is dependency-free and AOT/trim-clean; the ASP.NET Core host (`Microsoft.AspNetCore.OData` for full EDM/`$metadata` compliance) is JIT-only. Global `AddQueryFilter` predicates always apply underneath the translated `$filter`, so a client can't filter past them; `$count` is computed pre-paging.
+</RN>
+<RN type="feature">
+**JSON Schema validation before write (`Shiny.DocumentDb.JsonSchema`)** — attach a JSON Schema (draft 2020-12, powered by [JsonSchema.Net](https://www.nuget.org/packages/JsonSchema.Net)) to a document type and the store validates the exact JSON about to be persisted just before the write. A failure throws `DocumentSchemaValidationException` (with field-level `Errors`) and rolls the write back — the only structural contract a schema-free store can offer. Register via DI (`services.AddDocumentJsonSchema(o => o.MapJsonSchema<Customer>(schemaJson))`) or inline in options (`options.AddJsonSchemaValidation(...)`); map schemas by `JsonSchema` object, JSON text, `Stream`, or `MapJsonSchemaFromFile<T>(path)` (all parsed once at registration). `format` (email/uuid/date-time) is asserted by default (`EnableFormatAssertion = false` for annotation-only). Validate what the C# type can't — `maxLength`, ranges, `pattern`, `enum`, `additionalProperties:false`, reference-type required-ness. Schema property names match the **serialized** (camelCase) JSON names. Works on every provider (rides the shared interceptor path); deletes and set-based writes pass through.
+
+```csharp
+services.AddDocumentJsonSchema(o => o.MapJsonSchema<Customer>("""
+{ "type":"object", "required":["name","email"],
+  "properties": {
+    "name":  { "type":"string", "minLength":1, "maxLength":100 },
+    "email": { "type":"string", "format":"email" } } }
+"""));
+// store.Insert(invalidCustomer) -> throws DocumentSchemaValidationException, nothing persisted
+```
+</RN>
+<RN type="feature">
+**Side-effect-free writes & the serialized-JSON write context** — two additions to the core write path:
+
+- `UnitOfWork.SaveChanges(suppressInterceptors: true)` commits a unit with **no** interceptor (per-document or bulk) firing — bounded by that transaction, so writes outside the unit still fire normally. The right tool for *mirrored / authoritative* data that should carry no side effects: bulk import, seeding, migration, and the inbound apply of `Shiny.DocumentDb.AppDataSync`. While suppressed, the multi-row batch fast path is re-enabled.
+- Inside `IDocumentInterceptor.BeforeWrite`, `ctx.GetJson()` / `ctx.GetJsonDocument()` expose the exact JSON about to be persisted (the store's own options/`JsonTypeInfo`, cached, invalidated if an earlier interceptor replaces the document). Useful for auditing/redaction; it's the primitive the JSON-Schema package builds on.
+</RN>
 <RN type="feature">
 **Batch upsert, update & remove** — `BatchUpsert<T>`, `BatchUpdate<T>` and `BatchRemove<T>` join `BatchInsert<T>` on `IDocumentStore`, collapsing many single-document round-trips into one set operation. They are **all-or-nothing**: on a versioned type the first version conflict throws `ConcurrencyException` and the whole batch rolls back. The win varies by backend (provider tier):
 

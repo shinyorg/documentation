@@ -348,14 +348,21 @@ export default defineConfig({
               id: 'mobilev5-1',
               content: 'Client v5: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
               variant: 'tip',
-              link: { text: 'Check It Out', href: '/ble' },
+              link: { text: 'Power up!', href: '/ble' },
               dismissable: false
             },
+          {
+              id: 'docdb-v90',
+              content: 'Document DB v9.0 Integrations EVERYWHERE - Orleans, Aspire, OData, Data Sync, & more!',
+              variant: 'tip',
+              link: { text: 'Integrate Me Today', href: '/documentdb/' },
+              dismissable: false
+            },            
             {
               id: 'docdb-v81',
               content: 'Document DB v8.1 Interceptors, Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
               variant: 'tip',
-              link: { text: 'Feed The Machine Here', href: '/documentdb/' },
+              link: { text: 'Take me there', href: '/documentdb/' },
               dismissable: false
             },
             {

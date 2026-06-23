@@ -1,0 +1,100 @@
+---
+title: Offline Sync
+---
+
+`Shiny.DocumentDb.AppDataSync` makes an `IDocumentStore` the **local cache of an offline-first app that
+bidirectionally syncs to an HTTP backend**, by gluing it to
+[Shiny.Data.Sync](https://shinylib.net/client/data-sync). You write to the document store exactly as you
+do today; the glue:
+
+1. **Auto-queues** every local `Insert` / `Update` / `Upsert` / `Remove` on a sync-registered type into
+   the Shiny.Data.Sync **outbox** — reliable, background-capable, surviving app kill on the platforms
+   Shiny.Data.Sync supports.
+2. **Auto-applies** every change pulled from the server back into the store (Create/Update → `Upsert`,
+   Delete → `Remove`) — without you hand-writing an `IDataSyncDelegate`.
+
+```bash
+dotnet add package Shiny.DocumentDb.AppDataSync
+```
+
+Client-tier providers: **SQLite, LiteDB, IndexedDB** (Blazor WASM) — the on-device stores that match
+Shiny.Data.Sync's platform model. The server providers (Cosmos/Mongo/relational) are the sync *backend*,
+not the local cache.
+
+## Setup
+
+```csharp
+builder.Services
+    .AddDocumentStore(o => o.UseSqlite("app.db").MapTypeToTable<TodoItem>())
+    .AddDataSync<MyDataSyncDelegate>(opts =>
+        opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos"))
+    .SyncDocumentStore(sync =>
+    {
+        sync.Sync<TodoItem>();   // wire the DocumentDb type to its registered sync endpoint
+    });
+
+// Application code — no Queue, no delegate. Local write -> outbox; server change -> store.
+await store.Upsert(new TodoItem { Id = id, Title = "Buy milk", Completed = false });
+```
+
+Synced types implement `Shiny.Data.Sync.ISyncEntity` — its string `Identifier` is the sync key (set it
+from your Id, e.g. `Identifier => Id.ToString()`). Shiny.Data.Sync's `RegisterEndpoint<T>` and `Queue<T>`
+constrain `T : ISyncEntity`, so this is required; the glue bridges that `Identifier` to the store's Id
+configuration internally.
+
+```csharp
+public class TodoItem : ISyncEntity
+{
+    public Guid Id { get; set; }
+    public string Identifier => this.Id.ToString();   // the sync key
+    public string Title { get; set; } = "";
+    public bool Completed { get; set; }
+}
+```
+
+## How it works
+
+The glue contributes two stateless moving parts; it stores **nothing** of its own (the durable outbox is
+entirely Shiny.Data.Sync's):
+
+- **Outbound** — an `IDocumentInterceptor` whose `AfterWrite` maps the operation to a `SyncVerb` and calls
+  `IDataSyncManager.Queue(...)`. It runs inside the write transaction and then hands off; the queue it
+  feeds is Shiny.Data.Sync's.
+- **Inbound** — a supplied `IDataSyncDelegate` whose `OnReceived` applies the pulled item back into the
+  store through a `UnitOfWork` committed with `SaveChanges(suppressInterceptors: true)`. Because that
+  suppresses interceptors, the apply **does not echo back** to the server (the loop guard), runs no
+  validation/side-effects on mirrored data, and applies the whole pulled page atomically.
+
+Inbound applies go through `Upsert`/`Remove`, which raise `IObservableDocumentStore.NotifyOnChange<T>` —
+so a MAUI/Blazor view bound to the store updates automatically when a server change arrives.
+
+## Rules worth knowing
+
+### Set-based writes on synced types are rejected
+
+`ExecuteUpdate`, `ExecuteDelete`, and `Clear<T>()` never materialize the affected documents, so they
+can't be enqueued per row. On a synced type they throw `SyncBulkWriteNotSupportedException` rather than
+silently skipping the outbox. For a local-only **whole-store wipe** (sign-out / reset), use
+`IDocumentMaintenance.ClearAll` — it fires no interceptor, so it commits locally without enqueuing.
+
+Batch writes are fine: `BatchInsert` / `BatchUpsert` / `BatchUpdate` / `BatchRemove` on a synced type each
+enqueue per item (registering the forwarder forces the per-document path).
+
+### One shared serializer
+
+DocumentDb and Shiny.Data.Sync must serialize synced types through the **same** `JsonSerializerOptions` /
+source-gen context — that single context defines the wire format the backend sees and guarantees an
+inbound payload round-trips back through `Upsert`. `SyncDocumentStore` validates this at startup and
+throws if they diverge.
+
+### Composes with validation
+
+If [`Shiny.DocumentDb.JsonSchema`](/documentdb/validation) is also registered, validation runs on
+`BeforeWrite` and the forwarder enqueues on `AfterWrite` — so an invalid document throws and rolls back
+before it can ever reach the outbox. No coordination required.
+
+:::caution[Eventual-consistency of the enqueue]
+The document write and the outbox enqueue are two separate stores, by design — the glue only *sends*
+writes to the sync manager; it does not back Shiny.Data.Sync's persistence. A crash in the narrow window
+between commit and enqueue is reconciled by the next pull. This keeps the two libraries decoupled.
+:::
