@@ -702,25 +702,31 @@ export const sidebarTopics = [
     icon: 'cloud-download',
     items:[
       {
-        label: 'Orleans',
+        label: 'Orleans Database Providers',
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'aspire/orleans/' },
           { label: 'Hosting (AppHost)', link: 'aspire/orleans/hosting' },
           { label: 'Server (Silo)', link: 'aspire/orleans/server' },
           { label: 'Client', link: 'aspire/orleans/client' },
-          { label: 'Database Providers', link: 'documentdb/orleans' },
           { label: 'Release Notes', link: 'aspire/orleans/release-notes' }
         ]
       },
       {
-        label: 'Gluetun VPN',
+        label: 'Aspire Gluetun VPN',
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'aspire/gluetun/' },
           { label: 'Configuration', link: 'aspire/gluetun/configuration' },
           { label: 'Container Routing', link: 'aspire/gluetun/routing' },
           { label: 'Release Notes', link: 'aspire/gluetun/release-notes' }
+        ]
+      },
+      {
+        label: 'DocumentDB',
+        items:[
+          { label: 'Aspire', link: 'documentdb/aspire', attrs: { target: '_blank' } },
+          { label: 'Orleans', link: 'documentdb/orleans', attrs: { target: '_blank' } }
         ]
       }
     ]
