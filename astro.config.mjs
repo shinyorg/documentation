@@ -86,6 +86,8 @@ export default defineConfig({
       '/client/hosting/manual/': '/foundation/hosting/manual/',
       '/appbuilder/': '/foundation/appbuilder/',
       '/ai-skills/': '/foundation/ai-skills/',
+      // Template Builder merged into the App Builder
+      '/templates/builder/': '/foundation/appbuilder/',
 
       // Shell redirects
       '/client/maui/': '/mauishell/',

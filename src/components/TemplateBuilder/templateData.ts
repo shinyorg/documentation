@@ -747,6 +747,26 @@ export function getDefaultState(kind: TemplateKind): TemplateState {
     return state;
 }
 
+/** Params that describe project identity/targets rather than features — kept as-is in the baseline. */
+const BASELINE_STABLE_PARAM_IDS = new Set(['useios', 'useandroid', 'usemaccatalyst', 'usewindows', 'Framework']);
+
+/**
+ * State with every optional feature forced off (bool -> false, choice -> first/"none" value,
+ * string -> ''), while keeping platform targets and framework at their defaults. Used as the
+ * reference point for "which files change because of a library selection".
+ */
+export function getBaselineState(kind: TemplateKind): TemplateState {
+    const cfg = TEMPLATE_CONFIGS[kind];
+    const state = getDefaultState(kind);
+    for (const p of cfg.params) {
+        if (BASELINE_STABLE_PARAM_IDS.has(p.id)) continue;
+        if (p.type === 'bool') state[p.id] = false;
+        else if (p.type === 'choice') state[p.id] = p.choices?.[0]?.value ?? '';
+        else if (p.type === 'string') state[p.id] = '';
+    }
+    return state;
+}
+
 /** Convenience: compute symbols for any template kind. */
 export function computeSymbols(kind: TemplateKind, state: TemplateState): Record<string, boolean | string> {
     return TEMPLATE_CONFIGS[kind].computeSymbols(state);

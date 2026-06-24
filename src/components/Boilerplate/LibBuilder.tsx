@@ -17,6 +17,10 @@ import Alert from '../Alert';
 import React from 'react';
 import ApplePrivacy from './Components/ApplePrivacy';
 import WindowsAppxManifest from './Components/WindowsAppxManifest';
+import { mappedKinds, buildSingleLibState, KIND_LABELS } from './componentTemplateMap';
+import { buildProjectFiles, STABLE_GUID } from '../TemplateBuilder/buildProjectFiles';
+import FileTreePreview from '../TemplateBuilder/FileTreePreview';
+import type { TemplateKind } from '../TemplateBuilder/templateFiles';
 
 type AppMode = 'maui' | 'blazor' | 'aspnet' | 'linux';
 
@@ -24,7 +28,42 @@ interface Props {
     componentName: string;
 }
 
+/** Lib Builder driven by the Template Builder engine: previews the files a single library adds/changes. */
+const MappedLibBuilder = ({ componentName, kinds }: { componentName: string; kinds: TemplateKind[] }) => {
+  const [kind, setKind] = useState<TemplateKind>(kinds[0]);
+  const files = buildProjectFiles(kind, buildSingleLibState(componentName, kind), { applicationIdGuid: STABLE_GUID });
+
+  return (
+    <div className="app-builder">
+      {kinds.length > 1 && (
+        <div className="app-builder__mode-toggle">
+          {kinds.map(k => (
+            <button
+              key={k}
+              className={`app-builder__mode-btn${kind === k ? ' app-builder__mode-btn--active' : ''}`}
+              onClick={() => setKind(k)}
+            >
+              {KIND_LABELS[k]}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="app-builder__output">
+        <FileTreePreview files={files} rootName="MyApp" setupOnly />
+      </div>
+    </div>
+  );
+};
+
 const LibBuilder = (props: Props) => {
+  const templateKinds = mappedKinds(props.componentName);
+  if (templateKinds.length > 0) {
+    return <MappedLibBuilder componentName={props.componentName} kinds={templateKinds} />;
+  }
+  return <LegacyLibBuilder {...props} />;
+};
+
+const LegacyLibBuilder = (props: Props) => {
   const components = ShinyComponents.filter(x => x.id === props.componentName);
   const { usesPush, usesActivity, usingForeground, usesWindows, hasPlatformConfig } = Data;
   const isBlazorCompatible = BLAZOR_COMPATIBLE_IDS.includes(props.componentName);

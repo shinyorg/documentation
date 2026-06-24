@@ -2,6 +2,8 @@ import { useState, useCallback, useMemo } from 'react';
 import React from 'react';
 import { TEMPLATE_CONFIGS, getDefaultState, type TemplateState, type TemplateParam, type TemplateConfig } from './templateData';
 import { generateProject } from './generateProject';
+import { buildProjectFiles, STABLE_GUID } from './buildProjectFiles';
+import FileTreePreview from './FileTreePreview';
 import type { TemplateKind } from './templateFiles';
 import Dropdown from './Dropdown';
 
@@ -304,6 +306,12 @@ const TemplateBuilder = () => {
 
     const activeBlurb = useMemo(() => activeConfig.blurb, [activeConfig]);
 
+    // Stable GUID so the preview's setup-diff isn't polluted by a random project GUID.
+    const previewFiles = useMemo(
+        () => buildProjectFiles(activeKind, state, { applicationIdGuid: STABLE_GUID }),
+        [activeKind, state]
+    );
+
     return (
         <div className="template-builder">
             <div className="template-builder__tabs" role="tablist">
@@ -323,6 +331,14 @@ const TemplateBuilder = () => {
             <p className="template-builder__blurb">{activeBlurb}</p>
 
             <KindForm config={activeConfig} state={state} onUpdate={updateState} />
+
+            <section className="template-builder__section template-builder__section--span-12">
+                <header className="template-builder__section-header">
+                    <span className="template-builder__section-title">Setup Preview</span>
+                    <span className="template-builder__section-count">files added or changed by your selections — the download includes the full project</span>
+                </header>
+                <FileTreePreview files={previewFiles} rootName={state.projectName || 'MyApp'} setupOnly />
+            </section>
 
             <div className="template-builder__actions">
                 <button
