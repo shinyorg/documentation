@@ -229,6 +229,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "2.0.0-beta-0004"
     },
     {
+        "id": "health-ai",
+        "nuget": "Shiny.Health.Extensions.AI",
+        "description": "Health Data - AI Tools",
+        "category": "platformdata",
+        "version": "2.0.0-beta-0004"
+    },
+    {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
@@ -681,7 +688,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health', 'music', 'speech', 'aiconversation'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health', 'health-ai', 'music', 'speech', 'aiconversation'];
         return compos.some(x => ids.includes(x.id));
     }
 };

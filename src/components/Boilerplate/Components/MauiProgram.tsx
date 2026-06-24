@@ -168,9 +168,22 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddContactStore();`;
   }
-  if (has('health')) {
+  if (has('health') || has('health-ai')) {
     src += `
       builder.Services.AddHealthIntegration();`;
+  }
+  if (has('health-ai')) {
+    src += `
+
+      // Expose a curated, opt-in slice of the health store to an LLM as Microsoft.Extensions.AI
+      // tools. Permissions are NOT requested by the tools - call IHealthService.RequestPermissions
+      // first. Resolve HealthAITools from DI and pass its .Tools to your IChatClient (ChatOptions.Tools).
+      builder.Services.AddHealthAITools(tools => tools
+          .AddMetric(DataType.StepCount)
+          .AddMetric(DataType.HeartRate)
+          .AddWorkouts()
+          .AddNutrition(HealthAICapabilities.ReadWrite)
+      );`;
   }
   if (has('di')) {
     src += `

@@ -27,7 +27,7 @@ const ApplePrivacy = (props: Props) => {
   };
 
   let health = '';
-  if (has('health')) {
+  if (has('health') || has('health-ai')) {
       health += "\n<!--health-->\n";
       health += genPrivDataType('NSPrivacyCollectedDataTypeHealth', true, false);
       health += genPrivDataType('NSPrivacyCollectedDataTypeFitness', true, false);

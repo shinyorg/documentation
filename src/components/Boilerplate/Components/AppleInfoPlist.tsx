@@ -50,7 +50,7 @@ const AppleInfoPlist = (props: Props) => {
   if (has('contactstore')) {
     addKey('NSContactsUsageDescription');
   }
-  if (has('health')) {
+  if (has('health') || has('health-ai')) {
     addKey('NSHealthShareUsageDescription');
     addKey('NSHealthUpdateUsageDescription');
     src += `

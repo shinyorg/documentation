@@ -67,7 +67,7 @@ const AndroidManifest = (props: Props) => {
     src += addP('WRITE_CONTACTS');
   }
 
-  if (has('health')) {
+  if (has('health') || has('health-ai')) {
     src += addP('ACTIVITY_RECOGNITION');
     src += `
       <uses-permission android:name="android.permission.health.READ_STEPS" />
