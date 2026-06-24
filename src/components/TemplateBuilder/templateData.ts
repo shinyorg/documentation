@@ -253,6 +253,10 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyHealth,
         description: 'Cross-platform health data access (HealthKit/Health Connect) https://shinylib.net/health/',
         visibleWhen: noDesktop },
+    { id: 'aihealth', label: 'Health AI Tools', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyHealth,
+        description: 'Exposes an opt-in slice of health data as Microsoft.Extensions.AI tools https://shinylib.net/health/ai-tools/',
+        visibleWhen: (s) => !!s.health && noDesktop(s) },
     { id: 'contactstore', label: 'Contact Store', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyContactStore,
         description: 'Full CRUD access to device contacts https://shinylib.net/contactstore/',
@@ -455,9 +459,10 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
     s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
+    s.usehealth = !!(s.health || s.aihealth);
     // Telemetry only emitted when a store is actually present.
     s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
-    s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aiconversation);
+    s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation);
     s.communitytoolkit = !!(s.mediaelement || s.cameraview || s.usecsharpmarkup);
     return s;
 }
