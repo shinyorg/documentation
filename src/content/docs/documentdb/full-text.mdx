@@ -1,0 +1,111 @@
+---
+title: Full-Text Search
+---
+
+Full-text search finds documents by **relevance**, not exact substring — tokenized, ranked matching over one or more string properties. The library exposes a single `FullTextSearch` API that runs on each provider's native full-text engine: **FTS5** on SQLite, a generated **`tsvector` + GIN** index on PostgreSQL, a **`FULLTEXT`** index on MySQL, **Oracle Text** (`CTXSYS.CONTEXT`), a **Full-Text Index** on SQL Server, the **`fts`** extension on DuckDB, **full-text search** on Cosmos DB, and a **`$text`** index on MongoDB. LiteDB and IndexedDB have no native engine, so they fall back to an in-memory **TF-IDF** scan — the API works everywhere.
+
+The shape mirrors vector search: register the searchable property/properties with `MapFullTextProperty<T>(...)`, then query with `store.FullTextSearch<T>("some text")`. Results come back ordered by relevance descending, each with a `Score`.
+
+## Declaring a full-text property
+
+Full-text is **declarative and up-front**: the index is created for you when the store initializes the type, so a type **must be mapped before it can be searched** — there is no ad-hoc full-text over an arbitrary property (unlike `.Where(x => x.Body.Contains(...))`, which works on any field). This is what lets the library create the underlying FTS index, generated/computed column, or `$text` index on your behalf — you never write the DDL.
+
+```csharp
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db");
+
+    // single property
+    opts.MapFullTextProperty<Article>(a => a.Body);
+
+    // …or several fields combined into one index
+    opts.MapFullTextProperty<Article>([a => a.Title, a => a.Body]);
+});
+```
+
+It indexes the **text value extracted at the property's JSON path**, not the raw JSON document. For a collection of strings or a custom projection, use the AOT-safe overload:
+
+```csharp
+opts.MapFullTextProperty<Article>(
+    propertyNames: ["tags"],
+    textSelector: a => a.Tags,                 // IEnumerable<string>
+    language: FullTextLanguage.English);
+```
+
+### FullTextLanguage
+
+Controls stemming / stop-words where the backend supports it (PostgreSQL `regconfig`, Oracle lexer, DuckDB stemmer, the in-memory fallback). Backends without per-language support ignore everything but the distinction between `Simple` (no stemming) and a stemmed language.
+
+```csharp
+public enum FullTextLanguage
+{
+    Simple, English, Spanish, French, German, Italian, Portuguese, Dutch, Russian
+}
+```
+
+## Searching
+
+`FullTextSearch` is a terminal operation that returns up to `maxResults` documents ordered by relevance descending. Terms are OR-combined (a document matches if it contains any term); the exact operator grammar is provider-specific.
+
+```csharp
+var hits = await store.FullTextSearch<Article>("orleans persistence", maxResults: 20);
+
+foreach (var hit in hits)
+    Console.WriteLine($"{hit.Score:F3}  {hit.Document.Title}");
+```
+
+### FullTextResult
+
+```csharp
+public class FullTextResult<T> where T : class
+{
+    public required T Document { get; init; }
+    public double Score { get; init; }   // higher = more relevant
+}
+```
+
+`Score` is normalized so **higher always means a better match**, but its absolute scale is provider-specific (BM25 on SQLite/DuckDB, `ts_rank` on PostgreSQL, `MATCH … AGAINST` on MySQL, `textScore` on MongoDB, the in-memory TF-IDF score, and a positional score on Cosmos, whose `FullTextScore` cannot be projected). **Compare scores only within one result set**, never across providers.
+
+### Pre-filtering
+
+Pass a predicate to narrow results alongside the full-text match — for tenant or category scoping. It is pushed into the query where the provider supports it.
+
+```csharp
+var techHits = await store.FullTextSearch<Article>(
+    "orleans",
+    filter: a => a.Category == "tech");
+```
+
+### Fluent form
+
+`FullTextMatch` on the query builder bridges to the same engine and folds the query's current `Where` predicates into the pre-filter. `OrderBy`, `GroupBy`, and `Paginate` are ignored — `maxResults` controls the count and results come back ranked.
+
+```csharp
+var hits = await store.Query<Article>()
+    .Where(a => a.Category == "tech")
+    .FullTextMatch("orleans", maxResults: 10);
+```
+
+## Provider support
+
+The index is maintained automatically by the engine — no write-path bookkeeping — so once a type is mapped, `Insert`/`Update`/`Remove`/`Clear` keep it in sync for free.
+
+| Provider | Engine | Ranking | Notes |
+|---|---|---|---|
+| **SQLite** | FTS5 virtual table + triggers | BM25 | Always available. |
+| **PostgreSQL** | generated `tsvector` column + GIN | `ts_rank` | Per-language stemming. |
+| **MySQL** | generated column + `FULLTEXT` (InnoDB) | `MATCH … AGAINST` | Natural-language mode. |
+| **Oracle** | `CTXSYS.CONTEXT` (sync on commit) | `SCORE()` | Requires the Oracle Text option. |
+| **SQL Server** | Full-Text Index + `FREETEXTTABLE` | `RANK` | Requires the Full-Text Search feature. |
+| **DuckDB** | `fts` extension (BM25) | BM25 | Snapshot index — rebuilt before each query. |
+| **Cosmos DB** | full-text policy + `FullTextScore` | rank order | Newer Cosmos service feature. |
+| **MongoDB** | `$text` index | `textScore` | One text index per collection. |
+| **LiteDB** | in-memory TF-IDF | TF-IDF | No native engine — scans the collection. |
+| **IndexedDB** | in-memory TF-IDF | TF-IDF | No native engine — scans the store. |
+
+### Limitations
+
+- **Map before you query.** A type that hasn't been mapped with `MapFullTextProperty` cannot be full-text searched — `FullTextSearch`/`FullTextMatch` throw. This is by design (it's how the index gets created).
+- **One mapped type per table/collection** is the supported shape on engines that allow only a single full-text index per table (SQL Server, MongoDB).
+- **Optional features must be installed.** Oracle Text and SQL Server Full-Text Search are optional server components; if absent, `FullTextSearch` fails at query time. Cosmos full-text requires a service/SDK that supports it.
+- **In-memory fallback** (LiteDB, IndexedDB) loads and scans the collection, so it suits modest data sizes — exactly the client-tier scenarios those providers target.

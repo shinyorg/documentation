@@ -475,6 +475,7 @@ export const sidebarTopics = [
             items: [
               { label: 'Spatial', link: 'documentdb/spatial' },
               { label: 'Vector / ANN Search', link: 'documentdb/vector' },
+              { label: 'Full-Text Search', link: 'documentdb/full-text' },
               { label: 'Temporal Support', link: 'documentdb/temporal' },
             ]
           },
