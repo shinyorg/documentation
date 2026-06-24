@@ -248,7 +248,7 @@ Recognizes text with Apple Vision / Android MLKit / `Windows.Media.Ocr`. The reu
 
 - <NugetDownloads name="Shiny.Maui.Controls.Camera.Documents" />
 
-Structured extraction, where **each document type is its own analyzer with its own strongly-typed event** (`DocumentDetected`, typed to the document). Every payload is a strong record with **nullable fields** — only what was found is populated. Ships analyzers for **invoices** (`Invoice`, with order lines), **receipts** (`Receipt`, with line items + per-tax breakdown + totals), **driver's licenses** (`DriversLicense`), **health cards** (`HealthCard`), **credit cards** (`CreditCard`), and **passports** (`Passport`).
+Structured extraction, where **each document type is its own analyzer with its own strongly-typed event** (`DocumentDetected`, typed to the document). Every payload is a strong record with **nullable fields** — only what was found is populated. Ships analyzers for **invoices** (`Invoice`, with order lines), **receipts** (`Receipt`, with line items + per-tax breakdown + totals), **business cards** (`BusinessCard`, with emails + typed phones + name/title/company/website/address), **driver's licenses** (`DriversLicense`), **health cards** (`HealthCard`), **credit cards** (`CreditCard`), and **passports** (`Passport`).
 
 :::note[OCR runs once per frame]
 The document analyzers and `OcrAnalyzer` cache their OCR result on the frame instance, so the active analyzer runs **one** recognition per frame and reuses it. That pass runs with Vision language correction **off** — it otherwise corrupts structured fields (license/MRZ/card numbers, totals, dates) by snapping codes to dictionary words; the parsers fuzzy-match the raw text.
@@ -294,7 +294,8 @@ camera.Analyzer = invoice;
 - **`CreditCardAnalyzer`** reads the front of a payment card into a `CreditCard`. The **brand** (`CreditCardType` — Visa, Mastercard, Amex, …) and number validity are derived deterministically from the number's IIN prefix + Luhn; name / expiry / company are best-effort OCR. (`Cvv` is on the back signature panel and PCI-sensitive — it is almost always `null` from a front scan.)
 - **`ReceiptAnalyzer`** reads a point-of-sale receipt into a `Receipt` — merchant header, purchased line items (`Receipt.Lines`), a **per-tax breakdown** (`Receipt.Taxes`, each with an optional rate), plus `Subtotal` / `Tax` (the sum) / `Tip` / `Discount` / `Total` and best-effort `PaymentMethod` / `CardLast4` / `Currency` / `Date` / `Time`. OCR + best-effort rules.
 - **`HealthCardAnalyzer`** is OCR + best-effort rules tuned for **Canadian** health cards: it detects the issuing province from on-card keywords and applies that province's member-number format — Quebec/RAMQ (4 letters + 8 digits), Ontario/OHIP (10 digits + a 2-letter version code), BC Personal Health Number (10 digits), Alberta/AHCIP (9 digits), and the rest of the provinces — surfacing `HealthCard.Province` plus a `Plan` field. Unknown layouts fall back to the longest plausible digit run.
-- **`InvoiceAnalyzer`** / **`ReceiptAnalyzer`** / **`HealthCardAnalyzer`** are OCR + best-effort rules. Swap the rules on any OCR-backed analyzer by supplying a custom `IDocumentParser<T>` to the constructor (`new InvoiceAnalyzer(new MyInvoiceParser())`), where `TryParse` returns the typed payload plus the boxes to draw — back it with rules, a cloud Document AI, or a vision LLM.
+- **`BusinessCardAnalyzer`** reads a business card into a `BusinessCard` — the cardholder `Name` + `JobTitle`, the `Company`, every contact channel (`Emails` and typed `Phones`, each tagged Mobile/Office/Fax… from its line label), `Website`, and a best-effort `Address`. Email / phone / URL are matched deterministically; name / title / company are heuristic (cards have no fixed layout). `BusinessCard.Email` / `.Phone` return the first of each for convenience. OCR + best-effort rules.
+- **`InvoiceAnalyzer`** / **`ReceiptAnalyzer`** / **`BusinessCardAnalyzer`** / **`HealthCardAnalyzer`** are OCR + best-effort rules. Swap the rules on any OCR-backed analyzer by supplying a custom `IDocumentParser<T>` to the constructor (`new InvoiceAnalyzer(new MyInvoiceParser())`), where `TryParse` returns the typed payload plus the boxes to draw — back it with rules, a cloud Document AI, or a vision LLM.
 
 ```csharp
 var card = new CreditCardAnalyzer();
@@ -325,6 +326,11 @@ record Receipt(string? Merchant, string? MerchantPhone, string? ReceiptNumber,
                IReadOnlyList<DocumentField> Fields);
 record ReceiptLine(string? Description, decimal? Quantity, decimal? UnitPrice, decimal? Amount, RectF? Bounds);
 record ReceiptTax(string? Label, decimal? Rate, decimal? Amount, RectF? Bounds);
+
+record BusinessCard(string? Name, string? JobTitle, string? Company,
+                    IReadOnlyList<string> Emails, IReadOnlyList<BusinessCardPhone> Phones,
+                    string? Website, string? Address, IReadOnlyList<DocumentField> Fields);  // .Email / .Phone = first of each
+record BusinessCardPhone(string Number, string? Type, RectF? Bounds);   // Type = Mobile / Office / Fax / … from the line label
 
 record DriversLicense(string? Number, string? FirstName, string? LastName,
                       DateOnly? DateOfBirth, DateOnly? Expiry, string? Address,
@@ -411,7 +417,7 @@ camera.Analyzer = new InvoiceAnalyzer(new MyInvoiceParser());   // IDocumentPars
 
 ### Option B — a brand-new document type
 
-Three pieces: a **payload record**, a **parser**, and a one-line **analyzer** that wires them. Here's a business-card scanner end to end:
+Three pieces: a **payload record**, a **parser**, and a one-line **analyzer** that wires them. (Business cards already ship as `BusinessCardAnalyzer` — here's a loyalty/membership-card scanner to show a brand-new type end to end:)
 
 ```csharp
 using System.Text.RegularExpressions;
@@ -420,44 +426,41 @@ using Shiny.Controls.Camera;                  // RecognizedText, DocumentField, 
 using Shiny.Maui.Controls.Camera.Documents;   // DocumentAnalyzer<T>
 
 // 1) payload — nullable fields (only what was found is set) + a Fields bag for extras
-public record BusinessCard(
-    string? Name, string? Company, string? Email, string? Phone,
+public record LoyaltyCard(
+    string? Program, string? MemberName, string? MemberNumber,
     IReadOnlyList<DocumentField> Fields);
 
 // 2) parser — pull fields out of the OCR'd lines
-public sealed partial class BusinessCardParser : IDocumentParser<BusinessCard>
+public sealed partial class LoyaltyCardParser : IDocumentParser<LoyaltyCard>
 {
-    [GeneratedRegex(@"[\w.+-]+@[\w-]+\.[\w.-]+")] private static partial Regex Email();
-    [GeneratedRegex(@"\+?\d[\d ().-]{7,}\d")]     private static partial Regex Phone();
+    [GeneratedRegex(@"\b\d[\d ]{8,}\d\b")]         private static partial Regex Number();
+    [GeneratedRegex(@"member|rewards|loyalty", RegexOptions.IgnoreCase)] private static partial Regex Signal();
 
     public bool TryParse(
         IReadOnlyList<RecognizedText> text,
-        out BusinessCard document,
+        out LoyaltyCard document,
         out IReadOnlyList<OverlayBox> boxes)
     {
         document = null!;
         boxes = [];
 
-        // a cheap "is this my document?" signal first — an email line. Bail fast otherwise so the
+        // a cheap "is this my document?" signal first — a long member number. Bail fast otherwise so the
         // analyzer doesn't misfire on every frame of unrelated text.
-        var emailLine = text.FirstOrDefault(t => Email().IsMatch(t.Text));
-        if (emailLine is null)
+        var numberLine = text.FirstOrDefault(t => Number().IsMatch(t.Text));
+        if (numberLine is null)
             return false;
 
-        var phoneLine = text.FirstOrDefault(t => Phone().IsMatch(t.Text));
-        var name = text.FirstOrDefault()?.Text;                       // first line is usually the name
-        var company = text.Skip(1).FirstOrDefault(t =>               // next non-contact line ≈ company
-            !Email().IsMatch(t.Text) && !Phone().IsMatch(t.Text))?.Text;
+        var program = text.FirstOrDefault(t => Signal().IsMatch(t.Text))?.Text
+            ?? text.FirstOrDefault()?.Text;                            // the program/brand line
+        var number = Number().Match(numberLine.Text).Value.Replace(" ", "");
 
         var fields = new List<DocumentField>
         {
-            new("Name", name, text.FirstOrDefault()?.BoundingBox),
-            new("Company", company),
-            new("Email", Email().Match(emailLine.Text).Value, emailLine.BoundingBox),
-            new("Phone", phoneLine is null ? null : Phone().Match(phoneLine.Text).Value, phoneLine?.BoundingBox),
+            new("Program", program, text.FirstOrDefault()?.BoundingBox),
+            new("Member #", number, numberLine.BoundingBox),
         };
 
-        document = new BusinessCard(fields[0].Value, company, fields[2].Value, fields[3].Value, fields);
+        document = new LoyaltyCard(program, null, number, fields);
 
         // box each field we actually located
         boxes = fields
@@ -469,26 +472,26 @@ public sealed partial class BusinessCardParser : IDocumentParser<BusinessCard>
 }
 
 // 3) analyzer — the base does OCR + threading + events + overlay
-public sealed class BusinessCardAnalyzer : DocumentAnalyzer<BusinessCard>
+public sealed class LoyaltyCardAnalyzer : DocumentAnalyzer<LoyaltyCard>
 {
-    public BusinessCardAnalyzer() : base(new BusinessCardParser()) { }
-    public BusinessCardAnalyzer(IDocumentParser<BusinessCard> parser) : base(parser) { }  // allow swap-in too
+    public LoyaltyCardAnalyzer() : base(new LoyaltyCardParser()) { }
+    public LoyaltyCardAnalyzer(IDocumentParser<LoyaltyCard> parser) : base(parser) { }  // allow swap-in too
 
-    public override string Id => "myapp.camera.businesscard";
+    public override string Id => "myapp.camera.loyaltycard";
 }
 ```
 
 Use it like any other analyzer — code or XAML (it inherits `DocumentDetectedCommand`, `IsEnabled`, `ShowBoundingBox`, and `OverlayProvider` from the base):
 
 ```csharp
-var cards = new BusinessCardAnalyzer();
-cards.DocumentDetected += (_, e) => status = $"{e.Document.Name} — {e.Document.Email}";
+var cards = new LoyaltyCardAnalyzer();
+cards.DocumentDetected += (_, e) => status = $"{e.Document.Program} — {e.Document.MemberNumber}";
 camera.Analyzer = cards;
 ```
 
 ```xml
-<my:BusinessCardAnalyzer DocumentDetectedCommand="{Binding CardCommand}"
-                         IsEnabled="{Binding ScanCards}" />
+<my:LoyaltyCardAnalyzer DocumentDetectedCommand="{Binding CardCommand}"
+                        IsEnabled="{Binding ScanCards}" />
 ```
 
 :::note[Things to keep in mind]
