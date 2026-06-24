@@ -248,14 +248,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Shiny Controls",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "controls-desktop",
         "nuget": "Shiny.Maui.Controls.Desktop",
         "description": "Desktop Controls",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "controls-kiosk",
@@ -263,7 +263,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Kiosk",
         "description": "Kiosk Controls",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "tableview",
@@ -271,7 +271,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TableView",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -280,7 +280,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Scheduler",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -289,7 +289,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "FloatingPanel",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -297,7 +297,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "FontPicker",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -306,7 +306,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "PillView",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -315,7 +315,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageViewer",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -324,7 +324,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageEditor",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -333,7 +333,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ChatView",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -342,7 +342,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Markdown",
         "description": "Markdown",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "mermaiddiagrams",
@@ -350,7 +350,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.MermaidDiagrams",
         "description": "Mermaid Diagrams",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "barcodes",
@@ -358,7 +358,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Barcodes",
         "description": "Barcodes",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "cameraview",
@@ -366,14 +366,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Camera",
         "description": "CameraView",
         "category": "controls",
-        "version": "1.0.1-beta-0127"
+        "version": "1.0.1-beta-0129"
     },
     {
         "id": "camera-motion",
         "nuget": "Shiny.Maui.Controls.Camera.Motion",
         "description": "CameraView Motion Analyzer",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -381,7 +381,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Barcode",
         "description": "CameraView Barcode Analyzer",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -389,7 +389,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Face",
         "description": "CameraView Face Analyzer",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -397,7 +397,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Ocr",
         "description": "CameraView OCR Analyzer",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -405,7 +405,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Desktop",
         "description": "Tray Icon (Desktop)",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -414,7 +414,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Kiosk",
         "description": "Docking (Desktop)",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -423,7 +423,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Kiosk",
         "description": "On-Screen Keyboard (Touch / Kiosk)",
         "category": "controls",
-        "version": "1.0.1-beta-0127",
+        "version": "1.0.1-beta-0129",
         "hideFromAppBuilder": true
     },
     {
@@ -448,9 +448,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -458,9 +458,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
         "description": "Document DB (SqlCipher)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -468,9 +468,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.SqlServer",
         "description": "Document DB (SQL Server)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -478,9 +478,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.MySql",
         "description": "Document DB (MySQL)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -488,9 +488,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.PostgreSql",
         "description": "Document DB (PostgreSQL)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -498,9 +498,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.CosmosDb",
         "description": "Document DB (Cosmos DB)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -508,9 +508,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.MongoDb",
         "description": "Document DB (MongoDB)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -518,9 +518,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.LiteDb",
         "description": "Document DB (LiteDB)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -528,9 +528,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.DuckDb",
         "description": "Document DB (DuckDB)",
         "category": "storage",
-        "version": "8.2.0",
+        "version": "9.1.0",
         "additionalNugets": [
-            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "8.2.0" }
+            { "nuget": "Shiny.DocumentDb.Extensions.DependencyInjection", "version": "9.1.0" }
         ]
     },
     {
@@ -539,7 +539,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.DocumentDb.IndexedDb",
         "description": "Document DB (IndexedDB)",
         "category": "storage",
-        "version": "8.2.0"
+        "version": "9.1.0"
     },
     {
         "id": "documentdb-diagnostics",
@@ -547,7 +547,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.DocumentDb.Diagnostics",
         "description": "Document DB Telemetry & Diagnostics (OpenTelemetry)",
         "category": "storage",
-        "version": "8.2.0"
+        "version": "9.1.0"
     },
     {
         "id": "reflector",
@@ -568,7 +568,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Spatial",
         "description": "Spatial Database",
         "category": "storage",
-        "version": "1.1.0"
+        "version": "2.0.0"
     },
     {
         "id": "spatial-geofencing",
@@ -576,7 +576,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Spatial Geofencing",
         "category": "devices",
         "foregroundService": true,
-        "version": "1.1.0"
+        "version": "2.0.0"
     },
     {
         "id": "contactstore",
