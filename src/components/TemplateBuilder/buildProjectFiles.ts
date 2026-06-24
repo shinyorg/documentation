@@ -12,6 +12,8 @@ export interface GeneratedFile {
     binary: boolean;
     /** True when this file is added/changed by a feature selection (see setup detection). */
     isSetup: boolean;
+    /** 1-based line numbers added/changed vs. the baseline (for in-viewer highlighting). */
+    changedLines: number[];
 }
 
 export interface BuildOptions {
@@ -111,7 +113,44 @@ function normalize(s: string): string {
     return s.replace(/^﻿/, '').replace(/\r\n/g, '\n').replace(/[ \t]+$/gm, '').trimEnd();
 }
 
-/** Render the all-features-off baseline (stable identity) and return content by path. */
+/** Per-line equality used by the line diff: ignore trailing whitespace and a leading BOM. */
+function lineEq(a: string, b: string): boolean {
+    return a.replace(/^﻿/, '').replace(/[ \t\r]+$/, '') === b.replace(/^﻿/, '').replace(/[ \t\r]+$/, '');
+}
+
+/**
+ * 1-based candidate line numbers that are added or changed vs. the baseline (LCS line diff).
+ * A brand-new file (no baseline) reports all of its lines.
+ */
+function diffChangedLines(baseline: string | undefined, candidate: string): number[] {
+    const cand = candidate.split('\n');
+    if (baseline === undefined) return cand.map((_, i) => i + 1);
+    const base = baseline.split('\n');
+    const n = base.length, m = cand.length;
+    // LCS length table (lines small; O(n*m) is fine).
+    const dp: Uint16Array[] = Array.from({ length: n + 1 }, () => new Uint16Array(m + 1));
+    for (let i = n - 1; i >= 0; i--) {
+        for (let j = m - 1; j >= 0; j--) {
+            dp[i][j] = lineEq(base[i], cand[j])
+                ? dp[i + 1][j + 1] + 1
+                : Math.max(dp[i + 1][j], dp[i][j + 1]);
+        }
+    }
+    const changed: number[] = [];
+    let i = 0, j = 0;
+    while (j < m) {
+        if (i < n && lineEq(base[i], cand[j]) && dp[i][j] === dp[i + 1][j + 1] + 1) {
+            i++; j++;                       // unchanged line (part of LCS)
+        } else if (i < n && dp[i + 1][j] >= dp[i][j + 1]) {
+            i++;                            // line only in baseline (removed)
+        } else {
+            changed.push(j + 1); j++;       // line added/changed in candidate
+        }
+    }
+    return changed;
+}
+
+/** Render the all-features-off baseline (stable identity) and return raw content by path. */
 function baselineContentByPath(kind: TemplateKind, candidate: TemplateState, guid: string): Map<string, string> {
     const base: TemplateState = { ...getBaselineState(kind) };
     // Share identity + platform/framework with the candidate so only feature-driven diffs remain.
@@ -122,7 +161,7 @@ function baselineContentByPath(kind: TemplateKind, candidate: TemplateState, gui
     }
     const map = new Map<string, string>();
     for (const f of renderFiles(kind, base, guid)) {
-        if (!f.binary) map.set(f.path, normalize(f.content));
+        if (!f.binary) map.set(f.path, f.content);
     }
     return map;
 }
@@ -136,17 +175,19 @@ export function buildProjectFiles(kind: TemplateKind, state: TemplateState, opti
     const rendered = renderFiles(kind, state, guid);
 
     if (options?.computeSetup === false) {
-        return rendered.map(f => ({ ...f, isSetup: false }));
+        return rendered.map(f => ({ ...f, isSetup: false, changedLines: [] }));
     }
 
     const baseline = baselineContentByPath(kind, state, guid);
     return rendered.map(f => {
         // "Setup" = added or changed by a feature selection vs. the all-features-off baseline.
         let isSetup = false;
+        let changedLines: number[] = [];
         if (!f.binary && !isNoise(f.path)) {
             const base = baseline.get(f.path);
-            isSetup = base === undefined || base !== normalize(f.content);
+            isSetup = base === undefined || normalize(base) !== normalize(f.content);
+            if (isSetup) changedLines = diffChangedLines(base, f.content);
         }
-        return { ...f, isSetup };
+        return { ...f, isSetup, changedLines };
     });
 }

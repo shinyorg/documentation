@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect } from 'react';
 import React from 'react';
-import Syntax from '../Syntax';
+import CodeView from './CodeView';
 import type { GeneratedFile } from './buildProjectFiles';
 import { extname } from './utils';
 
@@ -229,7 +229,12 @@ const FileTreePreview = ({ files, rootName, setupOnly, initialSelectedPath }: Fi
                         {selected.binary ? (
                             <div className="file-tree-preview__binary">Binary file — included in the downloaded project.</div>
                         ) : (
-                            <Syntax source={selected.content} language={inferLang(selected.path)} label={selected.path.split('/').pop()} />
+                            <CodeView
+                                source={selected.content}
+                                language={inferLang(selected.path)}
+                                changedLines={selected.changedLines}
+                                label={selected.path.split('/').pop()}
+                            />
                         )}
                     </>
                 ) : (
