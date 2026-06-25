@@ -1,6 +1,6 @@
 ---
 title: Why DocumentDb
-description: How Shiny.DocumentDb compares to sqlite-net-pcl and Entity Framework Core — feature matrix and head-to-head benchmarks.
+description: How Shiny.DocumentDb compares to sqlite-net-pcl and Entity Framework Core (with Dapper as a raw-SQL benchmark baseline) — feature matrix and head-to-head benchmarks.
 ---
 import { Aside } from '@astrojs/starlight/components';
 
@@ -39,13 +39,13 @@ This page lays out, honestly, where each tool fits and where DocumentDb pulls ah
 
 **One API, ten backends.** The same code runs on SQLite on a phone and PostgreSQL on a server. sqlite-net is SQLite-only; EF Core spans relational engines but with provider-specific quirks and a heavier footprint.
 
-<Aside type="tip" title="Giving EF Core a fair fight">
-The benchmarks below run EF Core with **pre-compiled, no-tracking async queries** (`EF.CompileAsyncQuery` + `AsNoTracking`) — its fastest read configuration. Even tuned, the nested-graph reads stay multiples behind a single-document fetch.
+<Aside type="tip" title="Giving the contenders a fair fight">
+The benchmarks below run EF Core with **pre-compiled, no-tracking async queries** (`EF.CompileAsyncQuery` + `AsNoTracking`) — its fastest read configuration. **Dapper** is also included as the raw-SQL floor: hand-written `SELECT`/`INSERT` over a `Microsoft.Data.Sqlite` connection, with the same manual rehydration sqlite-net does for the nested graph. Even against that floor, the nested-graph reads stay multiples behind a single-document fetch.
 </Aside>
 
 ## Benchmarks
 
-Measured with [BenchmarkDotNet](https://benchmarkdotnet.org/) v0.15.8 on Apple M5 Pro, .NET 10.0.8, macOS. All three libraries run against SQLite. EF Core uses its fastest read path: pre-compiled `EF.CompileAsyncQuery` queries with `AsNoTracking`. Source lives in the [`benchmarks/`](https://github.com/shinyorg/DocumentDb/tree/main/benchmarks) folder of the repo.
+Measured with [BenchmarkDotNet](https://benchmarkdotnet.org/) v0.15.8 on Apple M5 Pro, .NET 10.0.8, macOS. All four contenders run against SQLite. EF Core uses its fastest read path: pre-compiled `EF.CompileAsyncQuery` queries with `AsNoTracking`; Dapper runs hand-written SQL over a raw `Microsoft.Data.Sqlite` connection. Source lives in the [`benchmarks/`](https://github.com/shinyorg/DocumentDb/tree/main/benchmarks) folder of the repo.
 
 ### Flat POCO (single table)
 
@@ -55,51 +55,58 @@ A plain `User { Id, Name, Age, Email }` — the case where sqlite-net and EF Cor
 
 | Library | 10 | 100 | 1000 |
 |---|---|---|---|
-| **Shiny.DocumentDb** | **420 µs** | **3.59 ms** | **36.05 ms** |
-| EF Core | 873 µs | 7.49 ms | 115.70 ms |
-| sqlite-net | 1.72 ms | 17.22 ms | 190.47 ms |
+| **Shiny.DocumentDb** | **389 µs** | **3.54 ms** | **35.14 ms** |
+| EF Core | 877 µs | 7.28 ms | 93.02 ms |
+| Dapper | 1.70 ms | 17.16 ms | 385.10 ms |
+| sqlite-net | 1.78 ms | 17.65 ms | 260.62 ms |
+
+<Aside type="note">
+The row-at-a-time contenders (sqlite-net, Dapper) auto-commit every insert, so at 1000 un-batched rows they get slow and high-variance — use batch inserts for bulk writes.
+</Aside>
 
 #### Read
 
-| Operation | Shiny.DocumentDb | EF Core (compiled) | sqlite-net |
-|---|---|---|---|
-| Get by Id | **2.79 µs** | 8.24 µs | 10.95 µs |
-| Get all (1000) | 502.58 µs | **319.84 µs** | 297.52 µs |
-| Query by name (1000) | 165.55 µs | **25.41 µs** | 30.53 µs |
+| Operation | Shiny.DocumentDb | Dapper | EF Core (compiled) | sqlite-net |
+|---|---|---|---|---|
+| Get by Id | **2.73 µs** | 4.96 µs | 8.69 µs | 10.35 µs |
+| Get all (1000) | 500.26 µs | **315.88 µs** | 317.24 µs | 396.97 µs |
+| Query by name (1000) | 160.52 µs | **21.47 µs** | 25.13 µs | 31.19 µs |
 
 <Aside type="note">
-On flat single-column queries, native column access wins — this is expected. A JSON property index (`CreateIndexAsync`) closes the gap: an indexed equality query drops from ~159 µs to ~6 µs (~26x). The document store's structural advantage is nested data, below.
+On flat single-column queries, native column access wins — Dapper's raw SQL is fastest here, as expected. A JSON property index (`CreateIndexAsync`) closes the gap: an indexed equality query drops from ~160 µs to ~6 µs (~26x). The document store's structural advantage is nested data, below.
 </Aside>
 
 ### Nested object graph (Order → Address + Order Lines + Tags)
 
-One order with a shipping address, three line items, and two tags. sqlite-net stores this across **3 tables** (6 inserts per order, 3 queries + manual rehydration per read). EF Core models it as related entities read with `Include`. DocumentDb stores it as **one JSON document**.
+One order with a shipping address, three line items, and two tags. sqlite-net stores this across **3 tables** (6 inserts per order, 3 queries + manual rehydration per read). EF Core models it as related entities read with `Include`. Dapper issues hand-written SQL across the same 3 tables. DocumentDb stores it as **one JSON document**.
 
 #### Insert (nested)
 
 | Library | 10 | 100 | 1000 |
 |---|---|---|---|
-| **Shiny.DocumentDb** | **439 µs** | **3.83 ms** | **39.02 ms** |
-| EF Core (3 tables) | 4.00 ms | 24.74 ms | 661.10 ms |
-| sqlite-net (3 tables) | 11.94 ms | 123.33 ms | 2.52 s |
+| **Shiny.DocumentDb** | **417 µs** | **3.63 ms** | **36.31 ms** |
+| EF Core (3 tables) | 4.94 ms | 24.75 ms | 648.55 ms |
+| Dapper (3 tables) | 11.43 ms | 174.28 ms | 1.99 s |
+| sqlite-net (3 tables) | 11.73 ms | 123.38 ms | 2.18 s |
 
-At 1,000 orders the document store is **~17x faster than EF Core** and **~65x faster than sqlite-net**.
+At 1,000 orders the document store is **~18x faster than EF Core**, **~55x faster than Dapper**, and **~60x faster than sqlite-net**.
 
 #### Read (nested)
 
-| Operation | Shiny.DocumentDb | sqlite-net | EF Core (Include, compiled) |
-|---|---|---|---|
-| Get by Id | **3.62 µs** | 28.10 µs | 31.00 µs |
-| Get all (100) | **124.3 µs** | 207.8 µs | 1.14 ms |
-| Get all (1000) | **1.27 ms** | 1.78 ms | 11.89 ms |
-| Query by status (~500/1000) | **1.01 ms** | 1.41 ms | 5.82 ms |
+| Operation | Shiny.DocumentDb | sqlite-net | Dapper | EF Core (Include, compiled) |
+|---|---|---|---|---|
+| Get by Id | **3.47 µs** | 27.84 µs | 18.56 µs | 32.03 µs |
+| Get all (100) | **127.2 µs** | 205.7 µs | 253.6 µs | 1.13 ms |
+| Get all (1000) | **1.36 ms** | 1.76 ms | 2.45 ms | 11.88 ms |
+| Query by status (~500/1000) | **1.01 ms** | 1.42 ms | 2.13 ms | 5.90 ms |
 
-The document store wins every nested read — by **8–10x** against EF Core's `Include` joins — because the whole graph lives in one row and deserializes in a single pass, with no JOINs and no change-tracker graph fixup.
+The document store wins every nested read — by **6–9x** against EF Core's `Include` joins, and **1.8–5x** even against Dapper's hand-written SQL — because the whole graph lives in one row and deserializes in a single pass, with no JOINs, no manual rehydration, and no change-tracker graph fixup.
 
 ## When to choose each
 
 - **Choose Shiny.DocumentDb** when your data is document-shaped (nested objects, child collections, variable structure), when you target .NET MAUI / AOT, when you want one storage API across multiple databases, or when you want vector search, temporal history, or built-in telemetry without bolting on more libraries.
 - **Choose sqlite-net-pcl** for the simplest possible flat-table CRUD on a single SQLite database, where every entity is a handful of scalar columns and you never store an object graph.
 - **Choose EF Core** for server-side relational applications with complex cross-entity queries, reporting, and a relational schema you genuinely want to model and migrate.
+- **Choose Dapper** when you want full control over hand-written SQL on a relational schema and are happy to map and rehydrate object graphs yourself — it is the fastest relational floor for flat reads, but you own every JOIN and every `INSERT`.
 
 DocumentDb is not trying to replace a relational mapper for relational problems. It is the right tool when your objects are the model and the database is just where they live.
