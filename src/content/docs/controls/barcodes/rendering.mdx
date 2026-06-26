@@ -1,0 +1,121 @@
+---
+title: Barcodes & QR Codes | Headless Rendering
+description: BarcodeRenderer and BarcodeRenderOptions — generate PNG bytes, SVG, or data URIs with no UI
+---
+
+`BarcodeRenderer` is a static, stateless class that produces barcode output directly — no view, no component, no platform dependency. It's the engine the MAUI views and Blazor components both call, exposed for use from view models, services, PDF builders, background jobs, and server code.
+
+```csharp
+using Shiny.Controls.Barcodes;
+```
+
+Everything here lives in the shared `Shiny.Controls.Barcodes` package, which is pulled in transitively by both the MAUI and Blazor packages — so if you've installed either UI package, the renderer is already available.
+
+## The API
+
+Three static methods, all overloads of "encode `content` as `format` using `options`":
+
+```csharp
+// Raw PNG bytes
+byte[] RenderPng(string content, BarcodeFormat format, BarcodeRenderOptions? options = null);
+
+// SVG markup (a complete <svg>…</svg> string)
+string RenderSvg(string content, BarcodeFormat format, BarcodeRenderOptions? options = null);
+
+// data: URI — pick PNG or SVG encoding
+string RenderDataUri(string content, BarcodeFormat format, BarcodeImageFormat imageFormat, BarcodeRenderOptions? options = null);
+```
+
+`options` is optional — omit it to use the [defaults](#barcoderenderoptions). All three calls are pure and thread-safe; call them from anywhere.
+
+```csharp
+var opts = new BarcodeRenderOptions
+{
+    PixelWidth = 600,
+    PixelHeight = 200,
+    Margin = 10,
+    ForegroundColor = "#000000",
+    BackgroundColor = "#FFFFFF",
+    QRErrorCorrection = QRErrorCorrection.High // QR only — ignored for other formats
+};
+
+byte[] png     = BarcodeRenderer.RenderPng("Hello", BarcodeFormat.QRCode, opts);
+string svg     = BarcodeRenderer.RenderSvg("Hello", BarcodeFormat.QRCode, opts);
+string dataUri = BarcodeRenderer.RenderDataUri("Hello", BarcodeFormat.QRCode, BarcodeImageFormat.Png, opts);
+```
+
+## BarcodeRenderOptions
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `PixelWidth` | `int` | `250` | Output bitmap width |
+| `PixelHeight` | `int` | `250` | Output bitmap height |
+| `Margin` | `int` | `10` | Quiet-zone padding in pixels |
+| `ForegroundColor` | `string` | `"#000000"` | Hex — `#RGB`, `#RRGGBB`, or `#AARRGGBB` (alpha is stripped) |
+| `BackgroundColor` | `string` | `"#FFFFFF"` | Hex — same formats as above |
+| `QRErrorCorrection` | `QRErrorCorrection` | `Medium` | QR-only; ignored for all other formats |
+
+:::note[Color parsing]
+Colors are parsed by an internal hex parser that accepts 3-, 6-, and 8-digit hex (with or without a leading `#`). For 8-digit `#AARRGGBB`, the **alpha channel is dropped** — barcodes are rendered fully opaque. Anything it can't parse falls back to black.
+:::
+
+:::caution[Defaults differ from the views]
+`BarcodeRenderOptions` defaults to **250 × 250** (square), which suits QR codes. The MAUI/Blazor views default to **400 × 150** (a wide 1D shape). When rendering 1D symbologies headlessly, set a wider `PixelWidth`/`PixelHeight` yourself.
+:::
+
+## Recipes
+
+### Save a QR code to disk
+
+```csharp
+byte[] png = BarcodeRenderer.RenderPng("https://shinylib.net", BarcodeFormat.QRCode);
+File.WriteAllBytes("join.png", png);
+```
+
+### Embed in a PDF or report
+
+Most PDF libraries accept a `byte[]` or `Stream` for an image:
+
+```csharp
+var png = BarcodeRenderer.RenderPng(invoice.Number, BarcodeFormat.Code128, new()
+{
+    PixelWidth = 600,
+    PixelHeight = 160
+});
+pdf.AddImage(png); // e.g. QuestPDF, iText, etc.
+```
+
+### Inline a barcode in an HTML email
+
+A data URI drops straight into an `<img src="…">`, so the image travels with the message body:
+
+```csharp
+var dataUri = BarcodeRenderer.RenderDataUri(
+    order.Tracking,
+    BarcodeFormat.Code128,
+    BarcodeImageFormat.Png   // most email clients render PNG more reliably than inline SVG
+);
+var html = $"<img src=\"{dataUri}\" alt=\"Tracking {order.Tracking}\" />";
+```
+
+### Vector output for a print template
+
+```csharp
+string svg = BarcodeRenderer.RenderSvg(label.Sku, BarcodeFormat.DataMatrix, new()
+{
+    PixelWidth = 300,
+    PixelHeight = 300
+});
+// drop `svg` directly into your XAML/HTML print layout
+```
+
+## How the PNG encoder works
+
+The PNG path doesn't depend on SkiaSharp or `System.Drawing`. It encodes the ZXing bit-matrix into a PNG by hand: a custom **zlib** deflate stream, **CRC32** for the chunk checksums, and **Adler32** for the zlib trailer. That's what keeps the package fully managed and **AOT/trim-safe** across every target — including iOS and Blazor WASM, where `System.Drawing` isn't an option.
+
+The SVG path emits one `<path>` built from horizontal runs of dark modules, with `shape-rendering="crispEdges"` so it never anti-aliases the edges. That makes the SVG both small and pixel-sharp at any scale.
+
+## See also
+
+- [.NET MAUI Usage](/controls/barcodes/maui/) and [Blazor Usage](/controls/barcodes/blazor/) — when you want a control instead of bytes
+- [Symbologies](/controls/barcodes/symbologies/) — choosing a format and its input rules

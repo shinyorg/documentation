@@ -1,0 +1,255 @@
+---
+title: AI Prompt
+description: Siri-style full-screen AI entry overlay for .NET MAUI and Blazor with frosted backdrop, animated glow edge, and optional speech-to-text
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+A Siri-style full-screen AI entry overlay: a frosted/blurred backdrop, an animated multi-colour glow that runs around the screen edge, and a large prompt entry with microphone and submit buttons. Drop it in when you want a focused "Ask anything…" moment for AI input. Use it either as a declarative control (`AiPromptOverlay`) or invoke it from code via the `IAiPromptService`. Speech-to-text is **optional** and decoupled through `IAiPromptSpeechProvider` — the base control has no speech dependency.
+
+- <NugetDownloads name="Shiny.Maui.Controls" />
+- <NugetDownloads name="Shiny.Blazor.Controls" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} />
+
+{/* TODO: capture screenshots for aiprompt — save to public/images/aiprompt/s1.png etc. and reference here */}
+
+## Features
+
+- **Two usage modes** — a declarative `AiPromptOverlay` control or a code-invoked `IAiPromptService.PromptAsync(...)`
+- **Frosted backdrop** — native blur behind the prompt (configurable `BackdropBlurRadius`)
+- **Animated glow edge** — a multi-colour glow that travels around the screen edge (default Siri-style violet → pink → blue → teal). On MAUI it's a `GraphicsView`/`IDrawable` ring; on Blazor it's an animated CSS `conic-gradient` border (`@property --shiny-ai-angle`) — no icon-font or image dependency
+- **Theme-aware** — colours follow the active Shiny theme tokens; only the glow palette is custom
+- **Optional speech-to-text** — decoupled via `IAiPromptSpeechProvider`; add it with the SpeechAddins packages. MAUI uses native speech (final transcript); Blazor uses the browser Web Speech API with **live partial transcription**
+- **Busy state** — `IsBusy` shows a working indicator while you call your AI backend
+- **Dismiss control** — backdrop tap (and Escape on Blazor), with optional dismiss-on-submit
+
+## When to Use
+
+Reach for the AI Prompt overlay when you want a dedicated, distraction-free surface for free-form AI input — an "Ask anything" entry point launched from a toolbar button, FAB, or wake word. If you need a full back-and-forth conversation UI with message bubbles, use [ChatView](/controls/chatview/) instead; the AI Prompt is for capturing a single prompt and handing it off to your model.
+
+## MAUI Usage
+
+### Service
+
+`IAiPromptService` is registered automatically by `UseShinyControls()`. Inject it and `await` `PromptAsync` — the overlay auto-attaches over the current page.
+
+```csharp
+public class MyViewModel(IAiPromptService aiPrompt)
+{
+    public async Task AskAsync()
+    {
+        var result = await aiPrompt.PromptAsync(new AiPromptRequest
+        {
+            Title = "Ask AI",
+            Placeholder = "Ask anything…"
+        });
+
+        if (result.HasText)
+            await SendToAi(result.Text!);
+    }
+}
+```
+
+`AiPromptRequest` lets you preset the `Title`, `Subtitle`, `Placeholder` (default `"Ask anything…"`), `InitialText`, `ShowMicrophone` (default `true`), a custom `GlowColors` palette, and the `BackdropBlurRadius` (default `30`). `PromptAsync` returns an `AiPromptResult` with `Text`, `WasCancelled`, and `HasText`.
+
+### Declarative
+
+The `AiPromptOverlay` is a `ContentView` that fills its host. Place it as the **last child** of a `Grid` that also holds your page content so it overlays everything.
+
+```xml
+<ContentPage xmlns:shiny="http://shiny.net/maui/controls" ...>
+    <Grid>
+        <ScrollView>
+            <!-- page content -->
+        </ScrollView>
+
+        <shiny:AiPromptOverlay x:Name="Prompt"
+                               Title="Ask AI"
+                               Subtitle="What can I help you with?"
+                               Submitted="OnSubmitted" />
+    </Grid>
+</ContentPage>
+```
+
+```csharp
+void OpenPrompt() => this.Prompt.IsOpen = true;
+
+void OnSubmitted(object? sender, AiPromptSubmittedEventArgs e)
+    => SendToAi(e.Text);
+```
+
+### Speech (MAUI)
+
+Speech-to-text is opt-in. Reference `Shiny.Maui.Controls.SpeechAddins` and call `.UseAiPromptSpeech()` **after** `.UseShinyControls()` — this registers Shiny.Speech and an `IAiPromptSpeechProvider`.
+
+```csharp
+builder
+    .UseShinyControls()
+    .UseAiPromptSpeech();
+```
+
+The service-based `PromptAsync` picks up the provider automatically. For the **declarative** control, assign the provider from DI yourself:
+
+```csharp
+public MyPage(IAiPromptSpeechProvider speech)
+{
+    InitializeComponent();
+    this.Prompt.SpeechProvider = speech;
+}
+```
+
+> Native speech returns a final transcript only (no live partials on MAUI).
+
+## Blazor Usage
+
+### Setup
+
+Register the service and place a single `<AiPromptHost />` in your layout (next to `<DialogHost />`):
+
+```csharp
+builder.Services.AddShinyAiEntry();
+// optional speech-to-text (browser Web Speech API)
+builder.Services.AddAiPromptSpeech();
+```
+
+```razor
+@* MainLayout.razor *@
+<div class="page">
+    <main>@Body</main>
+</div>
+
+<DialogHost />
+<AiPromptHost />
+```
+
+### Service
+
+```razor
+@inject IAiPromptService AiPrompt
+
+<button @onclick="AskAsync">Ask AI</button>
+
+@code {
+    async Task AskAsync()
+    {
+        var result = await AiPrompt.PromptAsync(new AiPromptRequest
+        {
+            Title = "Ask AI",
+            Placeholder = "Ask anything…"
+        });
+
+        if (result.HasText)
+            await SendToAi(result.Text!);
+    }
+}
+```
+
+### Declarative
+
+```razor
+<AiPromptOverlay @bind-IsOpen="open"
+                 Title="Ask AI"
+                 OnSubmit="OnSubmit" />
+
+@code {
+    bool open;
+    Task OnSubmit(string text) => SendToAi(text);
+}
+```
+
+Enter submits, Shift+Enter inserts a newline, and Escape dismisses.
+
+### Speech (Blazor)
+
+Add `Shiny.Blazor.Controls.SpeechAddins` and register it. It uses the browser **Web Speech API** with **live partial transcription**, so the entry updates as the user speaks.
+
+```csharp
+builder.Services.AddAiPromptSpeech();
+```
+
+## Properties
+
+### Request (`AiPromptRequest`)
+
+| Property | Type (MAUI / Blazor) | Default | Description |
+|---|---|---|---|
+| `Title` | `string?` | `null` | Heading above the prompt |
+| `Subtitle` | `string?` | `null` | Secondary line under the title |
+| `Placeholder` | `string?` | `"Ask anything…"` | Entry placeholder |
+| `InitialText` | `string?` | `null` | Pre-filled prompt text |
+| `ShowMicrophone` | `bool` | `true` | Show the microphone (speech) button |
+| `GlowColors` | `IList<Color>?` / `IReadOnlyList<string>?` | Siri palette | Custom glow colours (CSS colours on Blazor) |
+| `BackdropBlurRadius` | `double` | `30` (MAUI) / `24` (Blazor) | Frosted backdrop blur radius |
+
+### Result (`AiPromptResult`)
+
+| Property | Type | Description |
+|---|---|---|
+| `Text` | `string?` | The entered prompt (null when cancelled) |
+| `WasCancelled` | `bool` | `true` if dismissed without submitting |
+| `HasText` | `bool` | `true` when a non-empty prompt was submitted |
+
+### `AiPromptOverlay` — MAUI
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `IsOpen` | `bool` | `false` | Show/hide the overlay (TwoWay) |
+| `Prompt` | `string?` | `null` | The prompt text (TwoWay) |
+| `Placeholder` | `string?` | `"Ask anything…"` | Entry placeholder |
+| `Title` | `string?` | `null` | Heading |
+| `Subtitle` | `string?` | `null` | Secondary line |
+| `ShowMicrophone` | `bool` | `true` | Show the microphone button |
+| `ShowSubmitButton` | `bool` | `true` | Show the submit button |
+| `GlowColors` | `IList<Color>?` | Siri palette | Custom glow colours |
+| `GlowThickness` | `double` | `6` | Glow ring thickness |
+| `BackdropBlurRadius` | `double` | `30` | Frosted backdrop blur radius |
+| `AnimationDuration` | `uint` | `250` | Open/close animation in ms |
+| `IsBusy` | `bool` | `false` | Working indicator while you call your AI |
+| `DismissOnSubmit` | `bool` | `true` | Auto-close after submit |
+| `DismissOnBackdropTap` | `bool` | `true` | Close when the backdrop is tapped |
+| `SubmitCommand` | `ICommand?` | `null` | Command fired on submit |
+| `SpeechProvider` | `IAiPromptSpeechProvider?` | `null` | Speech-to-text provider (assign from DI) |
+
+**Events:** `Submitted` (`AiPromptSubmittedEventArgs { Text }`), `SpeechRequested` (`AiPromptSpeechRequestedEventArgs { Handled }`), `Cancelled`, `Opened`, `Closed`.
+
+### `AiPromptOverlay` — Blazor
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `IsOpen` | `bool` | `false` | Show/hide (`@bind-IsOpen`) |
+| `Prompt` | `string?` | `null` | Prompt text (`@bind-Prompt`) |
+| `Placeholder` | `string?` | `"Ask anything…"` | Entry placeholder |
+| `Title` | `string?` | `null` | Heading |
+| `Subtitle` | `string?` | `null` | Secondary line |
+| `ShowMicrophone` | `bool` | `true` | Show the microphone button |
+| `ShowSubmitButton` | `bool` | `true` | Show the submit button |
+| `GlowColors` | `IReadOnlyList<string>?` | Siri palette | Custom glow CSS colours |
+| `GlowThickness` | `double` | `5` | Glow border thickness |
+| `BackdropBlurRadius` | `double` | `24` | Frosted backdrop blur radius |
+| `GlowSpeedSeconds` | `double` | `6` | Seconds for one full glow rotation |
+| `IsBusy` | `bool` | `false` | Working indicator while you call your AI |
+| `DismissOnBackdropTap` | `bool` | `true` | Close when the backdrop is tapped |
+| `SpeechProvider` | `IAiPromptSpeechProvider?` | `null` | Speech-to-text provider |
+| `OnSubmit` | `EventCallback<string>` | — | Fired with the submitted text |
+| `OnCancel` | `EventCallback` | — | Fired when dismissed |
+| `OnSpeechRequested` | `EventCallback` | — | Fired when the microphone is tapped |
+
+## Custom Speech Provider
+
+Speech is decoupled behind a small contract, so you can plug in any engine (cloud STT, on-device, etc.) without touching the control:
+
+```csharp
+public interface IAiPromptSpeechProvider
+{
+    bool IsSupported { get; }
+    Task<AiPromptSpeechResult> ListenAsync(IProgress<string>? partial, CancellationToken ct);
+}
+```
+
+`partial` reports live interim transcription where the engine supports it (Blazor Web Speech API); MAUI's native provider reports only the final transcript.
+
+## AI Skill
+
+<AiSkill skillName="shiny-controls" />

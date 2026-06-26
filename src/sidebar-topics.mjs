@@ -286,9 +286,10 @@ export const sidebarTopics = [
     ]
   },
   {
-    label: 'Controls',
+    label: 'UI Controls',
     link: '/controls/',
     icon: 'seti:html',
+    flattenInHomenav: true,
     items:[
       { label: 'Getting Started', link: 'controls/' },
       {
@@ -299,28 +300,23 @@ export const sidebarTopics = [
         ],
       },
       {
-        label: 'TableView',
+        label: 'Barcodes & QR Codes',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/tableview/' },
-          { label: 'Cell Types', link: 'controls/tableview/cells' },
-          { label: 'Sections & Dynamic Content', link: 'controls/tableview/sections' },
-          { label: 'Styling', link: 'controls/tableview/styling' },
-          { label: 'Advanced Features', link: 'controls/tableview/advanced' },
-          { label: 'Blazor Usage', link: 'controls/tableview/blazor' },
+          { label: 'Getting Started', link: 'controls/barcodes/' },
+          { label: '.NET MAUI Usage', link: 'controls/barcodes/maui' },
+          { label: 'Blazor Usage', link: 'controls/barcodes/blazor' },
+          { label: 'Headless Rendering', link: 'controls/barcodes/rendering' },
+          { label: 'Symbologies', link: 'controls/barcodes/symbologies' },
         ]
       },
-      { label: 'DataGrid', link: 'controls/datagrid/', jumpTo: true },
       {
-        label: 'Scheduler',
+        label: 'CameraView',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/scheduler/' },
-          { label: 'Calendar View', link: 'controls/scheduler/calendar' },
-          { label: 'Agenda View', link: 'controls/scheduler/agenda' },
-          { label: 'Event List', link: 'controls/scheduler/event-list' },
-          { label: 'Custom Templates', link: 'controls/scheduler/templates' },
-          { label: 'Blazor Usage', link: 'controls/scheduler/blazor' },
+          { label: 'Getting Started', link: 'controls/cameraview/' },
+          { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
+          { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
         ]
       },
       {
@@ -342,22 +338,22 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'ImageEditor',
-        jumpTo: true,
+        label: 'Collections & Grids',
         items:[
-          { label: 'Getting Started', link: 'controls/imageeditor/' },
-          { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
-          { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
+          { label: 'DataGrid', link: 'controls/datagrid/', jumpTo: true },
+          { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
+          { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
+          { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
+          { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
+          { label: 'Carousel (Blazor)', link: 'controls/carousel/', jumpTo: true },
         ]
       },
       {
-        label: 'FloatingPanel',
-        jumpTo: true,
+        label: 'Desktop',
         items:[
-          { label: 'Getting Started', link: 'controls/floatingpanel/' },
-          { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
-          { label: 'Examples', link: 'controls/floatingpanel/examples' },
-          { label: 'Sheet View (Blazor Only)', link: 'controls/sheetview/' },
+          { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
+          { label: 'Docking', link: 'controls/docking/', jumpTo: true },
+          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true },
         ]
       },
       {
@@ -370,33 +366,32 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/fab/blazor' },
         ]
       },
-      { label: 'Toolbar & TabBar (Blazor Only)', link: 'controls/toolbar-tabbar/', jumpTo: true },
+      { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
       {
-        label: 'Mermaid Diagrams',
+        label: 'Floating Panels',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/mermaid-diagrams/' },
-          { label: 'Control Properties', link: 'controls/mermaid-diagrams/control' },
-          { label: 'Theming', link: 'controls/mermaid-diagrams/theming' },
-          { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor' },
+          { label: 'Getting Started', link: 'controls/floatingpanel/' },
+          { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
+          { label: 'Examples', link: 'controls/floatingpanel/examples' },
+          {
+            label: 'Derived Controls',
+            items:[
+              { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
+              { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
+              { label: 'DurationPicker', link: 'controls/durationpicker/', jumpTo: true },
+              { label: 'Sheet View (Blazor Only)', link: 'controls/sheetview/', jumpTo: true },
+            ]
+          },
         ]
       },
-      { label: 'Barcodes & QR Codes', link: 'controls/barcodes/', jumpTo: true },
       {
-        label: 'CameraView',
+        label: 'ImageEditor',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/cameraview/' },
-          { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
-          { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
-        ]
-      },
-      {
-        label: 'TreeView',
-        jumpTo: true,
-        items:[
-          { label: 'Getting Started', link: 'controls/treeview/' },
-          { label: 'Blazor Usage', link: 'controls/treeview/blazor' },
+          { label: 'Getting Started', link: 'controls/imageeditor/' },
+          { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
+          { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
         ]
       },
       {
@@ -408,7 +403,57 @@ export const sidebarTopics = [
           { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
         ]
       },
-      { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
+      {
+        label: 'Mermaid Diagrams',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/mermaid-diagrams/' },
+          { label: 'Control Properties', link: 'controls/mermaid-diagrams/control' },
+          { label: 'Theming', link: 'controls/mermaid-diagrams/theming' },
+          { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor' },
+        ]
+      },
+      {
+        label: 'Scheduler',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/scheduler/' },
+          { label: 'Calendar View', link: 'controls/scheduler/calendar' },
+          { label: 'Agenda View', link: 'controls/scheduler/agenda' },
+          { label: 'Event List', link: 'controls/scheduler/event-list' },
+          { label: 'Custom Templates', link: 'controls/scheduler/templates' },
+          { label: 'Blazor Usage', link: 'controls/scheduler/blazor' },
+        ]
+      },
+      {
+        label: 'TableView',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/tableview/' },
+          { label: 'Cell Types', link: 'controls/tableview/cells' },
+          { label: 'Sections & Dynamic Content', link: 'controls/tableview/sections' },
+          { label: 'Styling', link: 'controls/tableview/styling' },
+          { label: 'Advanced Features', link: 'controls/tableview/advanced' },
+          { label: 'Blazor Usage', link: 'controls/tableview/blazor' },
+        ]
+      },
+      {
+        label: 'Toolbar & TabBar (Blazor Only)',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/toolbar-tabbar/' },
+          { label: 'ShinyToolbar', link: 'controls/toolbar-tabbar/toolbar' },
+          { label: 'ShinyTabBar', link: 'controls/toolbar-tabbar/tabbar' },
+        ]
+      },
+      {
+        label: 'TreeView',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/treeview/' },
+          { label: 'Blazor Usage', link: 'controls/treeview/blazor' },
+        ]
+      },
       {
         label: 'Other Controls',
         items:[
@@ -417,32 +462,17 @@ export const sidebarTopics = [
           { label: 'Slider', link: 'controls/slider/', jumpTo: true },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
-          { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
-          { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
-          { label: 'Carousel (Blazor)', link: 'controls/carousel/', jumpTo: true },
-          { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
-          { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
-          { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
-          { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
           { label: 'Dialogs', link: 'controls/dialogs/', jumpTo: true },
         ]
       },
-      {
-        label: 'Desktop',
-        items:[
-          { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
-          { label: 'Docking', link: 'controls/docking/', jumpTo: true },
-          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true },
-        ]
-      },
       { label: 'Blazor Playground', link: 'https://shinyorg.github.io/controls/', attrs: { target: '_blank' } },
-      { label: 'Release Notes', link: 'controls/release-notes' }
+      { label: 'Release Notes', link: 'controls/release-notes' },
     ]
   },
   {
@@ -761,6 +791,7 @@ export function cleanTopicsForStarlight(topics) {
   return JSON.parse(JSON.stringify(stripHomeNavOnly(topics), (key, value) => {
     if (key === 'jumpTo') return undefined;
     if (key === 'expandInHomenav') return undefined;
+    if (key === 'flattenInHomenav') return undefined;
     if (key === 'homeNavOnly') return undefined;
     return value;
   }));
@@ -770,6 +801,8 @@ export const sidebarTopicsOptions = {
   exclude: [
     '/blog',
     '/blog/**/*',
+    '/controls/aiprompt',
+    '/controls/aiprompt/**/*',
     '/foundation/hosting/uno',
     '/other/androidforeground',
     '/mediator/extensions',
