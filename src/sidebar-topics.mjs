@@ -488,6 +488,7 @@ export const sidebarTopics = [
           { label: 'Why DocumentDb', link: 'documentdb/comparison' },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
+          { label: 'Bulk Export & Import', link: 'documentdb/backup' },
           { label: 'Querying', link: 'documentdb/querying' },
           { label: 'Projections & Streaming', link: 'documentdb/projections' },
           { label: 'Aggregates', link: 'documentdb/aggregates' },
@@ -505,6 +506,7 @@ export const sidebarTopics = [
               { label: 'Spatial', link: 'documentdb/spatial' },
               { label: 'Vector / ANN Search', link: 'documentdb/vector' },
               { label: 'Full-Text Search', link: 'documentdb/full-text' },
+              { label: 'Computed Properties', link: 'documentdb/computed-columns' },
               { label: 'Temporal Support', link: 'documentdb/temporal' },
             ]
           },

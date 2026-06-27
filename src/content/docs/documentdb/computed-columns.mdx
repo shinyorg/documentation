@@ -1,0 +1,124 @@
+---
+title: Computed Properties
+---
+
+A **computed property** is a value *derived* from other fields — `Total = Quantity * UnitPrice`, `FullName = First + " " + Last`, a normalized `lower(Email)` — that you can **filter, sort, and project by exactly like a stored property**, even though it is never written into the document JSON. Map it once with `MapComputedProperty<T>(...)` and reference it by name in typed LINQ, the string query API, and OData.
+
+It has two modes. By default it runs in **alias mode**: the definition is translated to SQL and inlined wherever the property appears — zero schema changes, works on every relational provider. Opt into `indexed: true` and the relational providers **materialize** the value as a native generated/computed column and index it, so filters and sorts are index-served. Either way the value is recomputed and written back onto the object on read, so a round-tripped document is complete.
+
+## Mapping a computed property
+
+Expose the value as a `[JsonIgnore]` property with a setter, then map it — the first expression is the property it backs, the second is the definition:
+
+```csharp
+using System.Text.Json.Serialization;
+
+public class Order
+{
+    public int     Quantity  { get; set; }
+    public decimal UnitPrice { get; set; }
+    public string  First     { get; set; } = "";
+    public string  Last      { get; set; } = "";
+
+    [JsonIgnore] public decimal Total    { get; set; }   // never serialized; engine owns it
+    [JsonIgnore] public string  FullName { get; set; } = "";
+}
+
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db");
+
+    opts.MapComputedProperty<Order, decimal>(o => o.Total,    o => o.Quantity * o.UnitPrice);
+    opts.MapComputedProperty<Order, string>(o => o.FullName,  o => o.First + " " + o.Last);
+});
+```
+
+The `[JsonIgnore]` is what keeps the value *derived* rather than persisted — it never appears in the stored `Data` JSON.
+
+## Querying by a computed property
+
+Reference it like any other property. Filtering, sorting, projecting, and read-back all work:
+
+```csharp
+// typed LINQ
+var big = await store.Query<Order>()
+    .Where(o => o.Total > 100)
+    .OrderByDescending(o => o.Total)
+    .ToList();
+
+// string query API — same name
+var page = await store.Query<Order>()
+    .Where("total > 100")
+    .OrderBy("fullName")
+    .ToList();
+
+// projection — by name, with an alias
+var rows = await store.Query<Order>()
+    .Project("fullName as name, total")
+    .ToList();
+
+// read-back: the property is populated even though it isn't stored
+var one = (await store.Query<Order>().Where(o => o.Id == "42").ToList()).Single();
+Console.WriteLine($"{one.FullName}: {one.Total}");   // both populated
+```
+
+OData inherits all three: `$filter=total gt 100`, `$orderby=fullName`, and `$select=total` resolve the computed property by name.
+
+The definition supports the same surface as ordinary queries — JSON field access, string concatenation, the scalar functions (`lower`, `year`, `substring`, …) and **numeric arithmetic** (`+ - * /`).
+
+## Making it fast: `indexed: true`
+
+Alias mode is a convenience, not a performance feature — it recomputes the expression on every row. When a computed value is a hot filter/sort target, opt into materialization:
+
+```csharp
+opts.MapComputedProperty<Order, decimal>(o => o.Total, o => o.Quantity * o.UnitPrice,
+    indexed: true);
+```
+
+On the relational providers this creates a native generated/computed column plus an index, scoped to the type (the document table is shared across types), and the query layer references the real column instead of inlining the expression. Filters become index seeks and `ORDER BY` is served from the index.
+
+| Mode | Storage | Filter / sort |
+| --- | --- | --- |
+| **Alias** (default) | none | inlined expression, recomputed per row |
+| **`indexed: true`** | native generated/computed column + index | index-served |
+
+Materialization is provider-specific:
+
+| Provider | Materialized column |
+| --- | --- |
+| SQLite | `VIRTUAL` generated column + index |
+| PostgreSQL | `STORED` generated column + filtered index |
+| SQL Server | `PERSISTED` computed column + filtered index |
+| MySQL | `VIRTUAL` generated column + index |
+| Oracle | virtual column + index |
+| DuckDB | alias mode (cannot add a generated column via `ALTER TABLE`; columnar scans make the index moot) |
+| MongoDB · Cosmos · LiteDB · IndexedDB | alias mode (evaluated in memory; `indexed` is ignored) |
+
+The column is maintained by the database engine, so it stays correct through every write — including bulk import paths that bypass the application. Only deterministic expressions over the document's own fields can be materialized.
+
+## Provider support
+
+| Capability | Relational (SQLite, PostgreSQL, SQL Server, MySQL, Oracle, DuckDB) | LiteDB · IndexedDB | MongoDB · Cosmos |
+| --- | --- | --- | --- |
+| Read-back | ✅ | ✅ | ✅ |
+| Filter / sort / project by computed | ✅ | ✅ (evaluated in memory) | Projection & read-back ✅; server-side **filter/sort** by a computed property is not supported |
+| Materialized column + index (`indexed: true`) | ✅ — except DuckDB (alias only) | — | — |
+
+On LiteDB and IndexedDB the value is computed in memory before filtering and ordering, so the full surface works client-side. On MongoDB and Cosmos the value is populated on read and is projectable, but a server-side `Where`/`OrderBy` over a computed property is not translated — filter on the underlying stored fields instead, or store the value as a real property.
+
+## AOT
+
+Computed properties are fully Native-AOT and trim-safe. The definition is **translated** to SQL by walking the expression tree and **interpreted** for read-back — neither path calls `Expression.Compile()`, so there is no runtime code generation. The expression overload resolves the backing property by name (a single suppressed reflection lookup over your model type, like the other `Map*Property` mappings); for a pristine, annotation-free surface use the AOT overload with an explicit setter:
+
+```csharp
+opts.MapComputedProperty<Order, decimal>(
+    "Total",
+    o => o.Quantity * o.UnitPrice,
+    setter: (o, v) => o.Total = v);
+```
+
+## Notes
+
+- The backing property must be writable (it has a setter) so the value can be populated on read.
+- The definition may reference stored fields and the supported scalar functions / arithmetic; a definition that references itself throws.
+- `indexed: true` is accepted by the document providers for API parity but has no native column to back, so it is a no-op there.

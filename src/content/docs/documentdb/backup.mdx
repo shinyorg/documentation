@@ -1,0 +1,187 @@
+---
+title: Bulk Export & Import
+---
+
+`IDocumentBackup` is a streaming bulk **export / import / restore** surface — move the whole contents of a store in and out as a portable backup document, or feed raw rows from any source into a store as fast as the backend allows. It is the cross-provider, programmatic counterpart to the file-copy [`Backup`](/documentdb/crud#backup) on the embedded providers.
+
+It is a **separate store capability**, not part of `IDocumentStore` — probe for it with `store is IDocumentBackup` (the same pattern as `IDocumentMaintenance`). It is implemented by the relational `DocumentStore` (every SQL provider), the MongoDB store, and the Cosmos DB store.
+
+```csharp
+if (store is not IDocumentBackup backup)
+    throw new NotSupportedException("This provider has no bulk backup surface.");
+```
+
+## The interface
+
+```csharp
+public interface IDocumentBackup
+{
+    // Stream the whole store out as a v1 backup document
+    Task ExportAsync(
+        Stream destination,
+        BackupExportOptions? options = null,
+        CancellationToken cancellationToken = default);
+
+    // Stream a backup document back in (the JSON adapter over BulkImportAsync)
+    Task<BulkRestoreResult> RestoreAsync(
+        Stream source,
+        BulkRestoreOptions? options = null,
+        CancellationToken cancellationToken = default);
+
+    // Lower-level primitive — write pre-shaped raw rows from any source
+    Task<BulkRestoreResult> BulkImportAsync(
+        IAsyncEnumerable<RawDocument> documents,
+        BulkRestoreOptions? options = null,
+        CancellationToken cancellationToken = default);
+}
+```
+
+The import path is built for throughput: document bodies are bound **verbatim** — no `<T>`, no `JsonTypeInfo`, no reflection over the documents — so it is AOT-friendly, and both export and restore **stream**, so a multi-GB backup never lands fully in memory.
+
+:::caution[This is a raw restore lane]
+The import path deliberately **skips** versioning / CAS, temporal history, interceptors, tenant scoping, and global query filters — that's exactly where the speed comes from. Treat it as a bulk restore/migration tool, **not** a transparent replacement for [`BatchUpsert`](/documentdb/crud#batch-upsert-update--remove). If you need any of those side effects, use the normal write APIs.
+:::
+
+## Exporting
+
+`ExportAsync` writes the entire store out to a `Stream` as a **v1 backup document** — a JSON array of `{ "id", "docType", "data" }` records, where `data` is the raw document body emitted **as-is**. Sidecar tables (temporal history, spatial, vector, full-text indexes) are *not* exported; they are rebuilt by the write path on restore.
+
+```csharp
+await using var file = File.Create("backup.json");
+await ((IDocumentBackup)store).ExportAsync(file);
+```
+
+### BackupExportOptions
+
+```csharp
+public class BackupExportOptions
+{
+    // Only export these resolved type names. Null exports everything.
+    public IReadOnlyCollection<string>? DocTypes { get; set; }
+
+    // Pretty-print the output. Defaults to false (compact).
+    public bool Indented { get; set; }
+}
+```
+
+```csharp
+await ((IDocumentBackup)store).ExportAsync(file, new BackupExportOptions
+{
+    DocTypes = ["Order", "Customer"],
+    Indented = true
+});
+```
+
+:::note[Export scope by provider]
+On the relational providers, export covers the store's configured document tables. On **Cosmos DB**, export is whole-**database** — every container is included.
+:::
+
+## Restoring
+
+`RestoreAsync` streams a v1 backup document back in, parsing it with a forward-only reader (the file is never fully buffered) and writing in committed chunks. The bodies are bound verbatim.
+
+```csharp
+await using var src = File.OpenRead("backup.json");
+var result = await ((IDocumentBackup)store).RestoreAsync(src, new BulkRestoreOptions
+{
+    Mode = BulkWriteMode.Insert,
+    ClearExistingFirst = true,
+    ChunkSize = 5000,
+    Progress = new Progress<BulkProgress>(p => Console.WriteLine($"{p.DocumentsWritten} written"))
+});
+
+Console.WriteLine($"Read {result.DocumentsRead}, wrote {result.DocumentsWritten}, " +
+                  $"skipped {result.DocumentsSkipped} across {result.ChunksCommitted} chunks.");
+```
+
+### BulkRestoreOptions
+
+```csharp
+public class BulkRestoreOptions
+{
+    // Collision strategy. Defaults to Insert (restore-into-empty).
+    public BulkWriteMode Mode { get; set; } = BulkWriteMode.Insert;
+
+    // Wipe every document table (IDocumentMaintenance.ClearAll) before importing.
+    public bool ClearExistingFirst { get; set; }
+
+    // Rows per statement / per committed transaction. Defaults to 500.
+    public int ChunkSize { get; set; } = 500;
+
+    // false (default): commit per chunk — resumable, bounded WAL/log.
+    // true: one transaction for the whole import — atomic, but heavy.
+    public bool SingleTransaction { get; set; }
+
+    // Optional progress callback, invoked after each committed chunk.
+    public IProgress<BulkProgress>? Progress { get; set; }
+}
+```
+
+### BulkWriteMode — collision handling
+
+How an imported row resolves a collision with an existing document of the same Id + type:
+
+| Mode | Behavior |
+|---|---|
+| `Insert` | **Fail** the chunk on a duplicate Id. Fastest — multi-row `VALUES` on every provider, native bulk copy where available. |
+| `Replace` | Overwrite the existing body **wholesale** on conflict. |
+| `Merge` | RFC 7396 **deep-merge** into the existing body — the same semantics as `BatchUpsert`. |
+| `SkipExisting` | Insert new rows, silently **skip** ones whose Id already exists. |
+
+:::caution[Choosing a mode for a full restore]
+For a clean restore into an empty (or `ClearExistingFirst`-wiped) store, use **`Insert`** or **`Replace`**. Avoid `Merge` for full restores — under RFC 7396 a `null` in a body **deletes** that field, which is rarely what you want when re-hydrating whole documents.
+:::
+
+### BulkRestoreResult
+
+```csharp
+public readonly record struct BulkRestoreResult(
+    long DocumentsRead,
+    long DocumentsWritten,
+    long DocumentsSkipped,
+    int ChunksCommitted);
+```
+
+## Importing raw rows (BulkImportAsync)
+
+`BulkImportAsync` is the lower-level primitive `RestoreAsync` is built on. Feed it any `IAsyncEnumerable<RawDocument>` — from another store, a network feed, a custom file format — and it writes them with the same chunking, modes, and result type.
+
+```csharp
+public readonly record struct RawDocument(string Id, string DocType, ReadOnlyMemory<byte> Data);
+```
+
+`Data` is the raw UTF-8 JSON body, bound verbatim into the document `Data` column — it is never parsed into a CLR type.
+
+```csharp
+async IAsyncEnumerable<RawDocument> MyRows()
+{
+    await foreach (var row in ReadFromSomewhere())
+        yield return new RawDocument(row.Key, "Order", row.JsonBytes);
+}
+
+await ((IDocumentBackup)store).BulkImportAsync(MyRows(), new BulkRestoreOptions
+{
+    Mode = BulkWriteMode.Replace
+});
+```
+
+## Provider compatibility
+
+| Capability | Providers |
+|---|---|
+| **Insert** | **Every** provider — relational multi-row `VALUES`, Mongo `BulkWrite`, Cosmos concurrent waves. |
+| **Replace & SkipExisting** | All relational providers (`ON CONFLICT` on SQLite/DuckDB/PostgreSQL, `ON DUPLICATE KEY`/`INSERT IGNORE` on MySQL, `MERGE` on SQL Server & Oracle) + MongoDB + Cosmos DB. |
+| **Merge** | **Only** SQLite, DuckDB (native JSON merge) and MongoDB / Cosmos (client-side merge). Throws `NotSupportedException` on PostgreSQL / MySQL / SQL Server / Oracle — use `Replace`. |
+| **Native bulk-copy fast path** (Insert, 10-100×) | PostgreSQL (binary `COPY`), SQL Server (`SqlBulkCopy`), DuckDB (appender). Other providers use multi-row `VALUES`. |
+
+### Caveats
+
+- **Mongo / Cosmos imports are not atomic.** They are best-effort — those engines lack multi-document transactions here, so `SingleTransaction` is **ignored**. Use the relational providers when you need an all-or-nothing import.
+- **Oracle large documents.** Oracle `Replace` / `SkipExisting` build the `MERGE` source via `SELECT … FROM DUAL UNION ALL`, which can reject very large documents bound as CLOB (documents above the VARCHAR2 bind limit).
+- **Cosmos export is whole-database** (all containers); relational export covers the store's configured tables.
+
+## See also
+
+- [Backup (file copy)](/documentdb/crud#backup) — hot file backup on SQLite / SQLCipher / LiteDB.
+- [ClearAll](/documentdb/crud#clear-the-entire-store-clearall) — the whole-store wipe that `ClearExistingFirst` calls.
+- [Batch upsert / update / remove](/documentdb/crud#batch-upsert-update--remove) — side-effect-honoring bulk writes.
