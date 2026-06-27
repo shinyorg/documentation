@@ -20,6 +20,16 @@ if (access != AccessState.Available)
 }
 ```
 
+:::caution[Android: scans return nothing?]
+On Android 12+ Shiny requests `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` at runtime — **not** `ACCESS_FINE_LOCATION`. If your `AndroidManifest.xml` declares `BLUETOOTH_SCAN` *without* the `neverForLocation` flag, Android silently withholds **all** scan results unless fine location is also granted. Unless your app derives physical location from BLE, declare:
+
+```xml
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+                 android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+```
+:::
+
 ## Scanning for Peripherals
 
 Scanning returns an `IObservable<ScanResult>` that emits each time a peripheral advertisement is detected.
