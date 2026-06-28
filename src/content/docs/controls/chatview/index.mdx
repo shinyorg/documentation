@@ -1,12 +1,16 @@
 ---
 title: ChatView
-description: A full-featured chat UI control for .NET MAUI and Blazor
+description: A provider-driven chat UI control for .NET MAUI and Blazor
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 import AiSkill from '/src/components/AiSkill.astro';
 
-A production-ready chat UI control that handles message bubbles, typing indicators, reactions, pagination, smart scrolling, and input — so you can focus on your messaging logic instead of pixel-pushing.
+A modern, provider-driven chat UI control. ChatView is **styles + layout only** — all data, lifecycle, permissions, and real-time behavior live behind an `IChatSessionProvider` you implement. You give the control a `Provider` and a `SessionId`; it does the rest: cursor paging, optimistic send, reactions, per-user read receipts, a markdown composition toolbar, image attachments, typing indicators, and a connection banner.
+
+:::caution
+ChatView is **v1 beta** — the API may still change between releases.
+:::
 
 - <NugetDownloads name="Shiny.Maui.Controls" />
 - <NugetDownloads name="Shiny.Blazor.Controls" />
@@ -17,25 +21,35 @@ A production-ready chat UI control that handles message bubbles, typing indicato
 
 <img src="/images/chatview/s1.png" width="220" alt="ChatView" />
 
+{/* TODO: capture additional screenshots for chatview (provider, markdown toolbar, attachment picker, reactions) */}
+
+## What Changed
+
+ChatView no longer binds a `Messages` collection or wires `SendCommand` / `LoadMoreCommand` / `Participants` / a bubble-tool tree. Those are **removed**. Instead you implement an `IChatSessionProvider` that hands the control a session-scoped `IChatSession`, exactly like the Scheduler's `ISchedulerEventProvider` pattern. The control subscribes to the session's live events on attach and disposes it on detach.
+
 ## What You Get Out of the Box
 
 | Feature | MAUI | Blazor |
 |---|:---:|:---:|
-| Message bubbles with grouping & timestamps | ✓ | ✓ |
-| Multi-person chat with avatars & colors | ✓ | ✓ |
-| Typing indicators (animated dots) | ✓ | ✓ |
-| Image messages | ✓ | ✓ |
-| Link auto-detection | ✓ | ✓ |
-| Acknowledgement reactions (emoji badges) | ✓ | ✓ |
-| Smart scroll & unread pill | ✓ | ✓ |
-| Load-more pagination | ✓ | ✓ |
-| DateSent pending state (dimmed bubble, offline support) | ✓ | ✓ |
-| Input bar with attach button | ✓ | ✓ |
-| Per-message bubble tools (⋯ menu) | ✓ | — |
-| Input bar tools (FAB menu) | ✓ | — |
-| Custom message templates | ✓ | — |
-| Speech-to-text input | ✓ | — |
-| Text-to-speech bubble tool | ✓ | — |
+| Provider-driven data (`IChatSessionProvider` + `SessionId`) | ✓ | ✓ |
+| Message bubbles with grouping, timestamps & alignment | ✓ | ✓ |
+| Multi-person chat with avatars & per-user bubble colors | ✓ | ✓ |
+| Cursor-based load-more paging (stable under live inserts) | ✓ | ✓ |
+| Optimistic send (Sending → Sent/Delivered/Read) | ✓ | ✓ |
+| Failed (retry) vs Rejected (no retry) send verdicts | ✓ | ✓ |
+| Emoji reactions (permission + `PermittedEmojis` driven) | ✓ | ✓ |
+| Per-user read receipts | ✓ | ✓ |
+| Markdown composition toolbar (gated by `BodyPermissions`) | ✓ | ✓ |
+| Inline markdown rendering in bubbles (no Markdown package) | ✓ | ✓ |
+| Image attachments — gallery + camera (where supported) | ✓ | ✓ |
+| Tap image → built-in ImageViewer (`OpenImagesInViewer`) | ✓ | ✓ |
+| Typing indicators (animated dots, auto-expiry) | ✓ | ✓ |
+| Connection banner + input disable while offline | ✓ | ✓ |
+| Permission-driven actions (react / edit / delete / copy) | ✓ | ✓ |
+| Scroll-to-first-unread | ✓ | ✓ |
+| Custom input + bubble actions (`ChatInputAction`/`ChatBubbleAction`) | ✓ | — |
+| Custom message templates (`MessageTemplate`/`MessageTemplateSelector`) | ✓ | — |
+| Speech-to-text input / text-to-speech bubble (SpeechAddins) | ✓ | — |
 | Haptic feedback | ✓ | — |
 
 ## Quick Start
@@ -43,10 +57,10 @@ A production-ready chat UI control that handles message bubbles, typing indicato
 ### MAUI
 
 ```xml
-xmlns:shiny="http://shiny.com/controls"
+xmlns:shiny="http://shiny.net/maui/controls"
 
-<shiny:ChatView Messages="{Binding Messages}"
-                SendCommand="{Binding SendCommand}"
+<shiny:ChatView Provider="{Binding Provider}"
+                SessionId="{Binding SessionId}"
                 MyBubbleColor="#DCF8C6"
                 OtherBubbleColor="White" />
 ```
@@ -54,19 +68,14 @@ xmlns:shiny="http://shiny.com/controls"
 ```csharp
 public partial class ChatViewModel : ObservableObject
 {
-    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
-
-    [RelayCommand]
-    void Send(string text)
+    public ChatViewModel(IChatSessionProvider provider)
     {
-        Messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
+        this.Provider = provider;
+        this.SessionId = "demo";
     }
+
+    public IChatSessionProvider Provider { get; }
+    public string SessionId { get; }
 }
 ```
 
@@ -76,46 +85,36 @@ public partial class ChatViewModel : ObservableObject
 @using Shiny.Blazor.Controls.Chat
 
 <div style="height: 600px;">
-    <ChatView Messages="messages"
-              SendCommand="OnSend"
-              MyBubbleColor="#DCF8C6"
-              OtherBubbleColor="#FFFFFF" />
+    <ChatView Provider="provider" SessionId="@sessionId" />
 </div>
 
 @code {
-    List<ChatMessage> messages = new();
-
-    Task OnSend(string text)
-    {
-        messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
-        StateHasChanged();
-        return Task.CompletedTask;
-    }
+    [Inject] public IChatSessionProvider provider { get; set; } = default!;
+    string sessionId = "demo";
 }
 ```
+
+You supply the `IChatSessionProvider` — see [The Provider Interface](./the-provider) for a full in-memory implementation.
 
 ## Documentation Sections
 
 | Section | What You'll Learn |
 |---|---|
-| [Getting Started](./getting-started) | Full setup, packages, first working chat |
-| [Messages](./messages) | Sending, images, links, pending state, identifiers |
-| [Participants & Avatars](./participants) | Multi-person mode, avatars, per-user colors |
-| [Typing Indicators](./typing-indicators) | Animated dots, toast pills, scroll-aware behavior |
-| [Scrolling & Pagination](./scrolling-pagination) | Smart scroll, unread pill, load-more, scroll-to-message |
-| [Acknowledgements](./acknowledgements) | Emoji reactions, grouping, dynamic updates |
-| [Bubble Tools](./bubble-tools) | Per-message action menus, built-in & custom tools |
-| [Input Bar & Tools](./input-bar) | Input config, FAB tools, speech-to-text |
-| [Message Templates](./message-templates) | Custom rendering with DataTemplate/DataTemplateSelector |
-| [Scenarios](./scenarios) | AI assistant, customer support, group chat, read-only |
-| [API Reference](./api-reference) | Full property, command, method & event tables |
+| [Getting Started](./getting-started) | Install, register, and the minimal end-to-end chat |
+| [The Provider Interface](./the-provider) | `IChatSessionProvider` / `IChatSession`, lifecycle, events |
+| [Messages & Paging](./messages-paging) | `ChatMessage`, cursor paging, optimistic send, edit/delete |
+| [Permissions](./permissions) | `ChatSessionPermissions`, `MessageBodyPermissions`, exceptions |
+| [Reactions & Read Receipts](./reactions-receipts) | Emoji reactions, `PermittedEmojis`, per-user receipts |
+| [Markdown & Input Bar](./markdown-input) | Composition toolbar, supported subset, input styling |
+| [Images & Attachments](./images-attachments) | Gallery/camera, `OutgoingAttachment`, ImageViewer |
+| [Typing & Connection](./typing-connection) | Typing indicators, connection banner |
+| [Message Templates](./message-templates) | Per-message rendering with `Identifier`/`Metadata` |
+| [Custom Actions](./custom-actions) | `ChatInputAction`/`ChatBubbleAction`, SpeechAddins |
+| [Scenarios](./scenarios) | Read-only, support, group chat, FloatingPanel hosting |
+| [API Reference](./api-reference) | Full provider/session/record/enum + control tables |
 
 ## AI Skill
 
 <AiSkill skillName="shiny-controls" />
+</content>
+</invoke>

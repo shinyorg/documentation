@@ -1,7 +1,15 @@
 ---
 title: ChatView | Getting Started
-description: Setting up ChatView in your MAUI or Blazor project from scratch
+description: Install ChatView and wire up a provider-driven chat in MAUI or Blazor
 ---
+import { Steps } from '@astrojs/starlight/components';
+
+ChatView is **provider-driven**. You do two things:
+
+1. Implement an `IChatSessionProvider` (your data + real-time layer).
+2. Bind the control's `Provider` and `SessionId`.
+
+That's the whole integration surface — no `Messages` collection, no `SendCommand`, no manual paging.
 
 ## Installation
 
@@ -17,12 +25,15 @@ Register in `MauiProgram.cs`:
 
 ```csharp
 builder.UseShinyControls();
+
+// register your provider however you like (singleton/scoped/transient)
+builder.Services.AddSingleton<IChatSessionProvider, MyChatSessionProvider>();
 ```
 
 Add the XML namespace to your page:
 
 ```xml
-xmlns:shiny="http://shiny.com/controls"
+xmlns:shiny="http://shiny.net/maui/controls"
 ```
 
 ### Blazor
@@ -33,161 +44,119 @@ Add the NuGet package:
 dotnet add package Shiny.Blazor.Controls
 ```
 
-Add the using directive to `_Imports.razor` or your component:
+Register your provider and add the using directive:
+
+```csharp
+builder.Services.AddSingleton<IChatSessionProvider, MyChatSessionProvider>();
+```
 
 ```razor
 @using Shiny.Blazor.Controls.Chat
 ```
 
 :::note
-The Blazor ChatView must be placed inside a container with a defined height. Without a height constraint, the component cannot calculate scroll positions.
+The Blazor ChatView must be placed inside a container with a defined height. Without a height constraint the component cannot calculate scroll positions.
 :::
 
-## Your First Chat (MAUI)
+## Minimal End-to-End
 
-A minimal working chat with send capability:
+<Steps>
+1. **Implement a tiny provider.** The provider returns a session-scoped `IChatSession` handle that owns paging, sending, and the live events. The snippet below is a stub — see [The Provider Interface](./the-provider) for a complete, runnable in-memory implementation you can copy.
 
-**ChatPage.xaml:**
-```xml
-<?xml version="1.0" encoding="utf-8" ?>
-<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
-             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:shiny="http://shiny.com/controls"
-             x:Class="MyApp.ChatPage">
+   ```csharp
+   using Shiny.Maui.Controls.Chat;   // Blazor: Shiny.Blazor.Controls.Chat
 
-    <shiny:ChatView Messages="{Binding Messages}"
-                    SendCommand="{Binding SendCommand}" />
-</ContentPage>
-```
+   public class MyChatSessionProvider : IChatSessionProvider
+   {
+       readonly Dictionary<string, MyChatSession> sessions = new();
 
-**ChatViewModel.cs:**
-```csharp
-public partial class ChatViewModel : ObservableObject
-{
-    [ObservableProperty]
-    ObservableCollection<ChatMessage> messages = new()
-    {
-        new ChatMessage
-        {
-            Text = "Hey! How can I help you today?",
-            SenderId = "bot",
-            IsFromMe = false,
-            Timestamp = DateTimeOffset.Now.AddMinutes(-2)
-        }
-    };
+       public Task<IChatSession> CreateSessionAsync(string[] userIds, CancellationToken ct = default)
+       {
+           var id = Guid.NewGuid().ToString("N");
+           var session = new MyChatSession(id, userIds);
+           this.sessions[id] = session;
+           return Task.FromResult<IChatSession>(session);
+       }
 
-    [RelayCommand]
-    void Send(string text)
-    {
-        Messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
-    }
-}
-```
+       public Task<IChatSession> GetSessionAsync(string sessionId, CancellationToken ct = default)
+       {
+           if (!this.sessions.TryGetValue(sessionId, out var session))
+               throw new ChatSessionException($"Session '{sessionId}' was not found.");
 
-That's it — you have a working chat with bubbles, timestamps, and Enter-to-send.
+           return Task.FromResult<IChatSession>(session);
+       }
+   }
+   ```
 
-## Your First Chat (Blazor)
+2. **Bind `Provider` + `SessionId` (MAUI).**
 
-```razor
-@page "/chat"
-@using Shiny.Blazor.Controls.Chat
+   ```xml
+   <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+                xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+                xmlns:shiny="http://shiny.net/maui/controls"
+                x:Class="MyApp.ChatPage">
 
-<div style="height: 100vh;">
-    <ChatView Messages="messages"
-              SendCommand="OnSend" />
-</div>
+       <shiny:ChatView Provider="{Binding Provider}"
+                       SessionId="{Binding SessionId}" />
+   </ContentPage>
+   ```
 
-@code {
-    List<ChatMessage> messages = new()
-    {
-        new ChatMessage
-        {
-            Text = "Hey! How can I help you today?",
-            SenderId = "bot",
-            IsFromMe = false,
-            Timestamp = DateTimeOffset.Now.AddMinutes(-2)
-        }
-    };
+   ```csharp
+   public partial class ChatViewModel : ObservableObject
+   {
+       public ChatViewModel(IChatSessionProvider provider)
+       {
+           this.Provider = provider;
+           this.SessionId = "demo";
+       }
 
-    Task OnSend(string text)
-    {
-        messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
-        StateHasChanged();
-        return Task.CompletedTask;
-    }
-}
-```
+       public IChatSessionProvider Provider { get; }
+       public string SessionId { get; }
+   }
+   ```
 
-## Adding a Bot Reply
+3. **Or bind it in Blazor.**
 
-Simulate an AI or bot responding after your message:
+   ```razor
+   @page "/chat"
+   @using Shiny.Blazor.Controls.Chat
+   @inject IChatSessionProvider ChatProvider
 
-```csharp
-[RelayCommand]
-async Task Send(string text)
-{
-    // Add user message
-    Messages.Add(new ChatMessage
-    {
-        Text = text,
-        SenderId = "me",
-        IsFromMe = true,
-        Timestamp = DateTimeOffset.Now
-    });
+   <div style="height: 600px;">
+       <ChatView Provider="ChatProvider" SessionId="@sessionId" />
+   </div>
 
-    // Simulate bot thinking
-    await Task.Delay(1500);
+   @code {
+       string sessionId = "demo";
+   }
+   ```
+</Steps>
 
-    // Add bot reply
-    Messages.Add(new ChatMessage
-    {
-        Text = "Thanks for your message! Let me look into that.",
-        SenderId = "bot",
-        IsFromMe = false,
-        Timestamp = DateTimeOffset.Now
-    });
-}
-```
+On attach, the control calls `GetSessionAsync(SessionId)`, fetches the newest page via `GetMessagesAsync(null, Older, PageSize)`, subscribes to the session's events, and renders. On detach it disposes the session.
 
 ## Customizing Appearance
 
 ```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                SendCommand="{Binding SendCommand}"
+<shiny:ChatView Provider="{Binding Provider}"
+                SessionId="{Binding SessionId}"
                 ChatBackgroundColor="#F0F0F0"
                 MyBubbleColor="#007AFF"
                 MyTextColor="White"
                 OtherBubbleColor="#E5E5EA"
                 OtherTextColor="Black"
                 BubbleFontSize="16"
-                BubbleFontFamily="OpenSans-Regular"
-                TimestampFontSize="10"
                 BubbleCornerRadius="12"
                 PlaceholderText="Ask me anything..."
                 SendButtonText="Go"
                 SendButtonBackgroundColor="#34C759"
-                SendButtonTextColor="White"
                 InputBarBackgroundColor="#FAFAFA"
                 InputBarBorderColor="#CCCCCC" />
 ```
 
 ## Next Steps
 
-Now that you have a working chat, explore:
-
-- **[Messages](./messages)** — Image messages, link detection, pending send state
-- **[Participants](./participants)** — Add avatars and multi-person support
-- **[Typing Indicators](./typing-indicators)** — Show when others are typing
-- **[Scenarios](./scenarios)** — Build AI assistants, support chats, and more
+- **[The Provider Interface](./the-provider)** — the full `IChatSessionProvider` / `IChatSession` contract and a complete in-memory provider
+- **[Messages & Paging](./messages-paging)** — the `ChatMessage` record, cursor paging, and optimistic send
+- **[Permissions](./permissions)** — gate every affordance with `ChatSessionPermissions`
+- **[Scenarios](./scenarios)** — read-only, support, group chat, and FloatingPanel hosting
+</content>

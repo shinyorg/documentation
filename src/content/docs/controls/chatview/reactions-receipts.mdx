@@ -1,0 +1,128 @@
+---
+title: ChatView | Reactions & Read Receipts
+description: Emoji reactions, PermittedEmojis, and per-user read receipts in ChatView
+---
+
+## Reactions
+
+Reactions are emoji a user toggles onto a message. They are gated by `CanReactToMessages` (see [Permissions](./permissions)) and filtered to the session's `PermittedEmojis`.
+
+```csharp
+public record Reaction(string UserId, string Emoji, DateTimeOffset Timestamp);
+```
+
+When the user picks an emoji, the control calls:
+
+```csharp
+Task ReactToMessageAsync(string messageId, string emoji, bool add, CancellationToken ct = default);
+```
+
+`add == true` toggles the emoji **on** for the current user; `add == false` removes it. A user may hold multiple distinct reactions on the same message. Mutate your store and raise `MessageUpdated` with `MessageChangeKind.ReactionChanged`:
+
+```csharp
+public Task ReactToMessageAsync(string messageId, string emoji, bool add, CancellationToken ct = default)
+{
+    ChatMessage? changed = null;
+    lock (this.store.Sync)
+    {
+        var idx = this.store.Messages.FindIndex(m => m.MessageId == messageId);
+        if (idx >= 0)
+        {
+            var msg = this.store.Messages[idx];
+            var reactions = msg.Reactions.ToList();
+            reactions.RemoveAll(r => r.UserId == this.CurrentUserId && r.Emoji == emoji);
+            if (add)
+                reactions.Add(new Reaction(this.CurrentUserId, emoji, DateTimeOffset.Now));
+
+            changed = msg with { Reactions = reactions };
+            this.store.Messages[idx] = changed;
+        }
+    }
+    if (changed is not null)
+        this.MessageUpdated?.Invoke(this, new MessageChanged(changed, MessageChangeKind.ReactionChanged));
+    return Task.CompletedTask;
+}
+```
+
+The control renders reactions as grouped badges beneath the bubble — the emoji plus a count when more than one user reacted with the same emoji.
+
+### `PermittedEmojis`
+
+The reaction picker is filtered to `ChatSessionInfo.PermittedEmojis`:
+
+| `PermittedEmojis` value | Picker behavior |
+|---|---|
+| `null` | falls back to the built-in default set: 👍 👎 ❤️ 😂 😮 😢 😡 🔥 👏 🙏 💯 🎉 |
+| a non-empty array | exactly those emoji, in order |
+| an empty array (`[]`) | no reactions at all |
+
+```csharp
+public ChatSessionInfo BuildInfo() => new(
+    /* ... */
+    PermittedEmojis: null,                    // use the control default 12-emoji set
+    /* PermittedEmojis: ["👍", "❤️", "🎉"], // or a curated set */
+    /* PermittedEmojis: [],                  // or disable reactions entirely */
+    /* ... */
+);
+```
+
+The provider re-validates the emoji regardless of what the picker offered — `PermittedEmojis` is a UX filter, not the security boundary.
+
+## Read Receipts
+
+Receipts are **per-user**, so they model group chats correctly. The control collapses them to a simple "Read" hint for 1:1 conversations.
+
+```csharp
+public record ReadReceipt(string UserId, DateTimeOffset Timestamp);
+```
+
+### The control marks read
+
+As messages become visible, the control batches and calls:
+
+```csharp
+Task MarkReadAsync(string[] messageIds, CancellationToken ct = default);
+```
+
+The control only ever passes ids that are **visible, not the current user's own, and currently unread** — so you don't have to filter those cases. Add the receipt and raise `MessageUpdated` with `MessageChangeKind.ReadReceiptChanged`:
+
+```csharp
+public Task MarkReadAsync(string[] messageIds, CancellationToken ct = default)
+{
+    var changes = new List<ChatMessage>();
+    lock (this.store.Sync)
+    {
+        foreach (var id in messageIds)
+        {
+            var idx = this.store.Messages.FindIndex(m => m.MessageId == id);
+            if (idx < 0) continue;
+
+            var msg = this.store.Messages[idx];
+            if (msg.ReadReceipts.Any(r => r.UserId == this.CurrentUserId))
+                continue;   // already recorded
+
+            var receipts = msg.ReadReceipts.ToList();
+            receipts.Add(new ReadReceipt(this.CurrentUserId, DateTimeOffset.Now));
+            var updated = msg with { ReadReceipts = receipts };
+            this.store.Messages[idx] = updated;
+            changes.Add(updated);
+        }
+    }
+    foreach (var c in changes)
+        this.MessageUpdated?.Invoke(this, new MessageChanged(c, MessageChangeKind.ReadReceiptChanged));
+    return Task.CompletedTask;
+}
+```
+
+:::caution Avoid the receipt loop
+The control **ignores inbound `ReadReceiptChanged` for `CurrentUserId`**, so a receipt the current user generated does not feed back into another `MarkReadAsync` call. In your transport, broadcast a user's receipt to *other* participants — don't echo it back to the same user as a fresh "unread" that re-triggers marking.
+:::
+
+`ChatMessage.ReadReceipts` carries the full per-user list; the control decides how to present it (a "Read" hint for 1:1, or a roster/avatars for groups).
+
+## Next Steps
+
+- **[Permissions](./permissions)** — `CanReactToMessages` and the affordance map
+- **[Messages & Paging](./messages-paging)** — `MessageChanged` / `MessageChangeKind`
+- **[Typing & Connection](./typing-connection)** — presence and connectivity
+</content>

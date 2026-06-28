@@ -1,0 +1,254 @@
+---
+title: ChatView | Messages & Paging
+description: The ChatMessage record, cursor-based paging, optimistic send, edit and delete
+---
+
+## The `ChatMessage` Record
+
+Every bubble is a `ChatMessage`. It is identical on MAUI and Blazor.
+
+```csharp
+public record ChatMessage(
+    string MessageId,
+    string? ClientMessageId,                 // matches OutgoingMessage.ClientMessageId for echo reconciliation
+    string SenderId,
+    string? Body,                            // markdown
+    string? ImageUrl,
+    MessageStatus Status,                    // Sending/Sent/Delivered/Read/Failed/Rejected
+    string? StatusReason,                    // shown on Failed/Rejected bubbles
+    DateTimeOffset Timestamp,
+    DateTimeOffset? EditedTimestamp,
+    IReadOnlyList<Reaction> Reactions,
+    IReadOnlyList<ReadReceipt> ReadReceipts, // per-user; control collapses to a "Read" hint for 1:1
+    string? Identifier = null,               // template-selector discriminator
+    IReadOnlyDictionary<string, string>? Metadata = null   // custom payload for templates
+);
+```
+
+| Field | Notes |
+|---|---|
+| `MessageId` | canonical key — the control dedups/merges on this |
+| `ClientMessageId` | echo-reconciliation key for optimistic sends; `null` for inbound/historical messages |
+| `SenderId` | compared to `CurrentUserId` for alignment + ownership |
+| `Body` | markdown text; `null` for image-only messages |
+| `ImageUrl` | image bubble; tap opens the ImageViewer (see [Images & Attachments](./images-attachments)) |
+| `Status` | drives the send/delivery indicator (see below) |
+| `StatusReason` | human-readable reason rendered on `Failed`/`Rejected` bubbles |
+| `EditedTimestamp` | non-null shows an "edited" hint |
+| `Reactions` / `ReadReceipts` | see [Reactions & Read Receipts](./reactions-receipts) |
+| `Identifier` / `Metadata` | discriminator + payload for [Message Templates](./message-templates) |
+
+A v1 message is **either text or an image, not both** (`ImageUrl` present ⇒ no text bubble).
+
+## Cursor-Based Paging
+
+ChatView never uses index/count paging (unstable when live messages arrive mid-scroll). It uses a **stable cursor** keyed on `MessageId`.
+
+```csharp
+public record MessagePage(
+    IReadOnlyList<ChatMessage> Messages,   // ALWAYS chronological ascending, regardless of direction
+    bool HasMore                           // more available in the requested direction
+);
+
+public enum MessagePageDirection
+{
+    Older,   // history above the cursor (scroll up) — the normal load-more path
+    Newer    // below the cursor — for jump-to-first-unread then scroll down
+}
+```
+
+```csharp
+Task<MessagePage> GetMessagesAsync(
+    string? cursorMessageId,
+    MessagePageDirection direction,
+    int count,
+    CancellationToken ct = default
+);
+```
+
+### What the control calls
+
+| Call | When |
+|---|---|
+| `GetMessagesAsync(null, Older, PageSize)` | initial load — newest page (`null` cursor + `Older` = "give me the latest") |
+| `GetMessagesAsync(oldestMessageId, Older, PageSize)` | user scrolls to the top — older history |
+| `GetMessagesAsync(cursor, Newer, PageSize)` | filling forward (e.g. after `ScrollToFirstUnread`) |
+
+Return `HasMore = false` when there is no more history in the requested direction — the control stops asking. `PageSize` is a control property (default `30`).
+
+### Implementing the slice
+
+`Older` slices everything *strictly before* the cursor; `Newer` slices everything *strictly after*. Always return the page **chronological ascending**.
+
+```csharp
+public Task<MessagePage> GetMessagesAsync(string? cursor, MessagePageDirection dir, int count, CancellationToken ct = default)
+{
+    lock (this.store.Sync)
+    {
+        var all = this.store.Messages;   // chronological asc
+
+        if (dir == MessagePageDirection.Older)
+        {
+            var end = all.Count;
+            if (cursor is not null)
+            {
+                var i = all.FindIndex(m => m.MessageId == cursor);
+                if (i >= 0) end = i;                       // strictly older than the cursor
+            }
+            var start = Math.Max(0, end - count);
+            var slice = all.GetRange(start, end - start);
+            return Task.FromResult(new MessagePage(slice, start > 0));
+        }
+        else // Newer
+        {
+            var start = 0;
+            if (cursor is not null)
+            {
+                var i = all.FindIndex(m => m.MessageId == cursor);
+                if (i >= 0) start = i + 1;                 // strictly newer than the cursor
+            }
+            var take = Math.Min(count, all.Count - start);
+            if (take <= 0)
+                return Task.FromResult(new MessagePage(Array.Empty<ChatMessage>(), false));
+
+            var slice = all.GetRange(start, take);
+            return Task.FromResult(new MessagePage(slice, start + take < all.Count));
+        }
+    }
+}
+```
+
+Because the cursor is a `MessageId` (not an index), pages stay correct even when new messages are inserted while the user scrolls.
+
+## Live Message Events
+
+| Event | Payload | Use |
+|---|---|---|
+| `MessageReceived` | `ChatMessage` | inbound messages **and** echoes of the current user's own sends (multi-device); the control merges by `MessageId` / reconciles by `ClientMessageId` |
+| `MessageUpdated` | `MessageChanged` | edit, reaction, receipt, or status change |
+| `MessageDeleted` | `string` (messageId) | remove the bubble |
+
+```csharp
+public record MessageChanged(ChatMessage Message, MessageChangeKind Change);
+public enum MessageChangeKind { Edited, ReactionChanged, ReadReceiptChanged, StatusChanged }
+```
+
+Always raise `MessageUpdated` with the correct `MessageChangeKind` — it replaces the old fragile "EditedTimestamp == null means reaction" heuristic and lets the control update the bubble precisely.
+
+## Optimistic Send
+
+When the user sends, the control:
+
+1. generates a `ClientMessageId`,
+2. immediately renders a bubble at `MessageStatus.Sending`,
+3. calls `SendMessageAsync(OutgoingMessage)`,
+4. reconciles the optimistic bubble with your echo (same `ClientMessageId`).
+
+```csharp
+public record OutgoingMessage(string? Body, OutgoingAttachment? Attachment = null, string ClientMessageId = "");
+```
+
+```csharp
+public enum MessageStatus
+{
+    Sending,    // optimistic, in flight
+    Sent,       // accepted by the provider/server
+    Delivered,  // reached the recipient
+    Read,       // recipient has read it
+    Failed,     // transient (network/server) — control offers RETRY via ResendMessageAsync
+    Rejected    // provider refused it (too big, not permitted…) — NOT retryable
+}
+```
+
+There is **no offline queue** — a send is only attempted while `Connected`.
+
+### Failed vs Rejected — retry vs reject
+
+The control never pre-validates size or count. It attempts the send and renders whatever the provider returns.
+
+| Outcome | How the provider signals it | Bubble | Retry? |
+|---|---|---|---|
+| **Transient failure** | throw any exception *other than* `ChatSendRejectedException` (or return `Failed`) | `Failed` + `StatusReason` | yes — control offers retry → `ResendMessageAsync(clientMessageId)` |
+| **Rejection** | throw `ChatSendRejectedException(reason, kind)` | `Rejected` + reason | no — the user must change the content |
+
+```csharp
+public class ChatSendRejectedException : Exception
+{
+    public ChatSendRejectedException(string reason, SendRejectionKind kind) : base(reason)
+        => this.Kind = kind;
+    public SendRejectionKind Kind { get; }
+}
+
+public enum SendRejectionKind
+{
+    MessageTooLarge, TooManyAttachments, AttachmentTooLarge, UnsupportedContent, NotPermitted, Other
+}
+```
+
+```csharp
+public Task<ChatMessage> SendMessageAsync(OutgoingMessage message, CancellationToken ct = default)
+{
+    if ((message.Body?.Length ?? 0) > 4000)
+        throw new ChatSendRejectedException("Message exceeds 4000 characters.", SendRejectionKind.MessageTooLarge);
+
+    // ...persist, return the stored ChatMessage with the same ClientMessageId...
+}
+```
+
+Retry calls `ResendMessageAsync(clientMessageId)`, which should flip the message back to `Sent` (and clear `StatusReason`) on success:
+
+```csharp
+public Task<ChatMessage> ResendMessageAsync(string clientMessageId, CancellationToken ct = default)
+{
+    lock (this.store.Sync)
+    {
+        var idx = this.store.Messages.FindIndex(m => m.ClientMessageId == clientMessageId);
+        if (idx < 0) throw new ChatSessionException("Message to resend was not found.");
+
+        var resent = this.store.Messages[idx] with { Status = MessageStatus.Sent, StatusReason = null };
+        this.store.Messages[idx] = resent;
+        return Task.FromResult(resent);
+    }
+}
+```
+
+## Edit & Delete
+
+Both act on **own** messages only (gated by `CanEditMessages` / `CanDeleteMessages` — see [Permissions](./permissions)). Mutate your store, then raise the matching event.
+
+```csharp
+public Task EditMessageAsync(string messageId, string body, CancellationToken ct = default)
+{
+    ChatMessage? edited = null;
+    lock (this.store.Sync)
+    {
+        var idx = this.store.Messages.FindIndex(m => m.MessageId == messageId);
+        if (idx >= 0)
+        {
+            edited = this.store.Messages[idx] with { Body = body, EditedTimestamp = DateTimeOffset.Now };
+            this.store.Messages[idx] = edited;
+        }
+    }
+    if (edited is not null)
+        this.MessageUpdated?.Invoke(this, new MessageChanged(edited, MessageChangeKind.Edited));
+    return Task.CompletedTask;
+}
+
+public Task DeleteMessageAsync(string messageId, CancellationToken ct = default)
+{
+    bool removed;
+    lock (this.store.Sync)
+        removed = this.store.Messages.RemoveAll(m => m.MessageId == messageId) > 0;
+
+    if (removed)
+        this.MessageDeleted?.Invoke(this, messageId);
+    return Task.CompletedTask;
+}
+```
+
+## Next Steps
+
+- **[Permissions](./permissions)** — gate edit/delete/react and reject sends
+- **[Reactions & Read Receipts](./reactions-receipts)** — per-user reactions and receipts
+- **[Images & Attachments](./images-attachments)** — `OutgoingAttachment` and the ImageViewer
+</content>

@@ -1,0 +1,222 @@
+---
+title: ChatView | The Provider Interface
+description: Implement IChatSessionProvider and IChatSession to back ChatView
+---
+
+ChatView is **styles + layout only**. Everything dynamic — history, sending, permissions, presence, reactions, receipts, connection state — lives behind two interfaces you implement:
+
+- **`IChatSessionProvider`** — a thin factory/lookup. Given a `SessionId`, it returns a session-scoped handle.
+- **`IChatSession`** — the handle. It owns paging, outgoing actions, and the live event stream for one conversation.
+
+This mirrors the Scheduler's `ISchedulerEventProvider` model: the control binds to your provider and renders whatever it returns.
+
+## The Interfaces
+
+```csharp
+public interface IChatSessionProvider
+{
+    Task<IChatSession> CreateSessionAsync(string[] userIds, CancellationToken ct = default);
+
+    // throws ChatSessionException if the session is missing or the current user has no access
+    Task<IChatSession> GetSessionAsync(string sessionId, CancellationToken ct = default);
+}
+
+public interface IChatSession : IAsyncDisposable
+{
+    ChatSessionInfo Info { get; }     // ALWAYS current — refreshed before SessionUpdated fires
+    string CurrentUserId { get; }     // who "me" is — drives bubble alignment + ownership checks
+
+    // cursor-based paging (stable under live inserts); null + Older = newest page (initial load)
+    Task<MessagePage> GetMessagesAsync(string? cursorMessageId, MessagePageDirection direction, int count, CancellationToken ct = default);
+
+    Task<ChatMessage> SendMessageAsync(OutgoingMessage message, CancellationToken ct = default);
+    Task<ChatMessage> ResendMessageAsync(string clientMessageId, CancellationToken ct = default);
+    Task EditMessageAsync(string messageId, string body, CancellationToken ct = default);
+    Task DeleteMessageAsync(string messageId, CancellationToken ct = default);
+
+    // add == true toggles the emoji on; add == false removes it
+    Task ReactToMessageAsync(string messageId, string emoji, bool add, CancellationToken ct = default);
+
+    Task MarkReadAsync(string[] messageIds, CancellationToken ct = default);   // control passes only visible, not-mine, unread ids
+    Task ToggleTypingAsync(bool isTyping, CancellationToken ct = default);
+    Task InviteUserAsync(string userId, CancellationToken ct = default);
+    Task LeaveAsync(CancellationToken ct = default);
+    Task RenameAsync(string sessionName, CancellationToken ct = default);
+
+    event EventHandler<ChatMessage> MessageReceived;       // includes echoes of own sends (multi-device)
+    event EventHandler<MessageChanged> MessageUpdated;     // carries WHAT changed
+    event EventHandler<string> MessageDeleted;             // messageId
+    event EventHandler<UserTypingEvent> UserTyping;
+    event EventHandler<ChatSessionUserInfo> UserJoined;
+    event EventHandler<ChatSessionUserInfo> UserLeft;
+    event EventHandler<ChatSessionInfo> SessionUpdated;
+    event EventHandler<ChatConnectionState> ConnectionStateChanged;
+}
+```
+
+:::note
+The namespaces are mirrored: `Shiny.Maui.Controls.Chat` and `Shiny.Blazor.Controls.Chat`. The only model difference is `ChatSessionUserInfo` (MAUI uses `ImageSource`/`Color`; Blazor uses `string` URL / CSS color).
+:::
+
+## Lifecycle
+
+| Stage | What the control does |
+|---|---|
+| **Attach** | Calls `GetSessionAsync(SessionId)`, fetches the newest page via `GetMessagesAsync(null, Older, PageSize)`, subscribes to all events, renders permissions/affordances from `Info`. |
+| **Live** | Reacts to your events, calls outgoing methods (`SendMessageAsync`, `ReactToMessageAsync`, `MarkReadAsync`, …) in response to user gestures. |
+| **`SessionId` changes** | Disposes the current session and resolves the new one. |
+| **Detach / dispose** | Unsubscribes from events and calls `DisposeAsync()` on the session. |
+
+Because the **session** (not the provider) owns the events, nothing threads a `sessionId` around and there are no leaked handlers — the control subscribes on attach and disposes on detach. Keep the *history* in the provider (or your backend) so it survives the control disposing and re-resolving the session across navigations; only the live `IChatSession` instance is transient.
+
+`Info` is a property, not an event payload — it is **always current**. The control reads `Info` whenever it needs the latest name/users/permissions, and you refresh it *before* raising `SessionUpdated`.
+
+## Events
+
+Events may fire **off the UI thread** — the control marshals them to the UI thread for you, so raise them from wherever your transport delivers them.
+
+| Event | Raise it when | Control reaction |
+|---|---|---|
+| `MessageReceived` | a new message arrives (including echoes of the current user's own sends from other devices) | merges/dedups by `MessageId`, reconciles optimistic bubbles by `ClientMessageId` |
+| `MessageUpdated` | a message is edited, reacted to, or gets a read receipt or status change | updates the bubble by `MessageId` using `MessageChangeKind` |
+| `MessageDeleted` | a message is removed | drops the bubble |
+| `UserTyping` | a remote user starts/stops typing | shows/expires the typing indicator |
+| `UserJoined` / `UserLeft` | session membership changes | refreshes participant chrome |
+| `SessionUpdated` | name / users / permitted emojis / permissions change (after `Info` is refreshed) | re-derives affordances from the new `Info` |
+| `ConnectionStateChanged` | connectivity changes | shows the offline/reconnecting banner; disables input when not `Connected` |
+
+## Merge & Reconcile (the control's contract)
+
+- **`MessageId` is the canonical key.** The same message can arrive via both `MessageReceived` and a later `GetMessagesAsync` page (a boundary race) — the control merges on `MessageId` and never renders duplicates.
+- **`ClientMessageId` reconciles optimistic sends.** When the user sends, the control generates a `ClientMessageId`, renders a `Sending` bubble, and calls `SendMessageAsync`. Your echo (returned message and/or `MessageReceived`) carries the same `ClientMessageId`, so the control replaces the optimistic bubble instead of adding a duplicate. After reconciliation it keys by `MessageId`.
+- **Ownership** is simply `message.SenderId == session.CurrentUserId` — it drives bubble alignment, edit/delete eligibility, and self-receipt suppression.
+
+## A Worked In-Memory Provider
+
+A complete, runnable provider that seeds a conversation and simulates live replies. The persistent data lives in the provider; a fresh `IChatSession` is handed to the control on each resolve.
+
+```csharp
+using Shiny.Maui.Controls.Chat;   // Blazor: Shiny.Blazor.Controls.Chat
+
+public class InMemoryChatSessionProvider : IChatSessionProvider
+{
+    public const string DemoSessionId = "demo";
+    readonly Dictionary<string, InMemoryChatStore> stores = new(StringComparer.Ordinal);
+
+    public InMemoryChatSessionProvider()
+    {
+        var demo = InMemoryChatStore.CreateDemo(DemoSessionId);
+        this.stores[demo.SessionId] = demo;
+    }
+
+    public Task<IChatSession> CreateSessionAsync(string[] userIds, CancellationToken ct = default)
+    {
+        var id = Guid.NewGuid().ToString("N");
+        var store = InMemoryChatStore.CreateEmpty(id, userIds);
+        this.stores[id] = store;
+        return Task.FromResult<IChatSession>(new InMemoryChatSession(store));
+    }
+
+    public Task<IChatSession> GetSessionAsync(string sessionId, CancellationToken ct = default)
+    {
+        if (!this.stores.TryGetValue(sessionId, out var store))
+            throw new ChatSessionException($"Chat session '{sessionId}' was not found.");
+
+        return Task.FromResult<IChatSession>(new InMemoryChatSession(store));
+    }
+}
+```
+
+The session handle implements paging, sending, and the live events. The key parts:
+
+```csharp
+sealed class InMemoryChatSession : IChatSession
+{
+    readonly InMemoryChatStore store;
+    public InMemoryChatSession(InMemoryChatStore store) => this.store = store;
+
+    public ChatSessionInfo Info => this.store.BuildInfo();   // always current
+    public string CurrentUserId => "me";
+
+    public event EventHandler<ChatMessage>? MessageReceived;
+    public event EventHandler<MessageChanged>? MessageUpdated;
+    public event EventHandler<string>? MessageDeleted;
+    public event EventHandler<UserTypingEvent>? UserTyping;
+    public event EventHandler<ChatSessionUserInfo>? UserJoined;
+    public event EventHandler<ChatSessionUserInfo>? UserLeft;
+    public event EventHandler<ChatSessionInfo>? SessionUpdated;
+    public event EventHandler<ChatConnectionState>? ConnectionStateChanged;
+
+    // cursor paging — see "Messages & Paging" for the full Older/Newer slice logic
+    public Task<MessagePage> GetMessagesAsync(string? cursor, MessagePageDirection dir, int count, CancellationToken ct = default)
+    {
+        lock (this.store.Sync)
+        {
+            var all = this.store.Messages;
+            var end = all.Count;
+            if (cursor is not null)
+            {
+                var i = all.FindIndex(m => m.MessageId == cursor);
+                if (i >= 0) end = i;                  // strictly older than the cursor
+            }
+            var start = Math.Max(0, end - count);
+            var slice = all.GetRange(start, end - start);
+            return Task.FromResult(new MessagePage(slice, start > 0));
+        }
+    }
+
+    public Task<ChatMessage> SendMessageAsync(OutgoingMessage message, CancellationToken ct = default)
+    {
+        // the provider OWNS and disposes the attachment stream after "uploading"
+        string? imageUrl = null;
+        if (message.Attachment is not null)
+        {
+            imageUrl = "https://example.com/uploaded.png";
+            message.Attachment.Content.Dispose();
+        }
+
+        var stored = new ChatMessage(
+            MessageId: this.store.NextMessageId(),
+            ClientMessageId: string.IsNullOrEmpty(message.ClientMessageId) ? null : message.ClientMessageId,
+            SenderId: this.CurrentUserId,
+            Body: message.Body,
+            ImageUrl: imageUrl,
+            Status: MessageStatus.Sent,
+            StatusReason: null,
+            Timestamp: DateTimeOffset.Now,
+            EditedTimestamp: null,
+            Reactions: Array.Empty<Reaction>(),
+            ReadReceipts: Array.Empty<ReadReceipt>()
+        );
+        lock (this.store.Sync) this.store.Messages.Add(stored);
+        _ = this.SimulateReplyAsync();   // raise MessageReceived after a typing burst
+        return Task.FromResult(stored);  // echo carries the same ClientMessageId
+    }
+
+    public Task RenameAsync(string sessionName, CancellationToken ct = default)
+    {
+        this.store.Rename(sessionName);          // refresh Info FIRST...
+        this.SessionUpdated?.Invoke(this, this.Info);  // ...then announce
+        return Task.CompletedTask;
+    }
+
+    // EditMessageAsync / DeleteMessageAsync / ReactToMessageAsync / MarkReadAsync mutate the
+    // store then raise MessageUpdated(new MessageChanged(msg, kind)) / MessageDeleted(id).
+    // ToggleTypingAsync / InviteUserAsync / LeaveAsync as appropriate for your transport.
+
+    public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+}
+```
+
+The complete demo — seeding, reactions/receipts, edit/delete, and a simulated typing-then-reply loop — ships in the sample app at `samples/Sample/Features/Chat/InMemoryChatSessionProvider.cs` (MAUI) and `samples/Sample.Blazor/Chat/InMemoryChatSessionProvider.cs` (Blazor).
+
+## Threading
+
+You may raise events from any thread — the control marshals them (MAUI: `Dispatcher`; Blazor: `InvokeAsync(StateHasChanged)`). Keep your store thread-safe if your transport delivers off-thread (the in-memory demo uses a `lock`).
+
+## Next Steps
+
+- **[Messages & Paging](./messages-paging)** — the `ChatMessage` record, full cursor logic, optimistic send
+- **[Permissions](./permissions)** — gate affordances and throw the right exceptions
+- **[Reactions & Read Receipts](./reactions-receipts)** — `ReactToMessageAsync` and per-user receipts
+</content>

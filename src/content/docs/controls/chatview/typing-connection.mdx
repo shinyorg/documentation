@@ -1,0 +1,83 @@
+---
+title: ChatView | Typing & Connection
+description: Typing indicators and the connection state banner in ChatView
+---
+
+## Typing Indicators
+
+ChatView shows animated typing dots when a remote user is composing. Two halves: the control tells you when the **current** user is typing, and you tell the control when **other** users are typing.
+
+### Current user → provider
+
+As the user types, the control debounces and calls:
+
+```csharp
+Task ToggleTypingAsync(bool isTyping, CancellationToken ct = default);
+```
+
+It sends `true` when typing begins and `false` on send or after an inactivity timeout. Broadcast this to other participants over your transport. (In a purely local provider there's nothing to broadcast.)
+
+```csharp
+public Task ToggleTypingAsync(bool isTyping, CancellationToken ct = default)
+{
+    // forward to your hub/transport so the other participants see the indicator
+    return this.hub.SendTypingAsync(this.SessionId, this.CurrentUserId, isTyping, ct);
+}
+```
+
+### Other users → control
+
+When a remote participant's typing state changes, raise `UserTyping`:
+
+```csharp
+public record UserTypingEvent(string UserId, bool IsTyping, DateTimeOffset Timestamp);
+```
+
+```csharp
+this.UserTyping?.Invoke(this, new UserTypingEvent(remoteUserId, isTyping: true, DateTimeOffset.Now));
+```
+
+The control handles the rest:
+
+- **Debounce** of the outbound `ToggleTypingAsync`.
+- **Expiry** of stale inbound indicators (if a `false` never arrives, the dots time out on their own).
+- **Rendering** the "{Name} is typing…" pill / animated dots, scroll-aware.
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ShowTypingIndicator` | `bool` | `true` | Enable/disable typing indicators entirely |
+
+## Connection State
+
+Raise `ConnectionStateChanged` whenever your transport's connectivity changes:
+
+```csharp
+public enum ChatConnectionState { Connected, Reconnecting, Offline }
+```
+
+```csharp
+this.ConnectionStateChanged?.Invoke(this, ChatConnectionState.Reconnecting);
+// ...later...
+this.ConnectionStateChanged?.Invoke(this, ChatConnectionState.Connected);
+```
+
+The control reacts automatically:
+
+| State | UI |
+|---|---|
+| `Connected` | no banner; input bar enabled (subject to `CanSendMessages`) |
+| `Reconnecting` | banner shown; **input bar disabled** |
+| `Offline` | banner shown; **input bar disabled** |
+
+There is **no offline queue** — sends are only attempted while `Connected`. A send that still fails transiently becomes `MessageStatus.Failed` (with retry); a provider rejection becomes `MessageStatus.Rejected` (no retry). See [Messages & Paging](./messages-paging#optimistic-send).
+
+:::tip
+Drive `ConnectionStateChanged` from your SignalR/WebSocket/MQTT client's reconnect lifecycle. While `Reconnecting`/`Offline` the user can still read and scroll history — only composing is blocked, which prevents sends that would immediately fail.
+:::
+
+## Next Steps
+
+- **[The Provider Interface](./the-provider)** — where these events fit in the lifecycle
+- **[Messages & Paging](./messages-paging)** — optimistic send and retry behavior
+- **[Reactions & Read Receipts](./reactions-receipts)** — the other live presence signals
+</content>

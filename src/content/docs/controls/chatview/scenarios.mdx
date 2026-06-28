@@ -1,528 +1,152 @@
 ---
 title: ChatView | Scenarios
-description: Complete implementation patterns for AI assistants, customer support, group chat, and more
+description: Provider-driven patterns — read-only feeds, support chat, group chat, and FloatingPanel hosting
 ---
 
-## AI Assistant / Chatbot
+Every ChatView scenario is the same two moving parts: an `IChatSessionProvider` and a `SessionId`. What changes is the **permissions** you return from `Info` and a couple of control flags. The snippets below assume a provider like the one in [The Provider Interface](./the-provider).
 
-A single-participant bot conversation with typing indicators and streaming responses.
+## Read-Only Chat / Feed
 
-### Setup
+Show history with no composer. Hide the input bar and return `None` permissions.
 
 ```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                Participants="{Binding Participants}"
-                TypingParticipants="{Binding TypingParticipants}"
-                ShowAvatarsInSingleChat="True"
-                SendCommand="{Binding SendCommand}"
-                MyBubbleColor="#007AFF"
-                MyTextColor="White"
-                OtherBubbleColor="#F0F0F0"
-                OtherTextColor="Black"
-                PlaceholderText="Ask me anything..." />
+<shiny:ChatView Provider="{Binding Provider}"
+                SessionId="{Binding SessionId}"
+                IsInputBarVisible="False" />
 ```
 
-### ViewModel
+```csharp
+public ChatSessionInfo BuildInfo() => new(
+    SessionId, SessionName, Users,
+    PermittedEmojis: [],                          // no reactions
+    BodyPermissions: MessageBodyPermissions.None,
+    Permissions: ChatSessionPermissions.None,
+    CreatedAt, LastReadDate, UnreadMessageCount: 0
+);
+```
+
+Paging, live `MessageReceived`, and image taps still work — only composing is removed.
+
+## Support / Agent Chat
+
+A 1:1 conversation where the customer can send text and images and react, but not edit/delete or manage the session.
 
 ```csharp
-public partial class AiChatViewModel : ObservableObject
+public ChatSessionInfo BuildInfo() => new(
+    SessionId, "Support", Users,
+    PermittedEmojis: ["👍", "❤️", "🎉"],
+    BodyPermissions: MessageBodyPermissions.Bold | MessageBodyPermissions.Italics | MessageBodyPermissions.Links,
+    Permissions: ChatSessionPermissions.CanSendMessages
+               | ChatSessionPermissions.CanSendImages
+               | ChatSessionPermissions.CanReactToMessages,
+    CreatedAt, LastReadDate, UnreadMessageCount
+);
+```
+
+Drive delivery/read status from your backend by sending `Sent`/`Delivered`/`Read` statuses and raising `MessageUpdated(MessageChangeKind.StatusChanged)`. Show the agent's typing indicator via `UserTyping`, and surface connectivity with `ConnectionStateChanged` (see [Typing & Connection](./typing-connection)).
+
+## AI Assistant
+
+Treat the assistant as another participant. The provider sends the user's message, then streams or posts the assistant's reply via `MessageReceived` (optionally after a `UserTyping(true)` "thinking" burst, like the demo's `SimulateReplyAsync`).
+
+```csharp
+public Task<ChatMessage> SendMessageAsync(OutgoingMessage message, CancellationToken ct = default)
 {
-    readonly IAiService aiService;
-
-    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
-    [ObservableProperty] ObservableCollection<ChatParticipant> typingParticipants = [];
-
-    [ObservableProperty]
-    ObservableCollection<ChatParticipant> participants = new()
-    {
-        new ChatParticipant
-        {
-            Id = "assistant",
-            DisplayName = "AI Assistant",
-            Avatar = ImageSource.FromFile("ai_bot.png")
-        }
-    };
-
-    ChatParticipant Bot => Participants[0];
-
-    [RelayCommand]
-    async Task Send(string text)
-    {
-        // Add user message
-        Messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
-
-        // Show typing indicator
-        TypingParticipants.Add(Bot);
-
-        try
-        {
-            // Call AI service
-            var response = await aiService.GetResponseAsync(text);
-
-            // Add bot response
-            Messages.Add(new ChatMessage
-            {
-                Text = response,
-                SenderId = "assistant",
-                IsFromMe = false,
-                Timestamp = DateTimeOffset.Now
-            });
-        }
-        finally
-        {
-            TypingParticipants.Remove(Bot);
-        }
-    }
+    var stored = /* persist the user's message with the same ClientMessageId */;
+    _ = this.RunAssistantAsync(message.Body);   // raise UserTyping then MessageReceived
+    return Task.FromResult(stored);
 }
 ```
 
-### With Action Buttons (using Message Templates)
+For action cards (approve/decline, suggestions), stamp `Identifier`/`Metadata` and render with a [message template](./message-templates).
 
-For AI assistants that suggest actions:
+## Group Chat with Invite & Rename
 
-```csharp
-// After AI suggests an action
-Messages.Add(new ActionChatMessage
-{
-    Text = "I found a flight from NYC to LA on June 15. Would you like to book it?",
-    ActionText = "Book Flight",
-    SenderId = "assistant",
-    IsFromMe = false
-});
-```
-
-See [Message Templates](./message-templates) for the full DataTemplateSelector setup.
-
----
-
-## Customer Support Chat
-
-A support scenario with agent identity, server confirmation, and file attachments.
-
-### Setup
-
-```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                Participants="{Binding Participants}"
-                ShowAvatarsInSingleChat="True"
-                SendCommand="{Binding SendCommand}"
-                AttachImageCommand="{Binding AttachCommand}"
-                IsMultiPerson="False"
-                MyBubbleColor="#DCF8C6"
-                OtherBubbleColor="White"
-                PlaceholderText="Describe your issue..." />
-```
-
-### ViewModel
+Grant the management permissions; the control surfaces invite/leave/rename affordances automatically.
 
 ```csharp
-public partial class SupportChatViewModel : ObservableObject
+public ChatSessionInfo BuildInfo() => new(
+    SessionId, "Controls Crew", Users,      // Users[] includes avatars + per-user BubbleColor
+    PermittedEmojis: null,                  // default emoji set
+    BodyPermissions: MessageBodyPermissions.All,
+    Permissions: ChatSessionPermissions.All,
+    CreatedAt, LastReadDate, UnreadMessageCount
+);
+```
+
+Implement the management methods and announce membership/name changes:
+
+```csharp
+public Task InviteUserAsync(string userId, CancellationToken ct = default)
 {
-    readonly ISupportService supportService;
-
-    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
-    [ObservableProperty]
-    ObservableCollection<ChatParticipant> participants = new()
-    {
-        new ChatParticipant
-        {
-            Id = "agent",
-            DisplayName = "Support Agent",
-            Avatar = ImageSource.FromFile("support_avatar.png")
-        }
-    };
-
-    [RelayCommand]
-    async Task Send(string text)
-    {
-        var msg = new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            DateSent = null, // Show pending state
-            Timestamp = DateTimeOffset.Now
-        };
-        Messages.Add(msg);
-
-        // Send to server
-        var response = await supportService.SendMessageAsync(text);
-
-        // Confirm delivery
-        var index = Messages.IndexOf(msg);
-        Messages.RemoveAt(index);
-        msg.DateSent = DateTimeOffset.Now;
-        msg.Identifier = response.ServerMessageId;
-        Messages.Insert(index, msg);
-    }
-
-    [RelayCommand]
-    async Task Attach()
-    {
-        var photo = await MediaPicker.PickPhotoAsync();
-        if (photo is null) return;
-
-        Messages.Add(new ChatMessage
-        {
-            ImageUrl = photo.FullPath,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
-    }
-
-    // Called when receiving messages from the agent (e.g., via SignalR)
-    public void OnAgentMessage(string text)
-    {
-        Messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "agent",
-            IsFromMe = false,
-            Timestamp = DateTimeOffset.Now
-        });
-    }
+    var joined = this.AddUser(userId);
+    this.UserJoined?.Invoke(this, joined);
+    this.SessionUpdated?.Invoke(this, this.Info);   // refresh Info first, then announce
+    return Task.CompletedTask;
 }
-```
 
----
-
-## Group Chat
-
-A multi-person conversation with per-user colors, typing indicators, and reactions.
-
-### Setup
-
-```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                Participants="{Binding Participants}"
-                IsMultiPerson="True"
-                TypingParticipants="{Binding TypingParticipants}"
-                SendCommand="{Binding SendCommand}"
-                LoadMoreCommand="{Binding LoadMoreCommand}"
-                BubbleToolItemTappedCommand="{Binding BubbleToolTappedCommand}">
-    <shiny:ChatView.BubbleToolItems>
-        <shiny:CopyBubbleTool />
-        <shiny:FabMenuItem Text="👍" FabBackgroundColor="#FFC107"
-                           Command="{Binding ReactCommand}" />
-        <shiny:FabMenuItem Text="Reply" FabBackgroundColor="#2196F3"
-                           Command="{Binding ReplyCommand}" />
-    </shiny:ChatView.BubbleToolItems>
-</shiny:ChatView>
-```
-
-### ViewModel
-
-```csharp
-public partial class GroupChatViewModel : ObservableObject
+public Task RenameAsync(string sessionName, CancellationToken ct = default)
 {
-    readonly IChatHub chatHub;
-
-    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
-    [ObservableProperty] ObservableCollection<ChatParticipant> typingParticipants = [];
-    [ObservableProperty]
-    ObservableCollection<ChatParticipant> participants = new()
-    {
-        new() { Id = "alice", DisplayName = "Alice", BubbleColor = Color.FromArgb("#E3F2FD") },
-        new() { Id = "bob", DisplayName = "Bob", BubbleColor = Color.FromArgb("#FFF3E0") },
-        new() { Id = "charlie", DisplayName = "Charlie", BubbleColor = Color.FromArgb("#F3E5F5") }
-    };
-
-    [RelayCommand]
-    void Send(string text)
-    {
-        var msg = new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        };
-        Messages.Add(msg);
-        chatHub.SendMessage(text);
-    }
-
-    [RelayCommand]
-    async Task LoadMore()
-    {
-        var older = await chatHub.GetHistory(before: Messages.First().Timestamp, count: 30);
-        foreach (var msg in older)
-            Messages.Insert(0, msg);
-    }
-
-    [RelayCommand]
-    void React(ChatMessage message)
-    {
-        message.Acknowledgements ??= new List<Acknowledgement>();
-        message.Acknowledgements.Add(new Acknowledgement
-        {
-            Glyph = "👍",
-            UserId = "me",
-            Timestamp = DateTime.Now
-        });
-
-        // Refresh UI
-        var i = Messages.IndexOf(message);
-        Messages.RemoveAt(i);
-        Messages.Insert(i, message);
-
-        chatHub.SendReaction(message.Identifier, "👍");
-    }
-
-    [RelayCommand]
-    void Reply(ChatMessage message)
-    {
-        // Could set entry text to quote the message
-    }
-
-    // SignalR callbacks
-    public void OnMessageReceived(string senderId, string text, DateTimeOffset timestamp)
-    {
-        Messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = senderId,
-            IsFromMe = false,
-            Timestamp = timestamp
-        });
-    }
-
-    public void OnUserTyping(string userId)
-    {
-        var participant = Participants.FirstOrDefault(p => p.Id == userId);
-        if (participant != null && !TypingParticipants.Contains(participant))
-            TypingParticipants.Add(participant);
-    }
-
-    public void OnUserStoppedTyping(string userId)
-    {
-        var participant = TypingParticipants.FirstOrDefault(p => p.Id == userId);
-        if (participant != null)
-            TypingParticipants.Remove(participant);
-    }
+    this.store.Rename(sessionName);
+    this.SessionUpdated?.Invoke(this, this.Info);
+    return Task.CompletedTask;
 }
+
+public Task LeaveAsync(CancellationToken ct = default) => this.RemoveSelfAsync();
 ```
 
----
+Per-user read receipts and per-participant bubble colors come from `ReadReceipts` and each `ChatSessionUserInfo.BubbleColor`.
 
-## Read-Only Chat History
+## Switching Conversations (Master/Detail)
 
-A view-only transcript with no input bar — useful for audit logs, shared conversations, or review views.
-
-### Setup
-
-```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                Participants="{Binding Participants}"
-                IsMultiPerson="True"
-                IsInputBarVisible="False"
-                LoadMoreCommand="{Binding LoadMoreCommand}"
-                MessageTappedCommand="{Binding MessageTappedCommand}" />
-```
-
-### ViewModel
-
-```csharp
-public partial class TranscriptViewModel : ObservableObject
-{
-    [ObservableProperty] ObservableCollection<ChatMessage> messages = [];
-    [ObservableProperty] ObservableCollection<ChatParticipant> participants = [];
-
-    public async Task LoadTranscript(string conversationId)
-    {
-        var transcript = await transcriptService.GetTranscript(conversationId);
-
-        Participants = new ObservableCollection<ChatParticipant>(transcript.Participants);
-        Messages = new ObservableCollection<ChatMessage>(transcript.Messages);
-    }
-
-    [RelayCommand]
-    void MessageTapped(ChatMessage message)
-    {
-        // Show message details, metadata, etc.
-    }
-
-    [RelayCommand]
-    async Task LoadMore()
-    {
-        var older = await transcriptService.GetOlderMessages(Messages.First().Timestamp);
-        foreach (var msg in older)
-            Messages.Insert(0, msg);
-    }
-}
-```
-
----
-
-## Chat with Scroll-to-Unread
-
-For apps where users return to conversations with unread messages:
-
-```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                Participants="{Binding Participants}"
-                ScrollToFirstUnread="True"
-                FirstUnreadMessageId="{Binding FirstUnreadId}"
-                SendCommand="{Binding SendCommand}" />
-```
-
-```csharp
-public partial class InboxChatViewModel : ObservableObject
-{
-    [ObservableProperty] string? firstUnreadId;
-
-    public async Task LoadConversation(string conversationId)
-    {
-        var data = await chatService.GetConversation(conversationId);
-
-        Messages = new ObservableCollection<ChatMessage>(data.Messages);
-        Participants = new ObservableCollection<ChatParticipant>(data.Participants);
-
-        // Set before or at the same time as Messages
-        FirstUnreadId = data.FirstUnreadMessageId;
-    }
-}
-```
-
-The view scrolls to the unread message on initial load, giving the user context of what they missed.
-
----
-
-## Bot with Button-Only Interaction
-
-No free-text input — the user interacts only through buttons in message templates:
-
-```xml
-<shiny:ChatView Messages="{Binding Messages}"
-                Participants="{Binding Participants}"
-                ShowAvatarsInSingleChat="True"
-                IsInputBarVisible="False">
-    <shiny:ChatView.MessageTemplateSelector>
-        <local:BotMessageTemplateSelector />
-    </shiny:ChatView.MessageTemplateSelector>
-</shiny:ChatView>
-```
-
-The bot sends `ActionChatMessage` objects with buttons. When a button is tapped, your ViewModel adds a "user response" message and triggers the next bot step:
-
-```csharp
-[RelayCommand]
-void ButtonTapped(ActionChatMessage message)
-{
-    // Show what the user chose
-    Messages.Add(new ChatMessage
-    {
-        Text = message.ActionText,
-        SenderId = "me",
-        IsFromMe = true,
-        Timestamp = DateTimeOffset.Now
-    });
-
-    // Trigger next step in the flow
-    _ = ContinueFlow(message.ActionText);
-}
-```
-
----
-
-## Chat in a Modal/Panel
-
-Embed ChatView inside a floating panel or modal for in-app support widgets:
-
-```xml
-<shiny:FloatingPanel>
-    <shiny:ChatView Messages="{Binding Messages}"
-                    Participants="{Binding Participants}"
-                    ShowAvatarsInSingleChat="True"
-                    SendCommand="{Binding SendCommand}"
-                    MyBubbleColor="#007AFF"
-                    MyTextColor="White" />
-</shiny:FloatingPanel>
-```
-
-The ChatView adapts to any container size — just ensure the container has a defined height.
-
----
-
-## Blazor: Full-Featured Example
+Bind `SessionId` to the selected conversation; the control disposes the old session and resolves the new one on change. One provider can host many sessions.
 
 ```razor
-@page "/chat"
-@using Shiny.Blazor.Controls.Chat
+@inject IChatSessionProvider ChatProvider
 
-<div style="height: 100vh; display: flex; flex-direction: column;">
-    <ChatView Messages="messages"
-              Participants="participants"
-              IsMultiPerson="true"
-              TypingParticipants="typingParticipants"
-              SendCommand="OnSend"
-              AttachImageCommand="OnAttach"
-              LoadMoreCommand="OnLoadMore"
-              MyBubbleColor="#007AFF"
-              MyTextColor="#FFFFFF"
-              OtherBubbleColor="#F0F0F0"
-              OtherTextColor="#000000"
-              PlaceholderText="Type a message..." />
+<select @onchange="OnPick">
+    @foreach (var c in contacts) { <option value="@c.Id">@c.Name</option> }
+</select>
+
+<div style="height: 600px;">
+    <ChatView Provider="ChatProvider" SessionId="@sessionId" />
 </div>
 
 @code {
-    List<ChatMessage> messages = new();
-    List<ChatParticipant> participants = new()
-    {
-        new() { Id = "alice", DisplayName = "Alice", AvatarUrl = "/avatars/alice.png", BubbleColor = "#E3F2FD" },
-        new() { Id = "bob", DisplayName = "Bob", AvatarUrl = "/avatars/bob.png", BubbleColor = "#FFF3E0" }
-    };
-    List<ChatParticipant> typingParticipants = new();
-
-    async Task OnSend(string text)
-    {
-        messages.Add(new ChatMessage
-        {
-            Text = text,
-            SenderId = "me",
-            IsFromMe = true,
-            Timestamp = DateTimeOffset.Now
-        });
-        StateHasChanged();
-
-        // Simulate response
-        await Task.Delay(1000);
-        typingParticipants.Add(participants[0]);
-        StateHasChanged();
-
-        await Task.Delay(2000);
-        typingParticipants.Clear();
-        messages.Add(new ChatMessage
-        {
-            Text = "Got it, thanks!",
-            SenderId = "alice",
-            IsFromMe = false,
-            Timestamp = DateTimeOffset.Now
-        });
-        StateHasChanged();
-    }
-
-    Task OnAttach()
-    {
-        // Open file picker, upload, add image message
-        return Task.CompletedTask;
-    }
-
-    async Task OnLoadMore()
-    {
-        // Fetch older messages from API
-        var older = await Http.GetFromJsonAsync<List<ChatMessage>>("/api/messages?before=...");
-        if (older != null)
-        {
-            messages.InsertRange(0, older);
-            StateHasChanged();
-        }
-    }
+    string sessionId = "alice";
+    void OnPick(ChangeEventArgs e) => sessionId = e.Value?.ToString() ?? sessionId;
 }
 ```
+
+## Hosting Inside a FloatingPanel (MAUI)
+
+When ChatView lives inside a [FloatingPanel](/controls/floatingpanel/), set `AdjustForKeyboard="False"` — otherwise the panel's keyboard handling and the chat's fight each other and the entry drops keystrokes.
+
+```xml
+<shiny:FloatingPanel>
+    <shiny:ChatView Provider="{Binding Provider}"
+                    SessionId="{Binding SessionId}"
+                    AdjustForKeyboard="False" />
+</shiny:FloatingPanel>
+```
+
+## Error State
+
+If `GetSessionAsync` (or the initial load) throws `ChatSessionException` — unknown session or no access — the control renders an error state instead of the chat. Throw it from the provider:
+
+```csharp
+public Task<IChatSession> GetSessionAsync(string sessionId, CancellationToken ct = default)
+{
+    if (!this.stores.TryGetValue(sessionId, out var store))
+        throw new ChatSessionException($"Chat session '{sessionId}' was not found.");
+
+    return Task.FromResult<IChatSession>(new InMemoryChatSession(store));
+}
+```
+
+## Next Steps
+
+- **[Permissions](./permissions)** — the building block for every scenario
+- **[The Provider Interface](./the-provider)** — the full provider/session contract
+- **[API Reference](./api-reference)** — every member at a glance
+</content>

@@ -1,0 +1,106 @@
+---
+title: ChatView | Images & Attachments
+description: Send images from gallery or camera and open them in the built-in ImageViewer
+---
+
+ChatView has a built-in image attachment affordance gated by the `CanSendImages` permission, and taps on image bubbles open the built-in [ImageViewer](/controls/imageviewer/).
+
+## Sending Images
+
+When `CanSendImages` is set (see [Permissions](./permissions)), the control shows an attach affordance offering **Gallery**, plus **Camera** when the platform/device supports capture:
+
+- **MAUI** — uses .NET MAUI Essentials `MediaPicker`. Camera is shown only when `MediaPicker.Default.IsCaptureSupported` is `true` (most desktop targets show Gallery only). `PickPhotoAsync()` / `CapturePhotoAsync()` produce the stream.
+- **Blazor** — uses `<InputFile accept="image/*">`; the `capture` attribute hints the mobile browser camera. Desktop browsers show file/gallery selection only.
+
+`CanSendImages` is **independent** of `CanSendMessages`, so a session can be image-only, text-only, or both. A v1 message is **either text or an image, not both**.
+
+## `OutgoingAttachment`
+
+The control packages the chosen image into an `OutgoingMessage` with an `OutgoingAttachment` and calls `SendMessageAsync`:
+
+```csharp
+public record OutgoingMessage(string? Body, OutgoingAttachment? Attachment = null, string ClientMessageId = "");
+
+public record OutgoingAttachment(
+    ChatAttachmentKind Kind,   // Image (Video/Audio/File reserved)
+    Stream Content,            // the provider OWNS and DISPOSES this stream after upload
+    string FileName,
+    string ContentType
+);
+
+public enum ChatAttachmentKind { Image }
+```
+
+:::caution The provider owns the stream
+The control supplies `Attachment.Content`; **your provider must dispose it** once it has uploaded (or copied) the bytes. The control will not dispose it for you.
+:::
+
+```csharp
+public Task<ChatMessage> SendMessageAsync(OutgoingMessage message, CancellationToken ct = default)
+{
+    string? imageUrl = null;
+    if (message.Attachment is not null)
+    {
+        // upload the bytes to your storage, then dispose the stream you were handed
+        imageUrl = MyUploadImage(message.Attachment.Content, message.Attachment.FileName, message.Attachment.ContentType);
+        message.Attachment.Content.Dispose();
+    }
+
+    var stored = new ChatMessage(
+        MessageId: this.store.NextMessageId(),
+        ClientMessageId: string.IsNullOrEmpty(message.ClientMessageId) ? null : message.ClientMessageId,
+        SenderId: this.CurrentUserId,
+        Body: message.Body,
+        ImageUrl: imageUrl,
+        Status: MessageStatus.Sent,
+        StatusReason: null,
+        Timestamp: DateTimeOffset.Now,
+        EditedTimestamp: null,
+        Reactions: Array.Empty<Reaction>(),
+        ReadReceipts: Array.Empty<ReadReceipt>()
+    );
+    lock (this.store.Sync) this.store.Messages.Add(stored);
+    return Task.FromResult(stored);
+}
+```
+
+### The optimistic image flow
+
+1. The user picks/captures an image → the control builds the `OutgoingAttachment` and a `ClientMessageId`.
+2. A `Sending` bubble shows a **local preview** immediately.
+3. The provider uploads and returns the stored `ChatMessage` (same `ClientMessageId`) with `ImageUrl` populated.
+4. The control reconciles the optimistic bubble; subsequent taps use the remote `ImageUrl`.
+
+### Rejecting oversized/too-many images
+
+The control never pre-checks image size or count — enforce limits in the provider and throw `ChatSendRejectedException`, which renders the bubble as `Rejected` (no retry):
+
+```csharp
+if (message.Attachment is not null && tooLarge)
+    throw new ChatSendRejectedException("Image exceeds 10 MB.", SendRejectionKind.AttachmentTooLarge);
+```
+
+See [Messages & Paging](./messages-paging#failed-vs-rejected--retry-vs-reject).
+
+## Tapping an Image → ImageViewer
+
+By default, tapping an image bubble opens the built-in **ImageViewer** (pinch / pan / double-tap zoom). This is a client-side behavior — **not** a provider call.
+
+```xml
+<shiny:ChatView Provider="{Binding Provider}"
+                SessionId="{Binding SessionId}"
+                OpenImagesInViewer="True" />
+```
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `OpenImagesInViewer` | `bool` | `true` | Tapping an image bubble opens the built-in ImageViewer. Set `false` to handle the tap yourself (e.g. with a custom `MessageTemplate`). |
+
+For an optimistic send, the viewer opens on the local preview; once the echo populates the remote `ImageUrl`, subsequent taps use it. Non-image bubble taps remain a notification only (MAUI exposes the `MessageTapped` event).
+
+## Next Steps
+
+- **[Permissions](./permissions)** — `CanSendImages`
+- **[Messages & Paging](./messages-paging)** — optimistic send, failed vs rejected
+- **[ImageViewer](/controls/imageviewer/)** — the zoom/pan viewer ChatView reuses
+</content>

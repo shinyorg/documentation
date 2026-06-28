@@ -1,0 +1,130 @@
+---
+title: ChatView | Permissions
+description: Drive every ChatView affordance with ChatSessionPermissions and MessageBodyPermissions
+---
+
+ChatView derives **every action affordance** from `Info.Permissions` + ownership (`CurrentUserId`). There is no per-tool wiring anymore — you set permissions on the `ChatSessionInfo` your session returns, and the control shows or hides the matching UI automatically.
+
+## `ChatSessionPermissions`
+
+```csharp
+[Flags]
+public enum ChatSessionPermissions
+{
+    None = 0,
+    CanSendMessages     = 1,
+    CanEditMessages     = 2,    // own messages only
+    CanDeleteMessages   = 4,    // own messages only
+    CanReactToMessages  = 8,
+    CanInviteUsers      = 16,
+    CanLeaveSession     = 32,
+    CanChangeSessionName= 64,
+    CanSendImages       = 128,  // gates the gallery/camera attach affordance (independent of text send)
+
+    Default = CanSendMessages | CanSendImages | CanReactToMessages | CanInviteUsers | CanLeaveSession,
+    All = CanSendMessages | CanEditMessages | CanDeleteMessages | CanReactToMessages
+        | CanInviteUsers | CanLeaveSession | CanChangeSessionName | CanSendImages
+}
+```
+
+### Permission → affordance map
+
+| Permission | Surfaced as | Calls |
+|---|---|---|
+| `CanSendMessages` | input bar enabled | `SendMessageAsync` |
+| `CanEditMessages` | "Edit" on **own** bubbles | `EditMessageAsync` |
+| `CanDeleteMessages` | "Delete" on **own** bubbles | `DeleteMessageAsync` |
+| `CanReactToMessages` | reaction picker (filtered to `PermittedEmojis`) | `ReactToMessageAsync` |
+| `CanInviteUsers` | invite affordance | `InviteUserAsync` |
+| `CanLeaveSession` | leave affordance | `LeaveAsync` |
+| `CanChangeSessionName` | rename affordance | `RenameAsync` |
+| `CanSendImages` | gallery/camera attach affordance | `SendMessageAsync` with `OutgoingAttachment` |
+
+Set permissions when you build `Info`:
+
+```csharp
+public ChatSessionInfo BuildInfo() => new(
+    SessionId: this.SessionId,
+    SessionName: this.SessionName,
+    Users: this.Users,
+    PermittedEmojis: null,                                   // null => control default emoji set
+    BodyPermissions: MessageBodyPermissions.All,
+    Permissions: ChatSessionPermissions.Default,            // or .All, or a hand-picked set
+    CreatedAt: this.CreatedAt,
+    LastReadDate: this.LastReadDate,
+    UnreadMessageCount: this.Unread
+);
+```
+
+Changing permissions at runtime is just a matter of refreshing `Info` and raising `SessionUpdated` — the control re-derives the affordances.
+
+### Common combinations
+
+| Goal | Permissions |
+|---|---|
+| Read-only feed | `None` (also set `IsInputBarVisible="false"`) |
+| Text-only, no reactions | `CanSendMessages` |
+| 1:1 chat with edit/delete | `CanSendMessages \| CanSendImages \| CanReactToMessages \| CanEditMessages \| CanDeleteMessages` |
+| Group admin | `ChatSessionPermissions.All` |
+| Standard member | `ChatSessionPermissions.Default` |
+
+`CanSendImages` is independent of `CanSendMessages`, so a session can be image-only, text-only, or both.
+
+## `MessageBodyPermissions`
+
+This separate flags enum drives the **markdown composition toolbar** (see [Markdown & Input Bar](./markdown-input)). Only granted formats show a toolbar button; `None` means a plain-text input with no toolbar.
+
+```csharp
+[Flags]
+public enum MessageBodyPermissions
+{
+    None = 0,
+    Links = 1, Bold = 2, Italics = 4, Underline = 8, Strikethrough = 16, Codeblocks = 32,
+    All = Links | Bold | Italics | Underline | Strikethrough | Codeblocks
+}
+```
+
+`MessageBodyPermissions` is strictly about **text formatting** — image sending is the `CanSendImages` action above, not a body flag.
+
+## Validation Lives in the Provider
+
+The control **never** pre-checks size, counts, or content policy — those depend on your server/business rules. It attempts optimistically and renders the verdict you return. Throw the right exception:
+
+```csharp
+// GetSessionAsync: the session is missing or the current user has no access
+public class ChatSessionException : Exception
+{
+    public ChatSessionException(string message) : base(message) { }
+}
+
+// SendMessageAsync / ResendMessageAsync / EditMessageAsync: content refused
+public class ChatSendRejectedException : Exception
+{
+    public ChatSendRejectedException(string reason, SendRejectionKind kind) : base(reason)
+        => this.Kind = kind;
+    public SendRejectionKind Kind { get; }
+}
+
+public enum SendRejectionKind
+{
+    MessageTooLarge, TooManyAttachments, AttachmentTooLarge, UnsupportedContent, NotPermitted, Other
+}
+```
+
+| Exception | Thrown from | Control reaction |
+|---|---|---|
+| `ChatSessionException` | `GetSessionAsync` (and the session methods, for not-found) | renders an error state instead of the chat |
+| `ChatSendRejectedException` | `SendMessageAsync` / `ResendMessageAsync` / `EditMessageAsync` | flips the optimistic bubble to `MessageStatus.Rejected`, sets `StatusReason`, **no retry** |
+
+A *transient* failure — any other exception — flips the bubble to `MessageStatus.Failed` with a retry affordance. See [Messages & Paging](./messages-paging#failed-vs-rejected--retry-vs-reject).
+
+:::tip
+Gate features with permissions *and* re-validate in the provider. Permissions hide the UI; the provider is the source of truth and re-checks regardless — a permission flag is a UX hint, not a security boundary.
+:::
+
+## Next Steps
+
+- **[Markdown & Input Bar](./markdown-input)** — what `MessageBodyPermissions` enables
+- **[Reactions & Read Receipts](./reactions-receipts)** — `CanReactToMessages` + `PermittedEmojis`
+- **[Custom Actions](./custom-actions)** — append app-specific verbs to the permission-driven set
+</content>
