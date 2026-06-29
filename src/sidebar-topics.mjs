@@ -489,6 +489,7 @@ export const sidebarTopics = [
           { label: 'Why DocumentDb', link: 'documentdb/comparison' },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
+          { label: 'Typed Context', link: 'documentdb/context' },
           { label: 'Bulk Export & Import', link: 'documentdb/backup' },
           { label: 'Querying', link: 'documentdb/querying' },
           { label: 'Projections & Streaming', link: 'documentdb/projections' },
