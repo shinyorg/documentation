@@ -73,14 +73,18 @@ partial class AppContext
 
 public static class AppContextRegistration
 {
+    // Scoped context (ASP.NET Core request scopes)
     public static IServiceCollection AddAppContext(this IServiceCollection services, Action<DocumentStoreOptions> configure);
+
+    // Singleton IDocumentContextFactory<AppContext> (MAUI / Blazor / desktop — no ambient scope)
+    public static IServiceCollection AddAppContextFactory(this IServiceCollection services, Action<DocumentStoreOptions> configure);
 }
 ```
 
 ## Register & use
 
 <Tabs>
-  <TabItem label="DI">
+  <TabItem label="DI (scoped)">
     ```csharp
     builder.Services.AddAppContext(o =>
     {
@@ -92,6 +96,27 @@ public static class AppContextRegistration
     public class UserService(AppContext db)
     {
         public Task<IReadOnlyList<User>> Adults() => db.Users.Where(u => u.Age >= 18).ToList();
+    }
+    ```
+  </TabItem>
+  <TabItem label="Factory (MAUI / Blazor)">
+    ```csharp
+    // MAUI / Blazor / desktop have no per-request scope. Register a singleton factory and
+    // create a short-lived context per unit of work — the parallel of EF's IDbContextFactory<T>.
+    builder.Services.AddAppContextFactory(o =>
+    {
+        o.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={dbPath}");
+        o.UseReflectionFallback = false;
+    });
+
+    // inject the factory anywhere — even into a singleton page/view-model
+    public class UserViewModel(IDocumentContextFactory<AppContext> factory)
+    {
+        public async Task<IReadOnlyList<User>> Adults()
+        {
+            var db = factory.Create();   // cheap; a facade over the shared store, no disposal needed
+            return await db.Users.Where(u => u.Age >= 18).ToList();
+        }
     }
     ```
   </TabItem>
@@ -107,6 +132,19 @@ public static class AppContextRegistration
 `DocumentContext` only needs an `IDocumentStore`, so it works over **any** provider — including the ones with
 their own options type (LiteDB, MongoDB, Cosmos): construct that store yourself and pass it to the context.
 The generated `ConfigureModel` / `AddAppContext` target the relational `DocumentStoreOptions`.
+
+:::tip[Picking a registration]
+Use **`AddAppContext`** (scoped) where there's a natural request scope — ASP.NET Core. Use
+**`AddAppContextFactory`** (singleton `IDocumentContextFactory<AppContext>`) where there isn't — **MAUI,
+Blazor, desktop, background services** — and create a context per operation with `factory.Create()`. The
+context is a stateless facade over the shared, thread-safe store, so created contexts are cheap and need no
+disposal (unlike an EF `DbContext`).
+
+Each context binds to its **own** store, keyed by the context type, so you can register **multiple**
+`DocumentContext` types in one container without them shadowing each other. The first context registered also
+becomes the default un-keyed `IDocumentStore`, which is what the extension packages (AppDataSync, Diagnostics,
+AI tools, OData, seeding) inject.
+:::
 
 ## `DocumentSet<T>`
 
