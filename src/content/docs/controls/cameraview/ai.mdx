@@ -1,0 +1,118 @@
+---
+title: CameraView AI Document Scanner
+description: Detect that a document is present on the Shiny CameraView, then send just that one frame to a Microsoft.Extensions.AI IChatClient for structured extraction — so the model runs only on real documents, not every frame
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+{/* TODO: capture screenshots for the AI document scanner (MAUI + Blazor) */}
+
+The **AI document scanner** splits the work to save time and money. A **cheap, native presence detector** runs on every frame — it answers only *"is a document here, and where?"* (no OCR) and draws a live outline. The **(slow, paid) model call** then fires **at most once per document**: only when one is held **steady** in view and the analyzer has been **armed**. At that moment it encodes *just that one frame* to JPEG (cropped to the document) and sends it to a **Microsoft.Extensions.AI `IChatClient`**, parsing the reply straight into your type via MEAI **structured output**. The model call runs **off the analysis thread**, so the preview never stalls.
+
+It's provider-agnostic — any `IChatClient` backed by a **vision** model (Azure OpenAI, OpenAI, Ollama, …) — and works with your own strongly-typed payload or a built-in schema-free one.
+
+## Install
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Ai" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Camera.Ai" />
+
+```bash
+# MAUI
+dotnet add package Shiny.Maui.Controls.Camera.Ai
+# Blazor
+dotnet add package Shiny.Blazor.Controls.Camera.Ai
+```
+
+You also register an `IChatClient` yourself (this is what keeps the package provider-agnostic), e.g. an Azure OpenAI / OpenAI client or Ollama.
+
+## MAUI
+
+Assign an `AiDocumentAnalyzer` to `CameraView.Analyzer`. The zero-setup form returns the schema-free `AiDocument` (a `DocumentType`, a `Summary`, and a flat list of label/value `Fields`) and is trim/AOT-safe out of the box:
+
+```csharp
+using Microsoft.Extensions.AI;
+using Shiny.Controls.Camera;             // AiDocument
+using Shiny.Maui.Controls.Camera.Ai;
+
+IChatClient chat = serviceProvider.GetRequiredService<IChatClient>();   // a vision model
+
+var ai = new AiDocumentAnalyzer(chat)
+{
+    Prompt = "Extract every field from this document.",
+};
+ai.DocumentDetected += (_, e) =>
+{
+    AiDocument doc = e.Document;
+    foreach (var f in doc.Fields)
+        Console.WriteLine($"{f.Label}: {f.Value}");
+};
+
+Camera.Analyzer = ai;
+Camera.Scan();   // arm — the model is called once the document is held steady
+```
+
+For a fixed schema, use the generic `AiDocumentAnalyzer<TDocument>` with your own record and supply context-backed `JsonSerializerOptions` (trim/AOT-safe):
+
+```csharp
+public record Invoice(string? Number, decimal? Total, string[] LineItems);
+
+var typed = new AiDocumentAnalyzer<Invoice>(chat)
+{
+    SerializerOptions = MyJsonContext.Default.Options,
+};
+typed.DocumentDetected += (_, e) => { Invoice inv = e.Document; /* ... */ };
+```
+
+It reuses the existing document delivery model — the `DocumentDetected` event, a bindable `DocumentDetectedCommand`, and an `OnDetected` (`Func<DocumentDetectedEventArgs<TDocument>, Task<bool>>`, `return true` to keep scanning) — plus `ShowBoundingBox` and `OverlayProvider`.
+
+### Properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `Prompt` | `string` | extraction instruction | What to extract; the JSON shape is supplied automatically by structured output |
+| `Options` | `ChatOptions?` | `null` | MEAI options (model id, temperature, …) |
+| `SerializerOptions` | `JsonSerializerOptions?` | `null` | Context-backed options for trim/AOT; the built-in `AiDocument` sets this for you |
+| `StabilityFrames` | `int` | `3` | Frames a document must stay in view before it's shipped (debounce blur/motion) |
+| `ResetAfterEmptyFrames` | `int` | `5` | Frames with no document that re-arm a fresh scan |
+| `CropPadding` | `float` | `0.04` | Margin added around the detected document before cropping |
+| `SendWholeFrame` | `bool` | `false` | Send the whole frame instead of cropping to the document |
+| `BoxColor` | `Color` | teal | Outline color for the live document box |
+
+An `Error` event surfaces network/auth/parse failures without tearing down the pipeline.
+
+:::note[Platform support]
+Presence detection is native on Apple (Vision document segmentation) and managed (luminance edge detection) on Android/Windows. Encoding is native per platform (Apple Core Image, Android YUV→JPEG, Windows `BitmapEncoder`). On **bare `net10.0`** there's no encoder, so the analyzer is inert (detection still runs).
+:::
+
+## Blazor
+
+Assign a `DocumentAnalyzer` to the camera's `Analyzer` (an in-browser luminance/edge heuristic detects presence and draws the outline), then drive it with an `AiDocumentScanner`:
+
+```razor
+@using Microsoft.Extensions.AI
+@using Shiny.Controls.Camera
+@using Shiny.Blazor.Controls.Camera
+@using Shiny.Blazor.Controls.Camera.Ai
+
+<CameraView @ref="camera" Analyzer="analyzer" />
+<button @onclick="Scan">Scan document</button>
+
+@code {
+    CameraView? camera;
+    CameraAnalyzer analyzer = new DocumentAnalyzer();
+    AiDocumentScanner scanner = default!;   // new AiDocumentScanner(chatClient)
+
+    async Task Scan()
+    {
+        AiDocument? doc = await scanner.ScanAsync(camera!);   // waits for a steady doc, ships the frame, parses
+        // doc.DocumentType, doc.Summary, doc.Fields
+    }
+}
+```
+
+`ScanAsync` awaits `CameraView.RequestDocumentImageAsync` — the gated *"next steadily-present document → cropped JPEG"* — then sends it to the `IChatClient`. Use the generic `AiDocumentScanner<TDocument>` for a fixed schema; give it context-backed `SerializerOptions` for trim/AOT-safe WASM (the non-generic `AiDocumentScanner` does this for you).
+
+## When to use it
+
+- **Free-form or unknown document** (a contract, a label, a form you don't have rules for) → let the model read it.
+- **A schema you can name** but don't want to hand-write a parser for → `AiDocumentAnalyzer<T>` / `AiDocumentScanner<T>` with your record.
+- **Deterministic, offline, no model cost** (driver's licence, passport, credit card, invoice/receipt with rules) → prefer the [document analyzers](/controls/cameraview/analyzers#documents). The two compose: detect cheaply, escalate to AI only when needed.

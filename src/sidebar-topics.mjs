@@ -316,6 +316,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/cameraview/' },
           { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
+          { label: 'AI Document Scanner', link: 'controls/cameraview/ai' },
           { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
         ]
       },
