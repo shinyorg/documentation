@@ -1,0 +1,197 @@
+---
+title: Azure Table Storage
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.AzureTable` package provides a document store over [Azure Table Storage](https://learn.microsoft.com/azure/storage/tables/) using [`Azure.Data.Tables`](https://www.nuget.org/packages/Azure.Data.Tables). It also targets the **Cosmos DB Table API** (the same SDK/protocol). Every document type lives in one table: `PartitionKey = typeName`, `RowKey = id`.
+
+<NugetBadge name="Shiny.DocumentDb.AzureTable" showLabel={true} />
+
+Azure Table is a **NoSQL key-partitioned store**. Rich LINQ queries evaluate **client-side** after a single-partition scan (the LiteDB model); optimistic concurrency is backed by the native Table `ETag`. There is no spatial / vector / full-text / temporal support on this provider.
+
+## When to Use
+
+- Cheap, massively scalable key/value + JSON document storage on Azure
+- Existing Azure Storage accounts (or a Cosmos DB Table API account) you already pay for
+- Workloads whose reads are almost always "all documents of a type" or point reads by id
+- You don't need server-side rich querying, spatial, vector, full-text, or temporal history
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.AzureTable
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.AzureTable;
+
+   var store = new AzureTableDocumentStore(new AzureTableDocumentStoreOptions
+   {
+       ConnectionString = "UseDevelopmentStorage=true", // or a real account / SAS connection string
+       TableName        = "Documents"                   // one table; PartitionKey=typeName, RowKey=id
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb;
+
+   builder.Services.AddAzureTableDocumentStore(o =>
+   {
+       o.ConnectionString = "UseDevelopmentStorage=true";
+       o.TableName        = "Documents";
+       o.MapVersionProperty<Order>(x => x.Version);      // opt-in optimistic concurrency (ETag-backed)
+   });
+   ```
+
+   `AddAzureTableDocumentStore` registers `IDocumentStore` **and** `IDocumentMaintenance` as singletons.
+</Steps>
+
+## Credentials
+
+Set exactly one of the following on the options (checked in this order): `TableServiceClient` (a pre-built client), `ConnectionString`, or `ServiceUri` + one credential.
+
+```csharp
+// Connection string (account key, SAS, or the emulator)
+o.ConnectionString = "DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...";
+
+// Managed identity / DefaultAzureCredential
+o.ServiceUri       = new Uri("https://myaccount.table.core.windows.net");
+o.TokenCredential  = new Azure.Identity.DefaultAzureCredential();
+
+// Shared key or SAS
+o.SharedKeyCredential = new TableSharedKeyCredential("myaccount", "<key>");
+o.SasCredential       = new AzureSasCredential("<sas>");
+```
+
+The same provider works against the **Cosmos DB Table API** — point the connection string / endpoint at your Cosmos Table account.
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ConnectionString` | `string?` | `null` | Account / SAS / emulator connection string |
+| `ServiceUri` | `Uri?` | `null` | Table endpoint (used with a credential) |
+| `TokenCredential` | `TokenCredential?` | `null` | `DefaultAzureCredential` / managed identity |
+| `SharedKeyCredential` | `TableSharedKeyCredential?` | `null` | Account name + key |
+| `SasCredential` | `AzureSasCredential?` | `null` | SAS credential |
+| `TableServiceClient` | `TableServiceClient?` | `null` | Pre-built client (wins over all other options) |
+| `TableName` | `string` | `"Documents"` | The single table holding every type |
+| `AutoCreateTable` | `bool` | `true` | Create the table if it doesn't exist |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names (partition keys) are derived |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set `false` for AOT safety |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback |
+
+Additional mapping methods: `MapTypeToPartition<T>(pk)`, `MapIdProperty<T>(...)`, `MapIdType<TId>(...)`, `AddQueryFilter<T>(...)`, `AddInterceptor` / `OnBeforeWrite<T>` / `OnAfterWrite<T>`, and `MapVersionProperty<T>(...)`.
+
+## The `(typeName, id)` key model
+
+| Concept | Azure Table |
+|---|---|
+| Partition | `PartitionKey = typeName` |
+| Document key | `RowKey = id.ToString()` |
+| Payload | `Data` string column (+ `CreatedAt` / `UpdatedAt`) |
+| Point read | `GetEntity(pk, rk)` |
+| Type-scoped query | `PartitionKey eq '<typeName>'` |
+| Concurrency (CAS) | `ETag` If-Match on `UpdateEntity` |
+| Batch | `SubmitTransaction` ≤ 100 per PartitionKey |
+
+Because `Query<T>()` is always type-scoped, the common read path is a **single-partition query** — no cross-partition scan.
+
+## Querying (client-side)
+
+There is no server-side query translation. `Query<T>()` runs a single-partition query to load every document of the type, then evaluates `Where` / `OrderBy` / `Paginate` / `Select` / aggregates **in memory** via the shared `ExpressionInterpreter`:
+
+```csharp
+var open = await store.Query<Order>()
+    .Where(o => o.Status == "Open")   // evaluated client-side
+    .OrderByDescending(o => o.CreatedAt)
+    .Paginate(0, 25)
+    .ToList();
+```
+
+:::caution[Full type scan]
+Every unindexed `Query<T>()` loads the whole partition for that type before filtering. This is fine for modest per-type document counts. For hot query paths, **promote the filtered property** (below) so the filter is served server-side. Keep per-type sets bounded, or split hot types.
+:::
+
+## Promoted columns & server-side pushdown
+
+Promote a scalar property to a native top-level Table column so predicates over it are pushed into a server-side OData `$filter` (the full predicate still re-runs client-side, so results are always exact):
+
+```csharp
+var opts = new AzureTableDocumentStoreOptions { ConnectionString = "…", TableName = "Documents" }
+    .MapIndexedProperty<Order>(o => o.Status)
+    .MapIndexedProperty<Order>(o => o.Total);
+
+// Status/Total are written as native columns → this predicate is pushed down, not scanned:
+var open = await store.Query<Order>().Where(o => o.Status == "Open" && o.Total > 100).ToList();
+```
+
+Inspect the query the builder would run with `ToQueryString()`.
+
+## Raw OData string query
+
+The string `Query`/`QueryStream`/`Count` overloads take a raw **OData** `$filter` fragment (Azure Table's native query language) scoped to the type's partition. It targets native columns — the promoted columns (reference them by their CLR/JSON property name) and the built-in `PartitionKey`/`RowKey`/`Timestamp` — not fields inside the opaque JSON body. `parameters` supplies `@name` token substitutions.
+
+```csharp
+var open = await store.Query<Order>("Status eq @s and Total gt @min",
+    parameters: new { s = "Open", min = 100 });
+```
+
+`Project(string)` is not supported.
+
+## Change observation
+
+Azure Table implements `IObservableDocumentStore` — subscribe to in-process changes made through this store instance:
+
+```csharp
+await foreach (var change in ((IObservableDocumentStore)store).NotifyOnChange<Order>(ct))
+    Console.WriteLine($"{change.ChangeType} {change.Id}");
+
+// or scoped to a query's predicate
+await foreach (var change in store.Query<Order>().Where(o => o.Status == "Open").NotifyOnChange(ct))
+    …
+```
+
+Notifications are in-process (this instance's writes), buffered inside a `UnitOfWork` until it commits. For a cross-writer feed use DynamoDB (Streams) or Cosmos.
+
+## Ids & concurrency
+
+- **Guid / string Ids auto-generate** on Insert when default. **Explicit int/long Ids round-trip fine.**
+- **Int/Long Id auto-generation is unsupported** — inserting a default int/long Id throws `NotSupportedException` (there is no cheap `MAX`). Use Guid/string Ids, or assign the int/long Id yourself.
+- **Optimistic concurrency:** `MapVersionProperty<T>(x => x.Version)` seeds the version to 1 on insert, checks & increments on update/upsert, and guards the write with the Table `ETag` (If-Match). A stale write throws `ConcurrencyException`. Blind (unversioned) upsert is last-write-wins.
+
+## Storage layout
+
+Each document is a `TableEntity`:
+
+| Column | Value |
+|---|---|
+| `PartitionKey` | the type name |
+| `RowKey` | the document id (string form) |
+| `Data` | the serialized JSON body |
+| `CreatedAt` / `UpdatedAt` | ISO-8601 timestamps |
+| `ETag` / `Timestamp` | SDK-managed (physical CAS token) |
+
+## Limitations
+
+- **64 KB per-property / 1 MB per-entity cap** — the JSON body is a single `Data` string column, so a document larger than ~64 KB throws a clear `NotSupportedException` (not a raw storage 413). Store large fields externally or use Cosmos/MongoDB.
+- **Client-side queries by default** — an unindexed `Query<T>()` is a full type scan; promote the filtered property with `MapIndexedProperty<T>` to push the filter server-side.
+- **Int/Long Id auto-generation unsupported** — use Guid/string.
+- **No spatial / vector / full-text / temporal** — `SupportsSpatial` / `SupportsVector` / `SupportsFullText` are `false` and there is no `ITemporalDocumentStore`.
+- **In-process change observation only** — `IObservableDocumentStore` observes this instance's writes; Azure Table has no cross-writer change feed (use DynamoDB Streams or Cosmos for that).
+- **Compensating unit of work** — `CreateUnitOfWork()` tracks inserts and rolls them back on failure; there is no cross-partition transaction (same model as Cosmos).
+
+## Notes
+
+- `IDocumentMaintenance.ClearAll()` is supported (scan-deletes every partition) — handy for tests/dev resets.
+- `BatchInsert` / `BatchRemove` use native `SubmitTransaction` in ≤ 100-item waves per PartitionKey.
+- `Upsert` deep-merges in C# with recursive null stripping (RFC 7396 semantics); when versioned, the merge write is the ETag-guarded write.

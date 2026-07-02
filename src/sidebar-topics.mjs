@@ -526,6 +526,8 @@ export const sidebarTopics = [
               { label: 'Oracle', link: 'documentdb/oracle' },
               { label: 'DuckDB', link: 'documentdb/duckdb' },
               { label: 'Azure Cosmos DB', link: 'documentdb/cosmosdb' },
+              { label: 'Azure Table Storage', link: 'documentdb/azure-table' },
+              { label: 'Amazon DynamoDB', link: 'documentdb/dynamodb' },
               { label: 'MongoDB', link: 'documentdb/mongodb' },
               { label: 'LiteDB', link: 'documentdb/litedb' },
               { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },

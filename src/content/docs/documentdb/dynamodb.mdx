@@ -1,0 +1,199 @@
+---
+title: Amazon DynamoDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.DynamoDb` package provides a document store over [Amazon DynamoDB](https://aws.amazon.com/dynamodb/) using [`AWSSDK.DynamoDBv2`](https://www.nuget.org/packages/AWSSDK.DynamoDBv2). Every document type lives in one table: partition key `pk = typeName` (HASH), sort key `sk = id` (RANGE).
+
+<NugetBadge name="Shiny.DocumentDb.DynamoDb" showLabel={true} />
+
+DynamoDB is a **NoSQL key-partitioned store**. Rich LINQ queries evaluate **client-side** after a single-partition query (the LiteDB model); optimistic concurrency is enforced with a conditional write on a top-level `Version` attribute. There is no spatial / vector / full-text / temporal support on this provider.
+
+## When to Use
+
+- Serverless, auto-scaling document storage on AWS
+- Existing AWS-hosted .NET workloads using DynamoDB for the rest of the data model
+- Workloads whose reads are almost always "all documents of a type" or point reads by id
+- You want a managed change feed later (DynamoDB Streams — planned phase-2 addition)
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.DynamoDb
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.DynamoDb;
+
+   var store = new DynamoDbDocumentStore(new DynamoDbDocumentStoreOptions
+   {
+       TableName       = "Documents",                    // one table; pk=typeName (HASH), sk=id (RANGE)
+       Region          = Amazon.RegionEndpoint.USEast1,
+       AutoCreateTable = true                            // dev convenience; off by default
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb;
+
+   builder.Services.AddDynamoDbDocumentStore(o =>
+   {
+       o.TableName       = "Documents";
+       o.Region          = Amazon.RegionEndpoint.USEast1;
+       o.MapVersionProperty<Order>(x => x.Version);       // opt-in optimistic concurrency
+   });
+   ```
+
+   `AddDynamoDbDocumentStore` registers `IDocumentStore` **and** `IDocumentMaintenance` as singletons.
+</Steps>
+
+## Credentials & endpoint
+
+The AWS standard credential chain is used by default. Override with explicit credentials, a region, a pre-built client, or a service URL (for DynamoDB Local):
+
+```csharp
+// Explicit credentials + region
+o.Credentials = new Amazon.Runtime.BasicAWSCredentials("<access>", "<secret>");
+o.Region      = Amazon.RegionEndpoint.EuWest1;
+
+// DynamoDB Local (integration tests)
+o.ServiceUrl  = "http://localhost:8000";
+
+// Or a fully pre-configured client (wins over everything else)
+o.Client      = new Amazon.DynamoDBv2.AmazonDynamoDBClient(/* … */);
+```
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `Client` | `IAmazonDynamoDB?` | `null` | Pre-built client (wins over the credential/region options) |
+| `Credentials` | `AWSCredentials?` | `null` | Explicit credentials (else the default chain) |
+| `Region` | `RegionEndpoint?` | `null` | AWS region (ignored when `ServiceUrl` is set) |
+| `ServiceUrl` | `string?` | `null` | Explicit endpoint — set for DynamoDB Local |
+| `TableName` | `string` | `"Documents"` | The single table holding every type |
+| `AutoCreateTable` | `bool` | `false` | Create the table (on-demand billing) if it doesn't exist |
+| `ConsistentRead` | `bool` | `false` | Strongly-consistent `Get`/`Query` (default eventual) |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names (partition keys) are derived |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set `false` for AOT safety |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback |
+
+Additional mapping methods: `MapTypeToPartition<T>(pk)`, `MapIdProperty<T>(...)`, `MapIdType<TId>(...)`, `AddQueryFilter<T>(...)`, `AddInterceptor` / `OnBeforeWrite<T>` / `OnAfterWrite<T>`, and `MapVersionProperty<T>(...)`.
+
+The table (when `AutoCreateTable` is on) is created with `pk` (HASH) / `sk` (RANGE) string keys and on-demand (`PAY_PER_REQUEST`) billing.
+
+## The `(typeName, id)` key model
+
+| Concept | DynamoDB |
+|---|---|
+| Partition | `pk = typeName` (HASH) |
+| Document key | `sk = id.ToString()` (RANGE) |
+| Payload | `Data` string attribute (+ `CreatedAt` / `UpdatedAt`, `Version` when mapped) |
+| Point read | `GetItem(pk, sk)` |
+| Type-scoped query | `Query` with `KeyConditionExpression pk = :t` |
+| Concurrency (CAS) | `ConditionExpression` on the `Version` attribute |
+| Batch | `BatchWriteItem` ≤ 25 per request |
+
+## Querying (client-side)
+
+There is no server-side query translation. `Query<T>()` runs a single-partition `Query` to load every document of the type, then evaluates `Where` / `OrderBy` / `Paginate` / `Select` / aggregates **in memory** via the shared `ExpressionInterpreter`:
+
+```csharp
+var open = await store.Query<Order>()
+    .Where(o => o.Status == "Open")   // evaluated client-side
+    .OrderByDescending(o => o.CreatedAt)
+    .Paginate(0, 25)
+    .ToList();
+```
+
+:::caution[Full type scan]
+Every unindexed `Query<T>()` loads the whole partition for that type before filtering. For hot query paths, **promote the filtered attribute** (below) so the filter is served server-side. Keep per-type document counts bounded, or split hot types.
+:::
+
+## Promoted attributes & server-side pushdown
+
+Promote a scalar property to a native top-level DynamoDB attribute so predicates over it are pushed into a server-side `FilterExpression` (the full predicate still re-runs client-side, so results are always exact):
+
+```csharp
+var opts = new DynamoDbDocumentStoreOptions { TableName = "Documents", Region = RegionEndpoint.USEast1 }
+    .MapIndexedProperty<Order>(o => o.Status)
+    .MapIndexedProperty<Order>(o => o.Total);
+
+var open = await store.Query<Order>().Where(o => o.Status == "Open" && o.Total > 100).ToList();
+```
+
+Inspect the query the builder would run with `ToQueryString()`.
+
+## Raw PartiQL string query
+
+The string `Query`/`QueryStream`/`Count` overloads take a raw **PartiQL** `WHERE` condition scoped to the type's partition. It targets top-level attributes — the promoted attributes (reference them by their CLR/JSON property name) — not fields inside the opaque JSON body. `parameters` supplies `@name` token substitutions.
+
+```csharp
+var open = await store.Query<Order>("Status = @s AND Total > @min",
+    parameters: new { s = "Open", min = 100 });
+```
+
+`Project(string)` is not supported.
+
+## Change observation & the Streams change feed
+
+DynamoDB implements **both** change surfaces:
+
+```csharp
+// In-process — this store instance's own writes
+await foreach (var change in ((IObservableDocumentStore)store).NotifyOnChange<Order>(ct))
+    …
+
+// Native DynamoDB Streams — changes from ANY writer/process
+await using var sub = await ((IChangeFeedDocumentStore)store).SubscribeChanges<Order>(async (change, ct) =>
+{
+    Console.WriteLine($"{change.ChangeType} {change.Id}");
+});
+```
+
+When the store auto-creates the table it enables a stream (`NEW_AND_OLD_IMAGES`). `SubscribeChanges` polls the stream's shards (latest-first) and delivers `Inserted`/`Updated`/`Removed` changes with the deserialized document (null on delete). Dispose the returned handle to stop.
+
+## Ids & concurrency
+
+- **Guid / string Ids auto-generate** on Insert when default. **Explicit int/long Ids round-trip fine.**
+- **Int/Long Id auto-generation is unsupported** — inserting a default int/long Id throws `NotSupportedException` (no cheap `MAX`). Use Guid/string Ids, or assign the int/long Id yourself.
+- **Optimistic concurrency:** `MapVersionProperty<T>(x => x.Version)` seeds the version to 1 on insert (stored as a top-level `Version` number attribute), checks & increments on update/upsert, and guards the write with `ConditionExpression: Version = :expected`. A stale write throws `ConcurrencyException`. Blind (unversioned) upsert is last-write-wins. Insert uses `attribute_not_exists(sk)` so a duplicate id throws.
+
+## Read consistency
+
+Reads are **eventually consistent** by default (matching DynamoDB). Set `ConsistentRead = true` for strongly-consistent `Get`/`Query` at extra read-capacity cost.
+
+## Storage layout
+
+Each document is an attribute map:
+
+| Attribute | Type | Value |
+|---|---|---|
+| `pk` | S | the type name |
+| `sk` | S | the document id (string form) |
+| `Data` | S | the serialized JSON body |
+| `CreatedAt` / `UpdatedAt` | S | ISO-8601 timestamps |
+| `Version` | N | present only when a version property is mapped |
+
+## Limitations
+
+- **400 KB item cap** — a document larger than the limit throws a clear `NotSupportedException` (not a raw storage error). Store large fields externally (e.g. S3) or use a provider without the item cap.
+- **Client-side queries by default** — an unindexed `Query<T>()` is a full type scan; promote the filtered attribute with `MapIndexedProperty<T>` to push the filter server-side.
+- **Int/Long Id auto-generation unsupported** — use Guid/string.
+- **No spatial / vector / full-text / temporal** — `SupportsSpatial` / `SupportsVector` / `SupportsFullText` are `false` and there is no `ITemporalDocumentStore`.
+- **Compensating unit of work** — `CreateUnitOfWork()` tracks inserts and rolls them back on failure; there is no cross-partition transaction (same model as Cosmos).
+
+## Notes
+
+- `IDocumentMaintenance.ClearAll()` is supported (scans and deletes every item) — handy for tests/dev resets.
+- `BatchInsert` / `BatchRemove` use native `BatchWriteItem` in ≤ 25-item waves, retrying `UnprocessedItems` with backoff.
+- `Upsert` deep-merges in C# with recursive null stripping (RFC 7396 semantics).

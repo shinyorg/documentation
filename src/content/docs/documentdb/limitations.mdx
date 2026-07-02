@@ -28,7 +28,7 @@ DocumentDB is a **document store**, not a relational ORM. A few things follow fr
 
 - `CreateIndexAsync` only exists on the **concrete SQL `DocumentStore` types** (SQLite, SQLCipher, PostgreSQL, SQL Server, MySQL, Oracle, DuckDB). It is not on `IDocumentStore`.
 - **No `INCLUDE` columns, no filtered indexes** beyond the automatic `WHERE TypeName = '...'` filter applied by the library.
-- **CosmosDB, MongoDB, LiteDB, IndexedDB** do not expose `CreateIndexAsync`. CosmosDB indexes everything automatically (tune via container indexing policy). MongoDB indexes are managed with native Mongo tooling. LiteDB does not configure indexes. IndexedDB indexes are fixed at object-store creation time (when you bump `Version`).
+- **CosmosDB, MongoDB, LiteDB, IndexedDB, Azure Table, DynamoDB** do not expose `CreateIndexAsync`. CosmosDB indexes everything automatically (tune via container indexing policy). MongoDB indexes are managed with native Mongo tooling. LiteDB does not configure indexes. IndexedDB indexes are fixed at object-store creation time (when you bump `Version`).
 
 ## Queries
 
@@ -48,7 +48,7 @@ The expression API translates a subset of C#. Anything outside this list throws 
 | Captured closure variables; enum & `DateTime` equality/comparison | |
 | `Sum/Min/Max/Average` on child collections in `.Select`; single-key `GroupBy` | |
 
-If your predicate needs something on the right column of this table, fall back to **raw SQL** via `Query<T>("...", parameters)` — but note that raw SQL is **not supported on LiteDB or IndexedDB**.
+If your predicate needs something on the right column of this table, fall back to **raw SQL** via `Query<T>("...", parameters)` — but note that raw SQL is **not supported on LiteDB or IndexedDB** (client-side eval only). Azure Table and DynamoDB support a raw string query too, but over **promoted columns** only (an OData `$filter` fragment / PartiQL condition, not the JSON body).
 
 ## Provider-specific limitations
 
@@ -62,6 +62,8 @@ Full matrix on [Provider Reference](/documentdb/providers/). The most consequent
 | **Oracle** | Requires Oracle Database **23ai+**. No spatial. No native change feed. No `Backup()`. Vector / ANN search is supported, but HNSW/IVF indexes need the `vector_memory_size` pool configured (exact search works without it). `SetProperty`/`RemoveProperty` go through PL/SQL helper functions (the connecting user needs `CREATE PROCEDURE`). |
 | **CosmosDB** | No `Backup()`. No `CreateIndexAsync` (tune indexing policy on the container). Cost model is RU-per-operation — full scans over unindexed paths get expensive fast. |
 | **MongoDB** | No raw SQL. No spatial. No `CreateIndexAsync` (manage indexes with native Mongo tooling). Transactions are **compensating** on single-node deployments — only inserts are tracked and rolled back; updates and removes are not. Use a replica set + custom `IClientSessionHandle` for true ACID. |
+| **Azure Table** | Predicates evaluated in C# after a single-partition load — unless the property is promoted with `MapIndexedProperty<T>` (then the filter pushes down to a server-side OData `$filter`; raw string `Query` takes an OData fragment over promoted columns). No spatial/vector/full-text/temporal. **Int/Long Id auto-generation unsupported** (use Guid/string). ~64 KB per-property / 1 MB per-entity body cap (throws a clear error). In-process observation only (no cross-writer change feed). Compensating transactions (inserts only). |
+| **DynamoDB** | Same client-side predicate evaluation + `MapIndexedProperty<T>` pushdown (`FilterExpression`; raw string `Query` is PartiQL over promoted attributes). No spatial/vector/full-text/temporal. **Int/Long Id auto-generation unsupported** (use Guid/string). 400 KB item cap (throws a clear error). Native DynamoDB Streams change feed (`IChangeFeedDocumentStore`). Compensating transactions (inserts only). |
 | **DuckDB** | Single-process / writer-one (like SQLite). No spatial. No `Backup()` (copy the file directly or use DuckDB `EXPORT DATABASE`). `SetProperty`/`RemoveProperty` go through `json_merge_patch` rather than `json_set`/`json_remove`. |
 | **LiteDB** | **All predicates evaluated in C# after a full load** of every document of that type. No raw SQL. No spatial. Fine for small datasets, painful for large ones. |
 | **IndexedDB** | Same client-side predicate evaluation as LiteDB. No raw SQL. No spatial. No `CreateIndexAsync`. Browser quota typically ~50 MB before prompting. Single-tab writer. |
@@ -94,6 +96,8 @@ There is no built-in cap on document size, but each provider has practical limit
 | DuckDB `JSON` | Practically bounded by available memory during reads (vectorized engine) |
 | CosmosDB | 2 MB per document — **the hard one to plan around** |
 | MongoDB BSON | 16 MB per document — hard server limit |
+| Azure Table | ~64 KB per property (the JSON body column) / 1 MB per entity — throws a clear error above the cap |
+| DynamoDB | 400 KB per item — throws a clear error above the cap |
 | LiteDB | 1 MB per document, 256 MB per page chain |
 | IndexedDB | Browser-dependent, typically tens of MB total quota |
 

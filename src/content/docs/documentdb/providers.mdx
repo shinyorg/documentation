@@ -16,6 +16,8 @@ For provider-specific install, setup, and feature notes see the per-provider pag
 | Oracle | [Oracle](/documentdb/oracle/) |
 | DuckDB | [DuckDB](/documentdb/duckdb/) |
 | Azure Cosmos DB | [Cosmos DB](/documentdb/cosmosdb/) |
+| Azure Table Storage | [Azure Table](/documentdb/azure-table/) |
+| Amazon DynamoDB | [DynamoDB](/documentdb/dynamodb/) |
 | MongoDB | [MongoDB](/documentdb/mongodb/) |
 | LiteDB | [LiteDB](/documentdb/litedb/) |
 | IndexedDB (Blazor WASM) | [IndexedDB](/documentdb/indexeddb/) |
@@ -37,6 +39,29 @@ For provider-specific install, setup, and feature notes see the per-provider pag
 | `BatchInsert` chunk size | 500 | 500 | 500 | 500 | 500 | 500 (multi-row `VALUES`, 23ai+) | 500 | 100 (Cosmos TransactionalBatch limit) | `InsertMany` (ordered) | bulk insert in one tx | one IDB transaction |
 
 The JSON column is always named `Data` across every SQL provider. Companion columns are `Id`, `TypeName`, `CreatedAt`, `UpdatedAt`.
+
+## Key-partitioned NoSQL providers (Azure Table & DynamoDB)
+
+[Azure Table Storage](/documentdb/azure-table/) and [Amazon DynamoDB](/documentdb/dynamodb/) are schema-free **key-partitioned** stores. They map the library's `(typeName, id)` identity onto the store's native partition/sort keys (`PartitionKey/RowKey` on Table, `pk/sk` HASH/RANGE on DynamoDB) and behave like LiteDB — queries evaluate **client-side** — but against a managed cloud backend.
+
+| Capability | Azure Table | DynamoDB |
+|---|---|---|
+| Storage | `Data` string column in one table, `PartitionKey=typeName` / `RowKey=id` | `Data` string attribute in one table, `pk=typeName` / `sk=id` |
+| `Query<T>(string sql, ...)` raw query | yes — **OData** `$filter` over promoted columns | yes — **PartiQL** over promoted attributes |
+| Predicate translated to native query | pushdown on promoted columns (`MapIndexedProperty`); residue in C# | pushdown (`FilterExpression`) on promoted attributes; residue in C# |
+| Promoted/indexed columns | `MapIndexedProperty<T>` → native column + OData `$filter` | `MapIndexedProperty<T>` → native attribute + `FilterExpression` |
+| `Upsert` deep merge (RFC 7396) | yes (C# recursive merge) | yes (C# recursive merge) |
+| Optimistic concurrency (`MapVersionProperty`) | yes — native `ETag` If-Match | yes — conditional write on a `Version` attribute |
+| Int/Long Id auto-generation | **no** (use Guid/string) | **no** (use Guid/string) |
+| Spatial / vector / full-text / temporal | no | no |
+| In-process observation (`IObservableDocumentStore`) | yes | yes |
+| Native change feed (`IChangeFeedDocumentStore`) | no | **yes — DynamoDB Streams** |
+| Transactions | compensating (track inserts, undo on failure) | compensating |
+| `BatchInsert` chunk size | 100 per PartitionKey (`SubmitTransaction`) | 25 per request (`BatchWriteItem`) |
+| Size cap | ~64 KB per property / 1 MB per entity | 400 KB per item |
+| `ClearAll` (`IDocumentMaintenance`) | yes | yes |
+
+Because `Query<T>()` is always type-scoped, the common read path is a single-partition query on both. Loading the whole partition before filtering is a **full type scan** unless the filtered property is promoted with `MapIndexedProperty<T>` (which pushes the filter server-side) — so promote hot query paths or keep per-type document counts bounded.
 
 ## JSON syntax cheat-sheet
 
