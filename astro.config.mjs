@@ -353,20 +353,13 @@ export default defineConfig({
               link: { text: 'Power up!', href: '/ble' },
               dismissable: false
             },
-          {
-              id: 'docdb-v90',
-              content: 'Document DB v9.0 Integrations EVERYWHERE - Orleans, Aspire, OData, Data Sync, & more!',
-              variant: 'tip',
-              link: { text: 'Integrate Me Today', href: '/documentdb/' },
-              dismissable: false
-            },            
             {
-              id: 'docdb-v81',
-              content: 'Document DB v8.1 Interceptors, Temporal Support, Telemetry Collection, All Calculations, String Based APIs, & Orleans Storage Providers!',
+              id: 'docdb-v10',
+              content: 'Document DB v10 - Orleans, Aspire, OData, Data Sync, DynamoDB, Azure Tables... the ultimate database solution!',
               variant: 'tip',
-              link: { text: 'Take me there', href: '/documentdb/' },
+              link: { text: 'See Why!', href: '/documentdb/' },
               dismissable: false
-            },
+            },  
             {
               id: 'controls1-3',
               content : 'Controls: The biggest control suite for MAUI & Blazor + the ULTIMATE CameraView to end all others!',
