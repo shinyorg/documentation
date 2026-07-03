@@ -414,6 +414,44 @@ See [Querying](/documentdb/querying) for more examples of bulk delete and update
 int deletedCount = await store.Clear<User>();
 ```
 
+## Late-bound JSON lane (Type + JsonNode)
+
+When you have a registered document `Type` but **not** a CLR `T` at the call site — generic HTTP intake, message-bus payloads, ETL, gateways — write and read documents by handing the store the `Type` and the JSON body directly. This skips serialization: the supplied JSON is stored **as-is**.
+
+```csharp
+using System.Text.Json.Nodes;
+
+// One document
+var body = JsonNode.Parse("""{ "customer": "acme", "total": 42.50 }""")!;
+int n = await store.Insert(typeof(Order), body);   // n == 1, Id auto-generated & injected into `body`
+
+// Many at once — one atomic transaction (a mid-batch failure rolls the whole call back)
+var batch = JsonNode.Parse("""[ { "customer": "a" }, { "customer": "b" } ]""")!;
+await store.Insert(typeof(Order), batch);          // returns 2
+
+// Update (full replace) and Upsert (RFC 7396 merge patch) mirror the typed methods
+await store.Update(typeof(Order), JsonNode.Parse("""{ "id": "ord-7", "status": "open" }""")!);
+await store.Upsert(typeof(Order), JsonNode.Parse("""{ "id": "ord-7", "status": "shipped" }""")!);
+
+// Read back as raw JSON — no deserialize to T (cheaper, and AOT-clean)
+JsonNode? doc = await store.Get(typeof(Order), "ord-7");
+IReadOnlyList<JsonNode> open = await store.Query(typeof(Order), "json_extract(Data, '$.status') = @s", new { s = "open" });
+await foreach (var node in store.QueryStream(typeof(Order), "json_extract(Data, '$.status') = @s", new { s = "open" })) { /* … */ }
+```
+
+This lane **rides the full normal write pipeline** — tenancy, temporal history, versioning/optimistic-CAS, spatial + vector sidecars, JSON interceptors, and change notifications all apply (unlike [`IDocumentBackup`/`BulkImport`](/documentdb/backup/), which deliberately bypasses them). The generated Id (and bumped version) is written back onto your node, exactly like the typed `Insert<T>`.
+
+Key rules:
+
+- **JSON stored AS-IS — you own the property shape.** Member names must match what `T` serializes to (camelCase by default). `Get`/`Query` read that same shape back.
+- **Object vs. array.** A `JsonObject` writes one document; a `JsonArray` writes many atomically; a primitive `JsonValue` throws `ArgumentException`.
+- **Mapped properties must be present.** Because the body is verbatim, every registered spatial/vector mapping's JSON path must be present, or `Insert`/`Update` throws `InvalidOperationException` naming it. An explicit JSON `null` is honored as a deliberate "no value" (the sidecar is skipped). `Upsert` runs this check only when the element has no Id (a guaranteed insert), so partial merge patches aren't forced to re-send the location/vector.
+- **Filtering reuses the string WHERE/OData surface** — there is no "filter by JsonNode".
+
+Two documented limitations: object-mutating interceptors are a **no-op** on this lane (there is no `T` to mutate — JSON-shaped interceptors via `ctx.GetJsonDocument()` still work fully), and **vector auto-embedding does not run** (supply the embedding in the JSON).
+
+**Provider tier:** supported on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) via the core store. The document-native (MongoDB, Cosmos, LiteDB, IndexedDB) and key-partitioned (Azure Table, DynamoDB) providers throw `NotSupportedException` until a later cut, and the lane is not available inside a `CreateUnitOfWork()`.
+
 ## Backup
 
 Creates a hot backup of the database to a file. The store remains fully usable during the backup. Only available on concrete store types — not on the `IDocumentStore` interface.
