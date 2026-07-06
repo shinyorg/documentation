@@ -95,6 +95,7 @@ export const sidebarTopics = [
           { label: 'Channels', link: 'notifications/channels' },
           { label: 'Platform Specific', link: 'notifications/platform' },
           { label: 'Scheduling & Triggers', link: 'notifications/scheduling' },
+          { label: 'AI Tools', link: 'notifications/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Release Notes', link: 'notifications/release-notes' }
         ]
       },
@@ -220,6 +221,7 @@ export const sidebarTopics = [
           { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
           { label: 'Geofencing', link: 'locations/geofencing' },
           { label: 'Motion Activity', link: 'locations/motionactivity' },
+          { label: 'AI Tools', link: 'locations/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'locations/release-notes' }
         ]
@@ -281,6 +283,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'contactstore/' },
           { label: 'Permissions', link: 'contactstore/permissions' },
           { label: 'Querying', link: 'contactstore/querying' },
+          { label: 'AI Tools', link: 'contactstore/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Release Notes', link: 'contactstore/release-notes' }
         ]
       },

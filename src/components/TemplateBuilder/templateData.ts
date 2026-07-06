@@ -12,13 +12,15 @@ export const VERSIONS = {
     shinyControls: '1.0.1-beta-0129',
     // Shiny — client packages that share the core release train
     shinyClient: '5.0.0',
+    // Shiny — Microsoft.Extensions.AI tool packages for the client modules
+    shinyClientAi: '5.2.0',
     shinyConfiguration: '5.0.0',
     shinyLocalization: '2.0.1',
     shinyStores: '5.1.1',
     shinyReflector: '5.1.1',
     shinyDI: '5.1.1',
     shinySpatial: '2.0.0',
-    shinyContactStore: '1.0.1',
+    shinyContactStore: '5.2.0',
     shinySpeech: '2.1.0',
     shinyAiConversation: '1.0.0-beta-0050',
     shinyMusic: '3.0.1',
@@ -35,7 +37,6 @@ export const VERSIONS = {
     ctMvvm: '8.4.2',
     ctMauiMarkup: '7.0.1',
     ctMediaElement: '10.0.0',
-    ctCamera: '6.1.0',
     sentry: '6.6.0',
     barcodes: '3.0.4',
     biometric: '2.5.1',
@@ -240,6 +241,10 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'gps', label: 'GPS', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Foreground & background GPS tracking https://shinylib.net/client/locations/gps/' },
+    { id: 'ailocations', label: 'Location AI Tools', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClientAi,
+        description: 'Exposes read-only GPS (location, distance, travel time) as Microsoft.Extensions.AI tools https://shinylib.net/locations/ai-tools/',
+        visibleWhen: (s) => !!s.gps },
     { id: 'geofencing', label: 'Geofencing', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Monitor geofence regions https://shinylib.net/client/locations/geofencing/' },
@@ -249,6 +254,10 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'notifications', label: 'Local Notifications', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Schedule & manage local notifications https://shinylib.net/client/notifications/' },
+    { id: 'ainotifications', label: 'Reminder AI Tools', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClientAi,
+        description: 'Exposes local notifications as reminder Microsoft.Extensions.AI tools https://shinylib.net/notifications/ai-tools/',
+        visibleWhen: (s) => !!s.notifications },
     { id: 'health', label: 'Health Data', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyHealth,
         description: 'Cross-platform health data access (HealthKit/Health Connect) https://shinylib.net/health/',
@@ -261,6 +270,10 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyContactStore,
         description: 'Full CRUD access to device contacts https://shinylib.net/contactstore/',
         visibleWhen: noDesktop },
+    { id: 'aicontacts', label: 'Contacts AI Tools', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClientAi,
+        description: 'Exposes device contacts as Microsoft.Extensions.AI tools https://shinylib.net/contactstore/ai-tools/',
+        visibleWhen: (s) => !!s.contactstore && noDesktop(s) },
     { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinySpeech,
         description: 'Speech-to-text, text-to-speech, and audio playback https://shinylib.net/speech/' },
@@ -320,9 +333,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'mediaelement', label: 'CT Media Element', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.ctMediaElement,
         description: 'Cross-platform media playback control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/mediaelement' },
-    { id: 'cameraview', label: 'CT Camera', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.ctCamera,
-        description: 'Camera preview & capture control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/camera-view' },
     { id: 'uraniumui', label: 'Uranium UI', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.uraniumUi,
         description: 'Material Design component library by Enis Necipoglu https://enisn-projects.io/docs/en/uranium/latest' },
@@ -397,6 +407,8 @@ const MAUI_PARAMS: TemplateParam[] = [
         description: 'Geospatial database & geofencing https://shinylib.net/spatial/' },
 
     // AI
+    { id: 'aiall', label: 'All Shiny AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        description: 'One-click: adds the Microsoft.Extensions.AI tool package for every compatible module you have selected (Health, Contacts, Reminders, Location, DocumentDB, Mediator, Shell) on the platforms that support it' },
     { id: 'msextai', label: 'Microsoft.Extensions.AI', type: 'bool', defaultValue: false, category: 'ai',
         version: VERSIONS.msExtAi,
         description: 'Unified abstractions for AI services (IChatClient, IEmbeddingGenerator) https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions' },
@@ -457,13 +469,24 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui);
     s.usemauicontrols = !!s.shinycontrols;
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
+    // "All Shiny AI Tools" expands to the AI tool extension for every compatible module
+    // the user already selected (each carries its own platform gating via visibleWhen).
+    if (s.aiall) {
+        if (s.health) s.aihealth = true;
+        if (s.contactstore) s.aicontacts = true;
+        if (s.notifications) s.ainotifications = true;
+        if (s.gps) s.ailocations = true;
+        if (s.documentdb) s.aidocumentdb = true;
+        if (s.shinymediator) s.aimediator = true;
+        if (s.mvvmframework === 'Shiny MAUI Shell') s.aishinyshell = true;
+    }
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
     s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
     s.usehealth = !!(s.health || s.aihealth);
     // Telemetry only emitted when a store is actually present.
     s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
-    s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation);
-    s.communitytoolkit = !!(s.mediaelement || s.cameraview || s.usecsharpmarkup);
+    s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation || s.aicontacts || s.ainotifications || s.ailocations);
+    s.communitytoolkit = !!(s.mediaelement || s.usecsharpmarkup);
     return s;
 }
 

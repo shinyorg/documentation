@@ -1,0 +1,81 @@
+---
+title: AI Tools
+---
+import { Steps } from '@astrojs/starlight/components';
+
+Expose the device's contacts as [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions that LLM agents can call directly — "Find Jane's mobile number", "Add a contact for the plumber", "Update Bob's email". You opt-in exactly which operations the model can see, read-only by default.
+
+The AI layer (`Shiny.Contacts.Extensions.AI`) sits on top of `IContactStore` and does not change its behavior. It wraps the operations you opt-in to as `AIFunction` tools.
+
+## Setup
+
+<Steps>
+1. Install the AI extensions package
+
+   ```bash
+   dotnet add package Shiny.Contacts.Extensions.AI
+   ```
+
+2. Register the contact store and the AI tools
+
+   ```csharp
+   using Shiny.Contacts;
+   using Shiny.Contacts.Extensions.AI;
+
+   builder.Services.AddContactStore();
+
+   builder.Services.AddContactsAITools(tools => tools
+       .AddContacts(ContactAICapabilities.ReadWrite)    // Read is the default; ReadWrite adds create/update/delete
+   );
+   ```
+
+3. Resolve `ContactAITools` and hand `.Tools` to your chat client
+
+   ```csharp
+   var contacts = sp.GetRequiredService<ContactAITools>();
+
+   var response = await chatClient.GetResponseAsync(
+       messages,
+       new ChatOptions { Tools = [.. contacts.Tools] }
+   );
+   ```
+</Steps>
+
+:::caution[Request permissions first]
+The generated tools assume contact permissions are **already granted** — they do not trigger the platform permission UI (which needs a foreground activity). Call `IContactStore.RequestAccess(...)` from your app before invoking the agent.
+:::
+
+## Capabilities
+
+`AddContacts` defaults to `ContactAICapabilities.Read`. Pass `ReadWrite` (or `Write`) to also expose the create/update/delete tools. This is an allow-list you control on behalf of the agent — **not** an OS permission prompt.
+
+```csharp
+[Flags]
+public enum ContactAICapabilities
+{
+    None = 0,
+    Read = 1 << 0,
+    Write = 1 << 1,
+    ReadWrite = Read | Write
+}
+```
+
+Anything you do not add is invisible to the model.
+
+## Generated Tools Reference
+
+| Tool | Capability | Arguments | Notes |
+|---|---|---|---|
+| `search_contacts` | Read | `query?`, `limit?` | Free-text match over display name, given/family name, nickname, organization, phone numbers, and emails. Returns id, name, phones, emails. |
+| `get_contact` | Read | `contactId` | Full detail for one contact (phones, emails, addresses, organization, note). |
+| `create_contact` | Write | `givenName?`, `familyName?`, `phone?`, `email?`, `organization?`, `note?` | Requires at least a name or organization. Returns the new id. |
+| `update_contact` | Write | `contactId`, `givenName?`, `familyName?`, `addPhone?`, `addEmail?`, `organization?`, `note?` | Only supplied fields change; `addPhone`/`addEmail` append. |
+| `delete_contact` | Write | `contactId` | Irreversible. |
+
+:::note[Confirm destructive actions]
+`delete_contact` permanently removes a contact. Instruct the model (via your system prompt) to confirm with the user before calling it.
+:::
+
+## AOT
+
+`Shiny.Contacts.Extensions.AI` is `IsAotCompatible` — tool schemas are hand-built and results are emitted as `JsonNode`, so there is no reflection-based serialization in the tool path.

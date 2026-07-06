@@ -1,0 +1,64 @@
+---
+title: AI Tools
+---
+import { Steps } from '@astrojs/starlight/components';
+
+Give an LLM agent **read-only** awareness of where the user is via [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions — "Where am I?", "How far is it to the airport from here?", "Roughly how long to cycle to the park?". The agent can learn the current position and reason about distance and travel time to a destination, but never writes location data.
+
+The AI layer (`Shiny.Locations.Extensions.AI`) sits on top of `IGpsManager` and reads the last cached GPS fix.
+
+## Setup
+
+<Steps>
+1. Install the AI extensions package
+
+   ```bash
+   dotnet add package Shiny.Locations.Extensions.AI
+   ```
+
+2. Register GPS and the AI tools
+
+   ```csharp
+   using Shiny.Locations;
+   using Shiny.Locations.Extensions.AI;
+
+   builder.Services.AddGps();
+
+   builder.Services.AddLocationAITool();   // read-only; there is no write capability for GPS
+   ```
+
+3. Resolve `LocationAITools` and hand `.Tools` to your chat client
+
+   ```csharp
+   var location = sp.GetRequiredService<LocationAITools>();
+
+   var response = await chatClient.GetResponseAsync(
+       messages,
+       new ChatOptions { Tools = [.. location.Tools] }
+   );
+   ```
+</Steps>
+
+:::caution[A fix must exist]
+The tools read the **last cached GPS reading**. Ensure location permission is granted and a recent fix is available (e.g. start a listener, or the platform has a cached location) before invoking the agent. If no reading is available the tool returns an explanatory error rather than a position.
+:::
+
+## Read-only by design
+
+GPS is exposed through a single parameterless `AddLocationAITool()` call — there is no write capability, and therefore no builder or capability to opt-in to. Registering the tools is **not** an OS permission prompt; location permission is granted separately by the platform.
+
+## Generated Tools Reference
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `get_current_location` | *(none)* | Latitude/longitude, accuracy, altitude, speed, heading, `isStationary`, and the reading timestamp. |
+| `get_distance_to` | `latitude`, `longitude` | Great-circle distance (km/mi/m) and compass bearing from the current location to the destination. |
+| `estimate_travel_time` | `latitude`, `longitude`, `mode?`, `speedKmh?` | Straight-line ETA. `mode` ∈ `walking` (5 km/h), `cycling` (15), `transit` (30), `driving` (50); `speedKmh` overrides `mode`. |
+
+:::note[Estimates, not routed ETAs]
+`get_distance_to` and `estimate_travel_time` use **great-circle (straight-line)** distance and an assumed average speed — they do not account for roads, traffic, or terrain. The tool results include a `note` field stating this so the model can caveat its answer. For turn-by-turn routing, call a dedicated directions API.
+:::
+
+## AOT
+
+`Shiny.Locations.Extensions.AI` is `IsAotCompatible` — tool schemas are hand-built and results are emitted as `JsonNode`, so there is no reflection-based serialization in the tool path.

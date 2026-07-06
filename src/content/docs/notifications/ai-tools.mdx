@@ -1,0 +1,75 @@
+---
+title: AI Tools
+---
+import { Steps } from '@astrojs/starlight/components';
+
+Expose local notifications as **reminder**-style [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions that LLM agents can call directly — "Remind me to call the dentist at 3pm", "Set a daily reminder to take my meds at 8:30am", "What reminders do I have?". You opt-in exactly which operations the model can see, read-only by default.
+
+The AI layer (`Shiny.Notifications.Extensions.AI`) sits on top of `INotificationManager` and does not change its behavior. It frames the notification operations you opt-in to as reminder `AIFunction` tools.
+
+## Setup
+
+<Steps>
+1. Install the AI extensions package
+
+   ```bash
+   dotnet add package Shiny.Notifications.Extensions.AI
+   ```
+
+2. Register notifications and the AI tools
+
+   ```csharp
+   using Shiny.Notifications;
+   using Shiny.Notifications.Extensions.AI;
+
+   builder.Services.AddNotifications();
+
+   builder.Services.AddNotificationAITools(tools => tools
+       .AddReminders(ReminderAICapabilities.ReadWrite, channel: "reminders")   // channel is optional
+   );
+   ```
+
+3. Resolve `NotificationAITools` and hand `.Tools` to your chat client
+
+   ```csharp
+   var reminders = sp.GetRequiredService<NotificationAITools>();
+
+   var response = await chatClient.GetResponseAsync(
+       messages,
+       new ChatOptions { Tools = [.. reminders.Tools] }
+   );
+   ```
+</Steps>
+
+:::caution[Request permissions first]
+The generated tools assume notification permissions are **already granted** — they do not trigger the platform permission UI (which needs a foreground activity). Call `INotificationManager.RequestAccess(...)` from your app before invoking the agent. If you pass a `channel`, register it first via `AddChannel`.
+:::
+
+## Capabilities
+
+`AddReminders` defaults to `ReminderAICapabilities.Read`. Pass `ReadWrite` (or `Write`) to also expose the create/cancel tools. This is an allow-list you control on behalf of the agent — **not** an OS permission prompt.
+
+```csharp
+[Flags]
+public enum ReminderAICapabilities
+{
+    None = 0,
+    Read = 1 << 0,
+    Write = 1 << 1,
+    ReadWrite = Read | Write
+}
+```
+
+## Generated Tools Reference
+
+| Tool | Capability | Arguments | Notes |
+|---|---|---|---|
+| `list_reminders` | Read | *(none)* | Returns pending/scheduled/repeating reminders with id, title, message, and when each fires. |
+| `create_reminder` | Write | `message`, `title?`, `scheduleFor?`, `repeatDailyAt?` | Omit both time args to notify now; `scheduleFor` for a one-time reminder; `repeatDailyAt` (`"HH:mm"`) for a daily one. Returns the reminder id. |
+| `cancel_reminder` | Write | `id` | Cancels a reminder (displayed or pending) by id. |
+
+`scheduleFor` and `repeatDailyAt` are mutually exclusive. Dates are ISO-8601 (`2026-07-06T15:00:00Z`); `repeatDailyAt` is a 24-hour local time (`"08:30"`).
+
+## AOT
+
+`Shiny.Notifications.Extensions.AI` is `IsAotCompatible` — tool schemas are hand-built and results are emitted as `JsonNode`, so there is no reflection-based serialization in the tool path.

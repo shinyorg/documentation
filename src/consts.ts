@@ -587,10 +587,10 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "contactstore",
-        "nuget": "Shiny.Maui.ContactStore",
+        "nuget": "Shiny.Contacts",
         "description": "Contact Store",
         "category": "platformdata",
-        "version": "1.0.1"
+        "version": "5.2.0"
     },
     {
         "id": "aiconversation",
