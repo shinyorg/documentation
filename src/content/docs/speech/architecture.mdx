@@ -142,10 +142,43 @@ So `IAudioSource` and `IAudioPlayer` are first-class — and they live in their 
 The capture contract is intentionally narrow:
 
 ```csharp
-Task<Stream> StartCaptureAsync(CancellationToken cancellationToken = default);
+Task<Stream> StartCaptureAsync(
+    AudioProcessingOptions? processing = null,
+    CancellationToken cancellationToken = default
+);
 ```
 
 Raw PCM, 16 kHz, 16-bit, mono. Every cloud STT provider in the ecosystem accepts this format (or transcodes it cheaply). Apps that need 48 kHz stereo for music recording aren't the target — that's a different library.
+
+## Why voice processing is a portable option, not per-platform code
+
+Blocking background noise, and stopping text-to-speech from bleeding back into an open mic (barge-in), are three separate DSP features — noise suppression, automatic gain control, and **acoustic echo cancellation** (AEC is the one that cancels your own TTS). Every target platform exposes them, but through wildly different APIs and granularities. Rather than leak that into app code, capture takes one portable record:
+
+```csharp
+public record AudioProcessingOptions
+{
+    public bool EchoCancellation { get; init; }
+    public bool NoiseSuppression { get; init; }
+    public bool AutomaticGainControl { get; init; }
+    public static AudioProcessingOptions VoiceChat { get; } // all three
+    public static AudioProcessingOptions None { get; }
+}
+```
+
+Each flag maps to the native voice-processing chain, best-effort — a platform or device that can't honor a flag ignores it:
+
+| Effect | iOS / macOS | Android | Windows | Browser |
+|---|---|---|---|---|
+| Echo Cancellation | ✅ Voice-Processing I/O | ✅ `AcousticEchoCanceler` + `VoiceCommunication` | ⚠️ `Communications` pipeline | ✅ WebRTC AEC3 |
+| Noise Suppression | ✅ (bundled) | ✅ `NoiseSuppressor` | ⚠️ best-effort | ✅ |
+| Automatic Gain Control | ✅ (bundled) | ✅ `AutomaticGainControl` | ⚠️ best-effort | ✅ |
+
+Two consequences of the platform reality are baked into the contract:
+
+- **Apple can't split the three.** Its Voice-Processing I/O unit is one switch that enables AEC + NS + AGC together, so any flag set enables the whole chain there. The flags stay independent for the platforms that *can* honor them (Android, browser).
+- **These are OS/hardware cancellers referencing the real speaker feed** — so AEC cancels *any* audio the device is playing, not just TTS the library rendered. That's why barge-in works even when something else is producing the sound.
+
+Cloud STT reaches this through `SpeechRecognitionOptions.AudioProcessing`, which `CloudSpeechToText` forwards into `StartCaptureAsync`. Native on-device recognizers own their microphone and ignore it — the option governs `IAudioSource` capture only.
 
 ## Why `IsPlayerAnalysisSupported` instead of a no-op level event?
 
