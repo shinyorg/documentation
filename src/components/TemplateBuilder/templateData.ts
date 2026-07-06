@@ -10,10 +10,10 @@ export const VERSIONS = {
     shinyMediator: '6.6.2',
     shinyShell: '6.3.0',
     shinyControls: '1.0.1-beta-0129',
-    // Shiny — client packages that share the core release train
-    shinyClient: '5.0.0',
-    // Shiny — Microsoft.Extensions.AI tool packages for the client modules
-    shinyClientAi: '5.2.0',
+    // Shiny — client packages that share the core release train (the default Shiny version).
+    // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
+    // ship on this same train, so they track this key too.
+    shinyClient: '5.1.1',
     shinyConfiguration: '5.0.0',
     shinyLocalization: '2.0.1',
     shinyStores: '5.1.1',
@@ -241,10 +241,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'gps', label: 'GPS', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Foreground & background GPS tracking https://shinylib.net/client/locations/gps/' },
-    { id: 'ailocations', label: 'Location AI Tools', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyClientAi,
-        description: 'Exposes read-only GPS (location, distance, travel time) as Microsoft.Extensions.AI tools https://shinylib.net/locations/ai-tools/',
-        visibleWhen: (s) => !!s.gps },
     { id: 'geofencing', label: 'Geofencing', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Monitor geofence regions https://shinylib.net/client/locations/geofencing/' },
@@ -254,26 +250,14 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'notifications', label: 'Local Notifications', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Schedule & manage local notifications https://shinylib.net/client/notifications/' },
-    { id: 'ainotifications', label: 'Reminder AI Tools', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyClientAi,
-        description: 'Exposes local notifications as reminder Microsoft.Extensions.AI tools https://shinylib.net/notifications/ai-tools/',
-        visibleWhen: (s) => !!s.notifications },
     { id: 'health', label: 'Health Data', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyHealth,
         description: 'Cross-platform health data access (HealthKit/Health Connect) https://shinylib.net/health/',
         visibleWhen: noDesktop },
-    { id: 'aihealth', label: 'Health AI Tools', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyHealth,
-        description: 'Exposes an opt-in slice of health data as Microsoft.Extensions.AI tools https://shinylib.net/health/ai-tools/',
-        visibleWhen: (s) => !!s.health && noDesktop(s) },
     { id: 'contactstore', label: 'Contact Store', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyContactStore,
         description: 'Full CRUD access to device contacts https://shinylib.net/contactstore/',
         visibleWhen: noDesktop },
-    { id: 'aicontacts', label: 'Contacts AI Tools', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyClientAi,
-        description: 'Exposes device contacts as Microsoft.Extensions.AI tools https://shinylib.net/contactstore/ai-tools/',
-        visibleWhen: (s) => !!s.contactstore && noDesktop(s) },
     { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinySpeech,
         description: 'Speech-to-text, text-to-speech, and audio playback https://shinylib.net/speech/' },
@@ -407,8 +391,20 @@ const MAUI_PARAMS: TemplateParam[] = [
         description: 'Geospatial database & geofencing https://shinylib.net/spatial/' },
 
     // AI
-    { id: 'aiall', label: 'All Shiny AI Tools', type: 'bool', defaultValue: false, category: 'ai',
-        description: 'One-click: adds the Microsoft.Extensions.AI tool package for every compatible module you have selected (Health, Contacts, Reminders, Location, DocumentDB, Mediator, Shell) on the platforms that support it' },
+    { id: 'aihealth', label: 'Health AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyHealth,
+        description: 'Exposes health data as Microsoft.Extensions.AI tools (requires Health Data) https://shinylib.net/health/ai-tools/',
+        visibleWhen: noDesktop },
+    { id: 'aicontacts', label: 'Contacts AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyClient,
+        description: 'Exposes device contacts as Microsoft.Extensions.AI tools (requires Contact Store) https://shinylib.net/contactstore/ai-tools/',
+        visibleWhen: noDesktop },
+    { id: 'ainotifications', label: 'Reminder AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyClient,
+        description: 'Exposes local notifications as reminder Microsoft.Extensions.AI tools (requires Local Notifications) https://shinylib.net/notifications/ai-tools/' },
+    { id: 'ailocations', label: 'Location AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyClient,
+        description: 'Exposes read-only GPS as Microsoft.Extensions.AI tools (requires GPS) https://shinylib.net/locations/ai-tools/' },
     { id: 'msextai', label: 'Microsoft.Extensions.AI', type: 'bool', defaultValue: false, category: 'ai',
         version: VERSIONS.msExtAi,
         description: 'Unified abstractions for AI services (IChatClient, IEmbeddingGenerator) https://learn.microsoft.com/en-us/dotnet/ai/ai-extensions' },
@@ -416,6 +412,7 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyMediator,
         description: 'Source generates AI tools from mediator contracts https://shinylib.net/mediator/extensions/ai/' },
     { id: 'aishinyshell', label: 'Shell AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyShell,
         description: 'Source generates AI navigation tools from shell maps https://shinylib.net/mauishell/ai/',
         visibleWhen: (s) => s.mvvmframework === 'Shiny MAUI Shell' },
     { id: 'aidocumentdb', label: 'DocumentDB AI Tools', type: 'bool', defaultValue: false, category: 'ai',
@@ -469,20 +466,11 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui);
     s.usemauicontrols = !!s.shinycontrols;
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
-    // "All Shiny AI Tools" expands to the AI tool extension for every compatible module
-    // the user already selected (each carries its own platform gating via visibleWhen).
-    if (s.aiall) {
-        if (s.health) s.aihealth = true;
-        if (s.contactstore) s.aicontacts = true;
-        if (s.notifications) s.ainotifications = true;
-        if (s.gps) s.ailocations = true;
-        if (s.documentdb) s.aidocumentdb = true;
-        if (s.shinymediator) s.aimediator = true;
-        if (s.mvvmframework === 'Shiny MAUI Shell') s.aishinyshell = true;
-    }
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
     s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
-    s.usehealth = !!(s.health || s.aihealth);
+    // AI tool packages are added on top of their base module - the base is selected
+    // independently (no auto-enable), so Health AI Tools requires Health Data, etc.
+    s.usehealth = !!s.health;
     // Telemetry only emitted when a store is actually present.
     s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
     s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation || s.aicontacts || s.ainotifications || s.ailocations);

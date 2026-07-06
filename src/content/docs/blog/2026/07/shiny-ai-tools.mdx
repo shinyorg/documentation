@@ -1,0 +1,139 @@
+---
+title: "Give Your MAUI Agent Hands — Contacts, Reminders & Location AI Tools"
+date: 2026-07-06
+authors:
+  - allanritchie
+tags:
+  - contacts
+  - notifications
+  - locations
+  - release
+  - AI
+excerpt: "Three new Microsoft.Extensions.AI packages turn device services into tools an LLM can call — Shiny.Contacts.Extensions.AI, Shiny.Notifications.Extensions.AI, and Shiny.Locations.Extensions.AI. Opt-in, read-only by default, AOT-safe, and they compose into a single IChatClient."
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+When we shipped `Shiny.Health.Extensions.AI`, it proved a simple point: a chat model becomes far more useful when it can *do* things instead of just talk about them. Give it a tool to read step counts and "how did I sleep last week?" stops being a guess and starts being an answer pulled from the device.
+
+So we did the same for three more device services. Three new packages expose Shiny modules as [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions:
+
+- **`Shiny.Contacts.Extensions.AI`** — search and manage the device address book
+- **`Shiny.Notifications.Extensions.AI`** — schedule and cancel reminders
+- **`Shiny.Locations.Extensions.AI`** — read-only GPS: where you are, and how far/long to somewhere else
+
+They all follow the same shape as Health: you **opt-in** to exactly which operations the model can see (a read/write allow-list you control on behalf of the agent — not an OS permission prompt), it's **read-only by default**, and the whole thing is `IsAotCompatible` — schemas are hand-built and results come back as `JsonNode`, so there's no reflection in the tool path.
+
+## Contacts
+
+<NugetBadge name="Shiny.Contacts.Extensions.AI" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Contacts.Extensions.AI
+```
+
+```csharp
+builder.Services.AddContactStore();
+builder.Services.AddContactsAITools(tools => tools
+    .AddContacts(ContactAICapabilities.ReadWrite)   // Read is the default; ReadWrite adds create/update/delete
+);
+```
+
+This generates `search_contacts`, `get_contact`, and — when you opt-in to `Write` — `create_contact`, `update_contact`, and `delete_contact`.
+
+**What you'd use it for:** a personal-assistant or CRM-lite app where the user talks to the address book instead of tapping through it — "grab that number so I can text them," "add the person on this business card," "which of my contacts work at Acme?" The agent looks up an id with `search_contacts`, then acts on it.
+
+**Example questions:**
+
+- "What's Jane Doe's mobile number?"
+- "Add a contact for my new dentist — Dr. Patel at Bright Smiles Dental, 555-0142."
+- "Change my brother Mike's email to mike@newjob.com."
+- "Do I have anyone saved from Acme Corp?"
+- "Delete the contact for my old landlord." *(destructive — tell the model to confirm first)*
+
+## Reminders
+
+<NugetBadge name="Shiny.Notifications.Extensions.AI" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Notifications.Extensions.AI
+```
+
+```csharp
+builder.Services.AddNotifications();
+builder.Services.AddNotificationAITools(tools => tools
+    .AddReminders(ReminderAICapabilities.ReadWrite, channel: "reminders")   // channel is optional
+);
+```
+
+Local notifications, framed as **reminders**. You get `list_reminders`, and — with `Write` — `create_reminder` (fire now, at a specific date/time, or daily at a set time) and `cancel_reminder`.
+
+**What you'd use it for:** any "remind me…" flow in a chat assistant — todo apps, habit and medication trackers, follow-up nudges. The user speaks a reminder in natural language and the model schedules a real local notification; `scheduleFor` and `repeatDailyAt` cover one-shot and recurring.
+
+**Example questions:**
+
+- "Remind me to call the plumber at 3pm today."
+- "Set a daily reminder to take my meds at 8:30am."
+- "What reminders do I have set?"
+- "Cancel the one about the dentist."
+- "Nudge me to water the plants every evening at 6."
+
+## Location
+
+<NugetBadge name="Shiny.Locations.Extensions.AI" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Locations.Extensions.AI
+```
+
+```csharp
+builder.Services.AddGps();
+builder.Services.AddLocationAITool();   // read-only — there's no write capability for GPS
+```
+
+GPS is **read-only**, so there's no builder to configure — a single `AddLocationAITool()` registers `get_current_location`, `get_distance_to`, and `estimate_travel_time`. The agent can learn where the user is and reason about distance and rough travel time to a destination.
+
+**What you'd use it for:** travel and field-service apps, delivery/ETA estimates, "am I near…" checks, or any assistant that should be location-aware. One honest caveat baked into the tools: distances are **great-circle (straight-line)** and travel times use an assumed average speed — the results say so in a `note` field, so the model caveats its answer rather than pretending to be a routing engine.
+
+**Example questions:**
+
+- "Where am I right now?"
+- "How far is it from here to 51.4700, -0.4543?"
+- "Roughly how long to cycle to the park at 51.51, -0.12?"
+- "Am I within 2 km of the office?"
+- "What's my current speed and heading?"
+
+## Compose them into one agent
+
+Each package hands you a small bundle you resolve from DI. Concatenate their `.Tools` and pass the lot to any `IChatClient`:
+
+```csharp
+var tools = new List<AITool>();
+tools.AddRange(sp.GetRequiredService<ContactAITools>().Tools);
+tools.AddRange(sp.GetRequiredService<NotificationAITools>().Tools);
+tools.AddRange(sp.GetRequiredService<LocationAITools>().Tools);
+
+var response = await chatClient.GetResponseAsync(
+    messages,
+    new ChatOptions { Tools = tools }
+);
+```
+
+Now a single message can fan out across all three:
+
+> **"I'm meeting Sarah at the office at 5 — how far am I, and remind me to leave in an hour."**
+
+The model calls `search_contacts` for Sarah if it needs her details, `get_distance_to` for the office, and `create_reminder` for the nudge — one turn, three device services.
+
+## Permissions still belong to your app
+
+The capability builders (`AddContacts(...)`, `AddReminders(...)`) are an allow-list for the *agent* — they decide which operations the model can see. They are **not** an OS permission prompt. The underlying platform permission must already be granted: call `IContactStore.RequestAccess`, `INotificationManager.RequestAccess`, or start a GPS listener from your app before you invoke the agent. The tools assume access is in place and return a clean error object if it isn't.
+
+## Get started
+
+```bash
+dotnet add package Shiny.Contacts.Extensions.AI
+dotnet add package Shiny.Notifications.Extensions.AI
+dotnet add package Shiny.Locations.Extensions.AI
+```
+
+Full details on each: [Contacts AI Tools](/contactstore/ai-tools), [Reminder AI Tools](/notifications/ai-tools), and [Location AI Tools](/locations/ai-tools). Same pattern as [Health AI Tools](/health/ai-tools) — opt-in, read-only by default, AOT-safe, and now your agent has hands.
