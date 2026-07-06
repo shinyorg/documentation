@@ -151,6 +151,37 @@ var filtered = await _library.GetGenresAsync(new MusicFilter
 });
 ```
 
+## Look Up Tracks by ID
+
+When you persist a track (a saved "now playing" item, a custom queue, a favorites list) you should store its `Id` rather than the whole record, then re-resolve it on next launch. Two methods do this without loading the entire library.
+
+### Get a Single Track
+
+```csharp
+var track = await _library.GetTrackByIdAsync(savedTrackId);
+if (track != null)
+{
+    await _player.PlayAsync(track);
+}
+```
+
+Returns `null` if no track with that identifier exists (for example, the file was deleted since it was saved). On Android this runs an `Id = ?` query against `MediaStore.Audio.Media`; on Apple platforms it looks up the `MPMediaItem` by persistent ID.
+
+### Get Multiple Tracks
+
+To hydrate a saved list of IDs, use `GetTracksByIdsAsync` — it resolves them in a **single query** rather than a loop:
+
+```csharp
+var savedQueue = new[] { "1234", "5678", "9012" };
+var tracks = await _library.GetTracksByIdsAsync(savedQueue);
+```
+
+Results are returned in the **same order** as the supplied IDs. Duplicate IDs are collapsed, and any ID that no longer resolves to a track is silently omitted — so the returned list may be shorter than the input.
+
+:::tip
+Prefer `GetTracksByIdsAsync` over calling `GetTrackByIdAsync` in a loop. On Android it issues one `Id IN (...)` query; on Apple platforms it makes a single pass over the songs query.
+:::
+
 ## GroupedCount&lt;T&gt;
 
 All grouping methods (`GetGenresAsync`, `GetYearsAsync`, `GetDecadesAsync`) return `IReadOnlyList<GroupedCount<T>>`:
@@ -195,6 +226,20 @@ foreach (var track in tracks)
 ```
 
 The `playlistId` parameter is the platform-specific identifier from `PlaylistInfo.Id`.
+
+### Get a Single Playlist
+
+To re-resolve a saved playlist's current name and song count without enumerating every playlist, use `GetPlaylistByIdAsync`:
+
+```csharp
+var playlist = await _library.GetPlaylistByIdAsync(savedPlaylistId);
+if (playlist != null)
+{
+    Console.WriteLine($"{playlist.Name} ({playlist.SongCount} songs)");
+}
+```
+
+Returns `null` if no playlist with that identifier exists. This resolves both device playlists and custom playlists (`custom:` prefixed IDs).
 
 ### PlaylistInfo
 
