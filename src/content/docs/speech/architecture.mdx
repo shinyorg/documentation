@@ -41,7 +41,7 @@ Five immutable design pillars:
 1. **Four interfaces, one shape across every backend.** `ISpeechToTextService`, `ITextToSpeechService`, `IAudioSource`, `IAudioPlayer`. The native implementations and the cloud-composed implementations are wire-compatible — consumers don't care which is registered.
 2. **STT is event-based with explicit Start/Stop.** A request/response shape can't model continuous recognition, partial results, or wake-word loops. `Start` + events + `Stop` does, and it's the only contract that survives across SFSpeechRecognizer's streaming, Android's segmented engine, ElevenLabs Scribe's one-shot POST, and Azure's continuous WebSocket session.
 3. **Cloud providers compose, they don't impersonate.** `ISpeechToTextProvider` + `ITextToSpeechProvider` are stateless. The orchestration — mic lifecycle, audio capture, playback, keyword regex matching, error fan-out — lives in `CloudSpeechToText` / `CloudTextToSpeech`. Adding a provider is one class, not a service implementation.
-4. **The audio I/O abstractions are first-class, not internal helpers.** `IAudioSource` and `IAudioPlayer` are public surface. Cloud providers depend on them, the AI Conversation library depends on them, and apps that just need raw PCM or MP3 playback depend on them directly.
+4. **The audio I/O abstractions are first-class, not internal helpers — and now ship separately.** `IAudioSource` and `IAudioPlayer` (plus `PipeStream` and `AccessState`) live in the standalone **`Shiny.Audio`** package/namespace. Cloud providers depend on them, the AI Conversation library depends on them, and apps that just need raw PCM or MP3 playback depend on them directly — some without needing the speech stack at all. `Shiny.Speech` references `Shiny.Audio`, so consumers add `using Shiny.Audio;` but get everything wired by `AddSpeechServices()`.
 5. **Capability bits, not exceptions.** `IsSupported`, `IsListening`, `IsSpeaking`, `IsPlayerAnalysisSupported` let app code check what a platform can do without trying it and catching. The Browser doesn't have native TTS metering; Windows doesn't expose level taps; the API says so before you bind UI.
 
 ## Why an event-based STT contract?
@@ -106,6 +106,20 @@ public class CloudSpeechToText : ISpeechToTextService { /* state, events, regex,
 
 The same split holds for TTS: `ITextToSpeechProvider.SynthesizeAsync` returns an MP3 stream; `CloudTextToSpeech` plays it through `IAudioPlayer` and forwards `AudioLevelChanged`.
 
+## Changing cloud credentials at runtime
+
+Keys rotate, users paste them into a settings screen, a trial key gets swapped for a paid one — so the credential can't be a value frozen at `AddXxxSpeech(...)` time. The provider config objects (`AzureSpeechConfig`, `ElevenLabsConfig`, `OpenAiSpeechConfig`, `TypecastConfig`) are therefore **mutable singletons**: registration is unchanged, but the same instance stays resolvable and editable.
+
+```csharp
+var config = new TypecastConfig { ApiKey = "initial" };
+builder.Services.AddTypecastSpeech(config);
+
+// later — from your retained reference, or serviceProvider.GetRequiredService<TypecastConfig>()
+config.ApiKey = "rotated-key";
+```
+
+Providers read the config on each call, so the change takes effect on the next synth/recognize with no re-registration. Providers that keep an expensive client (ElevenLabs' `HttpClient`, Typecast's SDK client) wrap it in `RefreshableClient<T>` (in `Shiny.Speech.Cloud`), which rebuilds — and disposes the old client — only when the key actually changes; unchanged keys keep reusing the same client. Azure and OpenAI build their client per call, so they pick up changes for free.
+
 ## Why is the cloud STT error contract two-tiered?
 
 Continuous cloud recognition can fail in two distinct ways:
@@ -123,7 +137,7 @@ The cloud STT path needs a microphone stream. The cloud TTS path needs to play a
 - **Apps need raw audio.** Voice memos, custom acoustic models, audio analysis, server-side STT — all want PCM bytes without coupling to a recognizer.
 - **`AudioLevelChanged` only works if the player is observable.** The VU meter on `ITextToSpeechService` forwards from `IAudioPlayer.AudioLevelChanged`. Making the player private breaks the level signal.
 
-So `IAudioSource` and `IAudioPlayer` are first-class. `AddSpeechServices()` registers them; cloud-provider registrations call `AddAudioSource()` / `AddAudioPlayer()` to make sure they exist; apps that only need raw capture or playback can register just those.
+So `IAudioSource` and `IAudioPlayer` are first-class — and they live in their own **`Shiny.Audio`** package so those "apps need raw audio" scenarios don't have to pull in the speech stack. `AddSpeechServices()` registers them; cloud-provider registrations call `AddAudioSource()` / `AddAudioPlayer()` to make sure they exist; apps that only need raw capture or playback reference `Shiny.Audio` directly and call `AddAudioServices()` (or the individual `AddAudioSource()` / `AddAudioPlayer()`).
 
 The capture contract is intentionally narrow:
 

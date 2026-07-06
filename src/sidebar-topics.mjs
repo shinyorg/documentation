@@ -233,6 +233,7 @@ export const sidebarTopics = [
           { label: 'Azure AI Speech', link: 'speech/azure' },
           { label: 'ElevenLabs', link: 'speech/elevenlabs' },
           { label: 'OpenAI', link: 'speech/openai' },
+          { label: 'Typecast', link: 'speech/typecast' },
           { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
           { label: 'Custom Provider', link: 'speech/custom-provider' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
