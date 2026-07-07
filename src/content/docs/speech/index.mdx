@@ -15,23 +15,27 @@ import NugetDownloads from '/src/components/NugetDownloads.astro';
 | Azure | <NugetDownloads name="Shiny.Speech.Azure" /> |
 | OpenAI | <NugetDownloads name="Shiny.Speech.OpenAI" /> |
 | ElevenLabs | <NugetDownloads name="Shiny.Speech.ElevenLabs" /> |
+| Typecast | <NugetDownloads name="Shiny.Speech.Typecast" /> |
 | Microsoft.Extensions.AI | <NugetDownloads name="Shiny.Speech.MicrosoftAI" /> |
 
 <PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "windows", "web"]} />
 
-Shiny.Speech provides a unified API for **speech-to-text**, **text-to-speech**, **audio capture**, and **audio playback** across Android, iOS, Windows, and Browser (Blazor WebAssembly) — with pluggable cloud providers for Azure AI Speech and ElevenLabs.
+Shiny.Speech provides a unified API for **speech-to-text**, **text-to-speech**, **audio capture**, and **audio playback** across Android, iOS, Windows, and Browser (Blazor WebAssembly) — with pluggable cloud providers for Azure AI Speech, OpenAI, ElevenLabs, and Typecast.
 
 ## Features
 * Event-based speech-to-text with Start/Stop lifecycle — multiple subscribers supported
 * Built-in keyword detection via `SpeechRecognitionOptions.Keywords` and the `KeywordHeard` event
 * Platform-native text-to-speech with voice selection, rate, pitch, and volume control
 * Raw audio capture from the device microphone (16kHz, 16-bit, mono PCM)
+* Voice processing on capture — echo cancellation, noise suppression, and automatic gain control via `AudioProcessingOptions` (cancels TTS bleed for barge-in)
 * Audio playback for MP3 streams
 * Pluggable cloud provider architecture — swap between on-device and cloud STT/TTS
 * Azure AI Speech integration (STT + TTS) with SSML prosody control
 * OpenAI integration (STT + TTS) powered by Whisper and GPT-4o models
 * ElevenLabs integration — Scribe speech-to-text and multilingual text-to-speech
+* Typecast integration — AI voice text-to-speech (TTS only) via the `typecast-csharp` SDK
 * Microsoft.Extensions.AI adapter — expose providers as `ISpeechToTextClient` / `ITextToSpeechClient`
+* Runtime credential changes — provider config objects are mutable singletons; rotate API keys / region / model without re-registration
 * State tracking — `IsListening` (STT), `IsSpeaking` (TTS), `IsPlaying` (audio)
 * VU meter signal — `AudioLevelChanged` event on `ITextToSpeechService` and `IAudioPlayer` emits a normalized 0.0–1.0 RMS level during playback; `IsPlayerAnalysisSupported` reports availability per platform
 * Permission management via `AccessState` and `RequestAccess()`
@@ -47,6 +51,7 @@ Shiny.Speech provides a unified API for **speech-to-text**, **text-to-speech**, 
 | `Shiny.Speech.Azure` | Azure AI Speech provider (STT + TTS) |
 | `Shiny.Speech.OpenAI` | OpenAI provider (STT + TTS) — Whisper, GPT-4o Transcribe, GPT-4o Mini TTS |
 | `Shiny.Speech.ElevenLabs` | ElevenLabs provider — Scribe STT + TTS |
+| `Shiny.Speech.Typecast` | Typecast provider (TTS only) — AI voice via the `typecast-csharp` SDK |
 | `Shiny.Speech.MicrosoftAI` | Microsoft.Extensions.AI adapter — `ISpeechToTextClient` / `ITextToSpeechClient` |
 
 ## Setup
@@ -201,6 +206,65 @@ public partial class TtsViewModel(ITextToSpeechService tts) : ObservableObject
 | Generic playback (`IAudioPlayer`) | ✅ — `AVAudioPlayer.MeteringEnabled` | ✅ — `Visualizer` on session | ❌ | ❌ |
 
 On iOS / macOS the native TTS path routes `AVSpeechSynthesizer` through `AVAudioEngine` + `AVAudioPlayerNode` so a tap can compute RMS. The engine is created lazily and kept warm across utterances — first-utterance latency adds roughly 50–150 ms; subsequent calls are indistinguishable from the legacy direct path.
+
+## Voice Processing (Noise Suppression & Echo Cancellation)
+
+Microphone capture can request platform voice-processing effects to strip background noise and,
+critically, to **cancel your text-to-speech output from the mic** so it isn't re-captured while the
+mic is open (barge-in). Configure it via `AudioProcessingOptions` — either directly on
+`IAudioSource.StartCaptureAsync(...)` or through `SpeechRecognitionOptions.AudioProcessing` (honored
+by the cloud providers, which capture through `IAudioSource`):
+
+```csharp
+await stt.Start(new SpeechRecognitionOptions
+{
+    Culture = CultureInfo.GetCultureInfo("en-US"),
+    AudioProcessing = AudioProcessingOptions.VoiceChat   // AEC + noise suppression + AGC
+});
+
+// or, capturing raw audio directly:
+var stream = await audioSource.StartCaptureAsync(new AudioProcessingOptions
+{
+    EchoCancellation = true,      // subtracts speaker/TTS output from the mic signal
+    NoiseSuppression = true,      // attenuates steady background noise
+    AutomaticGainControl = true   // normalizes capture level
+});
+```
+
+Each flag is **best-effort** and maps to native voice processing:
+
+| Effect | iOS / macOS | Android | Windows | Browser |
+|---|---|---|---|---|
+| Echo Cancellation | ✅ Voice-Processing I/O | ✅ `AcousticEchoCanceler` + VoiceCommunication | ⚠️ best-effort (Communications pipeline) | ✅ WebRTC AEC3 |
+| Noise Suppression | ✅ (bundled) | ✅ `NoiseSuppressor` | ⚠️ best-effort | ✅ |
+| Automatic Gain Control | ✅ (bundled) | ✅ `AutomaticGainControl` | ⚠️ best-effort | ✅ |
+
+* **Apple** bundles all three into a single Voice-Processing I/O unit — enabling any flag enables the whole chain (they can't be toggled independently).
+* **Android** effect availability is device/driver dependent; unavailable effects are skipped. Requesting echo cancellation also routes capture through `VoiceCommunication`.
+* **Windows** `AudioGraph` exposes no per-effect control; requesting any effect selects the `Communications` capture category, which engages driver-provided AEC/NS when present.
+* These are **OS/hardware** cancellers referencing the real speaker feed, so any device audio (not just library-played TTS) is cancelled.
+* **Native on-device** `ISpeechToTextService` implementations manage their own microphone and are unaffected by this setting — it applies to `IAudioSource` capture (cloud providers, raw capture).
+
+## Changing Credentials at Runtime
+
+Provider config objects are **mutable singletons**, so you can change the API key (or region / model /
+voice) at any time — after the user pastes a new key in a settings screen, for example — and the
+provider picks it up on its next call. No re-registration required. Hold your config instance, or
+resolve it from DI:
+
+```csharp
+var config = new AzureSpeechConfig { SubscriptionKey = "initial-key", Region = "eastus" };
+builder.Services.AddAzureSpeech(config);
+
+// ...later, e.g. after the user rotates the key in settings:
+config.SubscriptionKey = "rotated-key";        // next Speak/recognize uses it
+
+// Or resolve it from the container if you didn't keep a reference:
+serviceProvider.GetRequiredService<TypecastConfig>().ApiKey = "new-key";
+```
+
+Providers that cache an SDK/HTTP client (ElevenLabs, Typecast) transparently rebuild it when the key
+changes; Azure and OpenAI read the config on every call.
 
 ## Samples
 * [Sample MAUI App](https://github.com/shinyorg/speech/tree/main/samples/MauiSample)
