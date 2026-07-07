@@ -45,25 +45,40 @@ _player.Stop();
 _player.Seek(TimeSpan.FromMinutes(1.5));
 ```
 
-## Volume Control
+## Ducking
 
-Control the playback volume programmatically. The value ranges from 0.0 (silent) to 1.0 (full volume) and defaults to 1.0:
+Ducking temporarily lowers the currently playing music so an announcement — a text-to-speech prompt, a navigation callout, an alert — can be heard clearly over top. `Duck` returns an `IAsyncDisposable` **scope**: the music stays ducked until the scope is disposed, at which point full volume is restored. Wrap the announcement in an `await using` block:
 
 ```csharp
-// Set volume to 75%
-_player.Volume = 0.75f;
-
-// Mute
-_player.Volume = 0f;
-
-// Full volume
-_player.Volume = 1f;
-
-// Read current volume
-float currentVolume = _player.Volume;
+await using (_player.Duck(new DuckOptions { Level = 0.2 }))
+{
+    await TextToSpeech.Default.SpeakAsync("Turn left in 200 meters");
+}
+// music ramps back to full volume here
 ```
 
-The value is automatically clamped to the 0.0–1.0 range.
+If nothing is playing, `Duck` returns a harmless no-op scope, so it is always safe to call. Check `_player.IsDucked` to know whether a duck is currently active.
+
+### DuckOptions
+
+```csharp
+var options = new DuckOptions
+{
+    Level = 0.2,                              // target volume (0.0–1.0) while ducked
+    FadeIn = TimeSpan.FromMilliseconds(200),  // ramp-down when ducking starts
+    FadeOut = TimeSpan.FromMilliseconds(200)  // ramp-up when the scope is disposed
+};
+```
+
+Passing `null` (or omitting the argument) uses these defaults — 20% level with 200ms fades.
+
+### Last-writer-wins
+
+Ducks use last-writer-wins semantics: a newer `Duck` supersedes an older one. Disposing the **active** scope restores full volume; disposing a scope that has already been superseded does nothing. This means you never need to track or coordinate overlapping announcements — just duck around each one.
+
+:::note
+On Apple platforms, `Level` and the fade durations are advisory — the OS controls the duck depth and ramp. On Android they are applied exactly. See [Platform Details](#platform-details) below.
+:::
 
 ## Reading Playback State
 
@@ -120,10 +135,12 @@ If you register the player as a singleton in DI, it will be disposed when the ap
 - Playback uses `Android.Media.MediaPlayer` with content URIs from MediaStore.
 - Audio attributes are set to `ContentType.Music` with `Usage.Media`.
 - Seeking uses millisecond precision.
+- **Ducking** lowers this player's own track, honoring `DuckOptions.Level`, `FadeIn`, and `FadeOut` exactly.
 
 ### iOS
 - **Local tracks** (with `ContentUri`): Playback uses `AVAudioPlayer` with the track's `ipod-library://` asset URL. The `AVAudioSession` category is set to `Playback` to support background audio (if configured). Seeking uses second precision.
 - **Streaming tracks** (with `StoreId`): Playback uses `MPMusicPlayerController.SystemMusicPlayer` with the Apple Music catalog ID. This enables playback of DRM-protected Apple Music subscription content. The system player manages its own audio session.
+- **Ducking** activates `AVAudioSession` with `DuckOthers`; `Level` and the fade durations are advisory only, as the OS controls duck depth and ramp. Announcement audio played through the app's audio session (an `AVAudioPlayer`, or `AVSpeechSynthesizer` with `UsesApplicationAudioSession = true`) plays at full volume over the ducked music — only other out-of-process audio is ducked.
 
 :::note
 Music library access requires a **physical device**. Simulators and emulators typically have no music content and cannot test playback.
