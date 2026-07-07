@@ -1,0 +1,86 @@
+---
+title: AI Tools
+---
+
+`Shiny.Music.Extensions.AI` exposes the device music library and player as [Microsoft.Extensions.AI](https://learn.microsoft.com/dotnet/ai/) tool functions, so an LLM chat agent can search and browse the library, pick a track for a mood, control playback, and manage playlists — all through natural language.
+
+It ships as a **separate NuGet package** on top of `Shiny.Music`, depends only on `Microsoft.Extensions.AI.Abstractions`, and is fully AOT-compatible (the tool schemas are hand-authored — no reflection).
+
+```bash
+dotnet add package Shiny.Music.Extensions.AI
+```
+
+## Registration
+
+Register `Shiny.Music` as usual, then opt-in to the tool areas you want the model to see. Anything you don't add stays invisible to the LLM.
+
+```csharp
+using Shiny.Music.Extensions.AI;
+
+builder.Services.AddShinyMusic();
+builder.Services.AddMusicAITools(tools => tools
+    .AddLibrary()             // search / browse / genres / playlists / lyrics (read-only)
+    .AddPlayback()            // play, pause, resume, stop, seek, now-playing
+    .AddPlaylistManagement()  // create / modify / delete custom playlists
+);
+// or expose everything at once:
+// builder.Services.AddMusicAITools(tools => tools.AddAll());
+```
+
+`AddMusicAITools` requires `AddShinyMusic()` to have registered `IMediaLibrary`, `IMusicPlayer`, and `ILyricsProvider`. `AddPlayback()` throws at registration time if no `IMusicPlayer` is available (i.e. you're not on a platform target).
+
+## Handing the tools to a chat client
+
+Resolve the `MusicAITools` bundle from DI and pass its `.Tools` to any `IChatClient` call:
+
+```csharp
+var tools = serviceProvider.GetRequiredService<MusicAITools>().Tools;
+
+var response = await chatClient.GetResponseAsync(
+    messages,
+    new ChatOptions { Tools = [.. tools] }
+);
+```
+
+The library never references a specific model provider — only `Microsoft.Extensions.AI.Abstractions`. Use it with whichever `IChatClient` you already have.
+
+## Generated tools
+
+Only the areas you opt-in to produce tools.
+
+| Tool | Area | Arguments | Purpose |
+|---|---|---|---|
+| `search_tracks` | Library | `query` (required), `limit` | Free-text search over title/artist/album |
+| `browse_tracks` | Library | `genre`, `year`, `decade`, `query`, `limit` | Filter the library — the "pick a song for the mood" path |
+| `list_music_categories` | Library | `kind` (`genres`\|`years`\|`decades`, required), `genre` | Distinct categories with track counts |
+| `list_playlists` | Library | — | All playlists with ids and song counts |
+| `get_playlist_tracks` | Library | `playlist_id` (required), `limit` | Tracks in a playlist |
+| `get_lyrics` | Library | `track_id` (required) | Plain and/or synced lyrics |
+| `play_track` | Playback | `track_id` (required) | Load and play a track by id |
+| `control_playback` | Playback | `action` (`pause`\|`resume`\|`stop`\|`seek`, required), `position_seconds` | Transport control |
+| `get_now_playing` | Playback | — | Current state, track, position, duration |
+| `create_playlist` | Playlist management | `name` (required) | Create a custom playlist |
+| `modify_playlist` | Playlist management | `action` (`add_track`\|`remove_track`), `playlist_id`, `track_id` (all required) | Add/remove a track |
+| `delete_playlist` | Playlist management | `playlist_id` (required) | Delete a custom playlist |
+
+Track ids flow between tools: `search_tracks`, `browse_tracks`, and `get_playlist_tracks` return `id`s that `play_track`, `get_lyrics`, and `modify_playlist` consume.
+
+## Picking a track for a mood
+
+There is no dedicated "mood" tool — instead the model reasons about mood using `browse_tracks` and `list_music_categories`. Given a prompt like *"play me something mellow"*, the agent typically calls `list_music_categories` to see which genres exist, then `browse_tracks` with a fitting genre (e.g. `Jazz` or `Acoustic`), and finally `play_track` with the id it chose. Filtering by `decade` handles era-based requests like *"put on some 80s music"*.
+
+## Permissions
+
+The generated tools **assume music-library permission is already granted**. They never trigger the platform permission prompt, which requires a foreground activity. Request permission from your app before invoking the agent:
+
+```csharp
+var status = await library.RequestPermissionAsync();
+if (status == PermissionStatus.Granted)
+{
+    // safe to run the agent with the music tools
+}
+```
+
+## Error handling
+
+Every tool returns a structured JSON object. Failures come back as `{ "error": "..." }` rather than throwing, so the model can read the problem and recover (for example, when a `track_id` doesn't resolve or a track is DRM-protected and not playable).
