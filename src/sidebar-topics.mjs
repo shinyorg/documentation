@@ -466,6 +466,7 @@ export const sidebarTopics = [
           { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
           { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
           { label: 'Slider', link: 'controls/slider/', jumpTo: true },
+          { label: 'RangeSlider', link: 'controls/rangeslider/', jumpTo: true },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
