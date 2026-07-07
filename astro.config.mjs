@@ -389,8 +389,8 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'music3-1',
-              content: 'Shiny.Music v3: Lyrics, Album Art, Playlists, MusicKit and more!',
+              id: 'music3-2',
+              content: 'Shiny.Music v3: Lyrics, Album Art, Playlists, MusicKit and AI Tools!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/music' },
               dismissable: false
