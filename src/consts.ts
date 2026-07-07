@@ -222,6 +222,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "3.1.0-beta-0003"
     },
     {
+        "id": "music-ai",
+        "nuget": "Shiny.Music.Extensions.AI",
+        "description": "Music Library - AI Tools",
+        "category": "platformdata",
+        "version": "3.2.0"
+    },
+    {
         "id": "health",
         "nuget": "Shiny.Health",
         "description": "Health Data",
@@ -621,6 +628,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "3.0.0-beta-0003"
     },
     {
+        "id": "speechtypecast",
+        "nuget": "Shiny.Speech.Typecast",
+        "description": "Speech - Typecast TTS",
+        "category": "devices",
+        "version": "3.0.0-beta-0005"
+    },
+    {
         "id": "datasync",
         "nuget": "Shiny.Data.Sync",
         "blazorNuget": "Shiny.Data.Sync.Blazor",
@@ -670,7 +684,7 @@ export const Data = {
     },
 
     usesWindows(compos: ShinyComponent[]): boolean {
-        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push', 'speech', 'speechazure', 'speechelevenlabs', 'aiconversation'];
+        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push', 'speech', 'speechazure', 'speechelevenlabs', 'speechtypecast', 'aiconversation'];
         return compos.some(x => windowsIds.includes(x.id));
     },
 
