@@ -32,6 +32,37 @@ foreach (var track in results)
 
 The search is case-insensitive and matches partial strings against the title, artist, and album fields.
 
+## Catalog Search (Apple Music)
+
+`SearchTracksAsync` searches only the user's **local** library. To search the entire Apple Music streaming **catalog** — songs that need not be in the user's library — use `SearchCatalogAsync`:
+
+```csharp
+// Apple platforms only — check for a subscription first
+if (await _library.HasStreamingSubscriptionAsync())
+{
+    var results = await _library.SearchCatalogAsync("daft punk", limit: 10);
+
+    foreach (var track in results)
+        Console.WriteLine($"{track.Title} - {track.Artist} (catalog: {track.CatalogId})");
+
+    // Catalog tracks are playable directly, even though they aren't in the library:
+    if (results.Count > 0)
+        await _player.PlayAsync(results[0]);   // streams by CatalogId
+}
+```
+
+Each result is a `MusicMetadata` carrying a populated `CatalogId`. Passing it to `IMusicPlayer.PlayAsync` streams the track by its catalog id (via `MPMusicPlayerStoreQueueDescriptor`) — no library membership required.
+
+- Backed by MusicKit `MusicCatalogSearchRequest`.
+- The **first call prompts for MusicKit authorization**.
+- `limit` is capped at 25 by Apple Music and defaults to 25.
+- Catalog tracks are **streaming-only**: `ContentUri` is empty and `CopyTrackAsync` cannot export them.
+- Playback requires an active subscription — gate on `HasStreamingSubscriptionAsync`.
+
+:::caution
+`SearchCatalogAsync` is **Apple-only**. On Android it throws `PlatformNotSupportedException` — there is no Apple Music catalog. Use `SearchTracksAsync` for the local library on Android.
+:::
+
 ## Get Genres
 
 Returns all distinct genre names from the user's music library with track counts, sorted alphabetically:
@@ -318,6 +349,7 @@ Each track is represented by a `MusicMetadata` record with the following propert
 | `StoreId` | `string?` | Track persistent ID for playback via `MPMusicPlayerController` on Apple platforms. Always `null` on Android. |
 | `Year` | `int?` | The release year of the track. On Android from `MediaStore.Audio.Media.YEAR`; on Apple platforms from `MPMediaItem.ReleaseDate`. `null` if unavailable. |
 | `PlayCount` | `int` | Number of times the track has been played. On Apple platforms from `MPMediaItem.PlayCount`; on Android tracked locally by the app. Default 0. |
+| `CatalogId` | `string?` | Apple Music **catalog** identifier, set on tracks returned by [`SearchCatalogAsync`](#catalog-search-apple-music). When present the track is a streaming catalog item: `PlayAsync` streams it by this id and `ContentUri` is empty (not copyable). `null` for local tracks and always `null` on Android. |
 
 ## ContentUri, StoreId, and DRM
 

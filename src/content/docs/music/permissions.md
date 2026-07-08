@@ -48,10 +48,28 @@ Add these permissions to your `Platforms/Android/AndroidManifest.xml`:
                  android:maxSdkVersion="32" />
 ```
 
+### Shiny hosting is required (v4+)
+
+Android permission checks run on **Shiny.Core**'s `AndroidPlatform` (`GetCurrentPermissionStatus` / `RequestAccess`). Your app must be running under Shiny hosting so Shiny can track the current activity and route the permission result. In MAUI, add `.UseShiny()`:
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseShiny();          // required on Android for permission checks
+
+builder.Services.AddShinyMusic();
+```
+
+For a native (non-MAUI) Android app, use `ShinyAndroidApplication` + `ShinyAndroidActivity` instead. Without Shiny hosting, `IMediaLibrary` cannot resolve `AndroidPlatform` and permission requests will fail.
+
+:::note
+This is a **v4 breaking change** — earlier versions used a self-contained activity provider and required no host. See the [release notes](/music/release-notes/).
+:::
+
 ### How It Works
 - **API 33+**: The library requests the granular `READ_MEDIA_AUDIO` permission, which grants access only to audio files.
 - **API < 33**: Falls back to `READ_EXTERNAL_STORAGE`, which grants broader file access.
-- Runtime permission is requested via the MAUI Permissions API.
+- Runtime permission is requested through Shiny.Core's `AndroidPlatform.RequestAccess`, which uses `ActivityCompat.RequestPermissions` on the current activity and routes the result via Shiny's activity lifecycle.
 
 ## iOS Configuration
 

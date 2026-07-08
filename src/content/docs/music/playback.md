@@ -72,9 +72,9 @@ var options = new DuckOptions
 
 Passing `null` (or omitting the argument) uses these defaults — 20% level with 200ms fades.
 
-### Last-writer-wins
+### One duck at a time
 
-Ducks use last-writer-wins semantics: a newer `Duck` supersedes an older one. Disposing the **active** scope restores full volume; disposing a scope that has already been superseded does nothing. This means you never need to track or coordinate overlapping announcements — just duck around each one.
+Only a single duck is ever active. While one is active, a further `Duck` call returns a harmless **no-op scope** — the existing duck is *not* superseded and keeps running until its own scope is disposed. Dispose the active scope to restore full volume. Enforcing a single duck avoids a superseded duck's restore-fade racing the new duck on the shared volume, which could otherwise leave the music stuck at a lowered level.
 
 :::note
 On Apple platforms, `Level` and the fade durations are advisory — the OS controls the duck depth and ramp. On Android they are applied exactly. See [Platform Details](#platform-details) below.
@@ -140,6 +140,7 @@ If you register the player as a singleton in DI, it will be disposed when the ap
 ### iOS
 - **Local tracks** (with `ContentUri`): Playback uses `AVAudioPlayer` with the track's `ipod-library://` asset URL. The `AVAudioSession` category is set to `Playback` to support background audio (if configured). Seeking uses second precision.
 - **Streaming tracks** (with `StoreId`): Playback uses `MPMusicPlayerController.SystemMusicPlayer` with the Apple Music catalog ID. This enables playback of DRM-protected Apple Music subscription content. The system player manages its own audio session.
+- **Catalog tracks** (with `CatalogId`, from [`SearchCatalogAsync`](/music/querying/#catalog-search-apple-music)): Playback enqueues the track by its Apple Music catalog id via `MPMusicPlayerStoreQueueDescriptor` — no library membership required. An active Apple Music subscription is required; gate playback on `HasStreamingSubscriptionAsync`.
 - **Ducking** activates `AVAudioSession` with `DuckOthers`; `Level` and the fade durations are advisory only, as the OS controls duck depth and ramp. Announcement audio played through the app's audio session (an `AVAudioPlayer`, or `AVSpeechSynthesizer` with `UsesApplicationAudioSession = true`) plays at full volume over the ducked music — only other out-of-process audio is ducked.
 
 :::note
