@@ -1,0 +1,148 @@
+---
+title: Audio (Monitor & Devices)
+---
+
+`Shiny.Audio` is the standalone audio backbone under `Shiny.Speech` — usable on its own for
+recording and playback without the speech stack. Alongside capture (`IAudioSource`) and playback
+(`IAudioPlayer`) it provides a **live microphone monitor** (`IAudioMonitor`) and **audio route
+enumeration/selection** (`IAudioDevices`), all discoverable through a single `IAudio` facade.
+
+## Registration
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseShiny();                       // required on Android for RECORD_AUDIO permission routing
+
+builder.Services.AddAudioServices();   // IAudioPlayer + IAudioSource + IAudioMonitor + IAudioDevices + IAudio
+```
+
+`AddSpeechServices()` already registers the capture/playback pieces; call `AddAudioServices()` when
+you also want the monitor/devices/facade. The individual registrations still exist
+(`AddAudioSource()`, `AddAudioPlayer()`, `AddAudioMonitor()`, `AddAudioDevices()`), and every focused
+interface remains injectable directly — the facade doesn't replace them.
+
+## The `IAudio` facade
+
+Inject one service to discover the whole surface. Each member is the same service you could inject
+directly; lifetimes are preserved (player/monitor/devices singletons, `IAudioSource` a fresh
+transient per access).
+
+```csharp
+using Shiny.Audio;
+
+public class AudioViewModel(IAudio audio)
+{
+    Task Play()        => audio.Player.PlayAsync("https://example.com/clip.mp3");
+    Task StartMic()    => audio.Monitor.Start();
+    var  Outputs       => audio.Devices.GetOutputs();
+}
+```
+
+`Monitor` and `Devices` are implemented on **iOS / Mac Catalyst and Android only**; accessing them on
+other platforms throws `PlatformNotSupportedException`.
+
+## Microphone monitor (`IAudioMonitor`)
+
+Routes the microphone straight to the current audio output in near-real-time — a PA / megaphone. Ideal
+for "talk into the phone, hear it over a Bluetooth speaker".
+
+```csharp
+using Shiny.Audio;
+
+public partial class MicViewModel(IAudio audio) : ObservableObject
+{
+    [ObservableProperty] double level;   // bind to a VU bar
+
+    public async Task Toggle()
+    {
+        var monitor = audio.Monitor;
+        if (monitor.IsMonitoring)
+        {
+            await monitor.Stop();
+            return;
+        }
+
+        if (await monitor.RequestAccess() != AccessState.Available)
+            return;
+
+        monitor.InputLevelChanged += (_, l) =>
+            MainThread.BeginInvokeOnMainThread(() => Level = l);
+
+        // No Processing → routes to a Bluetooth A2DP speaker (see the trade-off below).
+        await monitor.Start(new AudioMonitorOptions { Gain = 1.0 });
+    }
+}
+```
+
+The output goes to the current route — the **built-in speaker, a wired output, or a connected
+**Bluetooth speaker** (A2DP) using the phone's own mic. `Gain` (0.0–1.0) is adjustable live;
+`InputLevelChanged` emits a normalized level for a meter.
+
+:::caution[Bluetooth speaker **or** echo cancellation — not both, on iOS]
+Enabling `AudioProcessingOptions` (echo cancellation) engages iOS's voice-processing unit, which
+forces Bluetooth onto the low-quality **HFP** call profile. A Bluetooth *speaker* (A2DP, no mic)
+can't provide HFP, so audio falls back to the phone. So: **leave processing off to reach a Bluetooth
+speaker**; turn it on only when outputting to the phone speaker up close and feedback is a problem.
+:::
+
+:::caution[Feedback]
+When output is the phone speaker, the mic can hear it and howl — keep distance, lower `Gain`, or
+enable echo cancellation. Always **stop the monitor when the page is dismissed** and when the app
+backgrounds.
+:::
+
+Implementation: iOS/Mac Catalyst use `AVAudioEngine` (input node → main mixer → output) in a
+`PlayAndRecord` session (no `DefaultToSpeaker`, so it follows a Bluetooth/wired route; `Default` mode
+unless processing is requested); the engine rebuilds on route changes so monitoring follows a
+newly-connected output. Android uses `AudioRecord` → `AudioTrack`. The audio session is snapshotted
+and restored on `Stop`.
+
+**AirPlay (HomePod / Apple TV) is not supported for a live mic** — iOS only permits AirPlay for
+playback, not while recording. Use Bluetooth for a wireless live PA.
+
+## Audio devices (`IAudioDevices`)
+
+Its most reliable use is **displaying where audio is flowing** and reacting to route changes — e.g.
+"Output: JBL Flip · Bluetooth". Read `CurrentInput` / `CurrentOutput` (each an `AudioDevice` with a
+normalized `Type`) and subscribe to `Changed`:
+
+```csharp
+using Shiny.Audio;
+
+var devices = audio.Devices;
+
+string input  = devices.CurrentInput?.Name  ?? "—";   // .Type: BuiltInMic, Bluetooth, …
+string output = devices.CurrentOutput?.Name ?? "—";   // .Type: BuiltInSpeaker, BluetoothA2dp, …
+
+devices.Changed += (_, _) => Refresh();   // route added / removed / switched
+```
+
+Each `AudioDevice` carries `Id`, `Name`, `Io` (input/output), a normalized `Type` (`BuiltInMic`,
+`BluetoothA2dp`, `WiredHeadphones`, `BuiltInSpeaker`, …) and `IsCurrent`.
+
+**Selection** (`GetInputs`/`GetOutputs` + `IAudioMonitor.SetInputDevice`/`SetOutputDevice`) is a full
+selector on **Android** only:
+
+```csharp
+await audio.Monitor.SetInputDevice(chosenInput);    // Android + iOS
+await audio.Monitor.SetOutputDevice(chosenOutput);  // Android only (best-effort elsewhere)
+```
+
+:::note[Device selection is platform-limited — treat routes as *display* on iOS]
+Apple deliberately does not let apps enumerate or freely pick **output** routes. On iOS,
+`GetOutputs()` returns only the *current* output, `SetOutputDevice` can only toggle the built-in
+speaker, and **AirPlay/Bluetooth output selection is owned by the system route picker
+(`AVRoutePickerView`) — there is no API to route to a specific HomePod/speaker programmatically**.
+Input *is* selectable on iOS (`AVAudioSession.SetPreferredInput`). **Android** enumerates and selects
+both input and output fully. So: use `CurrentInput`/`CurrentOutput` as a **display property**
+everywhere; use the selectors on Android.
+:::
+
+## Platform support
+
+| Capability | iOS / Mac Catalyst | Android | Windows | Browser |
+|---|---|---|---|---|
+| `IAudioPlayer` / `IAudioSource` | ✅ | ✅ | ✅ | ✅ |
+| `IAudioMonitor` (live monitor) | ✅ | ✅ | ❌ | ❌ |
+| `IAudioDevices` (routes) | ✅ | ✅ | ❌ | ❌ |
