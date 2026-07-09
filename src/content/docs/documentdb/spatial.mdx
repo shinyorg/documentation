@@ -299,14 +299,21 @@ Available: `Intersects`, `Disjoint`, `Contains`, `Within`, `Covers`, `CoveredBy`
 
 **Provider support for `DocumentFunctions`-in-`Where`:**
 
-| Provider | Mechanism | Predicate coverage |
+| Provider | Mechanism & index | Predicate coverage |
 |---|---|---|
-| **SQLite** | R\*Tree bbox prune + registered `docdb_st_*` UDF refine (indexed, dependency-free) | all |
-| **MySQL / DuckDB / PostgreSQL** | envelope prune + native `ST_*` on the fly from the JSON body (PostgreSQL needs PostGIS; DuckDB auto-loads `spatial`) | all (MySQL/DuckDB approximate a few — see note) |
-| **SQL Server** | native planar `geometry` column (WKT-ingested) + `.ST*` method syntax | all except `Covers`/`CoveredBy` (no `STCovers`); `Distance`-`OrderBy` unsupported |
-| **Oracle** | native `SDO_GEOM.RELATE` on the fly (requires the Oracle Spatial option) | all except `Crosses` |
-| **CosmosDB** | native `ST_INTERSECTS`/`ST_WITHIN`/`ST_DISTANCE` | `Intersects`, `Within`, `Disjoint`, `WithinDistance` |
-| **MongoDB** | native `$geoIntersects`/`$geoWithin`/`$centerSphere` | `Intersects`, `Within`, `WithinDistance` (point) |
+| **SQLite** | R\*Tree bbox prune + registered `docdb_st_*` UDF refine (dependency-free) | all |
+| **PostgreSQL** | native `geometry` sidecar column + **GiST spatial index** (needs PostGIS) | all |
+| **MySQL** | native `GEOMETRY` column + **`SPATIAL` index** | all (`Covers`≈`Contains`) |
+| **DuckDB** | native `GEOMETRY` column + **R-Tree index** (auto-loads `spatial`) | all |
+| **SQL Server** | native planar `geometry` column + **spatial index** + `.ST*` methods | all except `Covers`/`CoveredBy`; no `Distance`-`OrderBy` |
+| **Oracle** | `SDO_GEOM.RELATE` on the fly (requires Oracle Spatial; no spatial index) | all except `Crosses` |
+| **CosmosDB** | native `ST_INTERSECTS`/`ST_WITHIN`/`ST_DISTANCE` (native spatial index) | `Intersects`, `Within`, `Disjoint`, `WithinDistance` |
+| **MongoDB** | native `$geoIntersects`/`$geoWithin`/`$centerSphere` (**`2dsphere` index**) | `Intersects`, `Within`, `WithinDistance` (point) |
+
+On the relational providers, the `DocumentFunctions` predicate runs over a spatially-indexed geometry column in
+the sidecar, so the engine's **true 2-D spatial index** does the pruning (not a scan, and not just the
+bounding-box B-tree). The geometry column is populated from the document body on write. The dedicated
+`store.Geo*` methods use the bounding-box envelope tier (which also works under `PortableSpatial`).
 
 Where a predicate isn't natively available on a provider, the `DocumentFunctions` call in a `Where` throws a
 clear message — use the dedicated `store.Geo*` method, which supports **every** predicate on every
