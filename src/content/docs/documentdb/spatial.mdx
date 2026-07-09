@@ -277,6 +277,39 @@ var near = await store.GeoWithinDistance<Zone>(
 polygon *is* inside it) — you don't need `GeoContains` for the common point case.
 :::
 
+### LINQ composition with `DocumentFunctions`
+
+The dedicated `store.Geo*` methods above run standalone. To compose a spatial predicate with the rest of a
+LINQ query — other `Where` clauses, `OrderBy`, `Count`, paging — use `DocumentFunctions`, which lowers each
+predicate to the database's native spatial function (or a registered UDF on SQLite) so the whole query runs
+server-side:
+
+```csharp
+var page = await store.Query<Zone>()
+    .Where(z => DocumentFunctions.Intersects(z.Area!, searchArea) && z.Active)
+    .OrderBy(z => DocumentFunctions.Distance(z.Area!, origin))
+    .Skip(20).Take(20)
+    .ToList();
+```
+
+Available: `Intersects`, `Disjoint`, `Contains`, `Within`, `Covers`, `CoveredBy`, `Touches`, `Crosses`,
+`Overlaps`, `GeoEquals`, `WithinDistance(field, query, meters)` (all in `Where`), and `Distance(field, query)`
+(for `OrderBy`). Read them as `field <predicate> query`; argument order is handled for the asymmetric ones
+(`Contains(big, z.Area)` is the same as `z.Area within big`).
+
+**Provider support for `DocumentFunctions`-in-`Where`:**
+
+| Provider | Mechanism |
+|---|---|
+| **SQLite** | R\*Tree bbox prune + registered `docdb_st_*` UDF refine (indexed, dependency-free) |
+| **MySQL / DuckDB / PostgreSQL** | envelope prune + native `ST_*` computed on the fly from the JSON body (PostgreSQL needs the PostGIS extension; DuckDB loads `spatial` automatically) |
+| **SQL Server / Oracle / CosmosDB / MongoDB** | not yet — a `DocumentFunctions` spatial call in a `Where` throws a clear message; use the dedicated `store.Geo*` methods there |
+
+Set `PortableSpatial = true` on a relational provider to force the dependency-free envelope tier (dedicated
+`store.Geo*` methods only; `DocumentFunctions`-in-`Where` then throws — no native extension required).
+Boundary-case results (e.g. a query polygon sharing an exact edge with a stored one) can differ slightly
+between a provider's native predicate and the C# engine.
+
 ### Distance ordering & geometry k-nearest
 
 Pass `orderByDistanceFrom` to any predicate to sort the matches by ascending distance and populate
