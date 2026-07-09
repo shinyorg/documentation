@@ -2,7 +2,7 @@
 title: Spatial / Geo Queries
 ---
 
-Spatial queries let you find documents by geographic proximity — within a radius, inside a bounding box, or nearest to a point. Supported on **SQLite** (via R*Tree virtual tables) and **CosmosDB** (via native GeoJSON). Other providers throw `NotSupportedException`.
+Spatial queries let you find documents by geographic proximity — within a radius, inside a bounding box, nearest to a point — or by full-geometry topological relationships (intersects, contains, overlaps, …). Supported on **SQLite** (R*Tree bbox + in-process relate/refine), **CosmosDB** (native GeoJSON), and **MongoDB** (`2dsphere`). Other providers throw `NotSupportedException`.
 
 ## Spatial Types
 
@@ -185,6 +185,70 @@ var closestItalian = await store.NearestNeighbors<Restaurant>(
     count: 5,
     filter: r => r.Cuisine == "Italian");
 ```
+
+## Full geometry (lines, polygons & predicates)
+
+Beyond points, you can map full **OGC geometry** and run topological predicate queries. The geometry model
+lives in `Shiny.DocumentDb` and serializes as GeoJSON in the document body:
+
+| Type | Notes |
+|---|---|
+| `GeoPoint` | the existing point struct; implicitly converts to a point geometry |
+| `GeoLineString` | 2+ coordinates |
+| `GeoPolygon` | exterior ring (4+, closed) + optional holes |
+| `GeoMultiPoint` / `GeoMultiLineString` / `GeoMultiPolygon` | homogeneous collections |
+| `GeoGeometryCollection` | heterogeneous collection |
+
+Map a geometry property just like a point:
+
+```csharp
+opts.MapSpatialProperty<Zone>(z => z.Area);   // Area is a Geometry? property
+```
+
+### Predicate queries
+
+Every predicate reads *stored-geometry &lt;predicate&gt; query-geometry*, takes an optional
+`orderByDistanceFrom` (a point **or** geometry — results are ordered by ascending distance and
+`SpatialResult.DistanceMeters` is populated), an optional `filter` that pushes down to the database, and
+returns `SpatialResult<T>`:
+
+```csharp
+// "which zones contain this GPS point?" — a bare point works via implicit conversion
+var here = await store.GeoIntersects<Zone>(new GeoPoint(45.52, -122.68));
+
+// zones fully inside a query polygon, nearest-first
+var inside = await store.GeoContainedBy<Zone>(searchArea, orderByDistanceFrom: new GeoPoint(45.5, -122.6));
+
+// everything within 500 m of a route line
+var near = await store.GeoWithinDistance<Zone>(route, meters: 500);
+```
+
+Available: `GeoIntersects`, `GeoContainedBy`, `GeoContains`, `GeoDisjoint`, `GeoTouches`, `GeoCrosses`,
+`GeoOverlaps`, `GeoEquals`, `GeoCovers`, `GeoCoveredBy`, and `GeoWithinDistance(geometry, meters)`.
+`NearestNeighbors` also works over geometry-mapped types (point-to-geometry distance).
+
+### Measurement & validity
+
+`Geometry` exposes in-memory `Area` (m²), `Length`/`Perimeter` (m), `Centroid`, `NumPoints`,
+`NumGeometries`, plus `IsValid`, `IsSimple`, and a lightweight `MakeValid()`. Because these are ordinary
+properties, you can index measurement with a materialized computed property and filter on it server-side:
+
+```csharp
+opts.MapComputedProperty<Zone>(z => z.Area!.Area, indexed: true);   // then: Query(z => z.Area!.Area > 1e6)
+```
+
+### Provider tiers
+
+| Provider | Geometry predicates |
+|---|---|
+| **SQLite** | R\*Tree bbox prune + in-process relate/refine (dependency-free) |
+| **CosmosDB** | native `ST_INTERSECTS`/`ST_WITHIN`/`ST_DISTANCE`; finer predicates refine over the intersect candidate set |
+| **MongoDB** | `2dsphere` + native `$geoIntersects`/`$geoWithin`/`$near`; finer predicates & non-point distance refine in-process |
+| others | `SupportsSpatial => false` |
+
+`GeoDisjoint` is anti-selective (the answer is mostly rows *outside* any bbox), so it scans the type — O(n)
+on the two-pass providers. Distances on the two-pass/refine paths are a Haversine/planar approximation;
+native `ST_DISTANCE` is geodesic, so ordering can differ on near-ties across providers.
 
 ## How It Works
 
