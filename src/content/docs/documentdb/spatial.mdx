@@ -2,21 +2,60 @@
 title: Spatial / Geo Queries
 ---
 
-Spatial queries let you find documents by geographic proximity — within a radius, inside a bounding box, nearest to a point — or by full-geometry topological relationships (intersects, contains, overlaps, …). Supported on **SQLite**, **PostgreSQL**, **MySQL**, **SQL Server**, **Oracle**, and **DuckDB** (bbox prune + in-process relate/refine — no native spatial extension needed), plus **CosmosDB** (native GeoJSON) and **MongoDB** (`2dsphere`). The fallback stores (LiteDB, IndexedDB, Azure Table, DynamoDB) throw `NotSupportedException`.
+Spatial queries let you find documents by geographic relationship — proximity (within a radius, inside a
+bounding box, nearest to a point) or full-geometry topology (intersects, contains, overlaps, touches, …).
 
-## Spatial Types
+Two feature levels share one `MapSpatialProperty` registration:
+
+- **Point spatial** — map a `GeoPoint` and use `WithinRadius` / `WithinBoundingBox` / `NearestNeighbors`.
+- **Full geometry** *(v11+)* — map any `Geometry` (lines, polygons with holes, multi-geometries) and use the
+  `Geo`-prefixed topological predicate family plus `GeoWithinDistance`.
+
+**Supported providers:** **SQLite** (R\*Tree), **PostgreSQL / MySQL / SQL Server / Oracle / DuckDB**
+(dependency-free envelope sidecar), **CosmosDB** (native GeoJSON), and **MongoDB** (`2dsphere`). The
+key-partitioned / file stores (LiteDB, IndexedDB, Azure Table, DynamoDB) report `SupportsSpatial => false`
+and throw `NotSupportedException`.
+
+## Checking provider support
+
+Spatial capability is a runtime property — probe it before issuing a query if your provider is configurable:
+
+```csharp
+if (store.SupportsSpatial)
+{
+    var nearby = await store.WithinRadius<Restaurant>(center, 5000);
+}
+```
+
+| Provider | `SupportsSpatial` | Mechanism |
+|---|---|---|
+| SQLite / SQLCipher | `true` | R\*Tree virtual table (bbox) + in-process refine |
+| PostgreSQL, MySQL, SQL Server, Oracle, DuckDB | `true` | envelope-sidecar table (indexed bbox) + in-process refine |
+| CosmosDB | `true` | native GeoJSON spatial index |
+| MongoDB | `true` | `2dsphere` index |
+| LiteDB, IndexedDB, Azure Table, DynamoDB | `false` | — |
+
+## Spatial types
 
 ### GeoPoint
 
-A geographic coordinate using WGS84. Serializes as GeoJSON `{"type":"Point","coordinates":[longitude,latitude]}`.
+A WGS84 coordinate. Serializes as GeoJSON `{"type":"Point","coordinates":[longitude,latitude]}`.
 
 ```csharp
 public readonly record struct GeoPoint(double Latitude, double Longitude);
 ```
 
+:::caution[Coordinate order]
+The **constructor is `(Latitude, Longitude)`** — latitude first — but GeoJSON stores `[longitude, latitude]`.
+The library handles the GeoJSON transposition for you; just remember that in C# you always write
+`new GeoPoint(lat, lng)`. For Portland, OR (45.52° N, 122.68° W) that's `new GeoPoint(45.52, -122.68)`.
+:::
+
+A `GeoPoint` implicitly converts to a `Geometry`, so you can pass a bare point to any geometry query method.
+
 ### GeoBoundingBox
 
-A rectangular area for bounding box queries.
+A rectangular area, used by `WithinBoundingBox` and returned by `Geometry.GetEnvelope()`.
 
 ```csharp
 public readonly record struct GeoBoundingBox(
@@ -26,7 +65,9 @@ public readonly record struct GeoBoundingBox(
 
 ### SpatialResult\<T\>
 
-Wraps a document with its computed distance from the query center point.
+Wraps a matched document with a computed distance. For `WithinRadius` / `NearestNeighbors` the distance is
+from the query point; for the geometry predicates it is the distance from `orderByDistanceFrom` (or `0` when
+no distance reference was supplied).
 
 ```csharp
 public class SpatialResult<T> where T : class
@@ -38,7 +79,8 @@ public class SpatialResult<T> where T : class
 
 ## Configuration
 
-Register which `GeoPoint` property to use for spatial indexing per document type using `MapSpatialProperty`:
+Register which property drives spatial indexing per document type. The same method accepts a `GeoPoint(?)`
+**or** a `Geometry(?)` property:
 
 ```csharp
 public class Restaurant
@@ -50,37 +92,29 @@ public class Restaurant
 }
 
 var store = new DocumentStore(new DocumentStoreOptions
-{
-    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
-}
-.MapSpatialProperty<Restaurant>(r => r.Location)
-);
+    {
+        DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
+    }
+    .MapSpatialProperty<Restaurant>(r => r.Location)      // GeoPoint
+    .MapSpatialProperty<Zone>(z => z.Area));             // Geometry?
 ```
 
 :::tip[AOT-safe overload]
-For full AOT/trimming safety, use the delegate overload which avoids expression compilation:
+For full AOT/trimming safety, use the delegate overload (no expression compilation):
 ```csharp
 .MapSpatialProperty<Restaurant>("Location", r => r.Location)
+.MapSpatialProperty<Zone>("Area", z => z.Area)
 ```
 :::
 
-You can map multiple types:
-
-```csharp
-var options = new DocumentStoreOptions
-{
-    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
-}
-.MapSpatialProperty<Restaurant>(r => r.Location)
-.MapSpatialProperty<Hotel>(h => h.Coordinates);
-```
+One spatial property is mapped per type. The index sidecar (SQLite/relational) or native spatial index
+(Cosmos/Mongo) is created automatically the first time the table/collection is initialized, and CRUD keeps it
+in sync — no manual maintenance.
 
 ### Optional (nullable) locations
 
-The mapped property may be a nullable `GeoPoint?` — map it the same way, and a document whose location
-is `null` is simply left out of the spatial index (it still stores and queries normally otherwise). This
-is the common case for records where coordinates are optional, e.g. a calendar event that may or may not
-have a place attached:
+The mapped property may be nullable (`GeoPoint?` or `Geometry?`). A document whose spatial value is `null` is
+simply left out of the spatial index — it still stores and non-spatial-queries normally:
 
 ```csharp
 public class CalendarEvent
@@ -93,211 +127,269 @@ public class CalendarEvent
 options.MapSpatialProperty<CalendarEvent>(e => e.Location);
 ```
 
-Inserting or updating an event with a `null` location does **not** throw and does **not** index it; those
-documents never appear in `WithinRadius`/`WithinBoundingBox`/`NearestNeighbors` results. Clearing a
-previously-set location on update (setting it back to `null`) purges the stale index entry, so subsequent
-spatial queries no longer match it.
+Inserting/updating with a `null` location does **not** throw and does **not** index the document; it never
+appears in spatial results. Setting a previously-populated location back to `null` on update purges the stale
+index entry.
 
-## Checking Provider Support
-
-Not all providers support spatial queries. Check at runtime:
-
-```csharp
-if (store.SupportsSpatial)
-{
-    var nearby = await store.WithinRadius<Restaurant>(center, 5000);
-}
-```
-
-| Provider | `SupportsSpatial` |
-|---|---|
-| SQLite | `true` (when spatial properties are mapped) |
-| SQLCipher | `true` (inherits SQLite R*Tree support) |
-| CosmosDB | `true` (when spatial properties are mapped) |
-| LiteDB | `false` |
-| MySQL | `false` |
-| SQL Server | `false` |
-| PostgreSQL | `false` |
-
-## Queries
+## Point queries
 
 ### WithinRadius
 
-Find documents within a distance (meters) of a center point, ordered by distance ascending. Returns `SpatialResult<T>` with the computed distance.
+Documents within a distance (meters) of a center point, ordered by distance ascending.
 
 ```csharp
 var nearby = await store.WithinRadius<Restaurant>(
     new GeoPoint(45.5231, -122.6765), // Portland, OR
-    5000); // 5km radius
+    5000);                            // 5 km
 
-foreach (var result in nearby)
-{
-    Console.WriteLine($"{result.Document.Name} — {result.DistanceMeters:N0}m away");
-}
+foreach (var r in nearby)
+    Console.WriteLine($"{r.Document.Name} — {r.DistanceMeters:N0}m away");
 ```
 
-With an additional predicate filter:
+An optional `filter` composes with the spatial predicate and is pushed to the database:
 
 ```csharp
-var italianNearby = await store.WithinRadius<Restaurant>(
-    new GeoPoint(45.5231, -122.6765),
-    5000,
+var italian = await store.WithinRadius<Restaurant>(
+    new GeoPoint(45.5231, -122.6765), 5000,
     filter: r => r.Cuisine == "Italian");
 ```
 
 ### WithinBoundingBox
 
-Find documents within a rectangular geographic area.
-
-```csharp
-var inArea = await store.WithinBoundingBox<Restaurant>(
-    new GeoBoundingBox(45.0, -123.0, 46.0, -122.0));
-```
-
-With a filter:
+Documents inside a rectangular area (no ordering; returns `T`, not `SpatialResult<T>`).
 
 ```csharp
 var inArea = await store.WithinBoundingBox<Restaurant>(
     new GeoBoundingBox(45.0, -123.0, 46.0, -122.0),
-    filter: r => r.Cuisine == "Italian");
+    filter: r => r.Cuisine == "Italian");   // filter optional
 ```
 
 ### NearestNeighbors
 
-Find the K closest documents to a point, ordered by distance ascending.
+The K closest documents to a point, ordered by distance. Uses an expanding-envelope search so the true
+nearest are found even when they sit outside a fixed radius. Works over point **and** geometry mappings
+(point-to-geometry distance).
 
 ```csharp
 var closest = await store.NearestNeighbors<Restaurant>(
-    new GeoPoint(45.5231, -122.6765),
-    count: 10);
-
-foreach (var result in closest)
-{
-    Console.WriteLine($"{result.Document.Name} — {result.DistanceMeters:N0}m");
-}
+    new GeoPoint(45.5231, -122.6765), count: 10,
+    filter: r => r.Cuisine == "Italian");   // filter optional
 ```
 
-With a filter:
+## Full geometry
 
-```csharp
-var closestItalian = await store.NearestNeighbors<Restaurant>(
-    new GeoPoint(45.5231, -122.6765),
-    count: 5,
-    filter: r => r.Cuisine == "Italian");
-```
+### The geometry model
 
-## Full geometry (lines, polygons & predicates)
+`Geometry` is the base type; all types serialize as GeoJSON in the document body.
 
-Beyond points, you can map full **OGC geometry** and run topological predicate queries. The geometry model
-lives in `Shiny.DocumentDb` and serializes as GeoJSON in the document body:
-
-| Type | Notes |
+| Type | Shape / rules |
 |---|---|
-| `GeoPoint` | the existing point struct; implicitly converts to a point geometry |
+| `GeoPoint` | a single coordinate (implicitly a point geometry) |
 | `GeoLineString` | 2+ coordinates |
-| `GeoPolygon` | exterior ring (4+, closed) + optional holes |
-| `GeoMultiPoint` / `GeoMultiLineString` / `GeoMultiPolygon` | homogeneous collections |
-| `GeoGeometryCollection` | heterogeneous collection |
+| `GeoPolygon` | one exterior ring + optional interior rings (holes); each ring closed (first == last), 4+ points |
+| `GeoMultiPoint` | set of points |
+| `GeoMultiLineString` | set of line strings |
+| `GeoMultiPolygon` | set of polygons |
+| `GeoGeometryCollection` | heterogeneous set of geometries |
 
-Map a geometry property just like a point:
+Construction (remember `GeoPoint` is `(Latitude, Longitude)`):
 
 ```csharp
-opts.MapSpatialProperty<Zone>(z => z.Area);   // Area is a Geometry? property
+// A route
+var route = new GeoLineString(new[]
+{
+    new GeoPoint(45.50, -122.68),
+    new GeoPoint(45.52, -122.66),
+    new GeoPoint(45.55, -122.64),
+});
+
+// A delivery zone — the ring must be closed and have >= 4 points
+var zone = new GeoPolygon(new[]
+{
+    new GeoPoint(45.50, -122.70),
+    new GeoPoint(45.50, -122.60),
+    new GeoPoint(45.60, -122.60),
+    new GeoPoint(45.60, -122.70),
+    new GeoPoint(45.50, -122.70),   // closes the ring
+});
+
+// A polygon with a hole (exterior ring + one or more interior rings)
+var withHole = new GeoPolygon(exteriorRing, new[] { holeRing });
+
+// A region made of several polygons
+var region = new GeoMultiPolygon(new[] { zoneA, zoneB });
 ```
+
+:::note[Ring winding is handled for you]
+GeoJSON's right-hand rule (exterior ring counter-clockwise, holes clockwise) is **normalized automatically on
+write**, so a polygon you build in any orientation is accepted identically by every provider — including the
+native MongoDB `2dsphere` and CosmosDB indexes, which otherwise reject mis-wound polygons.
+:::
+
+`Geometry` also exposes `GetEnvelope()` (its `GeoBoundingBox`) and the measurement/validity members described
+[below](#measurement--validity).
 
 ### Predicate queries
 
-Every predicate reads *stored-geometry &lt;predicate&gt; query-geometry*, takes an optional
-`orderByDistanceFrom` (a point **or** geometry — results are ordered by ascending distance and
-`SpatialResult.DistanceMeters` is populated), an optional `filter` that pushes down to the database, and
-returns `SpatialResult<T>`:
+Every predicate reads **`stored-geometry <predicate> query-geometry`** — the argument is the query shape, the
+result is the stored documents that stand in that relationship to it. All share one signature:
 
 ```csharp
-// "which zones contain this GPS point?" — a bare point works via implicit conversion
-var here = await store.GeoIntersects<Zone>(new GeoPoint(45.52, -122.68));
-
-// zones fully inside a query polygon, nearest-first
-var inside = await store.GeoContainedBy<Zone>(searchArea, orderByDistanceFrom: new GeoPoint(45.5, -122.6));
-
-// everything within 500 m of a route line
-var near = await store.GeoWithinDistance<Zone>(route, meters: 500);
+Task<IReadOnlyList<SpatialResult<T>>> GeoXxx<T>(
+    Geometry geometry,
+    Geometry? orderByDistanceFrom = null,   // point OR geometry; orders + fills DistanceMeters
+    Expression<Func<T, bool>>? filter = null,
+    CancellationToken ct = default) where T : class;
 ```
 
-Available: `GeoIntersects`, `GeoContainedBy`, `GeoContains`, `GeoDisjoint`, `GeoTouches`, `GeoCrosses`,
-`GeoOverlaps`, `GeoEquals`, `GeoCovers`, `GeoCoveredBy`, and `GeoWithinDistance(geometry, meters)`.
-`NearestNeighbors` also works over geometry-mapped types (point-to-geometry distance).
+| Method | Matches stored documents whose geometry… |
+|---|---|
+| `GeoIntersects(g)` | shares **any** point with `g` (the general "do they touch at all") |
+| `GeoDisjoint(g)` | shares **no** point with `g` |
+| `GeoContains(g)` | **contains** `g` (g lies inside the stored geometry) |
+| `GeoContainedBy(g)` | **is within** `g` (the stored geometry lies inside `g`) |
+| `GeoCovers(g)` | covers `g` (boundary-inclusive contains) |
+| `GeoCoveredBy(g)` | is covered by `g` (boundary-inclusive within) |
+| `GeoEquals(g)` | is spatially equal to `g` |
+| `GeoTouches(g)` | meets `g` only at a boundary (interiors do not intersect) |
+| `GeoCrosses(g)` | crosses `g` (interiors intersect in a lower dimension — e.g. a line cutting through a polygon) |
+| `GeoOverlaps(g)` | partially overlaps `g` (same dimension, neither contains the other) |
+| `GeoWithinDistance(g, meters)` | lies within `meters` of `g` |
+
+```csharp
+// "Which delivery zones contain this GPS point?" — a bare point converts implicitly.
+var zones = await store.GeoIntersects<Zone>(new GeoPoint(45.52, -122.68));
+
+// Zones fully inside a search polygon, nearest-first from a reference point.
+var inside = await store.GeoContainedBy<Zone>(
+    searchArea, orderByDistanceFrom: new GeoPoint(45.5, -122.6));
+
+// Zones a road passes through (line crosses polygon).
+var crossed = await store.GeoCrosses<Zone>(roadLine);
+
+// Everything within 500 m of a route, filtered.
+var near = await store.GeoWithinDistance<Zone>(
+    route, meters: 500, filter: z => z.Active);
+```
+
+:::tip[Point-in-region lookups]
+"Which polygon contains this point?" is best expressed as `GeoIntersects(point)` (a point intersecting a
+polygon *is* inside it) — you don't need `GeoContains` for the common point case.
+:::
+
+### Distance ordering & geometry k-nearest
+
+Pass `orderByDistanceFrom` to any predicate to sort the matches by ascending distance and populate
+`DistanceMeters`. The reference can be a **point** (fast, native on every provider) or a **geometry**
+(geometry-to-geometry distance; native on SQLite/relational/Cosmos, in-process on Mongo):
+
+```csharp
+var origin = new GeoPoint(45.5, -122.6);
+var ranked = await store.GeoIntersects<Zone>(searchArea, orderByDistanceFrom: origin);
+// ranked[0] is the closest matching zone; each .DistanceMeters is set.
+```
+
+For "the N nearest geometries to a point", `NearestNeighbors<T>(point, count)` works directly over a
+geometry-mapped type using point-to-geometry distance.
 
 ### Measurement & validity
 
-`Geometry` exposes in-memory `Area` (m²), `Length`/`Perimeter` (m), `Centroid`, `NumPoints`,
-`NumGeometries`, plus `IsValid`, `IsSimple`, and a lightweight `MakeValid()`. Because these are ordinary
-properties, you can index measurement with a materialized computed property and filter on it server-side:
+`Geometry` exposes in-memory helpers computed directly on the object (geodesic approximations):
+
+| Member | Meaning |
+|---|---|
+| `Area` | area in m² (0 for points/lines) |
+| `Length` / `Perimeter` | total length / ring perimeter in m |
+| `Centroid` | the centroid `GeoPoint` |
+| `NumPoints` / `NumGeometries` | coordinate count / sub-geometry count |
+| `IsValid` | coordinate finiteness/range, min-vertex counts, ring closure, and (polygons) exterior ring non-self-intersection |
+| `IsSimple` | no self-intersections |
+| `MakeValid()` | best-effort repair: closes rings, fixes winding, drops degenerate/duplicate vertices |
 
 ```csharp
-opts.MapComputedProperty<Zone>(z => z.Area!.Area, indexed: true);   // then: Query(z => z.Area!.Area > 1e6)
+var region = (GeoPolygon)zone.Area!;
+Console.WriteLine($"{region.Area / 1e6:N1} km², perimeter {region.Perimeter / 1000:N1} km");
+
+if (!candidate.IsValid)
+    candidate = candidate.MakeValid();   // e.g. before storing user-drawn shapes
 ```
 
-### Provider tiers
+:::note[Filtering by measurement]
+These are **in-memory** accessors — there is no SQL function that computes geodesic area/length, so they
+cannot be translated to a server-side `WHERE`, and they do **not** compose with `MapComputedProperty`
+(computed properties are lowered to SQL). To filter/sort by a measurement server-side, compute the scalar in
+your application, store it as a normal property (e.g. `double AreaSqMeters`), and query that field like any
+other. `MakeValid()` is a good pre-insert guard so the native Mongo/Cosmos indexes never reject a shape.
+:::
 
-| Provider | Geometry predicates |
-|---|---|
-| **SQLite** | R\*Tree bbox prune + in-process relate/refine (dependency-free) |
-| **PostgreSQL / MySQL / SQL Server / Oracle / DuckDB** | dependency-free **envelope-sidecar** table (four indexed columns) + in-process relate/refine — no PostGIS/`geography`/`SDO_GEOMETRY`/`spatial` extension |
-| **CosmosDB** | native `ST_INTERSECTS`/`ST_WITHIN`/`ST_DISTANCE`; finer predicates refine over the intersect candidate set |
-| **MongoDB** | `2dsphere` + native `$geoIntersects`/`$geoWithin`/`$near`; finer predicates & non-point distance refine in-process |
-| LiteDB / IndexedDB / Azure Table / DynamoDB | `SupportsSpatial => false` |
+### Predicate support by provider
 
-On the relational engines the pass-1 prune uses a plain B-tree over the envelope columns (weaker than a true
-2-D spatial index for wide longitude spans, but still index-assisted — not a full scan). A native
-`ST_*`/`SDO` pushdown tier could be layered on later per engine.
+All predicates return identical results everywhere; the difference is **where the work runs**. On SQLite and
+the relational providers, every predicate is a bounding-box prune (index) + in-process relate refine. On the
+document stores, the coarse filter is native where an operator exists and refines in-process otherwise:
 
-`GeoDisjoint` is anti-selective (the answer is mostly rows *outside* any bbox), so it scans the type — O(n)
-on the two-pass providers. Distances on the two-pass/refine paths are a Haversine/planar approximation;
-native `ST_DISTANCE` is geodesic, so ordering can differ on near-ties across providers.
+| Predicate | SQLite / relational | CosmosDB | MongoDB |
+|---|---|---|---|
+| `GeoIntersects` | bbox + refine | native `ST_INTERSECTS` | native `$geoIntersects` |
+| `GeoContainedBy` | bbox + refine | native `ST_WITHIN` | native `$geoWithin` |
+| `GeoWithinDistance` | bbox + refine | native `ST_DISTANCE` | native `$near`/`$centerSphere` (point) |
+| `GeoDisjoint` | **type scan** + refine | native `NOT ST_INTERSECTS` | type scan + refine |
+| `GeoContains` / `Covers` / `CoveredBy` / `Touches` / `Crosses` / `Overlaps` / `Equals` | bbox + refine | `ST_INTERSECTS` candidates + refine | `$geoIntersects` candidates + refine |
+| distance ordering | in-process | native `ST_DISTANCE` order | point ref native, geometry ref in-process |
 
-## How It Works
+## How it works
 
-### SQLite — R*Tree Sidecar
+Spatial queries are a **two-pass** pipeline. Pass 1 uses an index to cheaply narrow candidates by bounding
+box; pass 2 runs the exact geometry test (and distance) in C#. This is the same shape PostGIS uses internally
+— the difference between providers is only which index backs pass 1.
 
-SQLite uses [R*Tree virtual tables](https://www.sqlite.org/rtree.html) for spatial indexing. For each table with spatial-mapped types, the library creates two companion tables:
+### SQLite — R\*Tree sidecar
 
-- **`{table}_spatial_map`** — maps document text IDs to integer rowids (R*Tree requires integer keys)
-- **`{table}_spatial`** — the R*Tree index storing latitude/longitude bounding boxes
+For each table with a spatial-mapped type, two companion tables are created:
 
-These tables are created automatically when the table is first used. CRUD operations automatically sync the spatial index:
+- **`{table}_spatial_map`** — maps document text IDs to integer rowids (R\*Tree requires integer keys)
+- **`{table}_spatial`** — the [R\*Tree](https://www.sqlite.org/rtree.html) index storing lat/lng envelopes
 
-| Operation | Spatial Sync |
-|---|---|
-| Insert / Update / Upsert | Extracts `GeoPoint` from document and upserts into R*Tree |
-| Remove | Deletes spatial entry for that document |
-| Clear | Removes all spatial entries for that type |
+Insert/Update/Upsert sync the envelope; Remove/Clear purge it. Pass 1 is an R\*Tree bbox join; pass 2 is the
+Haversine/relate refine.
 
-**Radius queries** use a two-phase approach: the R*Tree provides a fast bounding box pre-filter, then a Haversine post-filter computes exact distances for precision.
+### PostgreSQL / MySQL / SQL Server / Oracle / DuckDB — envelope sidecar
 
-**Nearest neighbor queries** use an expanding bounding box strategy — starting at 10km and doubling until enough candidates are found.
+These providers use a plain, dependency-free sidecar table — **no PostGIS, `geography`, `SDO_GEOMETRY`, or
+DuckDB `spatial` extension required**:
 
-### CosmosDB — Native GeoJSON
-
-CosmosDB has built-in geospatial support. The `GeoPoint` type serializes as GeoJSON directly in the document:
-
-```json
-{
-  "id": "rest-1",
-  "typeName": "Restaurant",
-  "data": {
-    "name": "Pizzeria Roma",
-    "location": {
-      "type": "Point",
-      "coordinates": [-122.6765, 45.5231]
-    }
-  }
-}
+```sql
+{table}_spatial ( docId, typeName, minLat, maxLat, minLng, maxLng,
+                  PRIMARY KEY (docId, typeName) )
+-- + a composite B-tree index on (typeName, minLat, maxLat, minLng, maxLng)
 ```
 
-CosmosDB automatically indexes GeoJSON properties. The library adds spatial index policies to the container during initialization. Queries use native SQL functions:
+Pass 1 is an indexed range join over the envelope columns; pass 2 is the in-process relate/refine. Each
+provider emits its own DDL/upsert dialect (`ON CONFLICT` / `ON DUPLICATE KEY` / `MERGE`), but the behavior is
+identical.
 
-- **WithinRadius**: `ST_DISTANCE(c.data.location, point) <= @radius`
-- **WithinBoundingBox**: `ST_WITHIN(c.data.location, polygon)`
-- **NearestNeighbors**: `ORDER BY ST_DISTANCE(c.data.location, point) OFFSET 0 LIMIT @count`
+### CosmosDB — native GeoJSON
 
-No sidecar tables or manual sync needed — CosmosDB handles everything natively.
+`Geometry` serializes as GeoJSON in the document body and CosmosDB indexes it via the container's spatial
+policy (added automatically at init). `GeoIntersects`/`GeoContainedBy`/`GeoWithinDistance`/`GeoDisjoint` and
+distance ordering push down to `ST_*` functions; the finer predicates fetch the `ST_INTERSECTS` candidate set
+and refine in-process.
+
+### MongoDB — 2dsphere
+
+A `2dsphere` index is created over the mapped GeoJSON path at first query. `$geoIntersects`, `$geoWithin`,
+and `$near`/`$centerSphere` run natively; the finer predicates and geometry-to-geometry distance refine
+in-process over the candidate set.
+
+## Limitations & fidelity
+
+- **`GeoDisjoint` is O(n)** on SQLite/relational — its answer is mostly rows *outside* any bounding box, so the
+  index can't prune it and it scans the type. Use it deliberately on large collections.
+- **Relational bbox selectivity** — the sidecar uses a B-tree over the envelope columns, which is weaker than a
+  true 2-D spatial index (R\*Tree/GiST) for queries spanning a wide longitude range. It's still index-assisted,
+  not a full scan. A native `ST_*`/`SDO` pushdown tier could be layered on per engine later.
+- **Distance approximation** — SQLite/relational and the in-process refine paths use a Haversine/planar
+  approximation; CosmosDB and native MongoDB distance use geodesic `ST_DISTANCE`. Ordering can differ on
+  near-ties across providers.
+- **Antimeridian / poles** — bounding boxes crossing ±180° longitude or the poles are not special-cased.
+- **One spatial property per type** — map a single `GeoPoint`/`Geometry` property per document type.
