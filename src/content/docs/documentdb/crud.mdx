@@ -200,6 +200,34 @@ For true partial updates, use nullable properties in your patch type so that uns
 Only **SQLite, SQLCipher, MySQL, CosmosDB, LiteDB, and IndexedDB** perform a true RFC 7396 **deep** merge — nested objects are recursively merged. **PostgreSQL and SQL Server perform a shallow top-level merge only** — sending a partial nested object replaces the whole sub-object and loses untouched nested fields. On those providers, either include all fields of nested objects in the patch, use `SetProperty` for individual nested fields, or use `Update` to replace the document. See [Provider Reference](/documentdb/providers/#upsert-merge-patch-depth--read-this) for examples.
 :::
 
+### Choosing merge vs. replace with a flag
+
+`Update` and `Upsert` each take an optional boolean so you can pick merge or replace explicitly, without switching methods:
+
+```csharp
+await store.Update(doc, patch: false);          // full replace (default) — the whole body is overwritten
+await store.Update(doc, patch: true);           // RFC 7396 merge into the existing doc (must already exist)
+
+await store.Upsert(doc, patchIfUpdate: true);   // merge on update, insert if absent (the default behaviour)
+await store.Upsert(doc, patchIfUpdate: false);  // replace the body wholesale on update, insert if absent
+```
+
+The merge modes strip null properties (so an unset nullable field is *left unchanged*, never deleted) and require a non-default Id. `Update(patch: true)` throws if the document doesn't exist; `Upsert` inserts instead.
+
+:::caution[Typed-object patch is coarse — prefer the JSON lane for precise partial updates]
+A typed object always serializes **every** property, so `patch: true` only skips the fields that are `null` — a non-nullable field with a default (e.g. `int Count` = `0`) is still written. For a true "change only these keys" update, either make the patch type's fields nullable (`JsonIgnoreCondition.WhenWritingNull`/`WhenWritingDefault`), or use the late-bound **JSON lane**, where you control exactly which keys are present:
+
+```csharp
+// Only 'name' is present → only 'name' changes; every other field is untouched.
+await store.Update(typeof(User), new JsonObject { ["id"] = "user-1", ["name"] = "Bob" }, patch: true);
+await store.Upsert(typeof(User), partialJson, patchIfUpdate: false);   // replace-or-insert
+```
+:::
+
+:::note[Provider tier]
+The merge/replace **flags** are implemented on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) and the JSON lane. The two default behaviours — `Update` (replace) and `Upsert` (merge) — work on every store; the non-default modes (`Update(patch: true)`, `Upsert(patchIfUpdate: false)`) throw `NotSupportedException` on the document-native and key-partitioned stores.
+:::
+
 ## Update a single property (SetProperty)
 
 `SetProperty` updates a single scalar field in-place using the provider's JSON set function — no deserialization, no full document replacement. Returns `true` if the document was found and updated, `false` if not found. The `id` parameter accepts `Guid`, `int`, `long`, or `string`.
