@@ -354,10 +354,10 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'docdb-v10',
-              content: 'Document DB v10 - Orleans, Aspire, OData, Data Sync, DynamoDB, Azure Tables... the ultimate database solution!',
+              id: 'docdb-v11',
+              content: 'Document DB v11 - the ULTIMATE database tool now with ULTIMATE geospatial capabilities!',
               variant: 'tip',
-              link: { text: 'See Why!', href: '/documentdb/' },
+              link: { text: 'Geospatial ME THERE', href: '/documentdb/' },
               dismissable: false
             },  
             {
