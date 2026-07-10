@@ -86,6 +86,63 @@ var hits = await store.Query<Article>()
     .FullTextMatch("orleans", maxResults: 10);
 ```
 
+## Composable queries with Lucene syntax
+
+`FullTextSearch`/`FullTextMatch` are *terminal* ranked calls. When you instead want full-text as a **composable predicate** — AND/OR'd with ordinary filters, paged, and sorted alongside everything else — use `DocumentFunctions.LuceneMatch(field, luceneQuery)` in a `Where` and `DocumentFunctions.LuceneScore(field, luceneQuery)` in an `OrderBy`/projection. They translate a Lucene query string to the provider's native full-text engine over the **same `MapFullTextProperty` index** (so the type must still be mapped). The `field` argument identifies the mapping — pass a mapped property; the search spans the type's whole combined index.
+
+```csharp
+// filter + relevance sort + paging in one server-side query
+var hits = await store.Query<Article>()
+    .Where(a => a.Category == "tech"
+             && DocumentFunctions.LuceneMatch(a.Body, "orleans AND grain NOT deprecated"))
+    .OrderByDescending(a => DocumentFunctions.LuceneScore(a.Body, "orleans grain"))
+    .Skip(0).Take(20)
+    .ToList();
+```
+
+The same functions are available in the string-expression grammar (AOT-safe), lowering to the identical query:
+
+```csharp
+store.Query<Article>().Where("lucenematch(body, 'title:quick AND brown~')");
+store.Query<Article>().Where($"lucenematch(body, {userQuery})")
+                      .OrderBy("lucenescore(body, 'orleans') desc");
+```
+
+### Lucene grammar
+
+| Feature | Example |
+|---|---|
+| term | `orleans` |
+| phrase | `"virtual actor"` |
+| boolean | `orleans AND grain`, `a OR b`, `a NOT b`, `+must -mustnot` (also `&&` `\|\|` `!`) |
+| grouping | `(quick OR slow) AND fox` |
+| prefix | `distrib*` |
+| fuzzy | `orlean~` / `orlean~1` |
+| proximity | `"quick fox"~5` |
+| boost | `orleans^2` (affects ranking only) |
+
+Range queries (`[a TO b]`) and non-trailing wildcards (`te*t`) are rejected with a clear error.
+
+### Provider support for composable queries
+
+Composable queries reuse the same per-type index as `FullTextSearch`, but each engine expresses a different subset of the grammar. **Operators a backend can't express throw `NotSupportedException`** — they never silently degrade to something else.
+
+| Provider | `LuceneMatch` | `LuceneScore` | Advanced operators |
+|---|---|---|---|
+| **SQLite** (FTS5) | ✅ | ✅ (`bm25`) | prefix, proximity (`NEAR`) |
+| **PostgreSQL** (`tsquery`) | ✅ | ✅ (`ts_rank`) | prefix |
+| **MySQL** (BOOLEAN MODE) | ✅ | ✅ | prefix, proximity |
+| **SQL Server** (`CONTAINS`) | ✅ | ✅ (`CONTAINSTABLE`) | prefix, proximity (`NEAR`) |
+| **Oracle Text** (`CONTAINS`) | ✅ | ❌ — use `FullTextSearch` | prefix, fuzzy, proximity |
+| **LiteDB / IndexedDB** (in-memory) | ✅ | ✅ | **all** (incl. fuzzy) |
+| **DuckDB / Cosmos DB / MongoDB** | ❌ — use `FullTextSearch` | ❌ | — |
+
+Baseline (terms, phrases, `AND`/`OR`/`NOT`, grouping) works on every provider in the ✅ rows. Notes:
+
+- **Oracle** — `SCORE(n)` requires a co-located `CONTAINS` label in the same statement, so a standalone `LuceneScore` can't be produced; use `store.FullTextSearch<Article>(...)` for ranking on Oracle.
+- **DuckDB / Cosmos / MongoDB** — the engine can't express the boolean Lucene grammar inline (DuckDB's index is a rebuild-on-query snapshot; Cosmos/MongoDB full-text is bag-of-words / single top-level clause). Use the terminal `store.FullTextSearch(...)` / `FullTextMatch(...)` on those providers.
+- **Field-scoped terms** (`title:foo`) are **not supported in v1** on any provider — the index is a single combined field — and throw. Pass the query without a field prefix; it searches all mapped properties.
+
 ## Provider support
 
 The index is maintained automatically by the engine — no write-path bookkeeping — so once a type is mapped, `Insert`/`Update`/`Remove`/`Clear` keep it in sync for free.

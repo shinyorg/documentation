@@ -16,7 +16,7 @@ The fluent query builder is the primary way to query documents. Start with `stor
 | `.OrderBy(selector)` / `.OrderByDescending(selector)` | Sort by property (expression). |
 | `.OrderBy(name[, jsonTypeInfo])` / `.OrderByDescending(name[, jsonTypeInfo])` | Sort by property name (string) — AOT-safe via `JsonTypeInfo<T>`. Supports dotted paths. |
 | `.OrderBy(name, direction[, jsonTypeInfo])` | Sort by property name with a runtime direction string (`"asc"`/`"ascending"`/`"desc"`/`"descending"`, case-insensitive; empty defaults to ascending). |
-| `.GroupBy(selector)` | Group by property (for aggregate projections with `Sql.*` markers). |
+| `.GroupBy(keySelector)` | Group into one row per key for an aggregate projection — see [Grouping & aggregation](#grouping--aggregation). |
 | `.Paginate(offset, take)` | Limit results with SQL `LIMIT`/`OFFSET`. |
 | `.Select(selector, resultTypeInfo?)` | Project into a different shape via JSON object construction. |
 | `.Project(fields[, jsonTypeInfo])` | Project a runtime-chosen field list (e.g. `"name,email"`) into `IDocumentQuery<JsonObject>` — AOT-safe. Ideal for REST sparse fieldsets; no DTO required. Supports scalar functions with an alias: `"name, lower(email) as email, year(created) as yr"` (all providers). |
@@ -160,6 +160,24 @@ var key = DocumentFunctions.Soundex("Smith");
 var matches = await store.Query<Person>().Where(p => p.NameSoundex == key).ToList();
 ```
 
+### Composable full-text — `DocumentFunctions.LuceneMatch` / `LuceneScore`
+
+Full-text as a **composable predicate** (rather than the terminal `store.FullTextSearch(...)` call). `LuceneMatch(field, luceneQuery)` filters inside a `Where` and `LuceneScore(field, luceneQuery)` ranks inside an `OrderBy`/projection, both over an existing `MapFullTextProperty` index. The Lucene grammar covers terms, `"phrases"`, `AND`/`OR`/`NOT`, grouping, prefix `foo*`, fuzzy `foo~`, proximity `"a b"~5`, and boost `foo^2`.
+
+```csharp
+var hits = await store.Query<Article>()
+    .Where(a => a.Category == "tech"
+             && DocumentFunctions.LuceneMatch(a.Body, "orleans AND grain NOT deprecated"))
+    .OrderByDescending(a => DocumentFunctions.LuceneScore(a.Body, "orleans grain"))
+    .Take(20)
+    .ToList();
+
+// string grammar (AOT-safe): lucenematch(...) / lucenescore(...)
+store.Query<Article>().Where("lucenematch(body, 'title:quick AND brown~')");
+```
+
+Supported on SQLite, PostgreSQL, MySQL, SQL Server (match + score), Oracle (match only), and the in-memory providers (full grammar); DuckDB/CosmosDB/MongoDB use `FullTextSearch` instead. Operators a provider can't express throw `NotSupportedException`. See [Full-Text Search → Composable queries](/documentdb/full-text/#composable-queries-with-lucene-syntax) for the full capability matrix.
+
 ### Custom function translations
 
 Register your own method → SQL function mapping for the relational providers. The exemplar captures the target method (so it stays trim/AOT-safe — no reflection by name):
@@ -185,6 +203,84 @@ var count = await store.Count<User>(
     "json_extract(Data, '$.age') > @minAge",
     new { minAge = 30 });
 ```
+
+## Grouping & aggregation
+
+`GroupBy` rolls the filtered set up into one output row per group. Use `g.Key` for the group value and
+the `Sql` group aggregates — `g.Count()`, `g.Sum(x => x.Total)`, `g.Avg`, `g.Min`, `g.Max` — in the
+projection. The whole-set terminals (`.Count()`, `.Sum()`, `.Average()` above) remain the simplest path
+for a single total over the entire filtered set; reach for `GroupBy` when you want a total **per key**.
+
+```csharp
+// Revenue + order count per status
+var rollup = await store.Query<Order>()
+    .Where(o => o.CreatedAt >= since)
+    .GroupBy(o => o.Status)                              // group key = a JSON property
+    .Select(g => new StatusRollup
+    {
+        Status  = g.Key,                                // the group key
+        Count   = g.Count(),
+        Revenue = g.Sum(o => o.Total),
+        AvgLine = g.Avg(o => o.Total)
+    })
+    .OrderByDescending(r => r.Revenue)                  // order the grouped rows (by an output column)
+    .ToList();
+```
+
+The group key can be a nested property (`o => o.ShippingAddress.Country`), a **derived** scalar you never
+declared a column for (`o => o.CreatedAt.Month` for a "revenue by month" rollup), or an anonymous type for
+a **multi-column** key:
+
+```csharp
+.GroupBy(o => new { o.Status, o.Region })              // g.Key.Status / g.Key.Region
+```
+
+### Filtering groups — `Having`
+
+`Having` filters the groups themselves by an aggregate (SQL `HAVING`). Call it more than once to AND
+predicates:
+
+```csharp
+var bigStatuses = await store.Query<Order>()
+    .GroupBy(o => o.Status)
+    .Having(g => g.Sum(o => o.Total) > 10_000)
+    .Select(g => new StatusRollup { Status = g.Key, Revenue = g.Sum(o => o.Total) })
+    .ToList();
+```
+
+Grouped results are ordinary rows — `OrderBy` (over an output column), `Paginate`, `ToList`,
+`ToAsyncEnumerable`, `Count` (number of groups), and `ToQueryString` all flow through. For hot rollups,
+index the group-key path with [`MapIndexedProperty`](/documentdb/#indexing) or a materialized
+[computed property](/documentdb/computed-properties/).
+
+### String grammar
+
+`GroupBy("field")` opens the string-grammar surface, mirroring the string `Where`/`Project` API. The
+aggregate functions `count()`, `sum(x)`, `avg(x)`, `min(x)`, `max(x)` are available (each requires an
+alias) and bare identifiers resolve to the group key:
+
+```csharp
+var rows = await store.Query<Order>()
+    .GroupBy("status")
+    .Having("sum(total) > 10000")
+    .Project("status, count() as orders, sum(total) as revenue")   // → JsonObject rows
+    .ToList();
+```
+
+The LINQ and string surfaces lower to the same `GROUP BY` / `HAVING` SQL. String grouping is a single-key,
+plain-property surface; multi-column and derived keys use the typed `GroupBy(keySelector)` form.
+
+### Provider support
+
+| Provider | Grouping | Notes |
+|---|---|---|
+| SQLite / SQLCipher | ✅ Push-down | `GROUP BY json_extract` + `HAVING` + grouped `ORDER BY` + multi/derived keys. |
+| PostgreSQL / MySQL | ✅ Push-down | Same portable ANSI SQL. |
+| SQL Server / Oracle | ✅ Push-down | Same; grouped `OrderBy` + paging valid. |
+| DuckDB | ✅ Push-down | Analytics engine — grouping is its wheelhouse. |
+| MongoDB / Cosmos | ⚠️ Client-side | Grouped like their `Select`: the filtered set is read and aggregated in memory. String grammar is relational-only. |
+| LiteDB / IndexedDB | ⚠️ Client-side | In-memory LINQ grouping; loads the matched set — pre-filter with `Where`. Typed surface only. |
+| **Azure Table / DynamoDB** | ❌ Throws | Key-partitioned, no server grouping — `NotSupportedException`, no silent scan. |
 
 ## Ordering
 

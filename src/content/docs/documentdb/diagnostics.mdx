@@ -26,6 +26,10 @@ services.AddOpenTelemetry()
 
 `AddDocumentStoreInstrumentation()` decorates the non-keyed `IDocumentStore` registration (preserving its lifetime) and re-points `ITemporalDocumentStore` at the same decorated instance. It works for every provider — the `db.system.name` tag is derived from the wrapped store, so SQLite, PostgreSQL, MongoDB, CosmosDB, and the rest are all reported correctly with no per-provider configuration.
 
+#### Keyed / named stores
+
+To instrument a keyed/named store (the `AddDocumentStore(name, ...)` overload), call the name overload — `services.AddDocumentStoreInstrumentation("orders")`. Every metric measurement and span from that store is tagged `db.namespace = "orders"` so you can tell signals from multiple stores apart. The decorated instance still surfaces `ITemporalDocumentStore` / `IObservableDocumentStore` / `IChangeFeedDocumentStore` faithfully, so casts on the keyed `IDocumentStore` keep working — there is no separate keyed capability descriptor to re-point. The call is idempotent (an already-instrumented store is left as-is) and throws `InvalidOperationException` if no keyed store is registered under that name.
+
 ### One-liner via the DI options flag
 
 If you register through `Shiny.DocumentDb.Extensions.DependencyInjection`, you can skip the separate call and just flip a flag — the DI package bundles the Diagnostics decorator and wires it for you:
@@ -38,7 +42,7 @@ services.AddDocumentStore(o =>
 });
 ```
 
-`Instrumentation = true` is honored by the **non-keyed** `AddDocumentStore` overloads (including the multi-tenant one). Setting it on a keyed/named store throws `NotSupportedException`, because the decorator only wraps the non-keyed registration — instrument those manually if you need them. You still point your OpenTelemetry pipeline at the `Shiny.DocumentDb` meter/source as shown above.
+`Instrumentation = true` is honored by the **non-keyed** `AddDocumentStore` overloads (including the multi-tenant one) **and** the eager keyed overload `AddDocumentStore(name, Action<DocumentStoreOptions>)` — on a named store the flag calls `AddDocumentStoreInstrumentation(name)` for you, so its signals carry the `db.namespace` tag. The one exception is the lazy keyed overload `AddDocumentStore(name, Action<IServiceProvider, DocumentStoreOptions>)`: its options are configured at resolve time, so the flag can't be read at registration — call `AddDocumentStoreInstrumentation(name)` explicitly there. You still point your OpenTelemetry pipeline at the `Shiny.DocumentDb` meter/source as shown above.
 
 ### Without a container
 
@@ -68,6 +72,7 @@ Every measurement is tagged with:
 | `db.system.name` | `sqlite`, `postgresql`, `mongodb`, `cosmosdb` | Derived from the wrapped store. |
 | `db.operation.name` | `insert`, `get`, `query.to_list`, `history` | The store operation. |
 | `db.collection.name` | `Order` | The document type name (low-cardinality). |
+| `db.namespace` | `orders` | The logical store name. **Present only for keyed/named stores** — the name you instrumented with `AddDocumentStoreInstrumentation("orders")` (or `Instrumentation = true` on the eager keyed overload). Omitted on the non-keyed path. |
 | `outcome` | `success` / `error` | |
 | `error.type` | `System.InvalidOperationException` | Present only on failures. |
 
