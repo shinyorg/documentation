@@ -7,6 +7,46 @@ import RN from '/src/components/ReleaseNote.astro';
 
 ## 11.0.0 TBD
 
+<RN type="feature">
+**Backup export/restore preserves `CreatedAt` / `UpdatedAt` (envelope v2).** A backup round trip used to rewrite every document's creation and modification timestamps to the import time. The export now records them and the Insert restore path binds them per row across every provider (relational + MongoDB/CosmosDB), so a backup faithfully preserves document history. The format is backward-compatible: a v1 backup (no timestamps) still imports, stamping the current time. DuckDB/PostgreSQL/SQL Server fall back from their native bulk-copy fast path to the multi-row insert only when timestamps are present.
+</RN>
+
+<RN type="fix">
+**Backup accounting and error shape.** `DocumentsWritten`/`DocumentsSkipped` are now derived from row intent for `Replace`/`Merge` (MySQL's `ON DUPLICATE KEY UPDATE` counts an update as two rows, which could make `DocumentsSkipped` negative). The native bulk-copy path now wraps a duplicate-key collision in the same friendly `InvalidOperationException` as the multi-row path instead of leaking the raw provider exception.
+</RN>
+
+<RN type="fix">
+**DynamoDB Streams change feed: no missed records across shard splits.** A newly-split child shard was subscribed at `LATEST`, dropping any records written to it before the next shard refresh; child shards now start at `TRIM_HORIZON` and are not read until their parent shard has fully drained, preserving per-key ordering across a split. (Also removed a dead no-op branch in the poll loop.)
+</RN>
+
+<RN type="fix">
+**Scoped `IDocumentInterceptor` registration now fails fast.** `IDocumentStore` is a singleton and resolves its DI-registered interceptors once from the root provider, so a `Scoped` interceptor would be a captive-dependency bug (a silently-reused singleton, or a scope-validation throw). `AddDocumentStore` now throws a clear error at registration directing you to register interceptors as `Singleton` (recommended) or `Transient`.
+</RN>
+
+<RN type="fix">
+**Generated serialization honors `[JsonPropertyName]` under trimming/AOT.** A `DocumentSerialization.Generated` type with a `[JsonPropertyName]` on a queried property could emit the wrong JSON path once trimming removed the property's reflection metadata, silently returning empty results. The generator now roots each document type's public properties (`[DynamicDependency]`) so the query layer resolves the mapped name correctly after trimming.
+</RN>
+
+<RN type="fix">
+**IndexedDB inserts and version updates are now atomic.** On Blazor WASM, `Insert`'s duplicate check and `Update`'s optimistic-concurrency check ran a JS `get` and `put` in separate transactions, so two overlapping writes could both pass their check. Both now run get-check-put inside a single `readwrite` transaction. (Upsert's RFC 7396 deep-merge stays on the C# path.)
+</RN>
+
+<RN type="fix">
+**Vector search `Score` semantics documented as provider-specific.** For Cosine/Euclidean the relational providers return a distance (lower = closer) while MongoDB/CosmosDB return a normalized similarity (higher = closer) — the same metric, opposite direction. There is no lossless canonical conversion, so results are always ordered nearest-first regardless of provider and `VectorResult.Score` is documented as backend-specific: rely on ordering, not the raw score, for portable ranking.
+</RN>
+
+<RN type="fix">
+**Enum queries work when enums are stored as strings.** With a `JsonStringEnumConverter` (or a `[JsonConverter]` that emits strings) configured, enums are persisted as their member name — but the relational query pipeline always bound an enum `==` / `!=` / `in` comparison as the underlying number and cast the extracted field to an integer, so every enum predicate silently matched nothing. The lowerer now detects a string-stored enum and binds the exact member-name string the write path persisted (extracting the field as text), across both the typed LINQ surface and the string grammar (`Where("Level == 'High'")`). Numeric-stored enums (the default) are unchanged. The fix spans the relational providers, CosmosDB (shared lowerer), and MongoDB (its own translator, fixed to match) for equality and `in` comparisons.
+</RN>
+
+<RN type="fix">
+**DuckDB bulk import no longer throws on a multi-tenant store.** An `Insert`-mode `BulkImport`/`Restore` into a shared-table multi-tenancy DuckDB store threw a column-count mismatch (`… has 6 columns but you specified only 5 values`) because DuckDB's native appender is positional and doesn't account for the trailing `TenantId` column. DuckDB now falls back to the multi-row `INSERT` path when tenancy is enabled — leaving `TenantId` NULL, exactly like the PostgreSQL and SQL Server native bulk paths. (Tenant-scoped bulk import is still documented as unsupported; the imported rows are NULL-tenant — the fix is graceful parity rather than a hard failure.)
+</RN>
+
+<RN type="fix">
+**Mapped-property JSON names now honor `[JsonPropertyName]` and source-generated contexts.** The version (`MapVersionProperty`), spatial, vector, computed, and full-text mappings resolved their stored JSON path from the runtime naming policy alone, which ignores the effective JSON name baked into a `JsonTypeInfo`. If a mapped property carried a `[JsonPropertyName("…")]` (or a source-gen context baked a different name), the resolver pointed at a key that isn't in the document — most visibly, optimistic-concurrency writes on such a type failed with a phantom `ConcurrencyException` because the CAS predicate read a missing path. The mappings now read the effective name off the resolved `JsonTypeInfo`, falling back to the naming policy only when the type has no metadata.
+</RN>
+
 <RN type="fix">
 **Temporal history is now tenant-isolated.** The `_history` sidecar gained a `TenantId` column and every temporal read/write (`History` / `AsOf` / `AsOfAll` / `ChangesByActor` / `ChangesBetween` / `Restore` / `GetDiffBetween`) is scoped to the current tenant. Previously a tenant could read another tenant's version history via a known id, and `AsOfAll` returned every tenant's documents. (Applies to newly-created history tables.)
 </RN>
