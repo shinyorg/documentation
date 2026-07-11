@@ -94,6 +94,25 @@ TimeSpan position = _player.Position;
 TimeSpan duration = _player.Duration;
 ```
 
+## Volume
+
+`Volume` is the **device-wide system media volume**, normalized `0.0`–`1.0`, independent of any active duck. **Reading works on every platform. Setting is Android-only** — always guard with `IsVolumeControlSupported`:
+
+```csharp
+// Read anywhere
+float level = _player.Volume;
+
+// Set only where supported (Android). On Apple the setter throws NotSupportedException.
+if (_player.IsVolumeControlSupported)
+    _player.Volume = 0.5f;
+```
+
+Setting `Volume` on iOS or Mac Catalyst throws `NotSupportedException`: Apple exposes no supported API to change the system volume (`MPMusicPlayerController.Volume` was deprecated in iOS 7 and is a no-op). On those platforms, let the user adjust volume with the hardware buttons or an `MPVolumeView`. `IsVolumeControlSupported` returns `true` on Android and `false` on Apple platforms.
+
+:::caution
+On Android the system music stream is integer-stepped (e.g. 0–15), so a value you set is quantized to the nearest step, and reading `Volume` back can differ slightly from what you assigned.
+:::
+
 ## Events
 
 ### StateChanged
@@ -119,6 +138,19 @@ _player.PlaybackCompleted += (sender, args) =>
 };
 ```
 
+### VolumeChanged
+
+Raised when the device media volume changes — via the hardware volume buttons, Control Center, or a successful `Volume` set. The argument is the new volume normalized `0.0`–`1.0`:
+
+```csharp
+_player.VolumeChanged += (sender, volume) =>
+{
+    Console.WriteLine($"Volume is now {volume:P0}");
+};
+```
+
+On Android this observes the system music-stream volume; on Apple platforms it comes from KVO on the audio session's output volume.
+
 ## Disposing
 
 `IMusicPlayer` implements `IDisposable`. Call `Dispose()` to stop playback and release all platform resources:
@@ -136,12 +168,14 @@ If you register the player as a singleton in DI, it will be disposed when the ap
 - Audio attributes are set to `ContentType.Music` with `Usage.Media`.
 - Seeking uses millisecond precision.
 - **Ducking** lowers this player's own track, honoring `DuckOptions.Level`, `FadeIn`, and `FadeOut` exactly.
+- **Volume** reads and writes the system `STREAM_MUSIC` level via `AudioManager` (`IsVolumeControlSupported` is `true`). `VolumeChanged` observes system-volume changes through a `ContentObserver`.
 
 ### iOS
 - **Local tracks** (with `ContentUri`): Playback uses `AVAudioPlayer` with the track's `ipod-library://` asset URL. The `AVAudioSession` category is set to `Playback` to support background audio (if configured). Seeking uses second precision.
 - **Streaming tracks** (with `StoreId`): Playback uses `MPMusicPlayerController.SystemMusicPlayer` with the Apple Music catalog ID. This enables playback of DRM-protected Apple Music subscription content. The system player manages its own audio session.
 - **Catalog tracks** (with `CatalogId`, from [`SearchCatalogAsync`](/music/querying/#catalog-search-apple-music)): Playback enqueues the track by its Apple Music catalog id via `MPMusicPlayerStoreQueueDescriptor` — no library membership required. An active Apple Music subscription is required; gate playback on `HasStreamingSubscriptionAsync`.
 - **Ducking** activates `AVAudioSession` with `DuckOthers`; `Level` and the fade durations are advisory only, as the OS controls duck depth and ramp. Announcement audio played through the app's audio session (an `AVAudioPlayer`, or `AVSpeechSynthesizer` with `UsesApplicationAudioSession = true`) plays at full volume over the ducked music — only other out-of-process audio is ducked.
+- **Volume** reads from `AVAudioSession.OutputVolume` (reliable), but **setting is not supported** (`IsVolumeControlSupported` is `false`) — the setter throws `NotSupportedException`, as Apple provides no supported API to change the system volume. `VolumeChanged` fires from KVO on the session's output volume.
 
 :::note
 Music library access requires a **physical device**. Simulators and emulators typically have no music content and cannot test playback.

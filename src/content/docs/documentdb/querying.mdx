@@ -36,6 +36,8 @@ The fluent query builder is the primary way to query documents. Start with `stor
 | `.Sum(selector)` | `Task<TValue>` | Sum of a property. |
 | `.Average(selector)` | `Task<double>` | Average of a property. |
 | `.PageResult(page, pageSize, zeroBased?)` | `Task<PagedResults<T>>` | Run the query and return records + total count in one call. 1-based by default. |
+| `.ToCursorPage(cursor, take)` | `Task<CursorPage<T>>` | One forward seek/keyset page; `null` cursor for the first page, `NextCursor` null on the last. See [Pagination](#tocursorpagecursor-take--seek--keyset-pagination). |
+| `.ToCursorStream(pageSize?)` | `IAsyncEnumerable<T>` | Walk every cursor page automatically — a resumable full scan with no deep-offset cost. |
 | `.ToQueryString()` | `DocumentQueryString` | Build the SQL (or MongoDB BSON) the query would run **without executing it** — see [Inspecting the generated query](#inspecting-the-generated-query--toquerystring). |
 
 ## Expression-based queries
@@ -528,6 +530,83 @@ var result = await store.Query<User>()
 - `TotalCount` reflects the current `Where` predicates (and any [global query filters](/documentdb/query-filters/)) — pagination state is ignored when counting, so the total spans all pages, not just the returned slice.
 - Any prior `.Paginate(...)` call on the query is overridden by `PageResult`.
 - Validation: `pageSize` must be greater than zero; `page` must be `>= 1` (or `>= 0` when `zeroBased: true`). Otherwise throws `ArgumentOutOfRangeException`.
+
+### `.ToCursorPage(cursor, take)` — seek / keyset pagination
+
+`ToCursorPage` is a **forward-only, seek-based** alternative to offset paging. Instead of an ever-growing
+`OFFSET`, each page hands back an opaque **cursor** that anchors the next page to where the last one ended.
+The keyset is **derived from the query's own `OrderBy`** (an `Id` tiebreaker is appended automatically so the
+order is always total). Pass `null` for the first page; a `null` `NextCursor` marks the last page.
+
+```csharp
+string? cursor = null;
+do
+{
+    var page = await store.Query<Order>()
+        .Where(o => o.Status == "open")
+        .OrderByDescending(o => o.CreatedAt)   // the cursor keyset is DERIVED from this OrderBy
+        .ToCursorPage(cursor, take: 50);
+
+    Render(page.Items);
+    cursor = page.NextCursor;                  // null ⇒ last page
+}
+while (cursor != null);
+```
+
+`CursorPage<T>` carries the `Items` and the `NextCursor` (plus a convenience `HasMore`). There is **no total
+count** — a cursor page skips the extra `COUNT(*)` round-trip that `PageResult` pays.
+
+**Auto-following stream.** `ToCursorStream` walks every page for you — a resumable full scan that never pays
+deep-offset cost:
+
+```csharp
+await foreach (var order in store.Query<Order>()
+    .OrderByDescending(o => o.CreatedAt)
+    .ToCursorStream(pageSize: 200))
+{
+    Export(order);
+}
+```
+
+#### Offset vs cursor — which to use
+
+| Use **offset** (`Paginate` / `PageResult`) when… | Use **cursor** (`ToCursorPage`) when… |
+|---|---|
+| You need a page number ("page 7 of 90") or a total count | You page deep, forever-scroll, or export large stable sets |
+| The UI lets users jump to an arbitrary page | You only ever move forward, one page at a time |
+| Result sets are small and shallow | Per-page cost must stay flat regardless of depth |
+| — | Rows are inserted/removed between page fetches (offset drifts; keyset doesn't) |
+
+**Why cursor paging is cheaper at depth.** `OFFSET N` scans and discards `N` rows on every relational
+backend, so page 500 is measurably slower than page 1. A keyset seek (`WHERE (sortkey, Id) > (…) ORDER BY …
+LIMIT n`) is O(log n) per page with the right index — regardless of depth — and it doesn't skip or duplicate
+rows when documents are written between fetches.
+
+:::tip[Index the sort key]
+Keyset is only O(log n) if an index covers the sort key (plus `Id`). Add `MapIndexedProperty` (or a
+`MapComputedProperty(indexed: true)`) on the property you order by for hot cursor paths. Without an index it is
+still correct — it just scans, the same as offset.
+:::
+
+**Rules and caveats:**
+
+- **Filters and ordering must be identical across page calls.** A cursor is only valid for the exact query
+  shape that produced it — a shape hash over the `OrderBy` catches the common "wrong sort" mistake and throws
+  `InvalidOperationException`. Toggling `IgnoreQueryFilters` or changing the `Where` between pages is
+  unsupported.
+- **Forward-only.** No `previous`/`last` and no random access in v1.
+- **Not after `Select` / `Project` / `GroupBy`.** Those drop the `Id` and raw sort columns the keyset needs, so
+  they throw `NotSupportedException`.
+- **`take` must be `> 0`** (and `≤ 10,000`); otherwise `ArgumentOutOfRangeException`.
+- **NULL sort keys.** A keyset boundary that lands on a `NULL` sort value can skip rows — order by non-nullable
+  columns for cursor paths (the `Id` tiebreaker is always non-null).
+- **Opaque, not secret.** The token base64url-encodes the trailing row's sort-key values (e.g. a timestamp) —
+  fine for the common case; don't treat it as confidential.
+
+**Provider support (11.0).** Keyset cursors work on every relational provider (SQLite, PostgreSQL, MySQL, SQL
+Server, Oracle, DuckDB) and on LiteDB, IndexedDB and MongoDB (the document/in-memory providers page the keyset
+client-side). The key-partitioned NoSQL providers (Cosmos, DynamoDB, Azure Table) don't opt in yet and throw
+`NotSupportedException` — native-continuation-token support for those is a follow-up.
 
 ## Bulk delete with ExecuteDelete
 

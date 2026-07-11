@@ -1,0 +1,79 @@
+---
+title: MariaDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.MariaDb` package provides a MariaDB-backed document store. MariaDB speaks the MySQL
+wire protocol and uses the same [`MySqlConnector`](https://www.nuget.org/packages/MySqlConnector) driver, so
+`MariaDbDatabaseProvider` **extends** [`MySqlDatabaseProvider`](/documentdb/mysql/) and inherits its entire
+document surface — CRUD, LINQ-to-SQL translation, JSON property indexes, batch/bulk writes, temporal history,
+computed columns, soundex, and full-text search all lower to identical SQL. Only the handful of places where
+MariaDB genuinely diverges from MySQL 8 are overridden.
+
+<NugetBadge name="Shiny.DocumentDb.MariaDb" showLabel={true} />
+
+## When to Use
+
+- Existing MariaDB estate (or a MariaDB-compatible service such as SkySQL)
+- You want the MySQL provider's feature set against a MariaDB server
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.MariaDb
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.MariaDb;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new MariaDbDatabaseProvider(
+           "Server=localhost;Database=mydb;User=root;Password=pass;")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new MariaDbDatabaseProvider(
+           "Server=localhost;Database=mydb;User=root;Password=pass;");
+   });
+   ```
+</Steps>
+
+## Differences from the MySQL provider
+
+Everything is inherited from the MySQL provider except:
+
+- **Spatial runs the portable envelope tier** (bounding-box prune + in-process geometry refine) rather than
+  MySQL's native SRID-4326 `ST_*` pushdown. MariaDB's geometry columns don't accept MySQL's `SRID` column
+  attribute, and — critically — MariaDB's `ST_Distance` is **not metric** for SRID-4326 geometry, so a native
+  `WithinRadius`/distance query would return wrong results. The portable tier computes true metres in C# and
+  is correct everywhere. The dedicated `Geo*` methods and `MapSpatialProperty` work as normal;
+  `DocumentFunctions` spatial predicates inside a `Where` are not pushed down (use the `Geo*` methods).
+- **Full-text proximity** (`"a b"~5` / `"a b"@N`) is dropped from the advertised Lucene capabilities —
+  MariaDB boolean-mode full-text has no proximity operator, so proximity queries are rejected up front rather
+  than emitting invalid SQL. Terms, phrases, prefixes, and required/optional/excluded terms all work, as does
+  `MapFullTextProperty` + `FullTextSearch`.
+- **Array-valued queries are not supported.** MariaDB has never shipped `JSON_TABLE`
+  ([MDEV-16620](https://jira.mariadb.org/browse/MDEV-16620), still open through 11.x) and has no `LATERAL`, so
+  the outer-correlated array unnest that MySQL relies on cannot be expressed. Predicates and projections that
+  unnest a JSON array — `Any`/`All` over a collection (`o => o.Lines.Any(l => …)`), collection aggregates
+  (`o.Lines.Sum(l => l.Quantity)`), and `GroupBy` over an array element — throw a clear `NotSupportedException`
+  at query-build time. Use the MySQL provider for those queries, or restructure the model to avoid unnesting a
+  JSON array. (Scalar array checks that don't unnest, like `.Count`/`.Length` via `JSON_LENGTH`, still work.)
+
+## Limitations
+
+- **No `Backup()`** — use `mariadb-dump` (`mysqldump`) from your operations tooling.
+- Same stored-JSON-`null` vs missing-key collapsing (`NULLIF(...,'null')`) as the MySQL provider.

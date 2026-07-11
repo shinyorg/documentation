@@ -1,0 +1,91 @@
+---
+title: CockroachDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.CockroachDb` package provides a CockroachDB-backed document store. CockroachDB is
+PostgreSQL wire-compatible and uses the same [`Npgsql`](https://www.nuget.org/packages/Npgsql) driver, so
+`CockroachDbDatabaseProvider` **extends** [`PostgreSqlDatabaseProvider`](/documentdb/postgresql/) and inherits
+nearly its entire surface — JSONB storage and operators, CRUD, `ON CONFLICT` batch/upsert, read-merge-write
+patch, temporal history, computed (`STORED`) columns, partial JSON indexes, and **full-text search** all lower
+to identical SQL. Only the PostgreSQL features that depend on extensions or Postgres-only server machinery are
+scoped away.
+
+<NugetBadge name="Shiny.DocumentDb.CockroachDb" showLabel={true} />
+
+## When to Use
+
+- A CockroachDB cluster (self-hosted or CockroachDB Cloud) as primary storage
+- You want a horizontally-scalable, distributed SQL backend with the PostgreSQL provider's feature set
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.CockroachDb
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb;
+   using Shiny.DocumentDb.CockroachDb;
+
+   var store = new DocumentStore(new DocumentStoreOptions
+   {
+       DatabaseProvider = new CockroachDbDatabaseProvider(
+           "Host=localhost;Port=26257;Username=root;Database=defaultdb;SSL Mode=Disable;")
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new CockroachDbDatabaseProvider(
+           "Host=localhost;Port=26257;Username=root;Database=defaultdb;SSL Mode=Disable;");
+   });
+   ```
+</Steps>
+
+## What works
+
+Inherited from the PostgreSQL provider and verified against CockroachDB:
+
+- **JSONB storage**, full LINQ-to-SQL translation, and partial (per-type) JSON indexes.
+- **CRUD, batch insert, and bulk import** — bulk import streams via multi-row `INSERT` (see below).
+- **Patch / merge** via the read-merge-write path (`SELECT … FOR UPDATE`).
+- **Temporal history**, **computed columns** (`GENERATED ALWAYS AS … STORED`), **multi-tenancy**, and
+  optimistic concurrency (`MapVersionProperty`).
+- **Full-text search** — `MapFullTextProperty` + `FullTextSearch` and the composable
+  `DocumentFunctions.LuceneMatch`/`LuceneScore`, backed by a `STORED` tsvector column, a GIN index, and
+  `ts_rank` (CockroachDB 23.1+).
+- **Spatial is native** — CockroachDB ships PostGIS-compatible `ST_*` built-ins and GiST spatial indexes, so
+  `MapSpatialProperty`, the `Geo*` methods, and `DocumentFunctions` spatial predicates all push down. No
+  `CREATE EXTENSION postgis` is needed (or accepted) — the spatial machinery is built into the binary.
+- **Vector / ANN search is native** — CockroachDB has a pgvector-compatible `VECTOR(n)` type and the same
+  `<->` / `<=>` / `<#>` distance operators built in, so `MapVectorProperty` + `NearestVectors` (Cosine /
+  Euclidean / DotProduct, with `Where` pre-filter) work with no extension. Search runs **brute-force** — the
+  pgvector `hnsw`/`ivfflat` index isn't used (CockroachDB's own `CREATE VECTOR INDEX` is v25.2+ and L2-only, a
+  possible future opt-in). `Hamming` is unsupported.
+
+## What's scoped away
+
+These PostgreSQL features are implemented through extensions or Postgres-only server machinery that
+CockroachDB does not provide, so they report unsupported rather than emitting incompatible SQL:
+
+- **Native change feed** — CockroachDB has no `LISTEN`/`NOTIFY` (the Postgres change feed is trigger-driven
+  `pg_notify`), so `SupportsChangeFeed` is false.
+- **Native bulk copy** — the binary `COPY` fast path is disabled; `BulkImport` uses the multi-row `INSERT`
+  path instead.
+- **Soundex** — no `fuzzystrmatch` extension.
+
+## Transactions
+
+CockroachDB transactions are **`SERIALIZABLE` by default** and may surface retryable (`40001`) errors under
+contention. Wrap contended batch / unit-of-work operations in application-level retry, as CockroachDB
+[recommends](https://www.cockroachlabs.com/docs/stable/transaction-retry-error-reference).
