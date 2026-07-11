@@ -139,10 +139,62 @@ both input and output fully. So: use `CurrentInput`/`CurrentOutput` as a **displ
 everywhere; use the selectors on Android.
 :::
 
+## Volume (`IAudioPlayer`)
+
+`IAudioPlayer` exposes the **device media volume** — the level the hardware buttons control, normalized
+`0.0`–`1.0` and independent of any per-request TTS `Volume`. **Reading works on every platform; setting
+is platform-limited** — always guard a set with `IsVolumeControlSupported`.
+
+```csharp
+using Shiny.Audio;
+
+public partial class VolumeViewModel(IAudio audio) : ObservableObject
+{
+    [ObservableProperty] float volume;          // bind to a Slider
+    public bool CanSet => audio.Player.IsVolumeControlSupported;
+
+    public VolumeViewModel(IAudio audio) : this(audio)
+    {
+        Volume = audio.Player.Volume;           // reading works everywhere
+
+        audio.Player.VolumeChanged += (_, v) => // hardware buttons, OS UI, or a successful set
+            MainThread.BeginInvokeOnMainThread(() => Volume = v);
+    }
+
+    partial void OnVolumeChanged(float value)
+    {
+        if (audio.Player.IsVolumeControlSupported)   // iOS / Mac Catalyst setter throws
+            audio.Player.Volume = value;
+    }
+}
+```
+
+| Platform | Read | Set | `VolumeChanged` source | Backing API |
+|---|---|---|---|---|
+| Android | ✅ | ✅ | system settings observer | `AudioManager` `STREAM_MUSIC` (integer-stepped → set values quantize) |
+| Windows | ✅ | ✅ | endpoint volume callback | WASAPI `IAudioEndpointVolume` (default render endpoint) |
+| macOS | ✅ | ✅ † | CoreAudio property listener | HAL virtual main volume of the default output device |
+| iOS / Mac Catalyst | ✅ | ❌ | KVO on `outputVolume` | `AVAudioSession.OutputVolume` (read-only) |
+| Browser (WASM) | ✅ | ✅ | echoed on set | `HTMLAudioElement.volume` — app-local, **not** the OS volume |
+
+:::note[Setting the volume is not universal]
+On **iOS / Mac Catalyst** Apple exposes no supported API to change the system volume, so the setter
+throws `NotSupportedException` — let the user adjust it with the hardware buttons or an `MPVolumeView`.
+† **macOS** is settable when the current default output device exposes a settable virtual main volume
+(most built-in / USB devices do; some HDMI / aggregate devices don't), reported by
+`IsVolumeControlSupported`. In the **browser** the OS volume is sandboxed, so `Volume` is the app's own
+media-element volume (settable, and it persists across plays). Marshal `VolumeChanged` to the UI thread
+before touching bound properties.
+:::
+
 ## Platform support
 
 | Capability | iOS / Mac Catalyst | Android | Windows | Browser |
 |---|---|---|---|---|
 | `IAudioPlayer` / `IAudioSource` | ✅ | ✅ | ✅ | ✅ |
+| `IAudioPlayer.Volume` (read) | ✅ | ✅ | ✅ | ✅ |
+| `IAudioPlayer.Volume` (set) | ❌ ¹ | ✅ | ✅ | ✅ |
 | `IAudioMonitor` (live monitor) | ✅ | ✅ | ❌ | ❌ |
 | `IAudioDevices` (routes) | ✅ | ✅ | ❌ | ❌ |
+
+¹ Native **macOS** (not Mac Catalyst) *can* set the volume via CoreAudio — see the Volume section.
