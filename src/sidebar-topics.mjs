@@ -520,6 +520,7 @@ export const sidebarTopics = [
             collapsed: true,
             items: [
               { label: 'Spatial', link: 'documentdb/spatial' },
+              { label: 'Reference Geo Data', link: 'documentdb/geo-reference' },
               { label: 'Vector / ANN Search', link: 'documentdb/vector' },
               { label: 'Full-Text Search', link: 'documentdb/full-text' },
               { label: 'Computed Properties', link: 'documentdb/computed-columns' },

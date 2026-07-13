@@ -1,0 +1,105 @@
+---
+title: Reference Geo Data
+---
+
+`Shiny.DocumentDb.Geo` ships a small, embedded reference dataset — **US states, Canadian provinces, and US
+& Canadian cities** — that seeds straight into any DocumentDb store. It's the "where is this coordinate?"
+starter data: point-in-region lookups (which state/province contains a point), nearest-city queries, and
+population lookups, without wiring up an external gazetteer.
+
+The dataset is **provider-agnostic**: it's plain `GeoRegion` / `GeoCity` documents written through the same
+[seeding](/documentdb/crud/#seeding) and [spatial](/documentdb/spatial) machinery as your own data, so it
+works on every backend that supports seeding, and spatial queries work wherever `MapSpatialProperty` does
+(SQLite, PostgreSQL, MySQL, SQL Server, Oracle, DuckDB, CosmosDB, MongoDB).
+
+## Install
+
+```xml
+<PackageReference Include="Shiny.DocumentDb.Geo" />
+```
+
+## The documents
+
+Two document types, both keyed on a deterministic string `Id`:
+
+```csharp
+public class GeoRegion   // a US state or Canadian province
+{
+    public string   Id           { get; set; }   // e.g. "US-CA", "CA-ON"
+    public string   CountryCode  { get; set; }   // "US" | "CA"
+    public string   Name         { get; set; }   // "California"
+    public string   Abbreviation { get; set; }   // "CA"
+    public long     Population   { get; set; }
+    public Geometry Boundary     { get; set; }   // a GeoPolygon (simplified)
+}
+
+public class GeoCity
+{
+    public string   Id          { get; set; }   // e.g. "US-CA-los-angeles"
+    public string   CountryCode { get; set; }   // "US" | "CA"
+    public string   RegionCode  { get; set; }   // containing state/province abbreviation
+    public string   Name        { get; set; }
+    public long     Population  { get; set; }
+    public GeoPoint Location    { get; set; }
+}
+```
+
+Region boundaries are intentionally **low-resolution** (a handful of vertices each) so the whole package
+stays tiny and embeddable — accurate enough for coarse containment tests, not for cartography.
+
+## Seed it
+
+Register the seeder so the data lands in your store once at startup, and call `MapGeoReferenceData()` in
+your store options if you want to run spatial queries against it:
+
+```csharp
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db");
+    opts.MapGeoReferenceData();   // maps GeoRegion.Boundary + GeoCity.Location for spatial queries
+});
+services.AddGeoReferenceSeeder();   // runs once (idempotent); pass a store name to target a keyed store
+```
+
+No generic host (MAUI / desktop)? Run the seeder directly:
+
+```csharp
+await new GeoReferenceSeeder().SeedAsync(store, cancellationToken);
+```
+
+Or skip the store entirely and read the in-memory dataset — `GeoDataSets.Regions` and `GeoDataSets.Cities`
+are materialized lists you can query with plain LINQ.
+
+## Query it
+
+Once seeded and mapped, it's ordinary DocumentDb spatial querying:
+
+```csharp
+// Which region contains a point?
+Geometry point = new GeoPoint(39.7392, -104.9903);      // Denver
+var region = (await store.GeoIntersects<GeoRegion>(point)).FirstOrDefault();
+// region.Document.Name == "Colorado"
+
+// Nearest cities to a point, ordered by distance
+Geometry origin = new GeoPoint(40.7128, -74.0060);      // NYC
+var nearby = await store.GeoWithinDistance<GeoCity>(origin, 50_000, orderByDistanceFrom: origin);
+
+// Plain document queries work too
+var texasCities = await store.Query<GeoCity>()
+    .Where(c => c.RegionCode == "TX")
+    .OrderByDescending(c => c.Population)
+    .ToList();
+```
+
+## Regenerating the data
+
+The city lists are refreshed from authoritative sources — the **US Census TIGERweb** place boundaries and
+**Statistics Canada** census-subdivision boundaries/population — by a dev-only tool,
+`tools/Shiny.DocumentDb.Geo.DataSeeder`. It downloads the live feature services, reduces each municipality
+to a representative point, and re-emits the embedded `Data/UsCities.cs` / `Data/CanadianCities.cs` files.
+State/province boundaries are authored by hand and aren't regenerated. It isn't part of the CI build (it
+does network I/O); run it manually and review the diff:
+
+```bash
+dotnet run --project tools/Shiny.DocumentDb.Geo.DataSeeder
+```

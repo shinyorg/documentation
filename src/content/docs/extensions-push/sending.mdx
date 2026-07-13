@@ -86,6 +86,39 @@ public sealed class LocalizationInterceptor : IPushInterceptor
 }
 ```
 
+## Event receivers
+
+When you only want to **observe** sends — not mutate them — implement `IPushEventReceiver` and register
+additively with `push.AddEventReceiver<T>()` (zero or more). Unlike an interceptor it can't skip or mutate;
+it's a pure observer with **batch lifecycle** hooks (`OnBatchStarted` / `OnBatchFinished`) plus per-device
+`OnSent` / `OnFailed`. Good for telemetry, delivery receipts, and dead-letter capture. A receiver that throws
+is logged and swallowed — it never breaks a batch or affects the other receivers.
+
+`OnFailed` fires for **every** failed device, including the normalized failures that never throw
+(`TokenExpired`, `InvalidToken`, `RateLimited`, `Error`) — the full `PushDeliveryResult` carries the status,
+reason, and any transport exception. Interceptor `Skip` and no-provider outcomes aren't failures; read them
+from the `OnBatchFinished` `PushSendResult` counts (`Skipped` / `Failed`) instead.
+
+```csharp
+public sealed class PushTelemetry : IPushEventReceiver
+{
+    public Task OnBatchStarted(Guid batchId, PushFilter filter, PushNotification n, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task OnSent(Guid batchId, DeviceRegistration reg, PushNotification n, PushDeliveryResult r, CancellationToken ct = default)
+        => Task.CompletedTask;
+
+    public Task OnFailed(Guid batchId, DeviceRegistration reg, PushNotification n, PushDeliveryResult r, CancellationToken ct = default)
+    {
+        // r.Status, r.Reason, r.Error — capture dead-letters, alert on RateLimited, …
+        return Task.CompletedTask;
+    }
+
+    public Task OnBatchFinished(Guid batchId, PushNotification n, PushSendResult result, CancellationToken ct = default)
+        => Task.CompletedTask; // result.Sent / .Failed / .TokensRemoved / .Skipped
+}
+```
+
 ## Token hygiene
 
 Providers return a normalized `PushDeliveryStatus`. The manager automatically removes tokens reported

@@ -138,6 +138,47 @@ builder.Services.AddSingleton<ITenantResolver, MyTenantResolver>();
 builder.AddDocumentStore("orders", settings => settings.MultiTenant = true);
 ```
 
+## Typed `DocumentContext` on an Aspire resource
+
+If you use the source-generated [typed `DocumentContext`](/documentdb/context) (EF-style
+`DocumentContext` + `DocumentSet<T>`), point its store at an Aspire-provisioned resource with
+`AddDocumentContextProvider`. It resolves the same injected connection string + provider discriminator,
+wires the health check + OpenTelemetry (honoring the same [settings](#settings)), and returns the
+`Action<DocumentStoreOptions>` you hand to the generated `Add{Context}` / `Add{Context}Factory` method:
+
+```csharp
+// scoped (ASP.NET Core):
+builder.Services.AddOrdersContext(builder.AddDocumentContextProvider("orders"));
+
+// factory (MAUI / Blazor / desktop / background):
+builder.Services.AddOrdersContextFactory(builder.AddDocumentContextProvider("orders"));
+```
+
+The returned action runs **inside** the generated method's configure delegate — after the context's
+`ConfigureModel` — so it just supplies the Aspire-resolved provider on top of your model mappings. It
+takes the same optional `configureSettings` / `configureOptions` as `AddDocumentStore`:
+
+```csharp
+builder.Services.AddOrdersContext(builder.AddDocumentContextProvider(
+    "orders",
+    configureSettings: s => s.DisableHealthChecks = true,
+    configureOptions: o => o.UseReflectionFallback = false));
+```
+
+Each context registers its store **keyed by the context type**, so calling `AddDocumentContextProvider`
+once per context (each with its own Aspire `name`) is the multi-store story — multiple contexts, each
+backed by a different Aspire resource, coexist without shadowing:
+
+```csharp
+builder.Services.AddOrdersContext(builder.AddDocumentContextProvider("orders"));
+builder.Services.AddInvoicesContext(builder.AddDocumentContextProvider("invoices"));
+```
+
+:::note[Relational + SQLite only]
+`AddDocumentContextProvider` covers the same provider family as `AddDocumentStore` (Postgres, CockroachDB,
+SQL Server, MySQL, MariaDB, SQLite). NoSQL providers are out of scope for the Aspire client.
+:::
+
 ## How the pieces connect
 
 - The hosting resource implements `IResourceWithConnectionString` over its backing DB and publishes a
