@@ -355,9 +355,9 @@ export default defineConfig({
             },
             {
               id: 'docdb-v11',
-              content: 'Document DB v11 - the ULTIMATE database tool now with ULTIMATE geospatial capabilities!',
+              content: 'Document DB v11 - the ULTIMATE ORM now with ULTIMATE geospatial capabilities, 19 providers, & 6 integrations!',
               variant: 'tip',
-              link: { text: 'Geospatial ME THERE', href: '/documentdb/' },
+              link: { text: 'WOW ME!', href: '/documentdb/' },
               dismissable: false
             },  
             {
@@ -372,13 +372,6 @@ export default defineConfig({
               content: 'Shiny Health 2.0 - Every Health Metric shared between Apple & Google Health - NOW with AI Tools!',
               variant: 'tip',
               link: { text: 'Check It Out', href: '/health' },
-              dismissable: false
-            },                        
-            {
-              id: 'aiconversations-1',
-              content: 'Introducing AI Conversations: Natural Language Interaction for Your Apps!',
-              variant: 'tip',
-              link: { text: 'Learn More', href: '/aiconversation/' },
               dismissable: false
             },          
             {
