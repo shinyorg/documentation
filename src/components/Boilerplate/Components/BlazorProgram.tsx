@@ -39,9 +39,6 @@ const BlazorProgram = (props: Props) => {
     usings.add('Shiny.DocumentDb');
     usings.add('Shiny.DocumentDb.IndexedDb');
   }
-  if (has('documentdb-diagnostics')) {
-    usings.add('Shiny.DocumentDb');
-  }
   if (has('blazorhost')) {
     usings.add('Shiny');
   }
@@ -102,12 +99,6 @@ public class Program
         // IndexedDB-backed document store - browser persistence, no native deps
         builder.Services.AddSingleton(new IndexedDbDocumentStoreOptions { DatabaseName = "MyAppDb" });
         builder.Services.AddSingleton<IDocumentStore, IndexedDbDocumentStore>();`;
-  }
-  if (has('documentdb-diagnostics')) {
-    src += `
-        // OpenTelemetry metrics + tracing — call AFTER registering a store.
-        // Subscribe from your OTel pipeline with .AddMeter("Shiny.DocumentDb") / .AddSource("Shiny.DocumentDb")
-        builder.Services.AddDocumentStoreInstrumentation();`;
   }
   if (has('di')) {
     src += `

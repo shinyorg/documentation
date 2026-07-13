@@ -118,12 +118,6 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     'documentdb-mongodb': [{ kind: 'shinyaspnet', paramId: 'documentdb', value: 'mongodb' }],
     'documentdb-litedb': [{ kind: 'shinyaspnet', paramId: 'documentdb', value: 'litedb' }],
     'documentdb-duckdb': [{ kind: 'shinyaspnet', paramId: 'documentdb', value: 'duckdb' }],
-    'documentdb-diagnostics': [
-        { kind: 'shinyapp', paramId: 'documentdb' },
-        { kind: 'shinyapp', paramId: 'documentdbdiagnostics' },
-        { kind: 'shinyblazor', paramId: 'documentdb' },
-        { kind: 'shinyblazor', paramId: 'documentdbdiagnostics' },
-    ],
 };
 
 /** Labels for the mode toggle, in display priority order. */
