@@ -4,9 +4,9 @@ title: Playback
 
 The `IMusicPlayer` interface provides full playback control for music tracks from the device library.
 
-On iOS, the player supports two modes that are automatically selected based on the track's properties:
-- **Local playback** via `AVAudioPlayer` when `ContentUri` is available (purchased/synced tracks)
-- **Streaming playback** via `MPMusicPlayerController.SystemMusicPlayer` when `StoreId` is available (Apple Music subscription tracks)
+On Apple platforms, all playback runs through `MPMusicPlayerController.ApplicationMusicPlayer` — the track's properties only decide how it is enqueued:
+- **Local library tracks** are looked up by their persistent ID (via `MPMediaQuery`) and set as the player's queue.
+- **Streaming catalog tracks** — those returned by [`SearchCatalogAsync`](/music/querying/#catalog-search-apple-music) with a `CatalogId` — are enqueued by catalog id via `MPMusicPlayerStoreQueueDescriptor`. An active Apple Music subscription is required; the track need not be in the user's library.
 
 ## Playing a Track
 
@@ -15,10 +15,10 @@ var tracks = await _library.GetAllTracksAsync();
 await _player.PlayAsync(tracks[0]);
 ```
 
-Calling `PlayAsync` stops any currently playing track, loads the new one, and begins playback immediately. The player automatically selects the appropriate playback engine based on whether `StoreId` or `ContentUri` is available.
+Calling `PlayAsync` stops any currently playing track, loads the new one, and begins playback immediately. On Apple platforms the player enqueues the track by its `CatalogId` (streaming catalog track) or, otherwise, by its persistent ID from the local library.
 
 :::caution
-`PlayAsync` will throw an `InvalidOperationException` if both `ContentUri` and `StoreId` are empty, or if the platform player fails to initialize.
+For a local track, `PlayAsync` throws an `InvalidOperationException` if the identifier is invalid or the track can no longer be found in the music library. Catalog tracks (with a `CatalogId`) stream without a library lookup, but require an active Apple Music subscription.
 :::
 
 ## Pause, Resume, and Stop
@@ -171,9 +171,9 @@ If you register the player as a singleton in DI, it will be disposed when the ap
 - **Volume** reads and writes the system `STREAM_MUSIC` level via `AudioManager` (`IsVolumeControlSupported` is `true`). `VolumeChanged` observes system-volume changes through a `ContentObserver`.
 
 ### iOS
-- **Local tracks** (with `ContentUri`): Playback uses `AVAudioPlayer` with the track's `ipod-library://` asset URL. The `AVAudioSession` category is set to `Playback` to support background audio (if configured). Seeking uses second precision.
-- **Streaming tracks** (with `StoreId`): Playback uses `MPMusicPlayerController.SystemMusicPlayer` with the Apple Music catalog ID. This enables playback of DRM-protected Apple Music subscription content. The system player manages its own audio session.
-- **Catalog tracks** (with `CatalogId`, from [`SearchCatalogAsync`](/music/querying/#catalog-search-apple-music)): Playback enqueues the track by its Apple Music catalog id via `MPMusicPlayerStoreQueueDescriptor` — no library membership required. An active Apple Music subscription is required; gate playback on `HasStreamingSubscriptionAsync`.
+- All playback uses `MPMusicPlayerController.ApplicationMusicPlayer`, which manages its own audio session. Seeking uses second precision.
+- **Local library tracks**: the `MPMediaItem` is resolved by persistent ID via `MPMediaQuery` and set as the player's queue. This covers purchased/synced tracks as well as DRM-protected Apple Music subscription content that is in the library.
+- **Catalog tracks** (with `CatalogId`, from [`SearchCatalogAsync`](/music/querying/#catalog-search-apple-music)): the track is enqueued by its Apple Music catalog id via `MPMusicPlayerStoreQueueDescriptor` — no library membership required. An active Apple Music subscription is required; gate playback on `HasStreamingSubscriptionAsync`.
 - **Ducking** activates `AVAudioSession` with `DuckOthers`; `Level` and the fade durations are advisory only, as the OS controls duck depth and ramp. Announcement audio played through the app's audio session (an `AVAudioPlayer`, or `AVSpeechSynthesizer` with `UsesApplicationAudioSession = true`) plays at full volume over the ducked music — only other out-of-process audio is ducked.
 - **Volume** reads from `AVAudioSession.OutputVolume` (reliable), but **setting is not supported** (`IsVolumeControlSupported` is `false`) — the setter throws `NotSupportedException`, as Apple provides no supported API to change the system volume. `VolumeChanged` fires from KVO on the session's output volume.
 
