@@ -74,8 +74,8 @@ export const ShinyCategories: ShinyCategory[] = [
 
 export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'controls-kiosk', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'aiconversation', 'docking', 'osk'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
-export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'reflector', 'di', 'webhost'];
-export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'webhost'];
+export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost'];
+export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost'];
 export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost'];
 
 export type AndroidConfig = {
@@ -517,6 +517,69 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentdb-duckdb",
         "nuget": "Shiny.DocumentDb.DuckDb",
         "description": "Document DB (DuckDB)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-oracle",
+        "nuget": "Shiny.DocumentDb.Oracle",
+        "description": "Document DB (Oracle)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-mariadb",
+        "nuget": "Shiny.DocumentDb.MariaDb",
+        "description": "Document DB (MariaDB)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-cockroachdb",
+        "nuget": "Shiny.DocumentDb.CockroachDb",
+        "description": "Document DB (CockroachDB)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-azuretable",
+        "nuget": "Shiny.DocumentDb.AzureTable",
+        "description": "Document DB (Azure Table Storage)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-dynamodb",
+        "nuget": "Shiny.DocumentDb.DynamoDb",
+        "description": "Document DB (Amazon DynamoDB)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-amazondocumentdb",
+        "nuget": "Shiny.DocumentDb.DocumentDb",
+        "description": "Document DB (Amazon DocumentDB)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-redis",
+        "nuget": "Shiny.DocumentDb.Redis",
+        "description": "Document DB (Redis Stack)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-ravendb",
+        "nuget": "Shiny.DocumentDb.RavenDb",
+        "description": "Document DB (RavenDB)",
+        "category": "storage",
+        "version": "11.0.0"
+    },
+    {
+        "id": "documentdb-firestore",
+        "nuget": "Shiny.DocumentDb.Firestore",
+        "description": "Document DB (Google Firestore)",
         "category": "storage",
         "version": "11.0.0"
     },

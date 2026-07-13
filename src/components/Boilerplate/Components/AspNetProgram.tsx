@@ -54,6 +54,27 @@ builder.Services.AddDocumentStore(opts =>
     opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=localhost;Database=mydb;Username=postgres;Password=pass;");
 });`;
   }
+  if (has('documentdb-oracle')) {
+    src += `
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new OracleDatabaseProvider("User Id=myuser;Password=pass;Data Source=localhost:1521/FREEPDB1");
+});`;
+  }
+  if (has('documentdb-mariadb')) {
+    src += `
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new MariaDbDatabaseProvider("Server=localhost;Database=mydb;User=root;Password=pass;");
+});`;
+  }
+  if (has('documentdb-cockroachdb')) {
+    src += `
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new CockroachDbDatabaseProvider("Host=localhost;Port=26257;Username=root;Database=defaultdb;SSL Mode=Disable;");
+});`;
+  }
   if (has('di')) {
     src += `
 builder.Services.AddGeneratedServices();`;
