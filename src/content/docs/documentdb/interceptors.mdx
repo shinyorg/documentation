@@ -56,7 +56,8 @@ opts.OnAfterWrite<Order>((ctx, ct) => outbox.Enqueue(ctx.Id, ctx.Operation, ct))
 
 `DocumentWriteContext` carries `Operation` (`Insert`/`Update`/`Upsert`/`Delete`), `Source`
 (`Direct`/`Temporal`), `DocumentType`, `TypeName`, `Id`, mutable `Document` (null for delete-by-id),
-and `Version`.
+`Version`, `Services` (the [DI scope for this write](#scoped-services-inside-a-write-ctxservices)), and
+`Store` (a [transaction-visible store handle](#transaction-visible-reads-and-side-effects-ctxstore)).
 
 ### Semantics
 
@@ -93,7 +94,7 @@ predicate, null for `Clear`-all), `Assignment` (for `ExecuteUpdate`), and `Affec
 
 :::caution[Per-document interceptors do not fire for set-based ops]
 This mirrors EF Core, where `ExecuteUpdate`/`ExecuteDelete` bypass the change tracker. If you need
-per-row hooks, load the documents and write them individually inside a `UnitOfWork`.
+per-row hooks, load the documents and write them individually inside a session (`store.OpenSession()`).
 :::
 
 ## Registering interceptors from DI
@@ -123,16 +124,114 @@ services.AddDocumentStore(opts =>
 ```
 
 **Execution order is deterministic:** options-registered interceptors run first, then DI-registered
-ones (in container registration order). This applies to both per-document and bulk interceptors.
+ones (in container registration order). Override it with `Order` (see [Ordering](#ordering-interceptors)).
+This applies to both per-document and bulk interceptors, and — since 11.0 — to **every provider**
+(previously DI-registered interceptors silently never fired on MongoDB, Cosmos, LiteDB, IndexedDB,
+DynamoDB, and Azure Table).
 
 :::note[Lifetime]
 DI interceptors are resolved once, from the store's service provider. Because the store is a singleton,
 register interceptors (and their dependencies) as **singletons** (recommended) or **transient** — a
-`Scoped` interceptor would be captured by the singleton store, so `AddDocumentStore` now **throws a clear
+`Scoped` interceptor would be captured by the singleton store, so `AddDocumentStore` **throws a clear
 error at registration** if it finds a `Scoped` `IDocumentInterceptor` / `IDocumentBulkInterceptor`. A
-transient is still resolved once and reused for the store's lifetime. If an interceptor needs per-operation
-scoped services, inject an `IServiceScopeFactory` and create a scope inside the hook.
+transient is still resolved once and reused for the store's lifetime. To use **scoped services** inside a
+hook, keep the interceptor a singleton and resolve them from
+[`ctx.Services`](#scoped-services-inside-a-write-ctxservices) — not the constructor.
 :::
+
+## Scoped services inside a write (`ctx.Services`)
+
+An interceptor is a singleton, but a write often needs **request-scoped** services — the current user, a
+scoped repository. Resolve them from `ctx.Services` **inside the method**, never the constructor. There is
+**no marker interface** — any DI-registered interceptor gets a scope, and `ctx.Services` is never null:
+
+```csharp
+public sealed class OrderValidationInterceptor : IDocumentInterceptor
+{
+    public int Order => 0;
+
+    public async Task BeforeWrite(DocumentWriteContext ctx, CancellationToken ct)
+    {
+        if (ctx.DocumentType != typeof(Order))
+            return;
+
+        // The scope the caller already holds — resolve scoped deps here, NOT via the ctor.
+        var validator = ctx.Services.GetRequiredService<IOrderValidator>();   // scoped
+        var user      = ctx.Services.GetRequiredService<ICurrentUser>();       // scoped
+
+        await validator.EnsureCanPlace((Order)ctx.Document!, user.Id, ct);
+    }
+
+    public Task AfterWrite(DocumentWriteContext ctx, CancellationToken ct) => Task.CompletedTask;
+}
+
+services.AddScoped<IOrderValidator, OrderValidator>();
+services.AddScoped<ICurrentUser, HttpCurrentUser>();
+services.AddSingleton<IDocumentInterceptor, OrderValidationInterceptor>();   // stateless → singleton
+// A scoped interceptor is fine too now: services.AddScoped<IDocumentInterceptor, ...>();
+```
+
+Interceptors are resolved **fresh from the flowing scope per write**, so a scoped interceptor resolves the
+caller's own instances (no captive-singleton problem — which is why the old scoped-interceptor ban and the
+`IScopedDocumentInterceptor` marker are gone).
+
+**Where the scope comes from:**
+
+- **Through an [`IDocumentSession`](/documentdb/crud) / [`DocumentContext`](/documentdb/context)** — the session
+  carries its own DI scope, so `ctx.Services` is the caller's **own request scope** (ASP.NET Core: inject the
+  scoped `IDocumentSession`/context; elsewhere: `IDocumentSessionFactory`). `IOrderValidator` / `ICurrentUser`
+  are the caller's instances.
+- **Through a raw singleton store immediate write** (MAUI, a background worker, an Orleans grain) — there is no
+  ambient scope, so the unit-of-work engine opens **one fresh child scope per unit** when DI interceptors are
+  registered, and disposes it after. It is a *new* scope, not a request scope, so request identity must ride a
+  singleton ambient accessor — or open an `IDocumentSession` from a factory.
+
+## Transaction-visible reads and side effects (`ctx.Session` / `ctx.Store`)
+
+`ctx.Session` is an [`IDocumentSession`](/documentdb/crud) **bound to the current write's transaction** — the
+natural handle for re-entrant side effects. A single write that has per-document interceptors registered runs
+as an implicit one-operation unit of work, so a hook can read and write through `ctx.Session` (or the
+equivalent `ctx.Store`) on the *same connection and transaction* as the triggering write:
+
+```csharp
+public async Task AfterWrite(DocumentWriteContext ctx, CancellationToken ct)
+{
+    if (ctx.DocumentType != typeof(Order))
+        return;
+
+    // Flushes into THIS transaction; suppress so the outbox write doesn't re-enter this interceptor.
+    using (ctx.Session.SuppressInterceptors())
+    {
+        ctx.Session.Add(new OutboxEntry(ctx.Id!, "OrderPlaced"));
+        await ctx.Session.SaveChanges(ct);
+    }
+    // Equivalent, immediate form: using (ctx.Store.SuppressInterceptors()) await ctx.Store.Insert(...);
+}
+```
+
+On the **relational providers and LiteDB**, a hook sees this unit's **uncommitted** rows (read-your-writes):
+a `BeforeWrite` `ctx.Store.Get(id)` returns the prior row, an `AfterWrite` `ctx.Store.Get(id)` returns the
+just-written row, and an `AfterWrite` side-effect write commits **atomically** with the triggering write (both
+roll back together if the hook throws). Do this through `ctx.Store`, **not** a DI-resolved `IDocumentStore`:
+the latter is the top-level singleton, which opens its own connection (not atomic, and a shared-connection
+deadlock on in-memory SQLite/DuckDB). `ctx.Store` is never null and valid **only within the hook** — don't
+capture it past `AfterWrite`.
+
+Other backends follow their own transaction model (`ctx.Store` is always safe to call): Cosmos is atomic
+within one type/partition; MongoDB is fully transactional only on a replica set, committed-state otherwise;
+IndexedDB / DynamoDB / Azure Table are committed-state reads only.
+
+## Ordering interceptors
+
+Both `IDocumentInterceptor` and `IDocumentBulkInterceptor` expose `int Order => 0`. Lower runs first; ties
+keep registration order (options-registered before DI-registered). Sequence, say, audit → soft-delete →
+validation deterministically:
+
+```csharp
+public sealed class AuditInterceptor      : IDocumentInterceptor { public int Order => 10; /* … */ }
+public sealed class SoftDeleteInterceptor : IDocumentInterceptor { public int Order => 20; /* … */ }
+public sealed class ValidationInterceptor : IDocumentInterceptor { public int Order => 30; /* … */ }
+```
 
 ## The serialized JSON about to be written
 
@@ -158,12 +257,12 @@ for auditing, redaction checks, and capturing the outbound payload for a transac
 ## Suppressing interceptors for a transaction
 
 Sometimes a write should carry **no** side effects — mirroring authoritative data in (offline sync inbound
-applies), a bulk import, a seed, or a migration. Commit a `UnitOfWork` with
+applies), a bulk import, a seed, or a migration. Commit a session with
 `SaveChanges(suppressInterceptors: true)` and **no** interceptor (per-document or bulk) fires for that
 transaction:
 
 ```csharp
-var uow = store.CreateUnitOfWork();
+await using var uow = store.OpenSession();
 foreach (var item in importedBatch)
     uow.Upsert(item);
 await uow.SaveChanges(suppressInterceptors: true);   // no AfterWrite, no validation, no audit

@@ -403,6 +403,11 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'MediaPickerButton',
+        link: 'controls/media-picker-button/',
+        jumpTo: true,
+      },
+      {
         label: 'Input Controls',
         items:[
           { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', jumpTo: true },
@@ -495,6 +500,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'documentdb/' },
           { label: 'Why DocumentDb', link: 'documentdb/comparison' },
+          { label: 'Migrating v10 → v11', link: 'documentdb/migrate-v10-to-v11', badge: { text: 'v11', variant: 'caution' } },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
           { label: 'Typed Context', link: 'documentdb/context' },
@@ -538,6 +544,10 @@ export const sidebarTopics = [
               { label: 'Azure Table Storage', link: 'documentdb/azure-table' },
               { label: 'Amazon DynamoDB', link: 'documentdb/dynamodb' },
               { label: 'MongoDB', link: 'documentdb/mongodb' },
+              { label: 'Amazon DocumentDB', link: 'documentdb/amazon-documentdb' },
+              { label: 'Redis', link: 'documentdb/redis' },
+              { label: 'RavenDB', link: 'documentdb/ravendb' },
+              { label: 'Google Firestore', link: 'documentdb/firestore' },
               { label: 'LiteDB', link: 'documentdb/litedb' },
               { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
             ]

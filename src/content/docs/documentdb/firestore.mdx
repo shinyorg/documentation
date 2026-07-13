@@ -1,0 +1,112 @@
+---
+title: Google Firestore
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.Firestore` package provides a document store over [Google Cloud Firestore](https://cloud.google.com/firestore) using [`Google.Cloud.Firestore`](https://www.nuget.org/packages/Google.Cloud.Firestore). Each document type maps to a Firestore collection, and documents are stored as **native Firestore maps** (not an opaque blob), so Firestore auto-indexes fields and many `Where`/`OrderBy` predicates push down.
+
+<NugetBadge name="Shiny.DocumentDb.Firestore" showLabel={true} />
+
+Firestore is a **document-native cloud** store and pairs naturally with the IndexedDB provider for offline/mobile scenarios. It has native cursor pagination, transaction-guarded CAS, and a real per-query change feed via snapshot listeners.
+
+## When to Use
+
+- Serverless, globally-distributed document storage on Google Cloud
+- Mobile/offline-first apps (pairs with the IndexedDB provider)
+- You need live per-query change notifications from any writer
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.Firestore
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.Firestore;
+
+   var store = new FirestoreDocumentStore(new FirestoreDocumentStoreOptions
+   {
+       ProjectId = "my-gcp-project"
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb;
+
+   builder.Services.AddFirestoreDocumentStore(o =>
+   {
+       o.ProjectId = "my-gcp-project";
+       o.MapVersionProperty<Order>(x => x.Version);   // opt-in optimistic concurrency
+   });
+   ```
+
+   `AddFirestoreDocumentStore` registers `IDocumentStore` **and** `IDocumentMaintenance` as singletons. Pass a pre-built `FirestoreDb` via `o.FirestoreDb`, or point at the emulator with `FIRESTORE_EMULATOR_HOST`.
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `FirestoreDb` | `FirestoreDb?` | `null` | Pre-built client (wins over ProjectId) |
+| `ProjectId` | `string?` | `null` | GCP project id |
+| `DatabaseId` | `string?` | `"(default)"` | Firestore database id |
+| `CollectionPrefix` | `string?` | `null` | Prefix applied to collection names (multi-tenant / test isolation) |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How collection names are derived |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set `false` for AOT safety |
+
+Mapping methods: `MapTypeToCollection`, `MapIdProperty`/`MapIdType`, `MapVersionProperty`, `AddQueryFilter`, and the interceptor hooks.
+
+## Querying
+
+Single-field equality/range predicates and `OrderBy` push down to a Firestore query; the full predicate is always re-applied client-side, so results are exact. Non-pushable predicates degrade to a collection read.
+
+```csharp
+var open = await store.Query<Order>()
+    .Where(o => o.Status == "Open")
+    .OrderByDescending(o => o.CreatedAt)
+    .Paginate(0, 25)
+    .ToList();
+
+// native keyset pagination
+var page = await store.Query<Order>().OrderBy(o => o.CreatedAt).ToCursorPage(cursor, take: 50);
+```
+
+`Count`/`Sum`/`Average` use Firestore aggregation queries. `GroupBy` and the string `Query`/`Count(whereClause)` overloads throw — use LINQ.
+
+:::caution[Composite indexes]
+A pushed query combining an equality + range, or ordering on multiple fields, requires a **composite index** created in the Firebase console. The provider catches the `FAILED_PRECONDITION` and falls back to a full-collection scan, so queries still return correct results — but create the index for production performance. (The emulator does not enforce composite indexes.)
+:::
+
+## Change observation
+
+```csharp
+// In-process
+await foreach (var c in ((IObservableDocumentStore)store).NotifyOnChange<Order>(ct)) …
+
+// Native snapshot-listener feed — changes from ANY writer, per query
+await using var sub = await ((IChangeFeedDocumentStore)store).SubscribeChanges<Order>(async (c, ct) => …);
+```
+
+Firestore's `NotifyOnChange` is a **real server-backed per-query feed** (unlike Mongo, which throws).
+
+## Ids & concurrency
+
+- **Guid / string Ids auto-generate** on Insert when default.
+- **Int/Long Id auto-generation is unsupported** — use Guid/string, or assign the Id.
+- **Optimistic concurrency:** `MapVersionProperty<T>` guards the write inside a Firestore transaction with a `Precondition.LastUpdated` check; a stale write throws `ConcurrencyException`. `Upsert` uses `SetOptions.MergeAll` (server-side merge).
+
+## Limitations
+
+- **No native full-text or spatial** — `SupportsFullText`/`SupportsSpatial` are `false` (use the Algolia/Elastic extension for search); vector and temporal are not wired in this release.
+- **Composite-index requirement** for multi-field pushed queries (falls back to a full scan otherwise).
+- **String `Query`/`Count(whereClause)` and `GroupBy` throw** — use LINQ.
+- **Compensating unit of work** — `store.OpenSession()` tracks inserts and undoes them on failure (Firestore transactions require all reads before writes).

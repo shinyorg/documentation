@@ -29,7 +29,6 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 | Azure Table | <NugetDownloads name="Shiny.DocumentDb.AzureTable" /> |
 | DynamoDB | <NugetDownloads name="Shiny.DocumentDb.DynamoDb" /> |
 | DuckDB | <NugetDownloads name="Shiny.DocumentDb.DuckDb" /> |
-| DI Extensions | <NugetDownloads name="Shiny.DocumentDb.Extensions.DependencyInjection" /> |
 | IndexedDB | <NugetDownloads name="Shiny.DocumentDb.IndexedDb" /> |
 | AI Tools | <NugetDownloads name="Shiny.DocumentDb.Extensions.AI" /> |
 | Orleans | <NugetDownloads name="Shiny.DocumentDb.Orleans" /> |
@@ -65,7 +64,7 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Computed properties** — map a value *derived* from other fields (`Total = Quantity * UnitPrice`, a normalized `lower(Email)`) that you filter, sort, and project by exactly like a stored property, though it's never written into the JSON. `MapComputedProperty<T>(o => o.Total, o => o.Quantity * o.UnitPrice)` runs in alias mode by default (SQL-inlined, zero schema); pass `indexed: true` on a relational provider to materialize it as a native generated/computed column + index. Recomputed and written back onto the object on read. Fully AOT/trim-safe. [Learn more](/documentdb/computed-columns/)
 - **Full AOT/trimming support** — all `JsonTypeInfo<T>` parameters are optional and auto-resolve from a configured `JsonSerializerContext`. Set `UseReflectionFallback = false` to catch missing registrations with clear exceptions
 - **Optimistic concurrency** — `MapVersionProperty<T>(x => x.RowVersion)` enables automatic version checking on update/upsert. Version is set to 1 on insert, checked and incremented on update. Throws `ConcurrencyException` on conflict. Works across all providers — stored in the JSON blob with zero schema changes
-- **Unit of work** — `CreateUnitOfWork()` + `SaveChanges()` with automatic commit/rollback
+- **Unit of work** — `store.OpenSession()` + `SaveChanges()` with automatic commit/rollback
 - **Batch writes** — `BatchInsert` inserts a collection in a single transaction with prepared command reuse, auto-generates IDs, and rolls back atomically on failure. `BatchUpsert`, `BatchUpdate`, and `BatchRemove<T>(ids)` apply many writes as one set operation (a single multi-row `INSERT … ON CONFLICT` deep-merge on SQLite/DuckDB, one `BulkWrite`/`DeleteMany` on MongoDB, parallel request waves on Cosmos, a single `DELETE … IN (…)` on relational). All-or-nothing — the first version conflict rolls the whole batch back
 - **Spatial / geo queries (full OGC geometry)** — beyond point-only `WithinRadius`/`WithinBoundingBox`/`NearestNeighbors`, a full `Geometry` model (`GeoLineString`, `GeoPolygon` with holes, multi-geometries) maps via `MapSpatialProperty<T>(x => x.Area)` and queries with the topological predicate family — `GeoIntersects`, `GeoContains`, `GeoWithin`, `GeoCovers`, `GeoWithinDistance`, and friends — returning `SpatialResult<T>` with `DistanceMeters`. Compose spatial predicates inside ordinary LINQ with `DocumentFunctions.Intersects/Distance/…` (server-side, combinable with other `Where`/`OrderBy`/paging) and in the string-expression surface too. Backed by a real 2-D spatial index on every SQL provider — SQLite R\*Tree, PostgreSQL GiST, MySQL `SPATIAL`, DuckDB R-Tree, SQL Server spatial index, Oracle `SDO_GEOMETRY` + MDSYS — plus native `ST_*` on CosmosDB and `2dsphere` on MongoDB. [Learn more](/documentdb/spatial/)
 - **Vector / ANN search** — register an embedding property with `MapVectorProperty<T>(d => d.Embedding, dimensions: 1536, metric: VectorDistance.Cosine, indexKind: VectorIndexKind.Hnsw)` and query with `Query<T>().Where(...).NearestVectors(query, k)`. Provider-native indexes: pgvector (PostgreSQL), `VECTOR` + DiskANN (SQL Server 2025), native `VECTOR` + HNSW/IVF (Oracle 23ai), embedding policy (CosmosDB), `$vectorSearch` (MongoDB Atlas), `vss` extension (DuckDB), `sqlite-vec` (SQLite). Plus `AutoEmbedOnInsert<T>` to plug in `Microsoft.Extensions.AI.IEmbeddingGenerator` and embed text automatically on every write. [Learn more](/documentdb/vector/)
@@ -77,13 +76,13 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Database seeding** — register `IDocumentSeeder`s to populate initial data once at startup. Schema-free seeding is just idempotent writes, so seeders are provider-agnostic; run-once is versioned via a `DocumentSeedMarker` (bump `Version` to re-run). Wire with `AddDocumentSeeder<T>()` / `AddDocumentSeeder(name, version, delegate)` at host startup, or call `DocumentSeedRunner.RunAsync(store, seeders)` directly (e.g. on MAUI)
 - **SQLCipher encryption** — separate `Shiny.DocumentDb.Sqlite.SqlCipher` package with AES-256 encryption, password-aware backup, and `RekeyAsync` to change the encryption key
 - **Multi-tenancy** — two isolation strategies: **shared-table** (single database with automatic `TenantId` column filtering) and **tenant-per-database** (separate database per tenant via lazy factory). Both resolve the current tenant via a user-implemented `ITenantResolver`. Consumer code is unchanged — tenant isolation is applied transparently
-- **Change monitoring** — consume an `IAsyncEnumerable<DocumentChange<T>>` of insert/update/remove/clear events with `await foreach (var c in store.NotifyOnChange<User>(ct))`. Filter to a single document with `WhenDocumentChanged<T>(id)` or to the result set of a fluent query with `query.NotifyOnChange()`. Buffered in a `UnitOfWork` and emitted on commit. [Learn more](/documentdb/change-monitoring/)
+- **Change monitoring** — consume an `IAsyncEnumerable<DocumentChange<T>>` of insert/update/remove/clear events with `await foreach (var c in store.NotifyOnChange<User>(ct))`. Filter to a single document with `WhenDocumentChanged<T>(id)` or to the result set of a fluent query with `query.NotifyOnChange()`. Buffered in a session and emitted on commit. [Learn more](/documentdb/change-monitoring/)
 - **Native change feeds** — `IChangeFeedDocumentStore.SubscribeChanges<T>` observes all writers via the database's own mechanism: **PostgreSQL** `LISTEN`/`NOTIFY` triggers, **SQL Server** Change Tracking (optionally with `SqlDependency` query notifications), and **Cosmos DB** native Change Feed. Provisioning is automatic and idempotent
 - **Temporal history (system-time versioning)** — `MapTemporal<T>(o => { o.Retention = ...; o.MaxVersions = ...; o.CaptureActor = ...; })` opts a type into append-only versioning. Every Insert/Update/Upsert/Remove/SetProperty/RemoveProperty/BatchInsert records a snapshot to a per-type history sidecar. Read it back with `History<T>(id)`, `AsOf<T>(id, when)`, `Restore<T>(id, version)`, `GetDiffBetween<T>(id, from, to)`, plus fleet-wide `AsOfAll<T>(when)`, `ChangesByActor<T>(actor)`, and `ChangesBetween<T>(from, to)` — on the `ITemporalDocumentStore` capability interface, not `IDocumentStore`. Opt-in per type, on every provider (relational and document/NoSQL). [Learn more](/documentdb/temporal/)
 - **Global query filters** — register an `AddQueryFilter<T>(u => !u.IsDeleted)` predicate that's automatically AND-applied to every query of `T`, plus `Get`/`Update`/`Remove`/`SetProperty`/`RemoveProperty`/`Clear`/`ExecuteUpdate`/`ExecuteDelete` and per-query change monitoring. Mirrors Entity Framework Core's `HasQueryFilter`, including named filters, `IgnoreQueryFilters()`/`IgnoreQueryFilters("name")`, and captured-variable semantics. [Learn more](/documentdb/query-filters/)
 - **AI tool integration** — `Shiny.DocumentDb.Extensions.AI` exposes document types as `Microsoft.Extensions.AI` tool functions for LLM agents. Per-type capability flags (`ReadOnly`, `All`), structured filter expressions, field visibility control, and page size caps. [Learn more](/documentdb/ai-tools/)
 - **Orleans persistence** — `Shiny.DocumentDb.Orleans` provides a full Microsoft Orleans stack — **grain storage**, **reminders**, **cluster membership**, and **grain directory** — on any DocumentDb backend (relational, MongoDB, or Cosmos) through one `IDocumentStore` abstraction. Because grain state is persisted as structured, queryable JSON, you can **query grain state directly without activating grains** (reporting, dashboards, ops tooling) and get a free audit trail of every mutation via `MapTemporal<T>`. [Learn more](/documentdb/orleans/)
-- **Telemetry & diagnostics** — `Shiny.DocumentDb.Diagnostics` wraps any provider with `AddDocumentStoreInstrumentation()` to emit OpenTelemetry-native metrics (`db.client.operation.duration` and friends) and `ActivitySource` trace spans per operation — CRUD, fluent-query terminals, temporal, and transactions (as parent spans). Built on `System.Diagnostics.Metrics`; zero-cost when nobody is listening. [Learn more](/documentdb/diagnostics/)
+- **Telemetry & diagnostics** — embedded and always-on: every store emits OpenTelemetry-native metrics (`db.client.operation.duration` and friends, plus a `db.client.unit_of_work.operations` histogram) and `ActivitySource` trace spans per operation — CRUD, fluent-query terminals, temporal, and a `unit_of_work` parent span per session. Built on `System.Diagnostics`; zero-cost when nobody is listening — subscribe with `.AddSource`/`.AddMeter("Shiny.DocumentDb")`. [Learn more](/documentdb/diagnostics/)
 - **JSON Schema validation** — `Shiny.DocumentDb.JsonSchema` attaches a JSON Schema (draft 2020-12) to a document type and validates the exact JSON about to be persisted just before the write. `options.MapJsonSchema<Customer>(schemaJson)` needs no DI (works with a hand-built `new DocumentStore(options)`); a failure throws `DocumentSchemaValidationException` with field-level errors and rolls the write back. Enforces what the C# type can't — `maxLength`, ranges, `pattern`, `enum`, `format`. [Learn more](/documentdb/validation/)
 - **OData query endpoints** — `Shiny.DocumentDb.OData` + `Shiny.DocumentDb.AspNetCore.OData` expose a document type as an OData v4 entity set: `$filter`/`$orderby`/`$top`/`$skip`/`$count`/`$select` translate onto the fluent query and run against any provider. Global query filters always apply underneath, and per-entity-set `ODataQueryPolicy` governance locks down public endpoints. [Learn more](/documentdb/odata/)
 - **Offline-first sync** — `Shiny.DocumentDb.AppDataSync` makes the store the local cache of an offline-first app that bidirectionally syncs to an HTTP backend via `Shiny.Data.Sync`. `SyncDocumentStore(sync => sync.Sync<TodoItem>())` turns an ordinary document type into a two-way synced one — every local write is auto-enqueued to the outbox and every pulled server change is auto-applied back. Client-tier providers (SQLite, LiteDB, IndexedDB). [Learn more](/documentdb/data-sync/)
@@ -144,13 +143,9 @@ A lightweight, database-agnostic document store for .NET that turns your databas
      </TabItem>
    </Tabs>
 
-   Each provider package includes the core `Shiny.DocumentDb` package automatically.
-
-   For dependency injection, also install the DI extensions package:
-
-   ```bash
-   dotnet add package Shiny.DocumentDb.Extensions.DependencyInjection
-   ```
+   Each provider package includes the core `Shiny.DocumentDb` package automatically — which now bundles the
+   dependency-injection registration (`AddDocumentStore`, `AddDocumentContext`, seeding) and OpenTelemetry
+   instrumentation, so there's no separate package to install.
 
 2. Register with dependency injection:
 
@@ -227,7 +222,7 @@ A lightweight, database-agnostic document store for .NET that turns your databas
    });
    ```
 
-   Inject via `[FromKeyedServices("name")]` or resolve dynamically with `IDocumentStoreProvider`:
+   Inject via `[FromKeyedServices("name")]` or resolve dynamically with `IDocumentSessionFactory`:
 
    ```csharp
    public class MyService(
@@ -235,7 +230,7 @@ A lightweight, database-agnostic document store for .NET that turns your databas
        [FromKeyedServices("analytics")] IDocumentStore analyticsStore) { }
 
    // Or dynamically:
-   public class MyService(IDocumentStoreProvider stores)
+   public class MyService(IDocumentSessionFactory stores)
    {
        void DoWork() => stores.GetStore("users").Insert(...);
    }

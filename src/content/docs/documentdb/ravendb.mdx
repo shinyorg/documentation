@@ -1,0 +1,99 @@
+---
+title: RavenDB
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.RavenDb` package provides a document store over [RavenDB](https://ravendb.net/) using the official [`RavenDB.Client`](https://www.nuget.org/packages/RavenDB.Client). Documents are stored in a single collection as an opaque System.Text.Json envelope (id `{typeName}/{id}`), so serialization is deterministic and identical to every other provider.
+
+<NugetBadge name="Shiny.DocumentDb.RavenDb" showLabel={true} />
+
+RavenDB is a **document-native** store. Because the document body is stored opaque, LINQ queries evaluate **client-side** over an immediately-consistent id-prefix stream (the LiteDB/DynamoDB model — no index-staleness surprises). `ToQueryString()` renders representative **RQL**.
+
+## When to Use
+
+- .NET-native document database with ACID documents and change vectors
+- You want a document store whose serialization exactly matches the rest of your DocumentDb providers
+- Existing RavenDB infrastructure
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.RavenDb
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.RavenDb;
+
+   var store = new RavenDbDocumentStore(new RavenDbDocumentStoreOptions
+   {
+       Urls     = ["http://localhost:8080"],
+       Database = "app"
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb;
+
+   builder.Services.AddRavenDbDocumentStore(o =>
+   {
+       o.Urls     = ["https://your-cluster"];
+       o.Database = "app";
+       // o.Certificate = new X509Certificate2(...);   // for secured clusters
+       o.MapVersionProperty<Order>(x => x.Version);
+   });
+   ```
+
+   `AddRavenDbDocumentStore` registers `IDocumentStore` **and** `IDocumentMaintenance` as singletons. You can also pass a pre-built RavenDB `IDocumentStore` via `o.DocumentStore`.
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `DocumentStore` | `IDocumentStore?` | `null` | Pre-built, initialized RavenDB store (wins over Urls/Database) |
+| `Urls` | `string[]?` | `null` | RavenDB server URL(s) |
+| `Database` | `string?` | `null` | Target database |
+| `Certificate` | `X509Certificate2?` | `null` | Client certificate for secured clusters |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names / collection prefixes are derived |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set `false` for AOT safety |
+
+Mapping methods: `MapIdProperty`/`MapIdType`, `MapVersionProperty`, `AddQueryFilter`, and the interceptor hooks.
+
+## Querying
+
+```csharp
+var open = await store.Query<Order>()
+    .Where(o => o.Status == "Open")
+    .OrderByDescending(o => o.CreatedAt)
+    .Paginate(0, 25)
+    .ToList();
+
+var rql = store.Query<Order>().Where(o => o.Total > 100).ToQueryString();   // representative RQL
+```
+
+`GroupBy`, `Select`, and aggregates run client-side after the id-prefix stream. The string `Query`/`QueryStream`/`Count(whereClause)` (SQL `WHERE`) overloads throw (the body is opaque JSON) — use the LINQ surface.
+
+## Ids & concurrency
+
+- **Guid / string Ids auto-generate** on Insert when default; **Int/Long** auto-generate via a max-scan; custom Id types via `MapIdType`.
+- **Optimistic concurrency:** `MapVersionProperty<T>` seeds the version to 1 on insert and checks/increments on update, backed by RavenDB change vectors (race-free insert-only via an empty change vector). A stale write throws `ConcurrencyException`.
+
+## Change observation
+
+In-process `IObservableDocumentStore.NotifyOnChange<T>` is supported (this instance's own writes, buffered and emitted on commit).
+
+## Limitations
+
+- **Client-side queries** — LINQ evaluates in memory over the id-prefix stream; correct but O(n) per type. Keep per-type counts bounded.
+- **String `Query`/`Count(whereClause)` (SQL WHERE) throw** — use LINQ.
+- **No spatial / vector / full-text** on this provider (`Supports*` are `false`); temporal (Revisions) and a native Changes-API feed are not yet wired.
+- **Compensating unit of work** — `store.OpenSession()` tracks inserts and undoes them on failure.

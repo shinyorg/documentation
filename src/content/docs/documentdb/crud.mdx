@@ -146,30 +146,36 @@ A type that has a version mapping, temporal history, a spatial/vector sidecar, m
 filter, or a per-document interceptor always takes the per-document loop inside one transaction —
 correct and atomic, just not the multi-row/bulk fast path.
 
-## Unit of work (grouping writes atomically)
+## Unit of work — `IDocumentSession` (`store.OpenSession()`)
 
-To apply several writes in a single transaction, create a `UnitOfWork`, queue operations, then call
-`SaveChanges`. Everything commits together or rolls back together. Contiguous same-type runs of inserts,
-upserts, updates, and removes are each coalesced into the matching batch method, so grouping like
-operations in a unit costs nothing versus calling those methods directly.
+The document store is a connection: open a short-lived `IDocumentSession` (the EF-`DbContext` analogue),
+queue operations, then call `SaveChanges`. Everything commits together or rolls back together. Contiguous
+same-type runs of inserts, upserts, updates, and removes are each coalesced into the matching batch method,
+so grouping like operations in a session costs nothing versus calling those methods directly.
 
 ```csharp
-var uow = store.CreateUnitOfWork();
-uow.Add(order)
-   .AddRange(orderLines)        // coalesced into one batch insert
-   .Update(customer)
-   .Remove<Cart>(cartId);
+await using var session = store.OpenSession();
+session.Add(order)
+       .AddRange(orderLines)        // coalesced into one batch insert
+       .Update(customer)
+       .Remove<Cart>(cartId);
 
-await uow.SaveChanges();        // one transaction; rolls back entirely on failure
+await session.SaveChanges();        // one transaction; rolls back entirely on failure
 ```
 
-You only ever inject `IDocumentStore` — the unit is created from it, never registered in DI. A unit is
-a write buffer, not a tracking context: reads don't see operations still buffered in an uncommitted unit.
-See the [FAQ](/documentdb/faq) for the full write-API decision tree.
+Open a session from the singleton `IDocumentStore` (`store.OpenSession()`), inject `IDocumentSession`
+(scoped) in ASP.NET via `AddScopedDocumentSession()`, or open one from the singleton
+`IDocumentSessionFactory` where there's no ambient scope (MAUI/desktop/background — mirrors EF's
+`IDbContextFactory`). A session is a write buffer, not a tracking context: reads don't see operations still
+buffered before `SaveChanges`. For read-and-lock or multiple set-based `ExecuteUpdate`/`ExecuteDelete` in one
+transaction, open an explicit `await using var tx = await session.BeginTransaction();` (relational providers)
+and use `session.Get(id, LockMode.Update)`; `SaveChanges` joins the active transaction. See the
+[FAQ](/documentdb/faq) for the full write-API decision tree.
 
-:::caution[Breaking change in 8.0]
-`RunInTransaction` has been removed. Replace `store.RunInTransaction(tx => …)` with a `UnitOfWork`:
-queue your `Add`/`Update`/`Upsert`/`Remove` calls and `await uow.SaveChanges()`.
+:::caution[Breaking change in 11.0]
+`CreateUnitOfWork()` and the public `UnitOfWork` type are removed — use `store.OpenSession()` (returns
+`IDocumentSession`) with the same `Add`/`AddRange`/`Update`/`Upsert`/`Remove` + `SaveChanges` surface;
+`uow.Clear()` is now `session.ClearPending()`. (`RunInTransaction` was already removed in 8.0.)
 :::
 
 ## Upsert with JSON Merge Patch
@@ -478,7 +484,7 @@ Key rules:
 
 Two documented limitations: object-mutating interceptors are a **no-op** on this lane (there is no `T` to mutate — JSON-shaped interceptors via `ctx.GetJsonDocument()` still work fully), and **vector auto-embedding does not run** (supply the embedding in the JSON).
 
-**Provider tier:** supported on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) via the core store. The document-native (MongoDB, Cosmos, LiteDB, IndexedDB) and key-partitioned (Azure Table, DynamoDB) providers throw `NotSupportedException` until a later cut, and the lane is not available inside a `CreateUnitOfWork()`.
+**Provider tier:** supported on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) via the core store. The document-native (MongoDB, Cosmos, LiteDB, IndexedDB) and key-partitioned (Azure Table, DynamoDB) providers throw `NotSupportedException` until a later cut, and the lane is not available inside a session transaction.
 
 ## Backup
 

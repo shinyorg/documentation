@@ -1,0 +1,127 @@
+---
+title: Redis
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.Redis` package provides a document store over **Redis Stack** using [`NRedisStack`](https://www.nuget.org/packages/NRedisStack). Each document is stored as a RedisJSON key (`doc:{typeName}:{id}`) and each type gets a [RediSearch](https://redis.io/docs/latest/develop/interact/search-and-query/) index, so filtering, full-text, vector (KNN), and geo queries run **server-side**.
+
+<NugetBadge name="Shiny.DocumentDb.Redis" showLabel={true} />
+
+:::caution[Requires Redis Stack]
+The provider needs the **RedisJSON** and **RediSearch** modules (Redis Stack, Redis 8+, or Azure Managed Redis / Redis Enterprise with the modules). At startup it probes for the modules and throws a clear error if they're missing — plain Redis is not supported.
+:::
+
+## When to Use
+
+- A hot/caching tier that also needs real document queries, full-text, or vector search
+- Low-latency lookups with server-side `GROUPBY`/aggregation (`FT.AGGREGATE`)
+- You want atomic, monotonic **Int/Long Id auto-generation** (unique to this provider among the NoSQL backends)
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.Redis
+```
+
+## Setup
+
+<Steps>
+1. Direct instantiation
+
+   ```csharp
+   using Shiny.DocumentDb.Redis;
+
+   var store = new RedisDocumentStore(new RedisDocumentStoreOptions
+   {
+       ConnectionString = "localhost:6379"
+   });
+   ```
+
+2. Dependency injection
+
+   ```csharp
+   using Shiny.DocumentDb;
+
+   builder.Services.AddRedisDocumentStore(o =>
+   {
+       o.ConnectionString = "localhost:6379";
+       o.MapIndexedProperty<Order>(x => x.Status);   // push Where(x => x.Status == …) into FT.SEARCH
+       o.MapVersionProperty<Order>(x => x.Version);  // opt-in optimistic concurrency
+   });
+   ```
+
+   `AddRedisDocumentStore` registers `IDocumentStore` **and** `IDocumentMaintenance` as singletons. You can also pass a pre-built `IConnectionMultiplexer` via `o.Multiplexer`.
+</Steps>
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ConnectionString` | `string?` | `null` | StackExchange.Redis connection string |
+| `Multiplexer` | `IConnectionMultiplexer?` | `null` | Pre-built multiplexer (wins over the connection string) |
+| `Database` | `int` | `-1` | Redis logical database index |
+| `KeyNamespace` | `string` | `""` | Prefix applied to all keys/indexes (multi-tenant / test isolation) |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are derived |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings |
+| `UseReflectionFallback` | `bool` | `true` | Set `false` for AOT safety |
+
+Mapping methods: `MapIdProperty`/`MapIdType`, `MapVersionProperty`, `MapIndexedProperty` (TAG/NUMERIC schema fields), `MapFullTextProperty` (TEXT), `MapVectorProperty` (VECTOR/KNN), `MapSpatialProperty` (GEO), `MapComputedProperty`, `AddQueryFilter`, and the interceptor hooks.
+
+## Storage & the search index
+
+| Concept | Redis |
+|---|---|
+| Document | RedisJSON key `doc:{typeName}:{id}` (`JSON.SET`/`JSON.GET`/`JSON.MERGE`) |
+| Index | one `FT.CREATE … ON JSON PREFIX doc:{typeName}:` per type, built lazily |
+| Queryable fields | only fields declared via `MapIndexedProperty`/`MapFullTextProperty`/`MapVectorProperty`/`MapSpatialProperty` |
+| Concurrency (CAS) | mapped version field guarded by a Lua compare-and-set |
+| Int/Long Id counter | `INCR seq:{typeName}` |
+
+## Querying
+
+LINQ predicates over **declared index fields** push down to `FT.SEARCH` (`ToQueryString()` returns the emitted RediSearch query); the full predicate is always re-applied client-side, so results are exact even for fields you didn't index.
+
+```csharp
+var open = await store.Query<Order>()
+    .Where(o => o.Status == "Open" && o.Total > 100)   // @status + @total → FT.SEARCH
+    .OrderBy(o => o.Total)
+    .Paginate(0, 25)
+    .ToList();
+```
+
+Native rich-search terminators (require the corresponding `Map*Property`):
+
+```csharp
+await store.FullTextSearch<Article>("distributed systems");            // RediSearch TEXT / BM25
+await store.NearestVectors<Doc>(queryVector, k: 10);                   // VECTOR HNSW KNN
+await store.WithinRadius<Place>(centre, radiusMeters);                 // GEO
+```
+
+Server-side `GROUPBY` + `COUNT`/`SUM` runs through `FT.AGGREGATE`. The string `Query`/`QueryStream`/`Count(whereClause)` (SQL `WHERE`) overloads throw — use the LINQ surface.
+
+## Ids & concurrency
+
+- **Guid / string Ids auto-generate** on Insert when default.
+- **Int/Long Id auto-generation works** — a per-type `INCR seq:{typeName}` counter assigns the next value. This is a differentiator: every other NoSQL provider throws for default int/long Ids. (Ids are monotonic-per-store, not globally meaningful.)
+- **Insert is atomic** — `JSON.SET … NX` means concurrent inserts of the same id race safely (one wins, the rest throw `InvalidOperationException`).
+- **Optimistic concurrency:** `MapVersionProperty<T>` seeds the version to 1 on insert and guards updates with a Lua compare-and-set; a stale write throws `ConcurrencyException`.
+
+## Change observation
+
+```csharp
+// In-process — this store instance's own writes
+await foreach (var c in ((IObservableDocumentStore)store).NotifyOnChange<Order>(ct)) …
+
+// Cross-process — keyspace notifications (requires notify-keyspace-events on the server)
+await using var sub = await ((IChangeFeedDocumentStore)store).SubscribeChanges<Order>(async (c, ct) => …);
+```
+
+The keyspace-notification feed is best-effort (not durable) and surfaces writes as `Updated`.
+
+## Limitations
+
+- **Redis Stack required** — RedisJSON + RediSearch modules must be loaded.
+- **Push-down needs declared fields** — a `Where` over a property without a `Map*Property` mapping falls back to a client-side filter.
+- **String `Query`/`Count(whereClause)` (SQL WHERE) throw** — use LINQ.
+- **Compensating unit of work** — buffered writes apply atomically via `MULTI`/`EXEC`; there is no read-your-writes transaction.

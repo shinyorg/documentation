@@ -97,22 +97,22 @@ If most of your workloads filter on just one of the columns, prefer two single-c
 
 Every expression index adds a B-tree write to every `Insert` / `Update` / `Upsert` / `BatchInsert`. Five indexes ≈ 6× the write cost of an unindexed table. Index the properties you actually query; do not index defensively. See [Performance](/documentdb/performance/) for more.
 
-## Transactions — Unit of Work
+## Transactions — the session (unit of work)
 
-Grouping writes into a single transaction is done through a `UnitOfWork` created from the store. It buffers `Add`/`AddRange`/`Update`/`Upsert`/`Remove` operations and applies them atomically when you call `SaveChanges` — all commit or all roll back. This is the only way to open a transaction (there is no `RunInTransaction`).
+Grouping writes into a single transaction is done through an `IDocumentSession` opened from the store (`store.OpenSession()`). It buffers `Add`/`AddRange`/`Update`/`Upsert`/`Remove` operations and applies them atomically when you call `SaveChanges` — all commit or all roll back. There is no `RunInTransaction`; `SaveChanges` is the implicit transaction, and `session.BeginTransaction()` is the explicit one (see below).
 
 ```csharp
-var uow = store.CreateUnitOfWork()
-    .Add(new User { Id = "u1", Name = "Alice" })
-    .Update(existingUser)
-    .Remove<User>("u2");
+await using var session = store.OpenSession();
+session.Add(new User { Id = "u1", Name = "Alice" })
+       .Update(existingUser)
+       .Remove<User>("u2");
 
-await uow.SaveChanges();
+await session.SaveChanges();
 // All three operations committed in a single transaction.
-// On success the queue is cleared automatically.
+// On success the buffer is cleared automatically.
 ```
 
-Contiguous same-type inserts are coalesced into the batch-insert fast path, so grouping inserts in a unit is as fast as `BatchInsert`. A unit is a write buffer, not a change tracker: reads against the store don't see operations still buffered in an uncommitted unit. For read-modify-write atomicity, use ETag/CAS (`IfMatch`) + retry.
+Contiguous same-type inserts are coalesced into the batch-insert fast path, so grouping inserts in a session is as fast as `BatchInsert`. A session is a write buffer, not a change tracker: reads against the store don't see operations still buffered before `SaveChanges`. For read-modify-write atomicity, use ETag/CAS (`IfMatch`) + retry, or an explicit `await using var tx = await session.BeginTransaction();` with a `LockMode.Update` read (relational providers).
 
 | Member | Purpose |
 |---|---|
@@ -122,25 +122,26 @@ Contiguous same-type inserts are coalesced into the batch-insert fast path, so g
 | `Upsert<T>(patch)` | Queue an `Upsert` (Id required) |
 | `Remove<T>(id)` | Queue a `Remove` by Id |
 | `SaveChanges(ct)` | Apply all queued operations atomically, then clear |
-| `Clear()` | Discard the queue without executing |
+| `ClearPending()` | Discard the buffer without executing |
 | `PendingCount` | Number of operations currently queued |
+| `BeginTransaction([IsolationLevel])` | Open an explicit transaction — locking reads + set-based writes (relational) |
 
-**Error handling.** If `SaveChanges()` fails the transaction is rolled back and the queue is **preserved**, so you can inspect or amend it and retry:
+**Error handling.** If `SaveChanges()` fails the transaction is rolled back and the buffer is **preserved**, so you can inspect or amend it and retry:
 
 ```csharp
 try
 {
-    await uow.SaveChanges();
+    await session.SaveChanges();
 }
 catch (InvalidOperationException)
 {
-    // Nothing was written. uow.PendingCount still reflects the queued operations.
-    uow.Clear();
+    // Nothing was written. session.PendingCount still reflects the queued operations.
+    session.ClearPending();
 }
 ```
 
-You only ever inject `IDocumentStore` — the unit is created from it, never registered in DI.
+Inject a scoped `IDocumentSession` in ASP.NET Core (add `.AddScopedDocumentSession()`), open one from the singleton `IDocumentSessionFactory` where there's no request scope, or `store.OpenSession()` directly.
 
 :::note
-A `UnitOfWork` instance is not thread-safe. Use one per logical operation or per request scope.
+An `IDocumentSession` is not thread-safe (the EF-`DbContext` contract). Use one per logical operation / request scope, and `await using` it.
 :::

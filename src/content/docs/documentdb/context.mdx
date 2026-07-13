@@ -23,7 +23,7 @@ await db.Users.Insert(user);
 :::note
 This is an **ergonomics + discoverability** layer, not a capability. There is **no change tracking, identity
 map, or navigation/`Include`** — a document store embeds, it does not join. Writes are immediate, exactly
-like `IDocumentStore`; group them with `CreateUnitOfWork()`.
+like `IDocumentStore`; group them with a session (`store.OpenSession()`).
 :::
 
 ## Install
@@ -114,7 +114,7 @@ public static class AppContextRegistration
     {
         public async Task<IReadOnlyList<User>> Adults()
         {
-            var db = factory.Create();   // cheap; a facade over the shared store, no disposal needed
+            await using var db = factory.Create();   // owns a child scope + session — await using it
             return await db.Users.Where(u => u.Age >= 18).ToList();
         }
     }
@@ -124,7 +124,8 @@ public static class AppContextRegistration
     ```csharp
     var opts = new DocumentStoreOptions { DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db") };
     AppContext.ConfigureModel(opts);
-    var db = new AppContext(new DocumentStore(opts));
+    // the generated constructor takes an IDocumentSession (the context is a unit of work)
+    await using var db = new AppContext(new DocumentStore(opts).OpenSession());
     ```
   </TabItem>
 </Tabs>
@@ -134,11 +135,13 @@ their own options type (LiteDB, MongoDB, Cosmos): construct that store yourself 
 The generated `ConfigureModel` / `AddAppContext` target the relational `DocumentStoreOptions`.
 
 :::tip[Picking a registration]
-Use **`AddAppContext`** (scoped) where there's a natural request scope — ASP.NET Core. Use
-**`AddAppContextFactory`** (singleton `IDocumentContextFactory<AppContext>`) where there isn't — **MAUI,
-Blazor, desktop, background services** — and create a context per operation with `factory.Create()`. The
-context is a stateless facade over the shared, thread-safe store, so created contexts are cheap and need no
-disposal (unlike an EF `DbContext`).
+Use **`AddAppContext`** (scoped) where there's a natural request scope — ASP.NET Core; the container disposes
+the context at end of request. Use **`AddAppContextFactory`** (singleton `IDocumentContextFactory<AppContext>`)
+where there isn't — **MAUI, Blazor, desktop, background services** — and create a context per unit of work with
+`factory.Create()`. Since v11 a context **wraps an `IDocumentSession`** (it *is* a unit of work), so — exactly
+like an EF `DbContext` — it is short-lived, single-flow, **not thread-safe**, and **must be disposed**
+(`await using`). A factory-created context owns its scope + session; never share one across concurrent flows —
+create one per flow.
 
 Each context binds to its **own** store, keyed by the context type, so you can register **multiple**
 `DocumentContext` types in one container without them shadowing each other. The first context registered also
@@ -166,15 +169,109 @@ await db.Users.Remove("alice@x.com");
 // batch writes (atomic where the provider supports it)
 await db.Users.BatchInsert(users);
 
-// explicit transaction
-var uow = db.CreateUnitOfWork();
-uow.Add(order);
-uow.Remove<User>("old@x.com");
-await uow.SaveChanges();
+// the context IS the unit of work — buffer with Add/Update/Upsert/Remove, commit atomically
+db.Add(order).Remove<User>("old@x.com");
+await db.SaveChanges();
+
+// explicit transaction (relational) — locking reads via the raw session, then commit
+await using var tx = await db.BeginTransaction();
+var u = await db.Session.Get<User>("u1", LockMode.Update);
+db.Update(u);
+await db.SaveChanges();   // flushes into the transaction
+await tx.Commit();
 ```
+
+The typed sets (`db.Users.Insert(…)`) are **immediate**; the context's own `Add`/`Update`/`Upsert`/`Remove` +
+`SaveChanges` are the **buffered** unit-of-work path. Reach the raw `IDocumentSession` via `db.Session` and the
+root `IDocumentStore` via `db.Store`.
 
 Because the set returns the store's `IDocumentQuery<T>` unchanged, `Select`, `Paginate`, aggregates, and the
 spatial/vector/full-text terminators all come for free — see [Querying](/documentdb/querying/).
+
+## Worked example — a small order service
+
+End-to-end: two aggregates, a context, both registration styles, and the three ways to write.
+
+```csharp
+// ── models ──────────────────────────────────────────────────────────────
+public class User  { public string Id { get; set; } = ""; public string Name { get; set; } = ""; public int Age { get; set; } }
+public class Order { public string Id { get; set; } = ""; public string UserId { get; set; } = ""; public decimal Total { get; set; } }
+
+// ── context: one [Document] per aggregate; the generator emits db.Users / db.Orders ──
+[Document(typeof(User))]
+[Document(typeof(Order))]
+public partial class AppDb : DocumentContext;
+```
+
+<Tabs>
+  <TabItem label="ASP.NET Core (scoped)">
+    ```csharp
+    // Program.cs — registered scoped, one context per request
+    builder.Services.AddAppDb(o =>
+        o.DatabaseProvider = new PostgreSqlDatabaseProvider(connectionString));
+
+    // inject the context directly — the container disposes it at end of request
+    app.MapPost("/users", async (User user, AppDb db) =>
+    {
+        await db.Users.Insert(user);                 // immediate
+        return Results.Created($"/users/{user.Id}", user);
+    });
+
+    app.MapGet("/users/{id}", async (string id, AppDb db) =>
+        await db.Users.Get(id) is { } u ? Results.Ok(u) : Results.NotFound());
+    ```
+  </TabItem>
+  <TabItem label="MAUI / desktop (factory)">
+    ```csharp
+    // MauiProgram.cs — no request scope, so use the factory
+    builder.Services.AddAppDbFactory(o =>
+        o.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={dbPath}"));
+
+    public class OrdersViewModel(IDocumentContextFactory<AppDb> dbf)
+    {
+        public async Task<IReadOnlyList<Order>> Recent()
+        {
+            await using var db = dbf.Create();       // one context per unit of work — await using it
+            return await db.Orders.Where(o => o.Total >= 100)
+                                  .OrderByDescending(o => o.Total)
+                                  .Paginate(0, 20)
+                                  .ToList();
+        }
+    }
+    ```
+  </TabItem>
+</Tabs>
+
+```csharp
+// ── the three ways to write ─────────────────────────────────────────────
+await using var db = dbf.Create();
+
+// (a) immediate — typed sets commit each call
+await db.Users.Insert(new User { Id = "u1", Name = "Allan", Age = 41 });
+
+// (b) unit of work — buffer on the context, commit atomically (all-or-nothing)
+db.Add(new Order { Id = "o1", UserId = "u1", Total = 50 })
+  .Add(new Order { Id = "o2", UserId = "u1", Total = 75 });
+await db.SaveChanges();
+
+// (c) explicit transaction — locking read + grouped writes (relational providers)
+await using var tx = await db.BeginTransaction();
+var user = await db.Session.Get<User>("u1", LockMode.Update);
+user.Age++;
+db.Update(user);
+await db.SaveChanges();                              // flushes into the transaction (no commit yet)
+await tx.Commit();
+```
+
+| You want | Use |
+|---|---|
+| Read | `db.Users.Get(id)`, `db.Users.Where(…).ToList()`, `db.Users.Count()` |
+| Immediate write | `db.Users.Insert / Update / Upsert / Remove(…)` |
+| Atomic multi-write | `db.Add(x).Add(y); await db.SaveChanges();` |
+| Transaction / locking / isolation | `await using var tx = await db.BeginTransaction(IsolationLevel.Snapshot);` … `await tx.Commit();` |
+| Escape hatch | `db.Session` (raw `IDocumentSession`), `db.Store` (root `IDocumentStore`) |
+
+No change tracking or identity map — a document store embeds, it does not join.
 
 ## Serialization modes
 
