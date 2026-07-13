@@ -164,9 +164,9 @@ foreach (var hit in hits)
     Console.WriteLine($"{hit.Score:F4}  {hit.Document.Content}");
 ```
 
-### NearestVectors (low-level on `IDocumentStore`)
+### NearestVectors (low-level on `IDocumentStore` / `IDocumentSession`)
 
-Same call without the fluent builder — useful when the filter is `null` or you're not in a query chain.
+Same call without the fluent builder — useful when the filter is `null` or you're not in a query chain. It lives on both the long-lived `IDocumentStore` and a short-lived `IDocumentSession`, so a unit of work can run vector search alongside its buffered writes.
 
 ```csharp
 var hits = await store.NearestVectors<Document>(queryEmbedding, k: 10);
@@ -175,6 +175,19 @@ var hits = await store.NearestVectors<Document>(queryEmbedding, k: 10);
 var scopedHits = await store.NearestVectors<Document>(
     queryEmbedding, k: 10,
     filter: d => d.Status == "Active");
+```
+
+Through a session it delegates to the same engine — and inside an explicit transaction it reads that transaction's consistent snapshot, so a read-modify-write over vector results sees one stable view:
+
+```csharp
+await using var session = store.OpenSession();
+if (session.Store.SupportsVector)   // capability is a store property; reach it via session.Store
+{
+    await using var tx = await session.BeginTransaction();      // relational providers
+    var hits = await session.NearestVectors<Document>(queryEmbedding, k: 10);
+    // …mutate + session.Add(...); await session.SaveChanges(); all in one transaction
+    await tx.Commit();
+}
 ```
 
 ### Filter semantics
@@ -186,29 +199,43 @@ The contract is "matches the `Where` predicates AND is in the top-k nearest". Th
 
 ## Auto-embed on Insert
 
-Wire `Microsoft.Extensions.AI.IEmbeddingGenerator<string, Embedding<float>>` so the vector is populated automatically when a text property is set. The hook fires inside `Insert`, `BatchInsert`, and `Upsert` before the document is serialized.
+Wire `Microsoft.Extensions.AI.IEmbeddingGenerator<string, Embedding<float>>` so the vector is populated automatically when a text property is set. Auto-embed is a **write interceptor**, so it runs on **every** provider (relational *and* the document-native stores — CosmosDB, MongoDB, Redis, …), inside the write's transaction, on `Insert`, `BatchInsert`, and `Upsert`, before the document is serialized.
+
+There are two overloads:
+
+**DI overload (recommended)** — resolves the generator **per write from the caller's scope** (`ctx.Services`), so a scoped session yields the caller's own generator (per-tenant / per-scope model selection just works). Register the generator in DI:
 
 ```csharp
 using Shiny.DocumentDb.Extensions.AI;
 
-var generator = /* resolved from DI, e.g. AddOpenAIClient(...).AddEmbeddingGenerator(...) */;
+services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(/* e.g. AddOpenAIClient(...).AsEmbeddingGenerator() */);
 
+services.AddDocumentStore(opts =>
+{
+    opts.MapVectorProperty<Document>(d => d.Embedding, dimensions: 1536)
+        .AutoEmbedOnInsert<Document>(
+            sourceSelector: d => d.Content,
+            targetSetter: (d, vec) => d.Embedding = vec,
+            targetGetter: d => d.Embedding);   // optional — skip when vector already set
+});
+```
+
+**Explicit-generator overload** — pass a fixed instance for the container-free `new DocumentStore(options)` path (or when you always want one specific model):
+
+```csharp
 opts.MapVectorProperty<Document>(d => d.Embedding, dimensions: 1536)
     .AutoEmbedOnInsert<Document>(
-        generator,
+        generator,                              // fixed IEmbeddingGenerator instance
         sourceSelector: d => d.Content,
         targetSetter: (d, vec) => d.Embedding = vec,
-        targetGetter: d => d.Embedding);   // optional — skip when vector already set
-
-await store.Insert(new Document { Content = "hello world" });
-// document.Embedding is now populated.
+        targetGetter: d => d.Embedding);
 ```
 
 **Skip rules:**
-- If `sourceSelector` returns `null` or `""`, the hook is a no-op (the vector stays at default).
-- If `targetGetter` is provided and the existing vector is non-empty, the hook is a no-op — explicit writes win.
+- If `sourceSelector` returns `null` or `""`, it is a no-op (the vector stays at default).
+- If `targetGetter` is provided and the existing vector is non-empty, it is a no-op — explicit writes win.
 
-If `IEmbeddingGenerator` isn't available at runtime (the hook captured `null`), the first `Insert` throws `InvalidOperationException` with a clear message instead of silently writing an empty vector.
+With the DI overload, if no `IEmbeddingGenerator` can be resolved from the write's scope, the write throws `InvalidOperationException` with a clear message (register one in DI, or use the explicit overload) rather than silently writing an empty vector.
 
 ## Tuning
 
