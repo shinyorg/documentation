@@ -1,0 +1,236 @@
+---
+title: Firestore Mobile (on-device)
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+The `Shiny.DocumentDb.Firestore.Mobile` package provides a document store over the **native** Firebase Firestore SDK, running **on the device**. The native SDK owns the hard parts — the local cache, the offline write queue, snapshot listeners, backoff and conflict handling — and this package is a thin typed adapter mapping `IDocumentStore` onto it.
+
+<NugetBadge name="Shiny.DocumentDb.Firestore.Mobile" showLabel={true} />
+
+Interop is via **first-party Shiny bindings** to the official Firebase SDKs — not `Plugin.Firebase` or any third-party binding.
+
+## This is not the Firestore provider
+
+There are two Firestore providers and they are not interchangeable. Pick by **where your code runs**:
+
+| | [`Shiny.DocumentDb.Firestore`](/documentdb/firestore/) | `Shiny.DocumentDb.Firestore.Mobile` |
+|---|---|---|
+| SDK | `Google.Cloud.Firestore` (admin/gRPC) | Native Firebase SDK (iOS/Android) |
+| Runs where | Server / backend host | On the client device |
+| Auth | Service account (ADC) | Firebase Auth, per end-user |
+| Security rules | Bypassed (admin credentials) | Enforced |
+| Offline | None | Native persistent cache — offline by default |
+| Registration | `AddFirestoreDocumentStore(…)` | `AddMobileFirestoreDocumentStore(…)` |
+
+:::caution[Never ship a service-account key in an app]
+The server provider authenticates with a service account, which bypasses security rules. Embedding one in a distributed app hands every user admin access to your database. That is what this package exists to avoid.
+:::
+
+## When to Use
+
+- A mobile app that must work offline and sync when connectivity returns
+- Per-user data enforced by Firestore security rules rather than a trusted backend
+- Live updates pushed from any writer, straight to the device
+
+## Platform support
+
+| Target | Behaviour |
+|---|---|
+| `net10.0-android` | Real adapter over the native SDK |
+| `net10.0-ios` | Real adapter over the native SDK |
+| Anything else | Throws `PlatformNotSupportedException` |
+
+Both mobile heads are at **feature parity** — the same operations work, the same ones throw — and both are verified end-to-end against the Firestore emulator. The `net10.0` target is a stub that exists so the surface stays unit-testable without a device; guard multi-targeted code with `#if ANDROID || IOS`.
+
+## Installation
+
+```bash
+dotnet add package Shiny.DocumentDb.Firestore.Mobile
+```
+
+## Setup
+
+<Steps>
+1. Initialise Firebase
+
+   Bundle the platform config file — `google-services.json` (Android) or `GoogleService-Info.plist` (iOS) — for auto-init. The store throws `InvalidOperationException` if Firebase is not initialised by the time it is resolved.
+
+2. Register the store
+
+   ```csharp
+   using Shiny.DocumentDb;
+
+   builder.Services.AddMobileFirestoreDocumentStore(o =>
+   {
+       o.ProjectId = "my-project";              // optional when the config file is bundled
+       o.PersistenceEnabled = true;             // default — the offline cache
+       o.MapTypeToCollection<Play>("plays");    // default collection = the type name
+   });
+   ```
+
+   This registers **one singleton** exposed as four contracts — `IDocumentStore`, `IDocumentMaintenance`, `IObservableDocumentStore` and `IChangeFeedDocumentStore` all resolve to the same instance.
+
+   On iOS, setting `ProjectId` + `AppId` lets the provider configure Firebase itself; a config file the app has already loaded always wins.
+
+3. Register identity (optional)
+
+   ```csharp
+   builder.Services.AddFirebaseIdentity(o => o.ApiKey = "your-web-api-key");
+   ```
+</Steps>
+
+## Documents
+
+Each document type maps to its own collection (the type name by default). The document **id is the Firestore document id**, read from an `Id` property (`MapIdProperty<T>` to override) and matched case-insensitively against the serialized JSON.
+
+```csharp
+class Play
+{
+    public string Id { get; set; } = null!;
+    public string Name { get; set; } = null!;
+    public int Version { get; set; }
+}
+```
+
+The id must be set and non-empty on every write — **this provider does not generate ids**, and an empty one throws. Field names are the *JSON* property names, so a `PropertyNamingPolicy` applies to queries automatically.
+
+## CRUD
+
+```csharp
+var store = sp.GetRequiredService<IDocumentStore>();
+
+await store.Insert(new Play { Id = "p1", Name = "Slant Left", Version = 1 });
+var play = await store.Get<Play>("p1");     // null when absent
+await store.Upsert(new Play { Id = "p1", Name = "Slant Right", Version = 2 });
+await store.Remove<Play>("p1");             // always true — Firestore deletes are idempotent
+var cleared = await store.Clear<Play>();    // deletes doc-by-doc, returns the count
+```
+
+:::caution[`Insert` is an upsert]
+`Insert`, `Update` and `Upsert` all map to the native Firestore `set()`, which overwrites. There is no insert-if-absent semantic — `Insert` against an existing id silently replaces it.
+:::
+
+## Querying
+
+Filters, ordering and limit push down to the native query. Aggregates and the pagination offset are applied **client-side over materialized results**.
+
+```csharp
+var plays = await store.Query<Play>()
+    .Where(p => p.Version >= 2)
+    .OrderBy(p => p.Version)
+    .ToList();
+
+var count = await store.Query<Play>().Count();
+var n     = await store.Query<Play>().Where(p => p.Version >= 2).ExecuteDelete();
+await store.Query<Play>().ExecuteUpdate(p => p.Name, "Renamed");
+```
+
+Supported: `Where`, `OrderBy`, `OrderByDescending`, `Paginate`, `ToList`, `ToAsyncEnumerable`, `Count`, `Any`, `ExecuteDelete`, `ExecuteUpdate`, `Max`, `Min`, `Sum`, `Average`, `NotifyOnChange`, `IgnoreQueryFilters`.
+
+Translated operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, and `ICollection.Contains`. Anything else throws.
+
+:::caution[Ordering with an inequality filter]
+Firestore requires that when a query has an inequality filter, the **first `OrderBy` is on that same field**. `.Where(p => p.Version >= 2).OrderBy(p => p.Version)` is valid; ordering by a different field first fails in the native SDK.
+:::
+
+- `Count()` **materializes every matching document** — it is not a native aggregate count. Avoid on large collections.
+- `Paginate(offset, take)` issues a native `Limit(offset + take)` and skips client-side, because Firestore has no offset. Deep pagination reads everything up to the offset.
+- `Max`/`Min`/`Sum`/`Average` materialize and compute in managed code.
+- `Select` projection throws — read with `ToList` and project client-side.
+
+## Offline
+
+`PersistenceEnabled` (default `true`) turns on the native persistent cache: reads are cache-first, and writes queue locally and drain automatically on reconnect. This is the entire point of the provider — leave it on outside of tests.
+
+:::caution[A completed write is not a server write]
+Because writes queue offline, an `await store.Insert(…)` that completes only means the native SDK accepted the write — not that the server has it.
+:::
+
+## Change observation
+
+```csharp
+await using var sub = await changeFeedStore.SubscribeChanges<Play>((change, ct) =>
+{
+    Console.WriteLine($"{change.ChangeType}: {change.Id}");
+    return Task.CompletedTask;
+});
+
+await foreach (var change in observableStore.NotifyOnChange<Play>(ct)) { … }
+
+// scoped to a filtered query
+await foreach (var change in store.Query<Play>().Where(p => p.Version > 1).NotifyOnChange(ct)) { … }
+```
+
+Both are backed by native snapshot listeners, so changes arrive from **any** writer. `ChangeType` is `Inserted`, `Updated` or `Removed`; a `Removed` change carries the id but no document.
+
+:::caution[The initial snapshot is skipped]
+You receive changes from the point of subscription onward, not the current contents of the collection. Pair a subscription with a `Get`/`ToList` if you need a baseline.
+:::
+
+## Identity
+
+`IFirebaseIdentity` signs users in through the Firebase Auth REST API — anonymous and email/password, with automatic token refresh.
+
+```csharp
+var identity = sp.GetRequiredService<IFirebaseIdentity>();
+
+var user  = await identity.SignInAnonymouslyAsync();
+var token = await identity.GetIdTokenAsync();   // refreshes within a minute of expiry
+var uid   = identity.CurrentUserId;
+identity.AuthStateChanged += (_, u) => { /* u is null on sign-out */ };
+```
+
+:::caution[Security rules do not see the user yet]
+The token is obtained and refreshed in **managed code only** — it is not yet wired into the native Firestore SDK's request auth, so rules do not see `request.auth.uid` for this provider's reads and writes. That integration needs a native `signInWithCustomToken` and lands with the native auth binding.
+
+Until then, scope per-user data by collection path:
+
+```csharp
+o.MapTypeToCollection<Play>($"users/{uid}/plays");
+```
+:::
+
+## Options Reference
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `ProjectId` | `string?` | `null` | Firebase project id — optional when a config file is bundled |
+| `AppId` | `string?` | `null` | Firebase application id, paired with `ProjectId` for explicit init |
+| `ApiKey` | `string?` | `null` | Firebase Web API key |
+| `PersistenceEnabled` | `bool` | `true` | The native offline cache |
+| `EmulatorHost` | `string?` | `null` | `host:port` of the Firestore emulator |
+| `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How collection names are derived |
+| `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | Drives field names and serialization |
+| `UseReflectionFallback` | `bool` | `true` | Set `false` for iOS full-AOT |
+| `Logging` | `Action<string>?` | `null` | Diagnostic callback |
+
+Mapping methods: `MapTypeToCollection`, `MapIdProperty`, `MapIdType`, `AddQueryFilter`.
+
+## Emulator
+
+```csharp
+var opts = new MobileFirestoreOptions
+{
+    ProjectId = "demo-shiny",
+    EmulatorHost = "10.0.2.2:8080",   // Android emulator; use "localhost:8080" on the iOS simulator
+    PersistenceEnabled = false        // clean slate per run
+};
+```
+
+`10.0.2.2` is the Android emulator's alias for the host machine — `localhost` will not reach it from there. The iOS simulator shares the host's network stack, so it uses `localhost`. The emulator accepts any demo project id and a fake API key. The Auth emulator equivalent is `FirebaseIdentityOptions.AuthEmulatorHost`.
+
+## Limitations
+
+This provider ships in milestones. Today:
+
+- **These throw `NotSupportedException`:** the string `Query`/`QueryStream`/`Count(whereClause)` overloads (use LINQ), `BatchInsert`, `SetProperty`, `RemoveProperty`, `GetDiff`, `ClearAll`, and `Select` projection.
+- **Write interceptors do not run.** `AddInterceptor`, `AddBulkInterceptor`, `OnBeforeWrite<T>` and `OnAfterWrite<T>` are accepted by the options but are never invoked. Keep that logic in your calling code.
+- **`MapVersionProperty` does not enforce concurrency.** The mapping is recorded, but writes are a plain `set()` — no version check, and `ConcurrencyException` is never thrown. A stale write silently wins.
+- **No `request.auth.uid` in rules yet** — see [Identity](#identity).
+- **No native full-text, spatial, vector or temporal** support.
+- **`Count` and the aggregates materialize documents** rather than using native aggregation.
+
+:::caution[Interceptors and version mapping compile but do nothing]
+These two are the sharp edges: they are configurable, raise no error, and silently have no effect. Do not rely on them for auditing, validation or optimistic concurrency on this provider.
+:::

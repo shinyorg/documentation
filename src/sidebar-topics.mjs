@@ -549,6 +549,7 @@ export const sidebarTopics = [
               { label: 'Redis', link: 'documentdb/redis' },
               { label: 'RavenDB', link: 'documentdb/ravendb' },
               { label: 'Google Firestore', link: 'documentdb/firestore' },
+              { label: 'Firestore Mobile (on-device)', link: 'documentdb/firestore-mobile' },
               { label: 'LiteDB', link: 'documentdb/litedb' },
               { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
             ]
