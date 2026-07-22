@@ -143,9 +143,23 @@ When you have an id and a key but no materialized document — a direct download
 var bytes = await ((IBlobDocumentStore)store).GetBlob<Invoice>(id, "Pdf");
 ```
 
+## Backup
+
+`ExportAsync` includes blob payloads by default — base64, inline with each document — so a restore is self-contained and rebuilds the sidecar. Take a metadata-only snapshot with `IncludeBlobs = false`:
+
+```csharp
+await ((IDocumentBackup)store).ExportAsync(stream);                                   // payloads included
+await ((IDocumentBackup)store).ExportAsync(stream, new BackupExportOptions { IncludeBlobs = false });
+await ((IDocumentBackup)store).RestoreAsync(stream);                                  // rebuilds sidecar rows
+```
+
+## Temporal
+
+Blobs are **not versioned** — the history sidecar would multiply payload storage by the retention window. Restoring an old version restores the document's *fields* but keeps the blobs exactly as they are now, so a restored document never carries metadata describing a superseded payload.
+
 ## Lifecycle
 
-Deleting a document **cascades** to its blob rows in the same unit of work; `ClearAll` drops the blob tables too. Blobs are not written out of band, so there are no orphans on the relational providers.
+Deleting a document **cascades** to its blob rows in the same unit of work; `ClearAll` drops the blob tables too. Blobs are only written through their document, so on the relational providers there are no orphans. `SweepOrphanedBlobs<T>()` (on `IDocumentMaintenance`) is available as anti-entropy insurance — it deletes blob rows whose owning document no longer exists (e.g. after an out-of-band delete) and returns the count removed.
 
 ## Size limits
 
@@ -160,7 +174,7 @@ else if (bytes.Length > store.MaxBlobSize)
 
 ## Provider support
 
-Blobs are supported on the relational family. Providers that do not support them report `MaxBlobSize == 0` and throw `NotSupportedException` on any blob write.
+Blobs are supported on every server-side provider — the relational family and all the document/NoSQL backends. Only IndexedDB (Blazor WebAssembly) does not support them yet. Providers that do not support blobs report `MaxBlobSize == 0` and throw `NotSupportedException` on any blob write.
 
 | Provider | Blobs | `MaxBlobSize` |
 |---|---|---|
@@ -170,7 +184,15 @@ Blobs are supported on the relational family. Providers that do not support them
 | MySQL / MariaDB | ✅ | 1 GB |
 | Oracle | ✅ | 2 GB |
 | DuckDB | ✅ | 1 GB |
-| MongoDB / Cosmos / LiteDB / IndexedDB / Redis / Firestore / Azure Table / DynamoDB / RavenDB | — not yet | 0 |
+| LiteDB | ✅ | 16 MB |
+| MongoDB / Amazon DocumentDB | ✅ | 15 MB |
+| Redis | ✅ | 512 MB |
+| Azure Table | ✅ | 64 KB |
+| DynamoDB | ✅ | 390 KB |
+| Azure Cosmos DB | ✅ | 1.4 MB |
+| Firestore | ✅ | 1 MB |
+| RavenDB | ✅ (native attachments) | 2 GB |
+| IndexedDB (Blazor WASM) | — not yet | 0 |
 
 :::note
 `DocumentBlob` replaces a raw `byte[]` property, not augments it. A `byte[]` on a document is still serialized into the document body as base64 — use `DocumentBlob` whenever the payload is more than incidental.
