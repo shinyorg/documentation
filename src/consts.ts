@@ -3,7 +3,7 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-export const DEFAULT_VERSION: string = "5.2.3";
+export const DEFAULT_VERSION: string = "5.2.4";
 
 // Brand colors from logo
 export const BRAND_COLORS = {
@@ -116,7 +116,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "aspnetNuget": "Shiny.Mediator.AspNet",
         "description": "Mediator",
         "category": "core",
-        "version" : "6.6.2"
+        "version" : "6.8.0"
     },
     {
         "id": "ble",
@@ -204,7 +204,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Push Notifications - Firebase (iOS)",
         "category": "essentials",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
-        "version": "5.0.1"
+        "version": "5.0.2"
     },
     {
         "id": "pushazure",
@@ -445,7 +445,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
         "category": "core",
-        "version": "5.1.2"
+        "version": "5.1.4"
     },
     {
         "id": "localization",
@@ -454,7 +454,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "category": "core",
         "version": "2.0.1",
         "additionalNugets": [
-            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.9" }
+            { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.10" }
         ]
     },
     {
@@ -462,126 +462,126 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-sqlcipher",
         "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
         "description": "Document DB (SqlCipher)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-sqlserver",
         "nuget": "Shiny.DocumentDb.SqlServer",
         "description": "Document DB (SQL Server)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-mysql",
         "nuget": "Shiny.DocumentDb.MySql",
         "description": "Document DB (MySQL)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-postgresql",
         "nuget": "Shiny.DocumentDb.PostgreSql",
         "description": "Document DB (PostgreSQL)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-cosmosdb",
         "nuget": "Shiny.DocumentDb.CosmosDb",
         "description": "Document DB (Cosmos DB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-mongodb",
         "nuget": "Shiny.DocumentDb.MongoDb",
         "description": "Document DB (MongoDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-litedb",
         "nuget": "Shiny.DocumentDb.LiteDb",
         "description": "Document DB (LiteDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-duckdb",
         "nuget": "Shiny.DocumentDb.DuckDb",
         "description": "Document DB (DuckDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-oracle",
         "nuget": "Shiny.DocumentDb.Oracle",
         "description": "Document DB (Oracle)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-mariadb",
         "nuget": "Shiny.DocumentDb.MariaDb",
         "description": "Document DB (MariaDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-cockroachdb",
         "nuget": "Shiny.DocumentDb.CockroachDb",
         "description": "Document DB (CockroachDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-azuretable",
         "nuget": "Shiny.DocumentDb.AzureTable",
         "description": "Document DB (Azure Table Storage)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-dynamodb",
         "nuget": "Shiny.DocumentDb.DynamoDb",
         "description": "Document DB (Amazon DynamoDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-amazondocumentdb",
         "nuget": "Shiny.DocumentDb.DocumentDb",
         "description": "Document DB (Amazon DocumentDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-redis",
         "nuget": "Shiny.DocumentDb.Redis",
         "description": "Document DB (Redis Stack)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-ravendb",
         "nuget": "Shiny.DocumentDb.RavenDb",
         "description": "Document DB (RavenDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-firestore",
         "nuget": "Shiny.DocumentDb.Firestore",
         "description": "Document DB (Google Firestore)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "documentdb-indexeddb",
@@ -589,21 +589,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.DocumentDb.IndexedDb",
         "description": "Document DB (IndexedDB)",
         "category": "storage",
-        "version": "11.0.0"
+        "version": "11.2.1"
     },
     {
         "id": "reflector",
         "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
         "category": "core",
-        "version": "5.1.2"
+        "version": "5.1.4"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
         "category": "core",
-        "version": "5.1.2"
+        "version": "5.1.4"
     },
     {
         "id": "spatial",
@@ -625,7 +625,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Contacts",
         "description": "Contact Store",
         "category": "platformdata",
-        "version": "5.2.3"
+        "version": "5.2.4"
     },
     {
         "id": "aiconversation",
@@ -668,21 +668,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Data.Sync.Blazor",
         "description": "Data Sync",
         "category": "essentials",
-        "version": "5.2.3"
+        "version": "5.2.4"
     },
     {
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
         "category": "core",
-        "version": "5.1.2"
+        "version": "5.1.4"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
         "category": "core",
-        "version": "5.1.2"
+        "version": "5.1.4"
     },
     {
         "id": "blazorhost",
@@ -690,7 +690,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Extensions.BlazorHosting",
         "description": "Blazor App Support (device/browser info, culture & time-zone changes)",
         "category": "core",
-        "version": "5.1.2"
+        "version": "5.1.4"
     }
 ];
 
