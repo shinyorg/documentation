@@ -1,0 +1,177 @@
+---
+title: Blobs
+---
+
+A **blob** is a binary payload attached to a document — a PDF, an image, a signature — stored in a **sidecar table** rather than inside the document JSON, and **loaded on demand**. The document keeps only the blob's *metadata* (size, content type, file name) in its body, so ordinary queries never drag the bytes along; you fetch a payload explicitly, when you actually need it.
+
+This is the right tool when a `byte[]` would otherwise land in the document. A raw `byte[]` property is base64-encoded straight into the `Data` column, inflating it ~33% and — the real cost — materializing on **every** read (`Get`, every filtered query, the change feed, temporal history). A `DocumentBlob` keeps the body small and the payload out of the hot path.
+
+## Mapping a blob
+
+Expose a `DocumentBlob` property (single) and/or a `DocumentBlobCollection` (many), then map them:
+
+```csharp
+public class Invoice
+{
+    public string Id { get; set; } = "";
+    public string Customer { get; set; } = "";
+
+    public DocumentBlob? Pdf { get; set; }
+    public DocumentBlobCollection Attachments { get; set; } = new();
+}
+
+services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db");
+
+    opts.MapBlob<Invoice>(i => i.Pdf);
+    opts.MapBlobCollection<Invoice>(i => i.Attachments);
+});
+```
+
+Each mapping accepts options:
+
+```csharp
+opts.MapBlob<Invoice>(i => i.Signature, o =>
+{
+    o.Key         = "sig";        // sidecar key; defaults to the property name
+    o.ComputeHash = true;         // SHA-256 into metadata; OFF by default (real CPU per write)
+    o.MaxSize     = 256 * 1024;   // per-mapping ceiling, floored by the provider's MaxBlobSize
+});
+```
+
+Payloads live in a `{table}_blobs` sidecar keyed `(DocumentId, TypeName, BlobKey)`. The document body holds metadata only.
+
+## Writing
+
+Blobs are written by assigning the member and saving the document — there is no separate "set blob" call. Routing every mutation through the document is what keeps the metadata in the body from ever disagreeing with the stored bytes.
+
+```csharp
+var invoice = new Invoice
+{
+    Customer = "Acme",
+    Pdf = DocumentBlob.FromBytes(pdfBytes, contentType: "application/pdf", fileName: "acme.pdf")
+};
+
+// the collection's Add(...) assigns the sidecar key up front and returns the blob
+invoice.Attachments.Add(scanBytes, contentType: "image/png");            // file name is optional
+invoice.Attachments.Add(noteBytes, contentType: "text/plain", fileName: "note.txt");
+
+await store.Insert(invoice);   // document row + N sidecar rows, one unit of work
+```
+
+Updating is the same object model:
+
+```csharp
+invoice.Pdf = DocumentBlob.FromBytes(newPdf, "application/pdf", "acme-v2.pdf");  // replaces the row
+invoice.Pdf = null;                                                             // drops the row
+invoice.Attachments.RemoveAt(0);                                                // prunes that item's row
+await store.Upsert(invoice);
+```
+
+A `Get` → `Upsert` round-trip that doesn't touch the blobs issues **zero** blob writes — an unloaded blob is never resent, and never dropped.
+
+## Reading — metadata is free, bytes are not
+
+A query returns the document with blob **metadata** populated and the payload **unloaded**:
+
+```csharp
+var inv = await store.Get<Invoice>(id);
+
+inv.Pdf!.Length;      // 84213      — from the document body
+inv.Pdf.FileName;     // "acme.pdf" — or null
+inv.Pdf.ContentType;  // "application/pdf"
+inv.Pdf.IsLoaded;     // false
+inv.Pdf.Bytes;        // throws InvalidOperationException — not loaded
+```
+
+Because the metadata is real JSON in the body, you can **filter and sort by it** like any other property — the payload is never touched:
+
+```csharp
+store.Query<Invoice>().Where(x => x.Pdf!.Length > 1_000_000);
+store.Query<Invoice>().Where(x => x.Pdf!.ContentType == "application/pdf")
+                      .OrderByDescending(x => x.Pdf!.Length);
+
+// the string grammar lowers to the same IR
+store.Query<Invoice>().Where("Pdf.Length > 1000000");
+
+// Bytes is not a queryable path — throws at translation time
+store.Query<Invoice>().Where(x => x.Pdf!.Bytes.Length > 0);   // ✗
+```
+
+## Loading payloads on demand
+
+The store stamps each blob during hydration with the loader it needs, so a blob fetches **itself** — no separate store call, and you choose the granularity:
+
+```csharp
+// one blob
+await inv.Pdf!.LoadAsync();
+var bytes = inv.Pdf.Bytes;
+
+// load + read in a single call
+var raw = await inv.Pdf.GetBytesAsync();
+
+// one item of a collection (items are DocumentBlobs)
+await inv.Attachments[0].LoadAsync();
+
+// the whole collection, in ONE round trip
+await inv.Attachments.LoadAllAsync();
+foreach (var a in inv.Attachments)
+    Save(a.FileName, a.Bytes);
+```
+
+`Bytes` throws until the payload is loaded — there is no hidden I/O behind a property getter and no sync-over-async. A fetch happens only where you write `await`.
+
+### Across a page of results
+
+Self-loading is per-document. Looping a page and awaiting `LoadAllAsync()` per row is an N+1. When you know you want every blob across a page, use the store's batch load — one round trip for the whole page:
+
+```csharp
+var page = await store.Query<Invoice>().Where(x => x.Customer == "Acme").ToList();
+
+await ((IBlobDocumentStore)store).BatchLoadBlobs(page);   // one query for the page
+
+foreach (var inv in page)
+    Process(inv.Pdf!.Bytes);
+```
+
+### Without a document instance
+
+When you have an id and a key but no materialized document — a direct download endpoint, say — read the payload straight off the store:
+
+```csharp
+var bytes = await ((IBlobDocumentStore)store).GetBlob<Invoice>(id, "Pdf");
+```
+
+## Lifecycle
+
+Deleting a document **cascades** to its blob rows in the same unit of work; `ClearAll` drops the blob tables too. Blobs are not written out of band, so there are no orphans on the relational providers.
+
+## Size limits
+
+Every provider reports a real ceiling via `store.MaxBlobSize` (bytes). Pre-flight against it rather than discovering the limit as an opaque provider error; a per-mapping `MaxSize` can only make the ceiling smaller.
+
+```csharp
+if (store.MaxBlobSize == 0)
+    // this provider does not support blobs
+else if (bytes.Length > store.MaxBlobSize)
+    // too large — reject before writing
+```
+
+## Provider support
+
+Blobs are supported on the relational family. Providers that do not support them report `MaxBlobSize == 0` and throw `NotSupportedException` on any blob write.
+
+| Provider | Blobs | `MaxBlobSize` |
+|---|---|---|
+| SQLite | ✅ | 1 GB |
+| PostgreSQL / CockroachDB | ✅ | 1 GB |
+| SQL Server | ✅ | 2 GB |
+| MySQL / MariaDB | ✅ | 1 GB |
+| Oracle | ✅ | 2 GB |
+| DuckDB | ✅ | 1 GB |
+| MongoDB / Cosmos / LiteDB / IndexedDB / Redis / Firestore / Azure Table / DynamoDB / RavenDB | — not yet | 0 |
+
+:::note
+`DocumentBlob` replaces a raw `byte[]` property, not augments it. A `byte[]` on a document is still serialized into the document body as base64 — use `DocumentBlob` whenever the payload is more than incidental.
+:::

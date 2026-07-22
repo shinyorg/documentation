@@ -16,9 +16,10 @@ While Shiny handles many known Android BLE issues internally, following these ru
 | 2 | **Don't scan while connected** to a GATT server — avoid overlapping radio operations. |
 | 3 | **Don't overwhelm the radio.** Shiny queues operations internally, but rapid-fire calls still cause issues. |
 | 4 | **Expect GATT 133 errors** on connect. Catch exceptions in your observable subscriptions. |
-| 5 | **Keep payloads small.** BLE is not designed for large data or JSON — use compact binary formats. |
-| 6 | **Always scan with a Service UUID filter.** Unfiltered scans return every BLE device nearby and drain battery. |
-| 7 | **Don't discover all services & characteristics.** Only query the ones you need — full discovery has a real performance cost. |
+| 5 | **Expect operations to fault on disconnect.** An operation interrupted mid-flight throws a `BleException` rather than hanging — always handle `onError` and retry once the peripheral reports `Connected` again. |
+| 6 | **Keep payloads small.** BLE is not designed for large data or JSON — use compact binary formats. |
+| 7 | **Always scan with a Service UUID filter.** Unfiltered scans return every BLE device nearby and drain battery. |
+| 8 | **Don't discover all services & characteristics.** Only query the ones you need — full discovery has a real performance cost. |
 
 ---
 
