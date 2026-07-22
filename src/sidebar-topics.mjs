@@ -524,6 +524,7 @@ export const sidebarTopics = [
               { label: 'Vector / ANN Search', link: 'documentdb/vector' },
               { label: 'Full-Text Search', link: 'documentdb/full-text' },
               { label: 'Computed Properties', link: 'documentdb/computed-columns' },
+              { label: 'Blobs', link: 'documentdb/blobs' },
               { label: 'Temporal Support', link: 'documentdb/temporal' },
             ]
           },
