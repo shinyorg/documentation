@@ -43,7 +43,7 @@ Five immutable design pillars:
 3. **Cloud providers compose, they don't impersonate.** `ISpeechToTextProvider` + `ITextToSpeechProvider` are stateless. The orchestration — mic lifecycle, audio capture, playback, keyword regex matching, error fan-out — lives in `CloudSpeechToText` / `CloudTextToSpeech`. Adding a provider is one class, not a service implementation.
 4. **The audio I/O abstractions are first-class, not internal helpers — and now ship separately.** `IAudioSource` and `IAudioPlayer` (plus `PipeStream`) live in the standalone **`Shiny.Audio`** package/namespace. Cloud providers depend on them, the AI Conversation library depends on them, and apps that just need raw PCM or MP3 playback depend on them directly — some without needing the speech stack at all. `Shiny.Speech` references `Shiny.Audio`, so consumers add `using Shiny.Audio;` but get everything wired by `AddSpeechServices()`.
 5. **Platform plumbing is delegated to [Shiny.Core](https://shinylib.net), not reinvented.** Android runtime-permission requests and current-activity tracking come from Shiny.Core's `AndroidPlatform`, and `AccessState` is a Shiny.Core type (namespace `Shiny`). This removed a hand-rolled `ActivityProvider`/`PermissionRequestFragment` and the permission-check code that was duplicated between `AndroidAudioSource` and the Android `SpeechToTextImpl`. The trade-off: consuming apps must call `.UseShiny()` (from `Shiny.Hosting.Maui`) so the platform is hosted.
-6. **Capability bits, not exceptions.** `IsSupported`, `IsListening`, `IsSpeaking`, `IsPlayerAnalysisSupported` let app code check what a platform can do without trying it and catching. The Browser doesn't have native TTS metering; Windows doesn't expose level taps; the API says so before you bind UI.
+6. **Capability bits, not exceptions.** `IsSupported`, `IsListening`, `IsSpeaking`, `IsPlayerAnalysisSupported`, `IsInputAnalysisSupported` let app code check what a platform can do without trying it and catching. The Browser doesn't have native TTS metering; Windows doesn't expose level taps; the API says so before you bind UI.
 
 ## Why an event-based STT contract?
 
@@ -136,7 +136,7 @@ The cloud STT path needs a microphone stream. The cloud TTS path needs to play a
 
 - **The AI Conversation library needs the same primitives.** `Shiny.AiConversation` calls `IAudioPlayer` directly for sound effects (the listening-blip, the response-blip) without going through TTS.
 - **Apps need raw audio.** Voice memos, custom acoustic models, audio analysis, server-side STT — all want PCM bytes without coupling to a recognizer.
-- **`AudioLevelChanged` only works if the player is observable.** The VU meter on `ITextToSpeechService` forwards from `IAudioPlayer.AudioLevelChanged`. Making the player private breaks the level signal.
+- **`AudioLevelChanged` only works if the player is observable.** The VU meter on `ITextToSpeechService` forwards from `IAudioPlayer.AudioLevelChanged`. Making the player private breaks the level signal. The mic meter mirrors it: `CloudSpeechToText.InputLevelChanged` forwards from `IAudioSource.InputLevelChanged`.
 
 So `IAudioSource` and `IAudioPlayer` are first-class — and they live in their own **`Shiny.Audio`** package so those "apps need raw audio" scenarios don't have to pull in the speech stack. `AddSpeechServices()` registers them; cloud-provider registrations call `AddAudioSource()` / `AddAudioPlayer()` to make sure they exist; apps that only need raw capture or playback reference `Shiny.Audio` directly and call `AddAudioServices()` (or the individual `AddAudioSource()` / `AddAudioPlayer()`).
 
@@ -181,7 +181,7 @@ Two consequences of the platform reality are baked into the contract:
 
 Cloud STT reaches this through `SpeechRecognitionOptions.AudioProcessing`, which `CloudSpeechToText` forwards into `StartCaptureAsync`. Native on-device recognizers own their microphone and ignore it — the option governs `IAudioSource` capture only.
 
-## Why `IsPlayerAnalysisSupported` instead of a no-op level event?
+## Why `IsPlayerAnalysisSupported` / `IsInputAnalysisSupported` instead of a no-op level event?
 
 The VU meter signal (`AudioLevelChanged`) doesn't work the same everywhere:
 
@@ -190,6 +190,17 @@ The VU meter signal (`AudioLevelChanged`) doesn't work the same everywhere:
 | Native TTS | ✅ `AVAudioEngine` tap | ✅ `OnAudioAvailable` RMS | ❌ | ❌ |
 | Cloud TTS | ✅ via `IAudioPlayer` | ✅ via `IAudioPlayer` | ❌ | ❌ |
 | Generic `IAudioPlayer` | ✅ `AVAudioPlayer.MeteringEnabled` | ✅ `Visualizer` on session | ❌ | ❌ |
+
+The input side is the same story with a different shape — hence `ISpeechToTextService.IsInputAnalysisSupported`:
+
+| Surface | iOS / macOS | Android | Windows | Browser |
+|---|---|---|---|---|
+| Native STT | ✅ recognizer input tap | ✅ `OnRmsChanged` | ❌ | ❌ |
+| Cloud STT | ✅ via `IAudioSource` | ✅ via `IAudioSource` | ✅ via `IAudioSource` | ✅ via `IAudioSource` |
+| `IAudioSource` | ✅ | ✅ | ✅ | ✅ |
+
+`IAudioSource` deliberately has **no** capability bit: it owns the PCM, so it can always meter it. The
+flag exists only where a platform recognizer takes the microphone away.
 
 The library could silently never fire the event on unsupported platforms. That's worse — UI binds to the event, shows an idle bar forever, and the developer has no way to know whether their handler is wrong or the platform is. So the contract publishes its own capabilities:
 
@@ -200,7 +211,7 @@ else
     HideVuBar();
 ```
 
-The same pattern repeats on `IAudioPlayer.IsPlayerAnalysisSupported`. Capability bits push the platform discovery into the API instead of into runtime surprises.
+The same pattern repeats on `IAudioPlayer.IsPlayerAnalysisSupported` and `ISpeechToTextService.IsInputAnalysisSupported`. Capability bits push the platform discovery into the API instead of into runtime surprises.
 
 ## Why is Apple TTS routed through `AVAudioEngine`?
 
@@ -250,8 +261,8 @@ The opposite direction — exposing arbitrary `ISpeechToTextClient` instances *a
 |---|---|
 | **iOS / macOS** | SFSpeechRecognizer streams interim results several times per second. CarPlay routes audio through the car's mic/speakers automatically when active. TTS goes through `AVAudioEngine` for VU metering. |
 | **Android** | Native STT works in **segments** — it stops after silence and must restart for the next segment. Causes brief pauses during continuous listening. Prefer the [ElevenLabs](/speech/elevenlabs) provider for truly continuous recognition. **Don't use Azure on Android** — its native libs don't support Android 15+'s 16 KB page size. |
-| **Windows** | `Windows.Media.SpeechRecognition` + `Windows.Media.SpeechSynthesis`. No native VU metering for TTS. |
-| **Browser (Blazor WASM)** | Web Speech API for STT + TTS; reliability varies by browser (Chromium is most consistent). `IAudioSource` captures raw PCM via `getUserMedia` + `ScriptProcessorNode`, downsampled to 16 kHz mono. No VU metering. |
+| **Windows** | `Windows.Media.SpeechRecognition` + `Windows.Media.SpeechSynthesis`. No native VU metering for TTS, and the native recognizer exposes no mic level — capture-side metering (`IAudioSource`, and therefore cloud STT) still works. |
+| **Browser (Blazor WASM)** | Web Speech API for STT + TTS; reliability varies by browser (Chromium is most consistent). `IAudioSource` captures raw PCM via `getUserMedia` + `ScriptProcessorNode`, downsampled to 16 kHz mono — metered from that PCM, so mic VU works even though playback and Web Speech metering don't. |
 
 ## What `Shiny.Speech` deliberately does not do
 

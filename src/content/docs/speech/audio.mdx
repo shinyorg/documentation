@@ -4,8 +4,9 @@ title: Audio (Monitor & Devices)
 
 `Shiny.Audio` is the standalone audio backbone under `Shiny.Speech` — usable on its own for
 recording and playback without the speech stack. Alongside capture (`IAudioSource`) and playback
-(`IAudioPlayer`) it provides a **live microphone monitor** (`IAudioMonitor`) and **audio route
-enumeration/selection** (`IAudioDevices`), all discoverable through a single `IAudio` facade.
+(`IAudioPlayer`) — both with normalized **VU metering** — it provides a **live microphone monitor**
+(`IAudioMonitor`) and **audio route enumeration/selection** (`IAudioDevices`), all discoverable
+through a single `IAudio` facade.
 
 ## Registration
 
@@ -101,6 +102,48 @@ and restored on `Stop`.
 **AirPlay (HomePod / Apple TV) is not supported for a live mic** — iOS only permits AirPlay for
 playback, not while recording. Use Bluetooth for a wireless live PA.
 
+## Microphone metering (`IAudioSource`)
+
+Capture raises `InputLevelChanged` with a normalized `0.0`–`1.0` level while it streams PCM — a mic
+VU meter for a record button, a "we're hearing you" indicator, or a silence detector. Unlike the
+playback meter it needs no capability check: it's computed from the captured PCM itself, so it works
+on **every** platform, including the browser.
+
+```csharp
+using Shiny.Audio;
+
+public partial class RecorderViewModel(IAudio audio) : ObservableObject
+{
+    [ObservableProperty] double level;   // bind to a VU bar
+
+    public async Task Record(CancellationToken ct)
+    {
+        var source = audio.Source;
+        if (await source.RequestAccess() != AccessState.Available)
+            return;
+
+        source.InputLevelChanged += (_, l) =>
+            MainThread.BeginInvokeOnMainThread(() => Level = l);
+
+        var pcm = await source.StartCaptureAsync(cancellationToken: ct);
+        // consume the 16 kHz / 16-bit / mono stream...
+        await source.StopCaptureAsync();
+        Level = 0;
+    }
+}
+```
+
+Events are raised on the capture thread and throttled to roughly 20/sec (peak-held in between), so a
+bound bar stays smooth without flooding the UI thread. If you'd rather meter the PCM yourself — say
+you're buffering it elsewhere — the same mapping is public:
+
+```csharp
+var level = AudioLevel.FromPcm16(buffer.AsSpan(0, bytesRead));   // 0.0 - 1.0
+```
+
+`AudioLevel` maps linear RMS to dBFS against a -50 dB noise floor. Every meter in the library goes
+through it, so mic and playback bars read on the same scale.
+
 ## Audio devices (`IAudioDevices`)
 
 Its most reliable use is **displaying where audio is flowing** and reacting to route changes — e.g.
@@ -192,6 +235,8 @@ before touching bound properties.
 | Capability | iOS / Mac Catalyst | Android | Windows | Browser |
 |---|---|---|---|---|
 | `IAudioPlayer` / `IAudioSource` | ✅ | ✅ | ✅ | ✅ |
+| `IAudioSource.InputLevelChanged` (mic VU) | ✅ | ✅ | ✅ | ✅ |
+| `IAudioPlayer.AudioLevelChanged` (playback VU) | ✅ | ✅ | ❌ | ❌ |
 | `IAudioPlayer.Volume` (read) | ✅ | ✅ | ✅ | ✅ |
 | `IAudioPlayer.Volume` (set) | ❌ ¹ | ✅ | ✅ | ✅ |
 | `IAudioMonitor` (live monitor) | ✅ | ✅ | ❌ | ❌ |

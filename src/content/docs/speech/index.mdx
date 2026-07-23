@@ -37,7 +37,8 @@ Shiny.Speech provides a unified API for **speech-to-text**, **text-to-speech**, 
 * Microsoft.Extensions.AI adapter — expose providers as `ISpeechToTextClient` / `ITextToSpeechClient`
 * Runtime credential changes — provider config objects are mutable singletons; rotate API keys / region / model without re-registration
 * State tracking — `IsListening` (STT), `IsSpeaking` (TTS), `IsPlaying` (audio)
-* VU meter signal — `AudioLevelChanged` event on `ITextToSpeechService` and `IAudioPlayer` emits a normalized 0.0–1.0 RMS level during playback; `IsPlayerAnalysisSupported` reports availability per platform
+* VU meter signal (outgoing) — `AudioLevelChanged` event on `ITextToSpeechService` and `IAudioPlayer` emits a normalized 0.0–1.0 RMS level during playback; `IsPlayerAnalysisSupported` reports availability per platform
+* VU meter signal (incoming) — `InputLevelChanged` event on `ISpeechToTextService` (gated by `IsInputAnalysisSupported`), `IAudioSource` (every platform), and `IAudioMonitor` emits the same normalized 0.0–1.0 level from the microphone
 * Permission management via `AccessState` and `RequestAccess()`
 * Convenience extension methods: `ListenUntilSilence`, `StatementAfterKeyword`, `WaitListenForKeywords`, `ListenForKeywords`
 * CarPlay compatible — iOS audio routes through the car's mic/speakers automatically when CarPlay is active
@@ -196,25 +197,51 @@ public class MyViewModel
 }
 ```
 
-## VU Meter (Audio Level)
+## VU Meters (Audio Levels)
 
-Both `ITextToSpeechService` and `IAudioPlayer` expose an `AudioLevelChanged` event that fires periodically while audio is playing, with a single normalized RMS level in the `0.0`–`1.0` range. Use it to drive a VU bar, waveform pulse, or speaking indicator. Check `IsPlayerAnalysisSupported` before binding UI — it's `false` on platforms where metering isn't available (e.g. Windows native TTS, Browser).
+Both directions are metered on the same normalized `0.0`–`1.0` scale — a "speaking" bar for what
+comes out of the speaker and a "listening" bar for what goes into the mic.
+
+### Outgoing — playback / TTS
+
+`ITextToSpeechService` and `IAudioPlayer` raise `AudioLevelChanged` while audio is playing. Check
+`IsPlayerAnalysisSupported` before binding UI — it's `false` where metering isn't available (Windows
+native TTS, Browser).
+
+### Incoming — microphone
+
+`ISpeechToTextService` raises `InputLevelChanged` while listening; check `IsInputAnalysisSupported`.
+The lower-level `IAudioSource.InputLevelChanged` (raw capture, supported everywhere, no flag) and
+`IAudioMonitor.InputLevelChanged` (live mic-to-output) emit the same signal.
 
 ```csharp
-public partial class TtsViewModel(ITextToSpeechService tts) : ObservableObject
+public partial class VoiceViewModel : ObservableObject
 {
-    [ObservableProperty] double audioLevel; // 0.0 .. 1.0
-    public bool IsVuSupported => tts.IsPlayerAnalysisSupported;
+    [ObservableProperty] double speakingLevel;    // 0.0 .. 1.0
+    [ObservableProperty] double listeningLevel;
 
-    public TtsViewModel(ITextToSpeechService tts) : this(tts)
-        => tts.AudioLevelChanged += (_, level) =>
-            MainThread.BeginInvokeOnMainThread(() => AudioLevel = level);
+    public bool IsSpeakingVuSupported { get; }
+    public bool IsListeningVuSupported { get; }
+
+    public VoiceViewModel(ITextToSpeechService tts, ISpeechToTextService stt)
+    {
+        IsSpeakingVuSupported = tts.IsPlayerAnalysisSupported;
+        IsListeningVuSupported = stt.IsInputAnalysisSupported;
+
+        tts.AudioLevelChanged += (_, level) =>
+            MainThread.BeginInvokeOnMainThread(() => SpeakingLevel = level);
+
+        stt.InputLevelChanged += (_, level) =>
+            MainThread.BeginInvokeOnMainThread(() => ListeningLevel = level);
+    }
 }
 ```
 
 ```xml
-<ProgressBar Progress="{Binding AudioLevel}"
-             IsVisible="{Binding IsVuSupported}" />
+<ProgressBar Progress="{Binding SpeakingLevel}"
+             IsVisible="{Binding IsSpeakingVuSupported}" />
+<ProgressBar Progress="{Binding ListeningLevel}"
+             IsVisible="{Binding IsListeningVuSupported}" />
 ```
 
 | Surface | iOS / macOS | Android | Windows | Browser |
@@ -222,8 +249,21 @@ public partial class TtsViewModel(ITextToSpeechService tts) : ObservableObject
 | Native TTS (`ITextToSpeechService`) | ✅ — `AVAudioEngine` + player-node tap | ✅ — `OnAudioAvailable` RMS | ❌ | ❌ |
 | Cloud TTS (`CloudTextToSpeech`) | ✅ — forwarded from `IAudioPlayer` | ✅ — forwarded from `IAudioPlayer` | ❌ | ❌ |
 | Generic playback (`IAudioPlayer`) | ✅ — `AVAudioPlayer.MeteringEnabled` | ✅ — `Visualizer` on session | ❌ | ❌ |
+| Cloud STT (`CloudSpeechToText`) | ✅ — forwarded from `IAudioSource` | ✅ — forwarded from `IAudioSource` | ✅ — forwarded from `IAudioSource` | ✅ — forwarded from `IAudioSource` |
+| Native STT (`ISpeechToTextService`) | ✅ — recognizer input-node tap | ✅ — `OnRmsChanged` | ❌ | ❌ |
+| Capture (`IAudioSource`) | ✅ | ✅ | ✅ | ✅ |
+| Monitor (`IAudioMonitor`) | ✅ | ✅ | n/a | n/a |
+
+Cloud recognition meters the `IAudioSource` feeding the provider, so a mic meter works on every
+platform. Native recognition depends on what the OS exposes: Apple taps the recognizer's own input
+node, Android forwards `SpeechRecognizer.OnRmsChanged`, while the Windows and Web Speech recognizers
+own the mic and surface no level at all.
 
 On iOS / macOS the native TTS path routes `AVSpeechSynthesizer` through `AVAudioEngine` + `AVAudioPlayerNode` so a tap can compute RMS. The engine is created lazily and kept warm across utterances — first-utterance latency adds roughly 50–150 ms; subsequent calls are indistinguishable from the legacy direct path.
+
+Level events are raised off the UI thread (capture-side ones are throttled to ~20/sec, peak-held in
+between) — marshal before mutating bound properties, and reset your bound value to `0` when playback
+or listening ends so the meter drains.
 
 ## Voice Processing (Noise Suppression & Echo Cancellation)
 
