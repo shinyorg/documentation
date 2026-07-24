@@ -143,6 +143,32 @@ tools.AddType(jsonContext.Customer, capabilities: DocumentAICapabilities.All, co
 });
 ```
 
+## Non-removable access filters
+
+`AllowProperties`/`IgnoreProperties` control which *fields* the LLM sees. To control which *rows* (documents) it can reach, register a fixed predicate with `Where`. It is a hard, server-side scope boundary: the model never sees it, cannot disable it, and cannot widen past it — it is AND-combined with whatever `filter` the model supplies. Call `Where` more than once to require several conditions.
+
+```csharp
+tools.AddType(jsonContext.Order, capabilities: DocumentAICapabilities.All, configure: b => b
+    .Where(o => o.TenantId == "acme")       // the model only ever works within this tenant…
+    .Where(o => !o.IsArchived));            // …and never sees archived orders
+```
+
+The filter is enforced on **every** tool for the type, not just queries:
+
+| Tool | Enforcement |
+|------|-------------|
+| `query` / `count` / `aggregate` | The predicate is pushed into the store query, so out-of-scope documents are never returned or counted — even if the model's `filter` names them explicitly. |
+| `get_by_id` | An out-of-scope id returns `{ found: false }` — indistinguishable from a missing document. |
+| `delete` | An out-of-scope id is refused and returns `{ deleted: false }`; the document is left untouched. |
+| `insert` | A document that would fall outside the filter is rejected and never written. |
+| `update` | The incoming document must satisfy the filter (the model cannot move a record out of scope) **and** the stored record being replaced must already be in scope (the model cannot overwrite a document it isn't allowed to see). Returns `{ updated: false }` when the stored record is out of scope. |
+
+Because AI tools are typically registered once as singletons, `Where` is designed for **stable** scopes — capture a constant (or a value fixed for the lifetime of the registration) rather than per-request state. For request-scoped isolation (per-user, per-tenant HTTP context) prefer the store-level [multi-tenancy and global query filters](/documentdb/query-filters/), which resolve their captured values per query.
+
+The predicate is evaluated with the same compile-free, AOT-safe machinery the store uses — keep it to the LINQ constructs the store can translate (the same set supported by a normal `Query<T>().Where(...)`).
+
+> **Scoped `update` requires an `Id` property.** The update path re-fetches the stored record by its `Id` to verify scope. Types whose identifier is mapped to a differently-named property (via `MapIdProperty`) can't be re-fetched this way, so a scoped `update` on such a type throws. `Get`/`Delete`/`Insert`/`Query` are unaffected.
+
 ## Structured Filters
 
 The query, count, and aggregate tools accept a structured `filter` parameter that supports nested boolean logic. The LLM constructs filter objects; the library translates them to LINQ expressions against the document store.
