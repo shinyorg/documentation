@@ -290,6 +290,18 @@ export const sidebarTopics = [
           { label: 'Release Notes', link: 'contactstore/release-notes' }
         ]
       },
+      {
+        label: 'Calendar Store',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'calendarstore/' },
+          { label: 'Permissions', link: 'calendarstore/permissions' },
+          { label: 'Querying', link: 'calendarstore/querying' },
+          { label: 'AI Tools', link: 'calendarstore/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'calendarstore/release-notes' }
+        ]
+      },
     ]
   },
   {

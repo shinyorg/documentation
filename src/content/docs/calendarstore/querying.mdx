@@ -1,0 +1,68 @@
+---
+title: Querying
+description: LINQ querying of calendar events with native fetch hints and in-memory fallback
+---
+
+`ICalendarStore.Query()` returns an `IQueryable<CalendarEvent>`. The query provider inspects your
+`Where` predicate and pushes three things down to the **native fetch** — the calendar id and the
+start/end date window — because those map directly onto the platform event query. Every other part of
+the predicate (title/location/description text, attendee filters, availability, …) is applied
+**in-memory** after the fetch. The full predicate is always re-applied in-memory, so results are exact
+regardless of native window semantics.
+
+## Native fetch hints
+
+| Expression                      | Effect |
+|---------------------------------|--------|
+| `e.CalendarId == "id"`          | Restricts the fetch to that calendar. |
+| `e.Start >= someDate`           | Sets the window lower bound. |
+| `e.End <= someDate`             | Sets the window upper bound. |
+
+Everything else runs in-memory.
+
+## Examples
+
+```csharp
+// Events on one calendar in the next week (fully native window)
+var upcoming = store.Query()
+    .Where(e => e.CalendarId == calId
+             && e.Start >= DateTimeOffset.Now
+             && e.End <= DateTimeOffset.Now.AddDays(7))
+    .ToList();
+
+// Free-text title filter (window native, title in-memory)
+var standups = store.Query()
+    .Where(e => e.Start >= DateTimeOffset.Now.AddDays(-30)
+             && e.Title.Contains("Standup"))
+    .ToList();
+
+// Attendee filter (in-memory) with paging
+var withAlice = store.Query()
+    .Where(e => e.Attendees.Any(a => a.Email == "alice@example.com"))
+    .Skip(0)
+    .Take(20)
+    .ToList();
+
+// Count
+var count = store.Query()
+    .Where(e => e.Availability == EventAvailability.Busy)
+    .Count();
+```
+
+:::note
+If you supply **no** date window, the fetch defaults to a bounded range (roughly one month back to
+three months ahead) so the platform query stays fast. Always add a `Start`/`End` window when you need
+a specific range.
+:::
+
+## Direct fetch
+
+When you already know the window, `GetEvents` is the direct equivalent of the native fetch:
+
+```csharp
+var events = await store.GetEvents(
+    calendarId: calId,
+    start: DateTimeOffset.Now,
+    end: DateTimeOffset.Now.AddMonths(1)
+);
+```

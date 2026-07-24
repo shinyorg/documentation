@@ -1,0 +1,80 @@
+---
+title: AI Tools
+description: Expose ICalendarStore to LLM agents as Microsoft.Extensions.AI tools with per-operation allow-listing
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+The optional **`Shiny.Calendar.Extensions.AI`** package exposes `ICalendarStore` as
+[`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions (`AIFunction`s) for
+LLM agents. You opt-in **per operation** — read, create, update, delete — an allow-list you control on
+behalf of the agent (this is **not** an OS permission prompt; the platform calendar permission must
+already be granted). AOT-compatible: hand-built schemas and `JsonNode` results, no reflection.
+
+<NugetDownloads name="Shiny.Calendar.Extensions.AI" />
+
+## Setup
+
+```csharp
+using Shiny.Calendar;
+using Shiny.Calendar.Extensions.AI;
+
+builder.Services.AddCalendarStore();                       // registers ICalendarStore
+builder.Services.AddCalendarAITools(tools => tools
+    .AddCalendar(CalendarAICapabilities.Read | CalendarAICapabilities.Create)
+);
+```
+
+Resolve the bundle and hand the tools to any `IChatClient`:
+
+```csharp
+var tools = sp.GetRequiredService<CalendarAITools>().Tools;
+var response = await chatClient.GetResponseAsync(
+    messages,
+    new ChatOptions { Tools = [.. tools] }
+);
+```
+
+## Capabilities
+
+`CalendarAICapabilities` is a `[Flags]` enum, so each operation toggles independently:
+
+| Flag     | Tools exposed |
+|----------|---------------|
+| `Read`   | `list_calendars`, `search_events`, `get_event` |
+| `Create` | `create_event` |
+| `Update` | `update_event` |
+| `Delete` | `delete_event` |
+| `Write`  | `Create \| Update \| Delete` |
+| `All`    | `Read \| Write` |
+
+```csharp
+// read + create only — the agent can add events but not modify or delete them
+.AddCalendar(CalendarAICapabilities.Read | CalendarAICapabilities.Create)
+
+// full access
+.AddCalendar(CalendarAICapabilities.All)
+```
+
+## Generated Tools
+
+| Tool | Capability | Description |
+|------|-----------|-------------|
+| `list_calendars` | Read | Lists device calendars (id, name, colour, read-only). |
+| `search_events`  | Read | Events in a date window, optional calendar id + free-text query. |
+| `get_event`      | Read | Full detail for one event (attendees, reminders, recurrence). |
+| `create_event`   | Create | Creates an event (title, start, end required; ISO-8601 dates). |
+| `update_event`   | Update | Updates supplied fields on an existing event. |
+| `delete_event`   | Delete | Deletes an event by id. |
+
+## Key Types
+
+- `AddCalendarAITools(Action<ICalendarAIToolBuilder>)` — DI extension; throws if nothing is added.
+- `ICalendarAIToolBuilder` — `AddCalendar(CalendarAICapabilities)`.
+- `CalendarAICapabilities` `[Flags]` — `None`, `Read`, `Create`, `Update`, `Delete`, `Write`, `All`.
+- `CalendarAITools` — resolve from DI; `.Tools` is `IReadOnlyList<AITool>`.
+
+:::caution
+The AI tools assume permissions are already granted — they do **not** trigger the platform permission
+UI (which needs a foreground activity). Call `ICalendarStore.RequestAccess(...)` from the app before
+invoking the agent. `delete_event` is irreversible — instruct the model to confirm with the user first.
+:::

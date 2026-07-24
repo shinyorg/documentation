@@ -102,12 +102,38 @@ await player.PlayAsync(track);
 player.Seek(startAt);
 ```
 
+## VU metering — `IVuMeter`
+
+For a live meter that updates as the song plays, `IMusicPlayer.CreateVuMeter(...)` returns an `IVuMeter` that raises a plain `LevelChanged` event. The **source of the levels differs by platform** — deliberately:
+
+- **Android** taps the **real audio output** via `android.media.audiofx.Visualizer` attached to the player's audio session (`IsLive == true`). This reflects what's actually being output. It requires the `RECORD_AUDIO` permission (the OS gates output capture like recording): add `<uses-permission android:name="android.permission.RECORD_AUDIO" />` and request it at runtime. Without it, the meter falls back to the implied version.
+- **Apple** uses the **implied** meter (`IsLive == false`): it samples the offline `AudioLevels` at the current playback position, because the system player (`MPMusicPlayerController`) plays out of process and exposes no output tap. Pass the `AnalyzeLevelsAsync` result so it has an envelope to read.
+
+```csharp
+var levels = await library.AnalyzeLevelsAsync(track.Id);   // used by the implied (Apple) meter
+var meter = player.CreateVuMeter(levels);                  // interval defaults to 50ms
+meter.LevelChanged += (_, level) =>
+{
+    // level.Rms / level.Peak are 0.0–1.0. LevelChanged may fire on a background thread.
+    MainThread.BeginInvokeOnMainThread(() => DrawVu(level.Rms, level.Peak));
+};
+meter.Start();
+// ...
+meter.Dispose();
+```
+
+Check `meter.IsLive` if you want to tell the user whether the meter is a true output tap or the implied approximation. The implied meter reflects the *song's* loudness at the play-head (not volume/duck changes); the live Android meter reflects the real output. To sample a single position without a running meter, call `audioLevels.SampleAt(position)`.
+
 ## Platform notes
 
-- **Android** decodes via `MediaExtractor` + `MediaCodec` to 16-bit PCM.
-- **Apple platforms** read the asset's PCM directly via `AVAssetReader` — no export and no playback. DRM-protected assets fail to open and yield `null`.
+Both platforms copy the track to a **temporary file** and decode that, rather than the live asset:
 
-Both platforms down-mix to a single mono envelope at a fixed rate, so `AudioLevels` is comparable across devices. Analysis decodes the whole track, so it is a background operation — run it off the UI thread (both methods already do their work on a background task) and cache the result if you need it repeatedly.
+- **Android** copies the track and decodes it with `MediaExtractor` + `MediaCodec` to 16-bit PCM.
+- **Apple platforms** export the track with `AVAssetExportSession` and read it with `AVAssetReader`. DRM-protected tracks aren't exportable and yield `null`.
+
+Decoding a temporary copy is deliberate: while a track is playing, the OS music player holds the live asset (on iOS `MPMusicPlayerController` owns the `ipod-library` asset), and reading it directly would fail — so analysis would only work while stopped. The temp copy keeps analysis working **during playback**, which is exactly what a "now playing" waveform needs.
+
+Both platforms down-mix to a single mono envelope at a fixed rate, so `AudioLevels` is comparable across devices. Analysis copies and decodes the whole track, so it is a background operation — both methods already do their work on a background task; cache the result if you need it repeatedly.
 
 ## Using it from an AI agent
 
