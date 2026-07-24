@@ -261,6 +261,7 @@ export const sidebarTopics = [
           { label: 'Lyrics', link: 'music/lyrics' },
           { label: 'Album Art', link: 'music/album-art' },
           { label: 'Copying Tracks', link: 'music/copying' },
+          { label: 'Audio Analysis', link: 'music/analysis' },
           { label: 'AI Tools', link: 'music/ai-tools' },
           { label: 'Release Notes', link: 'music/release-notes' }
         ]
