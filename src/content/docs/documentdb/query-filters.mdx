@@ -4,6 +4,10 @@ title: Global Query Filters
 
 Register a predicate that's automatically AND-applied to every query of `T` — the same shape as Entity Framework Core's `HasQueryFilter`. Use it for soft-delete, row-level security, or any "active only" scope that should be transparent to consumer code.
 
+:::tip[Soft delete is built in]
+For the soft-delete case you don't have to wire the filter (or the write side) yourself — `AddSoftDelete<T>(x => x.IsDeleted)` registers the filter *and* turns `Remove`/`ExecuteDelete`/`Clear` into flag updates. See [Soft Delete](/documentdb/soft-delete).
+:::
+
 ## Registration
 
 ```csharp
@@ -16,7 +20,7 @@ var store = new DocumentStore(new DocumentStoreOptions
 .AddQueryFilter<Order>("status", o => o.Status != "Archived"));
 ```
 
-`AddQueryFilter<T>` is available on `DocumentStoreOptions` (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, DuckDB) and on the provider-specific options classes for `LiteDbDocumentStore`, `CosmosDbDocumentStore`, `MongoDbDocumentStore`, and `IndexedDbDocumentStore`.
+`AddQueryFilter<T>` is available on `DocumentStoreOptions` (SQLite, SQLCipher, PostgreSQL, CockroachDB, MySQL, MariaDB, SQL Server, Oracle, DuckDB) and on every provider options class (LiteDB, MongoDB, Cosmos DB, IndexedDB, Redis, RavenDB, Firestore, Azure Table, DynamoDB). It is also on `IDocumentStoreOptions`, the provider-agnostic slice — that's how a feature like [soft delete](/documentdb/soft-delete) registers a filter once for every provider.
 
 Multiple filters compose with AND. User-supplied `.Where(...)` predicates are AND'd on top.
 
@@ -50,7 +54,7 @@ var dump = await store.Query<Order>().IgnoreQueryFilters("tenant", "status").ToL
 ```
 
 :::caution[Call before `Select(...)`]
-`IgnoreQueryFilters` must be called on the source query, **before** `Select(...)`. Calling it on a projected query throws `InvalidOperationException`.
+`IgnoreQueryFilters` must be called on the source query, **before** `Select(...)`. Calling it on a projected query throws `NotSupportedException` (it was `InvalidOperationException` on the relational providers before 12.0).
 :::
 
 ## Captured variables re-read per query
@@ -74,7 +78,7 @@ This makes filters a natural building block for per-request multi-tenancy withou
 
 - **`JsonTypeInfo<T>` is required** when filters are registered on SQL providers — the filter is translated by the same expression visitor as `Where`. Configure a `JsonSerializerContext` via `DocumentStoreOptions.JsonSerializerOptions`, or pass `JsonTypeInfo<T>` to call sites that take it. Without one, the first filtered call throws `InvalidOperationException`.
 - **Insert bypasses filters by design.** A user who inserts a `User { IsDeleted = true }` will have a row that's immediately invisible to subsequent queries — match EF Core's behavior. Catch this at the API layer if it matters.
-- **Spatial sidecar tables** are aware of single-row Remove (skipped when the filter rejects) but `Clear<T>()` with active filters skips the spatial clear entirely to avoid over-deleting. If you mix soft-delete with spatial indexing, prefer `Update` (setting the deleted flag) over `Remove`.
+- **Spatial sidecar tables** are aware of single-row Remove (skipped when the filter rejects) but `Clear<T>()` with active filters skips the spatial clear entirely to avoid over-deleting. If you mix soft-delete with spatial indexing, prefer `Update` (setting the deleted flag) over `Remove` — or use [`AddSoftDelete`](/documentdb/soft-delete), which never issues a delete at all, so the sidecar rows simply stay with the document.
 
 ## Relationship to `TenantIdAccessor`
 

@@ -297,3 +297,63 @@ SQLite quotes table identifiers with `"` so a type named `Order` or `User` works
 | Existing MongoDB estate / document-native workloads | **MongoDB** — typed BSON storage, full nested-field indexing via Mongo tooling, compensating transactions |
 | Embedded, no native dependencies, Windows-friendly | **LiteDB** — client-side query evaluation, fine for small datasets |
 | Blazor WebAssembly, client-only persistence | **IndexedDB** — zero native deps; if you need predicate push-down on large data, switch to SQLite-in-WASM |
+
+## Writing a provider (12.0+)
+
+The document providers in this repo share one implementation of `IDocumentQuery<T>`, and an out-of-repo provider can use it too. Derive from **`DocumentQueryBase<T>`** and supply four members — everything else (builder state and immutability, query-filter resolution, the client-side terminals, grouping, cursor pagination, string projection, and the whole set-based-write interceptor dance) is inherited:
+
+```csharp
+public class MyDocumentQuery<T> : DocumentQueryBase<T> where T : class
+{
+    readonly MyStore store;
+
+    internal MyDocumentQuery(MyStore store, JsonTypeInfo<T>? typeInfo)
+        : base(store.BuildQueryContext(typeInfo)) => this.store = store;
+
+    MyDocumentQuery(MyDocumentQuery<T> source) : base(source) => this.store = source.store;
+
+    protected override DocumentQueryBase<T> Clone() => new MyDocumentQuery<T>(this);
+
+    protected override async Task<QueryExecution<T>> ExecuteAsync(QueryPlan<T> plan, CancellationToken ct)
+        // Narrow however your engine can, then say what you satisfied:
+        //   Candidates(rows)  – nothing applied; the base filters, orders and pages
+        //   Filtered(rows)    – predicates applied server-side, ordering/paging not
+        //   Complete(rows)    – predicates, ordering and paging all applied server-side
+        => QueryExecution<T>.Candidates(await this.store.LoadAllAsync(this.Context.TypeName, ct));
+
+    protected override Task<int> DeleteMatchingAsync(QueryPlan<T> plan, CancellationToken ct)
+        => this.store.DeleteWhereAsync(plan.CompilePredicate(), ct);
+
+    protected override Task<int> SetPropertyMatchingAsync(QueryPlan<T> plan, string jsonPath, object? value, CancellationToken ct)
+        => this.store.SetPropertyWhereAsync(plan.CompilePredicate(), jsonPath, value, ct);
+}
+```
+
+:::caution[Report push-down honestly]
+`QueryExecution<T>` is a contract, not a hint. Claiming ordering you did not apply returns rows in the wrong order; claiming paging you did not apply drops rows. When in doubt return `Candidates` — correct and slower beats fast and wrong.
+:::
+
+Optional hooks (`ObserveChanges`, `FullTextSearchCore`, `NearestVectorsCore`, `ToQueryString`, `ToCursorPage`) throw `NotSupportedException` until you override them, and the aggregate hooks (`CountCore`, `MaxCore`, …) default to materializing — override them only where your engine computes the aggregate itself.
+
+On the store side, derive from `DocumentProviderBase` and implement `Mappings`, `IdCache`, `ResolveTypeInfo`, and `ResolveDocumentTypeName`; your write methods then bracket their persistence with the shared pipeline:
+
+```csharp
+async Task InsertImpl<T>(T document, JsonTypeInfo<T>? jsonTypeInfo, CancellationToken ct) where T : class
+{
+    var write = await this.BeginWriteAsync(DocumentOperation.Insert, document, null, jsonTypeInfo, ct);
+    if (!write.Proceed)                 // an interceptor replaced this write with its own
+        return;
+    document = write.Doc;               // …and may have swapped the document
+
+    var id = this.ResolveInsertId(write, accessor => this.GenerateId(accessor));
+    write.VersionMapping?.SetVersion(document, 1);
+
+    // …your persistence here…
+
+    await this.CompleteWriteAsync(write, id, 1, DocumentChangeType.Inserted, document, ct);
+}
+```
+
+`CompleteWriteAsync` runs the `AfterWrite` chain and publishes the change (buffered until commit when a unit of work is open). `RequireDocumentId(write)` is the update-side counterpart of `ResolveInsertId`.
+
+The `DocumentQueryContext<T>` your store builds carries the type name, telemetry tracker, interceptor pipeline, serializer options, query filters, computed-property applier, and id accessor. On the options side, implement **`IDocumentStoreOptions`** (three explicitly-implemented members) and every cross-cutting feature — soft delete, JSON Schema validation — works on your provider with no further code.

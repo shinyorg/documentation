@@ -1,0 +1,130 @@
+---
+title: Soft Delete
+---
+
+Soft delete keeps deleted documents in the store behind a flag instead of removing them. Map the flag once
+and `Remove`, `ExecuteDelete`, and `Clear` all set it rather than deleting — while every read hides the
+flagged documents, so consumer code carries on as if they were gone.
+
+```csharp
+opts.AddSoftDelete<Customer>(x => x.IsDeleted);
+
+await store.Remove<Customer>("c1");                 // UPDATE … SET IsDeleted = true
+
+await store.Get<Customer>("c1");                    // null
+await store.Query<Customer>().Count();              // excludes c1
+await store.Query<Customer>().IncludeDeleted().Count();   // includes c1
+```
+
+Nothing about this is wired into the stores. It is a [global query filter](/documentdb/query-filters)
+plus an [interceptor that cancels the write](/documentdb/interceptors#replacing-a-write-ctxcancel) and
+performs an update instead — the same two public building blocks you'd use to write your own variant.
+
+## Registration
+
+The flag is either a `bool` (set to `true` on delete) or a nullable `DateTime`/`DateTimeOffset` (stamped
+with the current time, from a DI-registered `TimeProvider` when there is one):
+
+```csharp
+opts.AddSoftDelete<Customer>(x => x.IsDeleted);   // bool      → true,  filter: !IsDeleted
+opts.AddSoftDelete<Order>(x => x.DeletedAt);      // DateTime? → now,   filter: DeletedAt == null
+```
+
+Any other property type throws at registration. A document type has exactly **one** soft-delete flag —
+mapping the same type on a different property throws.
+
+`AddSoftDelete` is an extension method, so on the provider stores it lives in that provider's namespace
+alongside the options type:
+
+```csharp
+using Shiny.DocumentDb.MongoDb;   // for MongoDbDocumentStoreOptions.AddSoftDelete
+
+var opts = new MongoDbDocumentStoreOptions { /* … */ };
+opts.AddSoftDelete<Customer>(x => x.IsDeleted);
+```
+
+## What each write does
+
+| Call | Behavior |
+|---|---|
+| `Remove<T>(id)` | Sets the flag. Returns `true` when a live document matched, `false` otherwise (including a second `Remove` of the same document). |
+| `SoftDelete<T>(id)` | Same thing, spelled explicitly — and it throws if `T` isn't mapped, instead of hard deleting. |
+| `query.ExecuteDelete()` | Re-issued as `ExecuteUpdate` over the *same* predicate and filters; returns the number flagged. |
+| `Clear<T>()` | Flags every live document of the type; returns the count. |
+| `Insert` / `Upsert` | Untouched — like every query filter, the insert path is not filtered. A document inserted with the flag already set is immediately invisible. |
+| `Update<T>` / `SetProperty<T>` | Untouched, but filtered: a flagged document can't be updated by id (it is hidden). |
+
+## Reading deleted documents
+
+```csharp
+// Everything, flagged or not
+var all = await store.Query<Customer>().IncludeDeleted().ToList();
+
+// Only the flagged ones
+var deleted = await store.Query<Customer>().OnlyDeleted().ToList();
+```
+
+`IncludeDeleted()` lifts just the soft-delete filter (it is `IgnoreQueryFilters("soft-delete")`, the name
+being `SoftDelete.FilterName`) — other named filters, including tenancy, stay in force. Call it on the
+source query, before any `Select(...)`.
+
+## Restore, purge, hard delete
+
+```csharp
+// Clear the flag — takes a predicate, not an id (see below). Returns how many were restored.
+await store.Restore<Customer>(x => x.Id == "c1");
+
+// Permanently delete flagged documents: all of them, or a subset. Live documents are never touched.
+await store.PurgeDeleted<Customer>();
+await store.PurgeDeleted<Customer>(x => x.DeletedAt < DateTimeOffset.UtcNow.AddDays(-30));
+
+// Permanently delete one live document, bypassing soft delete
+await store.HardDelete<Customer>("c1");
+```
+
+`Restore` takes a predicate rather than an id because a flagged document is invisible to a by-id write —
+the query filter hides it — so the restore has to run through `IncludeDeleted()`. `PurgeDeleted` and
+`HardDelete` suppress interceptors for the duration of the call, which is also available directly:
+
+```csharp
+using (store.SuppressInterceptors())
+    await store.Remove<Customer>("c1");      // a real DELETE
+```
+
+Await the write **inside** the `using` — the suppression is bound to the async flow, so returning the task
+un-awaited pops it before the write runs. `HardDelete` only reaches documents the filter lets through
+(i.e. not-yet-deleted ones); use `PurgeDeleted` for an already-flagged one.
+
+## Semantics worth knowing
+
+- **Change monitoring sees an update, not a delete.** The write that happens is an update, so
+  [change feeds](/documentdb/change-monitoring) emit `Updated` for a soft delete. Per-query
+  `NotifyOnChange` subscribers, which are filtered, stop seeing the document.
+- **[Temporal](/documentdb/temporal) history records an update** for the same reason — the document is
+  still there, so there is no `Removed` entry.
+- **The soft-delete interceptor runs last.** Its `Order` is `int.MaxValue`, so your own interceptors still
+  observe the `Delete` before it is replaced. An interceptor that cancels earlier wins, and soft delete
+  never runs for that write.
+- **The mapping is per document type, process-wide.** It has to be, so `Restore` / `PurgeDeleted` /
+  `OnlyDeleted` can find the flag from a bare `IDocumentStore`. Registering the same type on two stores
+  with the same property is fine; a different property throws.
+- **`JsonTypeInfo<T>` is required on the SQL providers**, as with any query filter — the predicate is
+  translated by the same expression visitor as `Where`.
+
+## Provider support
+
+Available wherever query filters and interceptors are — every provider. `AddSoftDelete` sits on
+`DocumentStoreOptions` (SQLite, SQLCipher, PostgreSQL, CockroachDB, MySQL, MariaDB, SQL Server, Oracle,
+DuckDB) and on each provider options class (LiteDB, MongoDB — and so Amazon DocumentDB, Cosmos DB,
+IndexedDB, Redis, RavenDB, Firestore, Azure Table, DynamoDB).
+
+The end-to-end round trip is covered by tests on SQLite (relational), LiteDB (embedded document store),
+and MongoDB (server document store); the other providers share the same interceptor and query-filter
+wiring rather than having a separate implementation.
+
+## Rolling your own
+
+Soft delete is deliberately thin, so a variant is easy — e.g. moving the document to an archive type
+instead of flagging it. See
+[Replacing a write (`ctx.Cancel()`)](/documentdb/interceptors#replacing-a-write-ctxcancel): perform the
+write you want through `ctx.Store` / `ctx.Session`, call `ctx.Cancel()`, and the store issues nothing.

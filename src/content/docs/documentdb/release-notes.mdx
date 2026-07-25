@@ -5,6 +5,67 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 12.0 - July 25, 2026
+
+<RN type="breaking">
+**Query builders are immutable everywhere — the relational query no longer mutates in place.** `Where`, `OrderBy`, `OrderByDescending`, `Paginate`, and `IgnoreQueryFilters` on the relational `DocumentStore` used to add to the query object and return **the same instance**; every document provider (MongoDB, Cosmos, LiteDB, Redis, RavenDB, Firestore, Azure Table, DynamoDB, IndexedDB) has always returned a **copy**. Both now return a copy, which is also what `IQueryable`/EF Core callers expect. Code that relied on the relational behavior silently loses its clause:
+
+```csharp
+var q = store.Query<User>();
+if (activeOnly)
+    q.Where(x => !x.IsDeleted);   // ← was applied on SQL, discarded everywhere else; now discarded everywhere
+await q.ToList();
+
+q = q.Where(x => !x.IsDeleted);   // ← assign the result (correct on every provider)
+```
+
+Sweep for builder calls used as statements — the compiler cannot flag them.
+</RN>
+
+<RN type="breaking">
+**Composing a query after `Select(...)`/`Project(...)` throws `NotSupportedException` everywhere.** The relational providers threw `InvalidOperationException` for these ~20 guards while the nine document providers threw `NotSupportedException`. They are all `NotSupportedException` now. Only code that catches the specific type is affected; the messages are unchanged. (The unrelated "this operation requires a `JsonTypeInfo<T>`" errors stay `InvalidOperationException`.)
+</RN>
+
+<RN type="feature">
+**`IDocumentStoreOptions` — one extension point for cross-cutting features on every provider.** A small interface (`AddInterceptor` / `AddBulkInterceptor` / `AddQueryFilter`), implemented explicitly by `DocumentStoreOptions` and every provider options class, so a feature that only needs those can be written once instead of once per provider. `AddSoftDelete<T>` collapsed from ten files to one, and `MapJsonSchema` (previously relational-only) now works on **every** provider. Each options class keeps its own strongly-typed fluent methods, so existing configuration code is unchanged.
+</RN>
+
+<RN type="feature">
+**`DocumentQueryBase<T>` — the shared query surface the document providers now build on.** The nine non-relational `IDocumentQuery<T>` implementations were 70–88% identical: the same builder state, the same client-side terminals, the same interceptor plumbing, re-typed per provider. They now derive from a public `DocumentQueryBase<T>` and supply only what is genuinely theirs — a `Clone`, an `ExecuteAsync(QueryPlan<T>)`, and the two set-based write primitives. **~3,700 lines of duplicated provider code deleted.** Push-down is preserved and explicit: `ExecuteAsync` returns a `QueryExecution<T>` saying how much of the plan the engine satisfied (`Complete` for MongoDB/Cosmos, `Candidates` for the key-value stores, `Partial` in between), and the base applies only the remainder client-side. Cosmos and MongoDB keep their server-side `COUNT`/aggregates by overriding the aggregate hooks; Firestore keeps its native keyset cursor. The base is **public**, so an out-of-repo provider gets the same deal — implement four members instead of ~450 lines. Behavior is covered by a new cross-provider conformance suite (below) that runs on all 17 providers.
+</RN>
+
+<RN type="feature">
+**The single-document write pipeline moved to `DocumentProviderBase`.** Every document provider's `Insert`/`Update`/`Upsert`/`Remove` opened with the same preamble (resolve type info, id accessor, type name and version mapping; build the write context; run `BeforeWrite`; honor a cancel; take a replacement document) and closed with the same tail (`AfterWrite`, then publish the change) — nine copies of it, which is why v11.4's `ctx.Cancel()` needed 45 hand-edited guards. That flow is now `BeginWriteAsync` / `ResolveInsertId` / `RequireDocumentId` / `CompleteWriteAsync` on the base, along with one `ChangeBroadcaster` and the unit-of-work-buffered `PublishChange` that five stores each re-implemented. Persistence, conflict handling, and id generation stay per provider — they genuinely differ (Redis `SET NX`, Cosmos ETag, DynamoDB conditional writes, Azure Table 409). Providers implement four new hooks: `Mappings`, `IdCache`, `ResolveTypeInfo`, `ResolveDocumentTypeName`.
+</RN>
+
+<RN type="feature">
+**Cross-provider conformance suites.** `DocumentQueryConformanceTestsBase` and `SoftDeleteConformanceTestsBase` assert the `IDocumentQuery<T>` contract, soft delete, and interceptor cancellation identically on **every** provider (relational + document), wired through a new `IDocumentStoreFixture.CreateStore(table, Action<IDocumentStoreOptions>)` hook. They found the four fixes below on their first run, and they are what makes provider-level refactoring safe.
+</RN>
+
+<RN type="fix">
+**Boolean properties in a predicate were broken on MySQL, MariaDB, and SQL Server.** A `bool` JSON value was extracted as the *text* `'true'`/`'false'` and compared against `1`/`0`, so `Where(x => x.IsActive)` (or any bool query filter, including soft delete's) failed with `Truncated incorrect DOUBLE value: 'false'` on MySQL/MariaDB. On SQL Server a bare bool predicate produced `An expression of non-boolean type specified in a context where a condition is expected` — `BIT` is a value, not a condition. Both providers now normalize a bool extract to `1`/`0`, and a new `IDatabaseProvider.BoolCondition` hook wraps it as a condition where the dialect requires it (SQL Server). PostgreSQL, SQLite, DuckDB, Oracle, and CockroachDB were unaffected.
+</RN>
+
+<RN type="fix">
+**Cosmos DB: `query.ExecuteUpdate(...)` failed with a 404.** The update read matching items with a narrowed `SELECT c.id, c.data` projection and wrote the result back with `ReplaceItemAsync` — so the round-tripped body had no `typeName`, which is the partition key, and Cosmos rejected the replace as *Resource Not Found*. The whole item is now selected before the write-back.
+</RN>
+
+<RN type="fix">
+**Cosmos DB: `SetProperty`/`RemoveProperty` ignored global query filters.** Every other provider returns `false` when the stored document fails a filter (it is invisible), but Cosmos wrote through regardless — so a soft-deleted document could still be updated by id. Both now check the filters before replacing.
+</RN>
+
+<RN type="feature">
+**Interceptors can now replace a write, not just observe it — `ctx.Cancel()`.** `BeforeWrite` gained `DocumentWriteContext.Cancel(bool succeeded = true)` and `BeforeBulkWrite` gained `DocumentBulkContext.Cancel(int affected = 0)`. Cancelling means "I performed this write myself": the store issues **no** write for the operation, no `AfterWrite`/`AfterBulkWrite` fires, no change notification or temporal history entry is written, and later interceptors in the chain are skipped. The caller still gets a normal result — `Cancel(false)` makes `Remove` return `false`, `Cancel(n)` makes `ExecuteDelete`/`ExecuteUpdate`/`Clear` return `n`. Previously the only lever was throwing, which aborts the write *and* the surrounding unit, so an interceptor could never change the shape of an operation (delete → update). Write your replacement through `ctx.Store`/`ctx.Session`, which are transaction-bound, so it commits with whatever unit the original write belonged to. To support re-issuing a set-based write differently, `DocumentBulkContext` also gained `QueryAs<T>()` (the originating query — same predicate, same filters; null for `Clear`) and now carries `Store`. `Cancel()` is valid only inside the before-hook and throws elsewhere; on providers that write a `BatchInsert` as one set, cancelling throws `NotSupportedException` rather than silently writing the row. Supported on every provider. See [Replacing a write](/documentdb/interceptors#replacing-a-write-ctxcancel).
+</RN>
+
+<RN type="feature">
+**Soft delete in the box — `AddSoftDelete<T>(x => x.IsDeleted)`.** Map the flag once and `Remove`, `query.ExecuteDelete()`, and `Clear<T>()` set it instead of deleting, while every read hides the flagged documents; `Query<T>().IncludeDeleted()` reads past it and `OnlyDeleted()` returns just the flagged ones. The flag is a `bool` (set to `true`) or a nullable `DateTime`/`DateTimeOffset` (stamped from a DI-registered `TimeProvider` when present). Comes with `store.SoftDelete<T>(id)`, `store.Restore<T>(predicate)`, `store.PurgeDeleted<T>(predicate?)` (permanently delete flagged documents), `store.HardDelete<T>(id)`, and `store.SuppressInterceptors()` for a raw write. Because a set-based delete is re-issued as an update over the same query, the spatial/vector/blob sidecar rows simply stay with the document instead of being orphaned. It is **not** built into the stores: it is a named query filter (`soft-delete`) plus a cancelling interceptor, composed from the two public building blocks above and shipped as an extension method — `AddSoftDelete` sits on `DocumentStoreOptions` and on each provider's options class (in that provider's namespace). One flag per document type; a second mapping on a different property throws. See [Soft Delete](/documentdb/soft-delete).
+</RN>
+
+<RN type="fix">
+**`SetProperty` / `ExecuteUpdate` with a date, time, or `Guid` value no longer writes malformed JSON.** On the providers that build the value as a JSON literal (SQLite, PostgreSQL/CockroachDB, MySQL/MariaDB, Oracle, DuckDB), a `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, or `Guid` was formatted with an unquoted invariant `ToString()` — `json_set` then rejected the whole statement (`malformed JSON` on SQLite). These now serialize as quoted JSON strings in exactly the format a normal document write produces, so the values also compare correctly against date predicates. SQL Server was unaffected (it binds the value natively).
+</RN>
+
 ## 11.3 - July 24, 2026
 
 <RN type="feature">

@@ -62,7 +62,8 @@ opts.OnAfterWrite<Order>((ctx, ct) => outbox.Enqueue(ctx.Id, ctx.Operation, ct))
 ### Semantics
 
 - `BeforeWrite` runs before serialization. Mutations to `ctx.Document` are persisted. Throwing aborts
-  the write and propagates (there is no separate cancel flag).
+  the write and propagates; `ctx.Cancel()` instead
+  [replaces the write with your own](#replacing-a-write-ctxcancel).
 - `AfterWrite` runs after the core write succeeds, inside the transaction, before commit. If the write
   throws, `AfterWrite` does **not** fire.
 - Multiple interceptors run in registration order.
@@ -90,7 +91,76 @@ opts.AddBulkInterceptor(new BulkAudit());
 ```
 
 `DocumentBulkContext` carries `Operation` (`Update`/`Delete`/`Clear`), `WhereClause` (the translated
-predicate, null for `Clear`-all), `Assignment` (for `ExecuteUpdate`), and `AffectedCount` (after only).
+predicate, null for `Clear`-all), `Assignment` (for `ExecuteUpdate`), `AffectedCount` (after only),
+`QueryAs<T>()` (the originating query, null for `Clear`), and `Store`.
+
+## Replacing a write (`ctx.Cancel()`)
+
+`BeforeWrite` can do more than observe and mutate: call `ctx.Cancel()` and the store performs **no write
+at all** for that operation — you have done it yourself. That's what makes an interceptor able to change
+the shape of an operation, e.g. turn a delete into an update (see [Soft Delete](/documentdb/soft-delete),
+which is built entirely this way and ships in the box).
+
+```csharp
+public sealed class TombstoneInterceptor : IDocumentInterceptor
+{
+    public async Task BeforeWrite(DocumentWriteContext ctx, CancellationToken ct)
+    {
+        if (ctx.Operation != DocumentOperation.Delete)
+            return;
+
+        // ctx.Store is transaction-bound, so this commits with whatever unit the Remove was part of.
+        var updated = await ctx.Store.SetProperty<Order>(ctx.Id!, x => x.Status, "voided", null, ct);
+        ctx.Cancel(updated);   // no DELETE is issued; Remove() returns `updated`
+    }
+
+    public Task AfterWrite(DocumentWriteContext ctx, CancellationToken ct) => Task.CompletedTask;
+}
+```
+
+What cancelling does:
+
+- **No store write** is issued for the operation, and **no `AfterWrite`** fires — nothing was written, so
+  there is no change notification and no temporal history entry either (the write *you* made produces its
+  own).
+- **Later interceptors are skipped.** The chain stops at the one that cancelled, so ordering matters —
+  a hook that must observe every delete needs a lower [`Order`](#ordering-interceptors) than the one
+  cancelling it.
+- **The caller sees a normal result.** `Cancel(bool succeeded = true)` chooses what `Remove` returns —
+  pass `false` when your replacement write matched nothing. `Insert`/`Update`/`Upsert` return no value, so
+  the flag is ignored there.
+- It is valid **only inside `BeforeWrite`** — calling it from `AfterWrite` throws `InvalidOperationException`.
+- To *fail* a write rather than replace it, **throw** — cancelling is not an error path.
+
+Set-based writes cancel the same way, with a count instead of a bool:
+
+```csharp
+public sealed class SoftDeleteBulk : IDocumentBulkInterceptor
+{
+    public async Task BeforeBulkWrite(DocumentBulkContext ctx, CancellationToken ct)
+    {
+        if (ctx.Operation != DocumentOperation.Delete)
+            return;
+
+        // The originating query — same predicate, same query filters — re-issued as an update.
+        var affected = await ctx.QueryAs<Order>()!.ExecuteUpdate(x => x.IsDeleted, true, ct);
+        ctx.Cancel(affected);   // ExecuteDelete() returns `affected`
+    }
+
+    public Task AfterBulkWrite(DocumentBulkContext ctx, CancellationToken ct) => Task.CompletedTask;
+}
+```
+
+`ctx.QueryAs<T>()` is null for `Clear` (there is no source query) — use `ctx.Store.Query<T>()` there, which
+covers every live document of the type.
+
+:::caution[Batch inserts cannot be cancelled]
+`BatchInsert` on the document providers writes the whole set in one operation, so an individual row cannot
+be skipped after the fact: cancelling during a batch insert throws `NotSupportedException` rather than
+quietly writing the row. Filter the list before calling `BatchInsert`, or insert one at a time. (On the
+relational stores a registered per-document interceptor already makes `BatchInsert` loop the single-document
+insert, so cancellation there simply skips that document.)
+:::
 
 :::caution[Per-document interceptors do not fire for set-based ops]
 This mirrors EF Core, where `ExecuteUpdate`/`ExecuteDelete` bypass the change tracker. If you need

@@ -525,6 +525,7 @@ export const sidebarTopics = [
           { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
           { label: 'Write Interceptors', link: 'documentdb/interceptors' },
           { label: 'Query Filters', link: 'documentdb/query-filters' },
+          { label: 'Soft Delete', link: 'documentdb/soft-delete' },
           { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/DocumentDb/', attrs: { target: '_blank' } },
