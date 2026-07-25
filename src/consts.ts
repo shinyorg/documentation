@@ -628,6 +628,22 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "5.2.4"
     },
     {
+        "id": "calendarstore",
+        "nuget": "Shiny.Calendar",
+        "description": "Calendar Store",
+        "category": "platformdata",
+        "macOsSupported": true,
+        "version": "5.3.0"
+    },
+    {
+        "id": "calendarstore-ai",
+        "nuget": "Shiny.Calendar.Extensions.AI",
+        "description": "Calendar Store - AI Tools",
+        "category": "platformdata",
+        "macOsSupported": true,
+        "version": "5.3.0"
+    },
+    {
         "id": "aiconversation",
         "nuget": "Shiny.AiConversation",
         "description": "AI Conversations",
@@ -712,12 +728,12 @@ export const Data = {
     },
 
     usesWindows(compos: ShinyComponent[]): boolean {
-        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push', 'speech', 'speechazure', 'speechelevenlabs', 'speechtypecast', 'aiconversation'];
+        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push', 'speech', 'speechazure', 'speechelevenlabs', 'speechtypecast', 'aiconversation', 'calendarstore', 'calendarstore-ai'];
         return compos.some(x => windowsIds.includes(x.id));
     },
 
     usesHosting(compos: ShinyComponent[]): boolean {
-        const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'datasync'];
+        const hostingIds = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'datasync', 'calendarstore', 'calendarstore-ai'];
         return compos.some(x => hostingIds.includes(x.id));
     },
 
@@ -730,7 +746,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'health', 'health-ai', 'music', 'speech', 'aiconversation'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation'];
         return compos.some(x => ids.includes(x.id));
     }
 };

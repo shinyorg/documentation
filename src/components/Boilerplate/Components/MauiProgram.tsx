@@ -162,6 +162,21 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddContactStore();`;
   }
+  if (has('calendarstore') || has('calendarstore-ai')) {
+    src += `
+      builder.Services.AddCalendarStore();`;
+  }
+  if (has('calendarstore-ai')) {
+    src += `
+
+      // Expose ICalendarStore to an LLM as Microsoft.Extensions.AI tools.  You opt-in per
+      // operation - this is NOT an OS permission prompt, so call ICalendarStore.RequestAccess
+      // from your app first.  Resolve CalendarAITools from DI and pass its .Tools to your
+      // IChatClient (ChatOptions.Tools).
+      builder.Services.AddCalendarAITools(tools => tools
+          .AddCalendar(CalendarAICapabilities.Read | CalendarAICapabilities.Create)
+      );`;
+  }
   if (has('health') || has('health-ai')) {
     src += `
       builder.Services.AddHealthIntegration();`;

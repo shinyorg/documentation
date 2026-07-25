@@ -67,6 +67,11 @@ const AndroidManifest = (props: Props) => {
     src += addP('WRITE_CONTACTS');
   }
 
+  if (has('calendarstore') || has('calendarstore-ai')) {
+    src += addP('READ_CALENDAR');
+    src += addP('WRITE_CALENDAR');
+  }
+
   if (has('health') || has('health-ai')) {
     src += addP('ACTIVITY_RECOGNITION');
     src += `

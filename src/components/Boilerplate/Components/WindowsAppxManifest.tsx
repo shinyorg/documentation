@@ -24,6 +24,9 @@ const WindowsAppxManifest = (props: Props) => {
   if (has('gps') || has('geofencing')) {
     capabilities.push('      <DeviceCapability Name="location" />');
   }
+  if (has('calendarstore') || has('calendarstore-ai')) {
+    capabilities.push('      <uap:Capability Name="appointments" />');
+  }
   // Push (WNS) and background HTTP transfers both need internet access.
   if (has('httptransfers') || has('push')) {
     if (!capabilities.some(c => c.includes('internetClient"'))) {
@@ -42,6 +45,17 @@ const WindowsAppxManifest = (props: Props) => {
         <em>and</em> associated with the Microsoft Store — WNS will not issue a channel URI to an
         unpackaged or unassociated build. In Visual Studio: right-click the project →{' '}
         <em>Publish</em> → <em>Associate App with the Store</em>.
+      </p>
+    );
+  }
+
+  if (has('calendarstore') || has('calendarstore-ai')) {
+    notes.push(
+      <p key="calendarstore">
+        <strong>Shiny.Calendar on Windows uses <code>AppointmentStore</code>,</strong>{' '}
+        which requires package identity and the <code>appointments</code> capability. Reads and
+        queries cover all calendars, but create/update/delete only work inside an app-owned
+        calendar — writing to a system calendar throws <code>NotSupportedException</code>.
       </p>
     );
   }

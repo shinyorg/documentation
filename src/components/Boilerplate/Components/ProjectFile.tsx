@@ -74,6 +74,15 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasCalendar = nugets.find(x => x.nuget === "Shiny.Calendar" || x.nuget === "Shiny.Calendar.Extensions.AI") !== undefined;
+    if (isMaui && hasCalendar) {
+        // Mac Catalyst turns the App Sandbox on by default - without this entitlement RequestAccess
+        // returns Denied and the system prompt never appears
+        pr += "\r\n<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.security.personal-information.calendars\" Type=\"Boolean\" Value=\"true\" />\r\n";
+        pr += "</ItemGroup>\r\n";
+    }
+
     if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {

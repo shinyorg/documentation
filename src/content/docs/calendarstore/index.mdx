@@ -2,6 +2,7 @@
 title: Calendar Store | Getting Started
 description: Cross-platform device calendar & event access with CRUD, LINQ queries, and Shiny.Core permissions
 ---
+import LibBuilder from '/src/components/Boilerplate/LibBuilder';
 import GitHubStars from '/src/components/GitHubStars.astro';
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
@@ -43,6 +44,10 @@ using Shiny;
 builder.UseShiny();
 builder.Services.AddCalendarStore();
 ```
+
+Or generate the full set of files — packages, registration, manifests, and entitlements — with the builder below:
+
+<LibBuilder componentName="calendarstore" client:load />
 
 See [Permissions](/calendarstore/permissions) for the per-platform manifest keys.
 
@@ -110,9 +115,40 @@ references `Shiny.Contacts` and ships a bridge so you can resolve an attendee ba
 var contact = await attendee.ResolveContact(contactStore); // matches on Email, returns Shiny.Contacts.Contact?
 ```
 
+## Deleting a Recurring Event
+
+`DeleteEvent` takes a `deleteSeries` flag. It is ignored for non-recurring events, so it is always
+safe to pass — but for a recurring one, don't guess. Check `CalendarEvent.IsRecurring` and let the
+user choose, the way the native calendar apps do:
+
+```csharp
+if (evt.IsRecurring)
+{
+    var choice = await dialogs.ActionSheet(
+        $"Delete \"{evt.Title}\"?", "Cancel", "Delete All Future Events", "Delete This Event");
+
+    if (choice is not ("Delete This Event" or "Delete All Future Events"))
+        return;
+
+    await store.DeleteEvent(evt.Id!, choice == "Delete All Future Events");
+}
+else
+{
+    await store.DeleteEvent(evt.Id!);
+}
+```
+
+| Platform | `deleteSeries: false` | `deleteSeries: true` |
+|---|---|---|
+| iOS / Mac Catalyst / macOS | `EKSpan.ThisEvent` | `EKSpan.FutureEvents` |
+| Android | Inserts a cancellation exception for the occurrence | Deletes the `Events` row (whole series) |
+| Windows | No effect — `AppointmentStore` has no per-instance delete | Deletes the appointment |
+
 ## Platform Caveats
 
 - **Recurrence is read-only** everywhere.
+- **Android instance granularity:** events are read as series masters from the `Events` table, not as
+  expanded instances, so `deleteSeries: false` cancels the series' own `DTSTART` — the first occurrence.
 - **Apple (EventKit):** attendees cannot be written — attendees you set on create/update are ignored.
 - **Android (CalendarContract):** event CRUD works with permissions; calendar creation uses sync-adapter semantics.
 - **Windows (AppointmentStore):** best-effort — reads cover all calendars, but create/update/delete only work inside an app-owned calendar; writes to a system calendar throw `NotSupportedException`.

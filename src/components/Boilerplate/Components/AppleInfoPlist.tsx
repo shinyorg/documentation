@@ -50,6 +50,13 @@ const AppleInfoPlist = (props: Props) => {
   if (has('contactstore')) {
     addKey('NSContactsUsageDescription');
   }
+  if (has('calendarstore') || has('calendarstore-ai')) {
+    // iOS 17+ / Mac Catalyst / macOS.  NSCalendarsUsageDescription is the legacy (iOS < 17) key.
+    addKey('NSCalendarsFullAccessUsageDescription');
+    // Only needed if you request CalendarAccessType.WriteOnly (add-only) access
+    addKey('NSCalendarsWriteOnlyAccessUsageDescription');
+    addKey('NSCalendarsUsageDescription');
+  }
   if (has('health') || has('health-ai')) {
     addKey('NSHealthShareUsageDescription');
     addKey('NSHealthUpdateUsageDescription');
