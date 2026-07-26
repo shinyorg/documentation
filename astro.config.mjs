@@ -347,45 +347,24 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'mobilev5-1',
-              content: 'Client v5: BLE, BLE Hosting, HTTP, Jobs - Linux, MacOS, & Blazor Support! Full AOT, RX on BLE only & MANY other features!',
+              id: 'docdb-v12',
+              content: 'Document DB v12 - Improved Interceptors with Soft Delete Integration',
               variant: 'tip',
-              link: { text: 'Power up!', href: '/ble' },
-              dismissable: false
-            },
-            {
-              id: 'docdb-v11',
-              content: 'Document DB v11 - the ULTIMATE ORM now with ULTIMATE geospatial capabilities, 19 providers, & 6 integrations!',
-              variant: 'tip',
-              link: { text: 'WOW ME!', href: '/documentdb/' },
+              link: { text: 'How!?', href: '/documentdb/' },
               dismissable: false
             },  
             {
-              id: 'controls1-3',
-              content : 'Controls: The biggest control suite for MAUI & Blazor + the ULTIMATE CameraView to end all others!',
+              id: 'music4-10',
+              content: 'Shiny.Music v4.1: More AI integration, wave form analysis, & VU metering!',
               variant: 'tip',
-              link: { text: 'Learn More', href: '/controls/' },
+              link: { text: 'Turn It Up!', href: '/music' },
               dismissable: false
             },
             {
-              id: 'health-2',
-              content: 'Shiny Health 2.0 - Every Health Metric shared between Apple & Google Health - NOW with AI Tools!',
+              id: 'mobilev5-3',
+              content: 'Client v5.3.0: Calendar Store with AI integration!',
               variant: 'tip',
-              link: { text: 'Check It Out', href: '/health' },
-              dismissable: false
-            },          
-            {
-              id: 'mediator66-1',
-              content: 'Mediator 6.6: AI Tool Generation and More AOT generation',
-              variant: 'tip',
-              link: { text: 'Check It Out', href: '/mediator/extensions/ai/' },
-              dismissable: false
-            },
-            {
-              id: 'music4-1',
-              content: 'Shiny.Music v4: AI upgrade, ducking, and volume control!',
-              variant: 'tip',
-              link: { text: 'Check It Out', href: '/music' },
+              link: { text: 'Power up!', href: '/ble' },
               dismissable: false
             }
           ]
