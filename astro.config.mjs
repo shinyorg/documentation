@@ -348,7 +348,7 @@ export default defineConfig({
           announcements: [
             {
               id: 'docdb-v12',
-              content: 'Document DB v12 - Improved Interceptors with Soft Delete Integration',
+              content: 'Document DB v12 - Improved Interceptors with Soft Delete Integration, AI protections, & More!',
               variant: 'tip',
               link: { text: 'How!?', href: '/documentdb/' },
               dismissable: false
