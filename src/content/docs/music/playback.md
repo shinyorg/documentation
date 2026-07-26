@@ -151,6 +151,10 @@ _player.VolumeChanged += (sender, volume) =>
 
 On Android this observes the system music-stream volume; on Apple platforms it comes from KVO on the audio session's output volume.
 
+:::tip
+To know *where* the music is coming out — speaker, wired/USB, Bluetooth, car, HDMI or AirPlay — and to react when the user unplugs their headphones, see [Audio Output](/music/output-devices).
+:::
+
 ## Disposing
 
 `IMusicPlayer` implements `IDisposable`. Call `Dispose()` to stop playback and release all platform resources:

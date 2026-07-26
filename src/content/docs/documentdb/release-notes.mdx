@@ -5,6 +5,49 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 12.1 TBD
+
+<RN type="enhancement">
+**Every shipping package is now trim/AOT warning-free, and declares it.** The whole `src/` tree builds with zero IL2026/IL2075/IL2090/IL3050 warnings, and packages carry `IsAotCompatible` — which stamps `[AssemblyMetadata("IsTrimmable","True")]`. Previously no package declared it, so a consumer's trimmer kept these assemblies whole instead of trimming into them. The four packages whose *dependencies* rule AOT out (`AspNetCore.OData`, `Aspire.Client`, `Aspire.Hosting`, `Aspire.Orleans`, `RavenDb`) declare `IsAotCompatible=false` honestly rather than silently.
+</RN>
+
+<RN type="enhancement">
+**Mapping APIs annotate their document type for the trimmer.** `MapVersionProperty`, `MapSpatialProperty`, `MapVectorProperty`, `MapFullTextProperty`, `MapComputedProperty`, `MapBlob`, and `MapBlobCollection` — on the core options, on every provider's options, and on the shared `DocumentMappingRegistry` — now declare `[DynamicallyAccessedMembers(PublicProperties)]` on `T`, so the properties they resolve by name are actually preserved under trimming. Previously these carried `IL2075` suppressions that did not match the code the analyzer emits (`IL2090`), so the warnings were live and nothing was preserved.
+
+Passing a concrete type (`MapSpatialProperty<Place>(…)`) needs no change. Code that **forwards its own unannotated generic parameter** into these methods will now get IL2091 and should propagate the same annotation:
+
+```csharp
+// before: silently unannotated
+static void Configure<T>(DocumentStoreOptions o, Expression<Func<T, int>> version) where T : class
+    => o.MapVersionProperty(version);
+
+// after
+static void Configure<[DynamicallyAccessedMembers(DynamicallyAccessedMemberTypes.PublicProperties)] T>(
+    DocumentStoreOptions o, Expression<Func<T, int>> version) where T : class
+    => o.MapVersionProperty(version);
+```
+</RN>
+
+<RN type="fix">
+**Spatial and blob serialization no longer route through the caller's reflection resolver.** `Geometry` and `DocumentBlob` are (de)serialized through an internal source-generated context — both carry a type-level `[JsonConverter]`, so the contract is a converter lookup and nothing reflects over their members. `SpatialJson` gains `FromGeoJson` and `FromNode` and is now the single GeoJSON entry point for the core, SQLite, Cosmos, and MongoDB providers, which had each rolled their own.
+</RN>
+
+<RN type="fix">
+`EnumJsonStorage` used `Enum.GetValues(Type)` (`RequiresDynamicCode`) to probe string-stored enums; it now uses `Enum.GetValuesAsUnderlyingType`, which never has to construct an array of the enum type at runtime.
+</RN>
+
+<RN type="fix">
+The AI tool schema builders and the Firestore cursor encoder bound `JsonArray.Add<T>` — the reflective generic overload — where the non-generic `Add(JsonNode?)` was meant.
+</RN>
+
+<RN type="enhancement">
+**AOT is verified on every build, not just analyzed.** `samples/Sample.Aot` publishes with `PublishAot=true`, exercises each mapping kind and every query surface once, and treats any trim/AOT warning as a build error. CI publishes and runs it. The Roslyn analyzers cannot see warnings coming out of dependencies or code reachable only through a call graph — a real ILC run can. The analyzers were also re-enabled on six packages that had them switched off (`Orleans.CosmosDb`, `Orleans.MongoDb`, `RavenDb`, `Aspire.Client`, `Aspire.Hosting`, `Aspire.Orleans`); all six were already clean, so the opt-outs were only hiding future regressions.
+</RN>
+
+<RN type="enhancement">
+Two permanent AOT limitations are now documented rather than discovered at runtime — grouped projections must target a **named** type with a `JsonTypeInfo` (an anonymous type cannot have one), and the anonymous-type parameter bag on the string-query overloads is not trim-safe, so pass `IDictionary<string, object?>` instead. See [AOT Setup](/documentdb/aot/#known-limitations-under-aot).
+</RN>
+
 ## 12.0 - July 25, 2026
 
 <RN type="breaking">

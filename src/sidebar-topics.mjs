@@ -258,6 +258,7 @@ export const sidebarTopics = [
           { label: 'Permissions', link: 'music/permissions' },
           { label: 'Querying Music', link: 'music/querying' },
           { label: 'Playback', link: 'music/playback' },
+          { label: 'Audio Output', link: 'music/output-devices', badge: { text: 'New', variant: 'success' } },
           { label: 'Lyrics', link: 'music/lyrics' },
           { label: 'Album Art', link: 'music/album-art' },
           { label: 'Copying Tracks', link: 'music/copying' },

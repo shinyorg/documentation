@@ -2,6 +2,7 @@
 title: Firestore Mobile (on-device)
 ---
 import NugetBadge from '/src/components/NugetBadge.tsx';
+import RN from '/src/components/ReleaseNote.astro';
 import { Steps } from '@astrojs/starlight/components';
 
 The `Shiny.DocumentDb.Firestore.Mobile` package provides a document store over the **native** Firebase Firestore SDK, running **on the device**. The native SDK owns the hard parts — the local cache, the offline write queue, snapshot listeners, backoff and conflict handling — and this package is a thin typed adapter mapping `IDocumentStore` onto it.
@@ -129,6 +130,17 @@ Supported: `Where`, `OrderBy`, `OrderByDescending`, `Paginate`, `ToList`, `ToAsy
 
 Translated operators: `==`, `!=`, `<`, `<=`, `>`, `>=`, `&&`, and `ICollection.Contains`. Anything else throws.
 
+The value being compared against can be a literal, a captured local, a field or property read, a method call, or an inline array — it is evaluated without runtime code generation, so predicates behave the same on a full-AOT build as they do in the debugger.
+
+```csharp
+var cutoff = DateTime.UtcNow.AddDays(-7);
+var wanted = new[] { "Alpha", "Beta" };
+
+await store.Query<Play>().Where(p => p.Created > cutoff).ToList();   // captured local
+await store.Query<Play>().Where(p => wanted.Contains(p.Name)).ToList();
+await store.Query<Play>().Where(p => new[] { 1, 2 }.Contains(p.Version)).ToList();
+```
+
 :::caution[Ordering with an inequality filter]
 Firestore requires that when a query has an inequality filter, the **first `OrderBy` is on that same field**. `.Where(p => p.Version >= 2).OrderBy(p => p.Version)` is valid; ordering by a different field first fails in the native SDK.
 :::
@@ -206,6 +218,28 @@ o.MapTypeToCollection<Play>($"users/{uid}/plays");
 
 Mapping methods: `MapTypeToCollection`, `MapIdProperty`, `MapIdType`, `AddQueryFilter`.
 
+## Trimming and AOT
+
+The package is built with `IsAotCompatible`, so the trim and AOT analyzers run over it and it produces no IL warnings of its own. Two pieces are worth knowing about.
+
+**Document (de)serialization** is the one place that still reaches for reflection, and only when you let it. Pass a `JsonTypeInfo<T>` — from a `JsonSerializerContext` — and the typed path is used end to end:
+
+```csharp
+[JsonSerializable(typeof(Play))]
+public partial class AppJsonContext : JsonSerializerContext;
+
+await store.Insert(play, AppJsonContext.Default.Play);
+var loaded = await store.Get("p1", AppJsonContext.Default.Play);
+```
+
+Set `UseReflectionFallback = false` to make that mandatory: any call that would have fallen back to reflection throws `InvalidOperationException` naming the type instead of silently working in the debugger and failing on a trimmed device build.
+
+**Firebase Auth** (`AddFirebaseIdentity`) is fully source-generated and needs nothing from you — it has no `JsonTypeInfo<T>` parameter to thread through, so it carries its own context internally.
+
+:::note[The app-level warning comes from upstream]
+Publishing a trimmed app may surface `IL2104: Assembly 'Shiny.DocumentDb' produced trim warnings`. That is the core DocumentDb package, not this provider.
+:::
+
 ## Emulator
 
 ```csharp
@@ -229,7 +263,49 @@ This provider ships in milestones. Today:
 - **No `request.auth.uid` in rules yet** — see [Identity](#identity).
 - **No native full-text, spatial, vector or temporal** support.
 - **`Count` and the aggregates materialize documents** rather than using native aggregation.
+- **`IgnoreQueryFilters()` restarts the query.** It rebuilds from the collection, so any `Where` applied before it is dropped. Call it first: `store.Query<T>().IgnoreQueryFilters().Where(…)`.
 
 :::caution[Interceptors and version mapping compile but do nothing]
 These two are the sharp edges: they are configurable, raise no error, and silently have no effect. Do not rely on them for auditing, validation or optimistic concurrency on this provider.
 :::
+
+## Release notes
+
+This package ships from the [shinyorg/firebase](https://github.com/shinyorg/firebase) repo and versions independently of DocumentDB itself — its releases are listed here rather than on the [DocumentDB releases](/documentdb/release-notes/) page.
+
+### 2.0.0 - TBD
+
+<RN type="breaking">
+**Requires `Shiny.DocumentDb` 12.0.0.** DocumentDB 12 moved the single-document write pipeline onto `DocumentProviderBase` and added four provider hooks (`Mappings`, `IdCache`, `ResolveTypeInfo`, `ResolveDocumentTypeName`); this provider implements them and its options now delegate id, query-filter and version mapping to the shared `DocumentMappingRegistry`. The public surface of `MobileFirestoreOptions` is unchanged — existing configuration code compiles as-is — but the package will not restore against DocumentDB 11.
+</RN>
+
+<RN type="feature">
+**Trim and AOT clean.** The package is built with `IsAotCompatible` and produces no IL warnings. Firebase Auth now uses a source-generated JSON context instead of reflection-based `PostAsJsonAsync`/`ReadFromJsonAsync`, so sign-in, sign-up and token refresh survive trimming — previously they could fail only on a published device build. Query comparison values are evaluated and serialized without runtime code generation. See [Trimming and AOT](#trimming-and-aot).
+</RN>
+
+<RN type="breaking">
+**The query builder returns a copy instead of mutating.** `Where`, `OrderBy`, `OrderByDescending` and `Paginate` used to add to the query and return the *same* instance; they now return a new query, matching every other DocumentDB 12 provider. Two consequences. A builder call used as a bare statement is now discarded — `q.Where(x => !x.IsDeleted);` on its own line silently loses the clause, so assign the result. Conversely, branching now works: `var recent = all.Where(…)` no longer disturbs `all`.
+
+```csharp
+var all    = store.Query<Play>();
+var recent = all.Where(p => p.Version >= 2);   // `all` is unchanged — previously both were the same query
+```
+</RN>
+
+<RN type="fix" platform="iOS">
+**`Any()` permanently capped the query it was called on.** The Swift `ShinyFirestoreQuery` wrapper mutated itself and returned `self`, so the `limitTo(1)` that `Any()` issues stuck to the underlying query — a subsequent `ToList()` on the same query returned at most one document. The wrapper now returns a new instance from `whereField`, `orderBy` and `limitTo`, preserving Firestore's own immutable `Query` semantics. Android was unaffected: its native `Query` was already immutable.
+</RN>
+
+<RN type="fix">
+**`new[] { … }.Contains(x.Prop)` in a `Where` threw instead of querying.** On .NET 10 an inline-array `Contains` binds to `MemoryExtensions.Contains`, so the collection reaches the translator wrapped in an array-to-`ReadOnlySpan` conversion — which the old expression-compiling evaluator could not box, on either platform. Inline arrays now translate to a native `in` filter. `Contains` over a captured collection was unaffected.
+</RN>
+
+<RN type="enhancement">
+**A predicate that cannot be evaluated without code generation now says so.** Where the translator previously relied on `Expression.Compile()` — which Mono quietly services with its interpreter and NativeAOT cannot — it walks the expression directly. An exotic shape on a build without code generation throws `NotSupportedException` naming the node type and suggesting you hoist the value into a local, rather than failing at runtime in the native SDK.
+</RN>
+
+### 1.0.0 - July 21, 2026
+
+<RN type="feature">
+Initial release, announced alongside DocumentDB 11.2 — built on the provider extension points opened in 11.1.1. See the [DocumentDB releases](/documentdb/release-notes/) page for the introduction.
+</RN>

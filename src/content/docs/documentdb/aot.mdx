@@ -162,3 +162,73 @@ All features are fully AOT/trimming-safe:
 | **Query translation** | `Where` predicates lower to a shared IR and emit native SQL/BSON — no `Expression.Compile()`. Relational `OrderBy`/projections push to SQL. |
 | **In-memory evaluation** | LiteDB/IndexedDB and client-side filters use a compile-free tree-walking interpreter instead of `Expression.Compile()` — no `RequiresDynamicCode` (IL3050). |
 | **DI extensions** | Thin wrapper — delegates all work to the AOT-safe core. |
+| **Mapping APIs** | `MapVersionProperty`, `MapSpatialProperty`, `MapVectorProperty`, `MapFullTextProperty`, `MapComputedProperty`, `MapBlob`, and `MapBlobCollection` annotate their `T` with `[DynamicallyAccessedMembers(PublicProperties)]`, so the trimmer preserves the properties they resolve by name. |
+| **Spatial serialization** | `Geometry` and `DocumentBlob` go through an internal source-generated context, not the caller's reflection resolver. |
+
+## Known limitations under AOT
+
+Two things behave differently under AOT. Both are permanent, and both fail loudly rather than silently.
+
+### Grouped projections need a named type
+
+`GroupBy(...).Select(...)` needs a `JsonTypeInfo` for its projection target, and an anonymous type cannot have
+one. The anonymous-type overload throws at runtime under AOT:
+
+```
+InvalidOperationException: This operation requires a JsonTypeInfo<<>f__AnonymousType0`2>.
+Pass it to the Select() call.
+```
+
+Project to a named type registered in your context instead:
+
+```csharp
+public class NameCount            // registered with [JsonSerializable(typeof(NameCount))]
+{
+    public string Name { get; set; } = "";
+    public int Count { get; set; }
+}
+
+var grouped = await store.Query<Person>()
+    .GroupBy(x => x.Name)
+    .Select(g => new NameCount { Name = g.Key, Count = g.Count() }, AppJsonContext.Default.NameCount)
+    .ToList();
+```
+
+The projection still raises **IL2026 in your own code**, because `Expression.Bind` and `Expression.New` are
+`RequiresUnreferencedCode` for every LINQ expression tree — EF Core behaves identically. It is safe once the
+projection type is in your context, since that preserves exactly the members the tree names. Suppress it on
+the smallest method that holds the projection.
+
+### Anonymous-type parameter bags are not trim-safe
+
+The string-query overloads accept parameters either as an anonymous type or as a dictionary:
+
+```csharp
+await store.Query<User>("json_extract(Data, '$.age') > @minAge", parameters: new { minAge = 30 });  // reflective
+await store.Query<User>("json_extract(Data, '$.age') > @minAge",
+    parameters: new Dictionary<string, object?> { ["minAge"] = 30 });                               // AOT-safe
+```
+
+The anonymous-type form reads its values with `GetType().GetProperties()`. `DynamicallyAccessedMembers` cannot
+be applied to an `object` parameter (IL2098), so that branch genuinely cannot be made analyzable — **pass the
+dictionary under trimming or AOT.**
+
+## Verifying AOT in your own app
+
+Publish with per-site warnings turned on, so a problem points at a line rather than an assembly:
+
+```xml
+<PropertyGroup>
+  <PublishAot>true</PublishAot>
+  <TrimmerSingleWarn>false</TrimmerSingleWarn>
+</PropertyGroup>
+```
+
+```bash
+dotnet publish -r linux-x64 -c Release
+```
+
+A clean publish is the real check — the Roslyn analyzers cannot see warnings coming out of dependencies, nor
+anything reachable only through a call graph. The repo runs exactly this on every build via
+`samples/Sample.Aot`, which exercises each mapping kind and every query surface once and treats any trim/AOT
+warning as a build error.
