@@ -1,0 +1,435 @@
+---
+title: "Shiny.DocumentDb v12 — Doing All The Things!"
+date: 2026-07-27
+authors:
+  - allanritchie
+tags:
+  - documentdb
+  - release
+  - aspire
+  - AOT
+excerpt: "v12 ships ShinyDocDbMyAdmin — a phpMyAdmin-style web UI for your document stores — plus schema-free JSON collections, interceptors that can replace a write, soft delete in the box, a fully trim/AOT-clean package set, and a provider consolidation that deleted ~4,300 lines and found four real bugs on its way out."
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import { Image } from 'astro:assets';
+import browseImg from '/src/assets/documentdb/admin-browse.jpg';
+import structureImg from '/src/assets/documentdb/admin-structure.jpg';
+import historyDiffImg from '/src/assets/documentdb/admin-history-diff.jpg';
+import geometryImg from '/src/assets/documentdb/admin-geometry.jpg';
+import sqlImg from '/src/assets/documentdb/admin-sql.jpg';
+
+<NugetBadge name="Shiny.DocumentDb" showLabel={true} />
+
+v12 landed as three releases in three days, and between them they cover an unusually wide spread — a
+whole new **web UI**, a new **schema-free write/query lane**, two new **extensibility primitives**, a
+full **trim/AOT** pass, and the largest internal refactor the library has had.
+
+- **[ShinyDocDbMyAdmin](/documentdb/admin/)** — a phpMyAdmin-style web front end for any relational
+  DocumentDb store, shipped as a container image.
+- **[`AddDocumentDbAdmin`](/documentdb/aspire#admin-ui-as-a-resource)** — that UI modelled as an Aspire
+  resource, already connected to every store you reference.
+- **[Schema-free JSON collections](/documentdb/json-collections/)** — `store.Collection("orders")`. No CLR
+  type, no mapping, no migration.
+- **[`ctx.Cancel()`](/documentdb/interceptors#replacing-a-write-ctxcancel)** — interceptors can now
+  *replace* a write instead of only observing it.
+- **[Soft delete](/documentdb/soft-delete/)** — `AddSoftDelete<Customer>(x => x.IsDeleted)`, built entirely
+  out of the two public primitives above.
+- **A shared provider surface** — `DocumentQueryBase<T>`, `IDocumentStoreOptions`, and a shared write
+  pipeline. ~4,300 lines of duplicated provider code deleted, and four real bugs fell out of the
+  conformance suites that replaced them.
+- **[Trim/AOT clean, and verified](/documentdb/aot/)** — every shipping package builds warning-free and
+  declares `IsAotCompatible`, checked by a real `PublishAot` run in CI.
+
+The full changelog is on the [release notes](/documentdb/release-notes/) page. This post walks the
+headliners, and closes with a summary of everything else DocumentDb does plus the package list.
+
+---
+
+## ShinyDocDbMyAdmin
+
+The schema-free model has always had one rough edge: when something looks wrong in production, there is
+no shape to inspect. `SELECT Data FROM documents` gives you a wall of minified JSON, and every SQL engine
+has a different set of JSON functions to dig into it.
+
+**ShinyDocDbMyAdmin** is the answer — a phpMyAdmin-style web UI for DocumentDb stores. No user management,
+no server administration, no query planner. Just the documents.
+
+```bash
+docker run -p 8085:8080 -v shiny-docdb-myadmin:/data ghcr.io/shinyorg/shiny-docdb-myadmin
+```
+
+It's a container image and nothing else — there's deliberately no `dotnet tool` form, because packaging
+the native provider binaries for every RID it might run on came out at ~120 MB to deliver what one image
+delivers for the platform you're actually on.
+
+### Browse
+
+The grid's columns are **inferred by sampling documents**, so nested paths like `customer.tier` become
+first-class columns instead of hiding inside a JSON blob. Filter on any envelope column or JSON path,
+or quick-search the string fields.
+
+<Image src={browseImg} alt="Browse grid for the Order type with columns id, number, status, customer.name, customer.email, customer.tier, total and Updated, inferred from nested JSON paths" />
+
+Numeric filters and sorts compare **numerically**, which is not free on a schema-free store — the plain
+JSON extract returns text on most engines, so an unhinted sort would put `"100"` before `"9"`.
+
+Any row expands into a read-only, syntax-highlighted view of the whole body, with objects and arrays
+collapsible — native `<details>` elements, so it still works with scripting off.
+
+### Structure
+
+<Image src={structureImg} alt="Structure tab for Order showing 42 documents, 13 fields seen, 15.3 KB of JSON, and a table of inferred paths with types, presence percentages, examples and per-path Index buttons" />
+
+The inferred shape of a type: every path, its type, **how often it is actually present**, an example
+value, and one-click create/drop of a JSON property index — named exactly as DocumentDb names its own,
+so an index you create here is the same index `CreateIndexAsync` would have made.
+
+Because the store is schema-free this describes what the sampled documents *contain*, not a contract.
+A field below 100% is simply absent from some documents — which is frequently the bug you came to find.
+
+### History
+
+If the type is mapped with [`MapTemporal<T>`](/documentdb/temporal/), a History tab appears. Pick a
+document, pick any two versions, and get a field-by-field diff by dotted path — or the two bodies side
+by side. Any prior version can be restored behind a two-click confirm.
+
+<Image src={historyDiffImg} alt="History tab showing four versions of one Order with operation, valid-from/valid-to interval, how long each was held and the actor, plus a field-level diff from version 1 to 4 showing status changed from refunded to delivered and tracking changed from null to 1Z397273X" />
+
+Writes made *in the UI* to a temporal-mapped type record a version too, stamped with the actor
+`shiny-docdb-myadmin`. That isn't optional politeness: the admin layer writes SQL directly — it sits
+below `IDocumentStore` because it has no CLR type to bind to — so none of the library's temporal tracking
+runs on its own. Without that, an edit here would change the row while the history sidecar went on
+insisting the old body was current, and a quietly wrong audit trail is worse than no History tab at all.
+
+### Geometry
+
+<Image src={geometryImg} alt="Geometry tab for DeliveryZone rendering four polygons on an SVG map with latitude and longitude gridlines, a scale bar, and extent and vertex statistics beneath" />
+
+Types that store GeoJSON get a map — server-rendered SVG, zoom-to-feature and fit-all, with vertices,
+length, area, centroid and OGC validity per document.
+
+It reads from the **document body**, not the `{table}_spatial` sidecar. The sidecar holds only bounding
+boxes for index pruning and its shape differs per provider; the GeoJSON in `Data` is the actual value and
+is identical everywhere. So the map works on **every** provider — including the ones with no spatial
+support at all.
+
+### SQL console
+
+<Image src={sqlImg} alt="SQL console running a parameterised GROUP BY over json_extract with a JSON parameters box binding status and min, and a result grid of tier, orders and revenue" />
+
+Whatever you want to type, in the target database's own dialect, with `@name` parameters bound from a
+JSON box so the types stay honest — `450` binds a number, `"450"` binds text. There is no statement
+allow-list, so give the tool a database account with the privileges you actually want it to have.
+
+### Plus
+
+**Edit** (JSON editor with format + validation, insert/duplicate/bulk delete), **Blobs** (payload listing
+that never selects the blob column, with inline preview and streamed downloads), **Import / Export**
+(JSON, NDJSON, CSV, or round-trippable envelope JSON), and **Create** for a documents table or a type,
+so a database whose store has never run isn't a dead end.
+
+Supported on every relational backend: SQLite, SQLCipher, DuckDB, PostgreSQL, SQL Server, MySQL, MariaDB,
+Oracle 23ai+ and CockroachDB. The document stores are out of scope — the tool works against the shared
+`Id / TypeName / Data / CreatedAt / UpdatedAt` envelope over ADO.NET.
+
+## It's an Aspire resource too
+
+You shouldn't have to remember a `docker run` line. `Shiny.DocumentDb.Aspire.Hosting` models the tool as
+a resource, so it comes up with the rest of your app and every store you reference is already connected:
+
+```csharp
+var store = builder.AddPostgresDocumentStore("orders");
+
+builder.AddDocumentDbAdmin(port: 8085)
+       .WithReference(store)
+       .WithDataVolume()                                  // keep saved connections across runs
+       .WithHostPath("/Users/me/databases", "/databases") // reach a file-backed store
+       .WithSecretKey(builder.AddParameter("admin-key", secret: true))
+       .WithReadOnly()
+       .WaitFor(store);
+```
+
+`WithReference` is the same call a consuming service makes — the tool reads the
+`ConnectionStrings:{name}` + `Shiny:DocumentDb:{name}:Provider` pair the hosting integration already
+emits, so a Redis or blob reference in the same AppHost is ignored rather than turning into a junk
+connection. Referenced stores show up under a **from host** badge and can't be edited or deleted from the
+UI; they're declared in the AppHost, so that's where they change.
+
+The image tag defaults to the hosting package's own version, so an integration upgrade brings the
+matching UI with it.
+
+## Schema-free JSON collections
+
+Not every document has a CLR type. Generic HTTP intake, message-bus payloads, ETL landing zones,
+multi-tenant "extra fields" — the shape is decided by whoever sent it.
+
+```csharp
+var orders = store.Collection("orders");
+
+var id  = await orders.Insert(jsonObject);   // returns the stored id
+var doc = await orders.Get(id);              // JsonObject?
+
+var rows = await orders.Query()
+    .Where("customer.name == 'bob' and total:number > 100")
+    .OrderBy("total:number desc")
+    .Paginate(0, 50)
+    .ToList();                               // IReadOnlyList<JsonObject>
+```
+
+No CLR type, no registered mapping, no migration. The collection name becomes the row's `TypeName`, so a
+schema-free collection shares a table with your typed documents without either seeing the other, and
+needs **zero schema change**.
+
+Querying is the [string grammar](/documentdb/querying/) only — there's no `T` to write a lambda against —
+lowered to the same IR and the same SQL as `Query<T>().Where("…")`. Since no metadata says what a field
+*is*, the type is **inferred** as the expression is built: from an explicit `path:type` hint, else from the
+other operand (`total > 100` is numeric), else from the function (`lower(name)` is a string), else
+`string`. You need a hint wherever nothing else pins the type — an `OrderBy`, a `min`/`max`, a numeric
+`Project` — because on every provider whose plain JSON extract returns text, `OrderBy("total")` sorts
+lexicographically.
+
+Ids default to the `id` property, read case-insensitively and written verbatim; an absent id generates a
+sortable **UUIDv7** string and stamps it into your object.
+
+The same object serves the **type-keyed** lane — `store.Collection(typeof(Order))` — where field paths
+resolve through the document type's metadata (naming policies, `[JsonPropertyName]`, leaf types), the body
+still rides the full write pipeline (tenancy, temporal, versioning/CAS, spatial + vector sidecars,
+interceptors, change notifications), and the *full* function set is available including `hasflag`, the geo
+predicates and the Lucene functions. That lane gained a fluent query builder and `Remove`/`BatchRemove`/
+`Clear`, which it never had.
+
+:::caution[Breaking]
+The eight `Type` + `JsonNode` members on `IDocumentStore` are **removed** in favour of this one surface —
+`store.Insert(type, node)` becomes `store.Collection(type).Insert(obj)`, and so on. There are no
+`[Obsolete]` shims. The full mapping table is in the [release notes](/documentdb/release-notes/).
+:::
+
+Relational providers only; everything else throws `NotSupportedException`, and the tier is pinned by a
+test per provider.
+
+## Interceptors can replace a write
+
+`BeforeWrite` could previously do exactly two things: mutate the document, or throw. Throwing aborts the
+write *and* the surrounding unit, so an interceptor could never change the **shape** of an operation —
+turn a delete into an update, route a write somewhere else, swallow one entirely.
+
+Now it can:
+
+```csharp
+public class ArchiveOnDelete : IDocumentInterceptor
+{
+    public async Task BeforeWrite(DocumentWriteContext ctx, CancellationToken ct)
+    {
+        if (ctx.Operation == DocumentOperation.Remove && ctx.Document is Invoice inv)
+        {
+            inv.Archived = true;
+            await ctx.Store.Update(inv, ct);   // transaction-bound — commits with the original unit
+            ctx.Cancel();                      // "I performed this write myself"
+        }
+    }
+}
+```
+
+`Cancel()` means the store issues **no** write for the operation: no `AfterWrite`, no change notification,
+no temporal history entry, and later interceptors in the chain are skipped. The caller still gets a normal
+result — `Cancel(false)` makes `Remove` return `false`, and the bulk form's `Cancel(n)` makes
+`ExecuteDelete`/`ExecuteUpdate`/`Clear` return `n`. `DocumentBulkContext` also gained `QueryAs<T>()`, the
+originating query with the same predicate and filters, so a set-based write can be re-issued differently.
+
+Supported on every provider.
+
+## Soft delete in the box
+
+Which is the whole point of the previous section — soft delete is now shipped, and it's built out of
+nothing but public parts:
+
+```csharp
+services.AddDocumentStore(o => o
+    .AddSoftDelete<Customer>(x => x.IsDeleted)
+);
+
+await store.Remove(customer);                              // sets the flag
+await store.Query<Customer>().ToList();                    // flagged documents are invisible
+await store.Query<Customer>().IncludeDeleted().ToList();   // read past it
+await store.Query<Customer>().OnlyDeleted().ToList();      // just the flagged ones
+```
+
+`Remove`, `query.ExecuteDelete()` and `Clear<T>()` all set the flag instead of deleting. The flag is a
+`bool`, or a nullable `DateTime`/`DateTimeOffset` stamped from a DI-registered `TimeProvider`. It comes
+with `SoftDelete<T>(id)`, `Restore<T>(predicate)`, `PurgeDeleted<T>(predicate?)`, `HardDelete<T>(id)`,
+and `SuppressInterceptors()` for a raw write.
+
+It is **not** built into the stores. It's a named query filter (`soft-delete`) plus a cancelling
+interceptor, composed from the two public building blocks and shipped as an extension method — which
+means you can write your own variant the same way. A pleasant side effect: because a set-based delete is
+re-issued as an *update* over the same query, the spatial/vector/blob sidecar rows stay with the document
+instead of being orphaned.
+
+## One surface, seventeen providers
+
+The least visible change is the biggest. The nine non-relational `IDocumentQuery<T>` implementations were
+70–88% identical — the same builder state, the same client-side terminals, the same interceptor plumbing,
+retyped per provider. Every document provider's `Insert`/`Update`/`Upsert`/`Remove` opened with the same
+preamble and closed with the same tail, nine times over. That's why v11.4's `ctx.Cancel()` needed 45
+hand-edited guards.
+
+v12 collapses all of it:
+
+- **`DocumentQueryBase<T>`** — providers supply a `Clone`, an `ExecuteAsync(QueryPlan<T>)`, and two
+  set-based write primitives. Push-down stays explicit: `ExecuteAsync` returns a `QueryExecution<T>`
+  declaring how much of the plan the engine satisfied (`Complete` for MongoDB/Cosmos, `Candidates` for
+  the key-value stores, `Partial` in between) and the base applies only the remainder client-side.
+- **`IDocumentStoreOptions`** — a three-method interface (`AddInterceptor`/`AddBulkInterceptor`/
+  `AddQueryFilter`) implemented by every options class, so a cross-cutting feature is written once.
+  `AddSoftDelete<T>` collapsed from ten files to one, and `MapJsonSchema` went from relational-only to
+  **every** provider for free.
+- **A shared single-document write pipeline** on `DocumentProviderBase`. Persistence, conflict handling
+  and id generation stay per provider — Redis `SET NX`, Cosmos ETag, DynamoDB conditional writes, Azure
+  Table 409 genuinely differ.
+
+**~4,300 lines of duplicated provider code deleted**, and `DocumentQueryBase<T>` is **public**, so an
+out-of-repo provider implements four members instead of ~450 lines.
+
+The safety net is a pair of cross-provider conformance suites that assert the `IDocumentQuery<T>`
+contract, soft delete, and interceptor cancellation identically on all 17 providers. They found four real
+bugs on their first run:
+
+- **Bools in a predicate were broken on MySQL, MariaDB and SQL Server.** A `bool` JSON value was extracted
+  as the *text* `'true'`/`'false'` and compared against `1`/`0`, so `Where(x => x.IsActive)` — or any bool
+  query filter, including soft delete's — failed with `Truncated incorrect DOUBLE value: 'false'`. SQL
+  Server had its own flavour: `BIT` is a value, not a condition.
+- **Cosmos `ExecuteUpdate` 404'd**, because the narrowed `SELECT c.id, c.data` projection dropped
+  `typeName` — the partition key — before writing back.
+- **Cosmos `SetProperty`/`RemoveProperty` ignored global query filters**, so a soft-deleted document could
+  still be updated by id.
+- **`SetProperty` with a date/`Guid` wrote malformed JSON** on the providers that build the value as a JSON
+  literal — an unquoted invariant `ToString()` that `json_set` rejected outright.
+
+Every one of those was a real defect that had shipped. That's the argument for the refactor.
+
+:::caution[Breaking]
+**Query builders are immutable everywhere now.** `Where`/`OrderBy`/`Paginate`/`IgnoreQueryFilters` on the
+relational store used to mutate in place and return the same instance; every document provider has always
+returned a copy. Both return a copy now — so a builder call used as a *statement* silently loses its
+clause. The compiler can't flag it, so sweep for it:
+
+```csharp
+q.Where(x => !x.IsDeleted);        // ← discarded
+q = q.Where(x => !x.IsDeleted);    // ← correct on every provider
+```
+
+Also: composing a query after `Select(...)`/`Project(...)` now throws `NotSupportedException` on the
+relational providers too, where it used to throw `InvalidOperationException`.
+:::
+
+## Trim and AOT, verified
+
+v12.1 was a dedicated pass. The whole `src/` tree now builds with **zero** IL2026/IL2075/IL2090/IL3050
+warnings, and packages carry `IsAotCompatible` — which stamps `[AssemblyMetadata("IsTrimmable","True")]`.
+Previously *no* package declared it, so a consumer's trimmer kept these assemblies whole instead of
+trimming into them. The handful whose dependencies rule AOT out declare `IsAotCompatible=false` honestly
+rather than silently.
+
+The mapping APIs (`MapVersionProperty`, `MapSpatialProperty`, `MapVectorProperty`, `MapFullTextProperty`,
+`MapComputedProperty`, `MapBlob`, `MapBlobCollection`) now declare
+`[DynamicallyAccessedMembers(PublicProperties)]` on `T`, so the properties they resolve by name are
+actually preserved. Passing a concrete type needs no change; code that forwards its own unannotated
+generic parameter into them will get IL2091 and should propagate the annotation.
+
+And it's checked, not assumed: `samples/Sample.Aot` publishes with `PublishAot=true`, exercises every
+mapping kind and query surface once, treats any trim/AOT warning as a build error, and CI publishes and
+runs it. The Roslyn analyzers can't see warnings coming out of dependencies or code reachable only through
+a call graph — a real ILC run can.
+
+---
+
+## Everything else DocumentDb does
+
+If you're new here, the pitch is one sentence: **turn any database into a schema-free JSON document store
+with LINQ querying, no `CREATE TABLE`, no migrations, and one API across 19 backends.**
+
+**Providers** — SQLite, SQLCipher, LiteDB, IndexedDB (Blazor WASM), DuckDB, PostgreSQL, CockroachDB, SQL
+Server, MySQL, MariaDB, Oracle, Cosmos DB, MongoDB, Amazon DocumentDB, Azure Table Storage, DynamoDB,
+Redis, RavenDB, Google Firestore.
+
+| Area | What you get |
+|---|---|
+| [CRUD](/documentdb/crud/) | Insert/Update/Upsert/Remove over whole object graphs; RFC 7396 merge-patch vs replace as a flag; `SetProperty`/`RemoveProperty` for surgical field updates; `GetDiff` returning an RFC 6902 patch; batch writes as one set operation |
+| [Querying](/documentdb/querying/) | Fluent LINQ over nested properties, `Any()`, string methods, captured variables; `IAsyncEnumerable` streaming; ordering, pagination and keyset cursors; a string-expression grammar (`Where("…")`) with full parity; Lucene-syntax queries |
+| [Projections](/documentdb/projections/) & [aggregates](/documentdb/aggregates/) | SQL-level `.Select()` into DTOs; `Max`/`Min`/`Sum`/`Average` terminals; `GroupBy`/`Having` pushed down to real SQL `GROUP BY` |
+| [Indexes](/documentdb/indexes/) | Expression-based JSON indexes (up to 30× faster), composite multi-column indexes, [computed properties](/documentdb/computed-columns/) as alias or materialized generated columns |
+| [Spatial](/documentdb/spatial/) | Full OGC `Geometry` model, topological predicates (`GeoIntersects`, `GeoWithin`, …), real 2-D indexes on every SQL provider plus Cosmos `ST_*` and Mongo `2dsphere` |
+| [Vector](/documentdb/vector/) | `MapVectorProperty` + `NearestVectors(query, k)` on pgvector, SQL Server 2025 `VECTOR`, Oracle 23ai, Cosmos DiskANN, Mongo Atlas `$vectorSearch`, DuckDB `vss`, `sqlite-vec`; `AutoEmbedOnInsert` via `IEmbeddingGenerator` |
+| [Full-text](/documentdb/full-text/) | `MapFullTextProperty` + relevance-ranked `FullTextSearch<T>` on FTS5, `tsvector`+GIN, MySQL `FULLTEXT`, Oracle Text, SQL Server FTS, DuckDB `fts`, Cosmos, Mongo `$text` |
+| [Temporal](/documentdb/temporal/) | `MapTemporal<T>` append-only versioning with `History`/`AsOf`/`Restore`/`GetDiffBetween`/`ChangesByActor`, on every provider |
+| [Blobs](/documentdb/blobs/) | `DocumentBlob` sidecar storage, loaded on demand, so reads and the change feed never drag the bytes along |
+| [Interceptors](/documentdb/interceptors/) & [filters](/documentdb/query-filters/) | Per-document and set-based write hooks running inside the transaction; EF-style global query filters with named `IgnoreQueryFilters` |
+| [Change monitoring](/documentdb/change-monitoring/) | `IAsyncEnumerable<DocumentChange<T>>`, per-query `.NotifyOnChange()`, plus native change feeds on PostgreSQL `LISTEN`/`NOTIFY`, SQL Server Change Tracking and Cosmos Change Feed |
+| [Context](/documentdb/context/) | EF-Core-style typed `DocumentContext` + `DocumentSet<T>`, source-generated from `[Document]` attributes |
+| [Backup](/documentdb/backup/) | Streaming export/import/restore with native bulk-copy fast paths (`COPY`, `SqlBulkCopy`, DuckDB appender); hot file backup on SQLite/SQLCipher/LiteDB |
+| Multi-tenancy | Shared-table `TenantId` filtering or tenant-per-database, resolved via `ITenantResolver`; consumer code unchanged |
+| Concurrency | `MapVersionProperty` optimistic concurrency, ETag/conditional CAS, `OpenSession()` unit of work with explicit transactions and lock modes |
+| [Orleans](/documentdb/orleans/) | Grain storage, reminders, cluster membership and grain directory — with grain state queryable *without activating grains* |
+| [AI tools](/documentdb/ai-tools/) | `Microsoft.Extensions.AI` tool functions per document type, capability-gated, with non-removable per-type filter scopes |
+| [OData](/documentdb/odata/) | `$filter`/`$orderby`/`$top`/`$skip`/`$count`/`$select` onto the fluent query, with per-entity-set governance |
+| [Data sync](/documentdb/data-sync/) | Offline-first bidirectional sync to an HTTP backend via `Shiny.Data.Sync` |
+| [Diagnostics](/documentdb/diagnostics/) | Always-on OpenTelemetry metrics and `ActivitySource` spans, zero-cost when nobody's listening |
+| [Validation](/documentdb/validation/) | JSON Schema (draft 2020-12) enforced just before the write |
+| [Geo reference data](/documentdb/geo-reference/) | Embedded US/CA states, provinces and cities that seed straight into any store |
+| [Aspire](/documentdb/aspire/) | Provider as a deployment decision, keyed stores with health checks + OTel, and the admin UI as a resource |
+
+## Packages
+
+| Package | |
+|---|---|
+| `Shiny.DocumentDb` | <NugetBadge name="Shiny.DocumentDb" /> |
+| `Shiny.DocumentDb.Sqlite` | <NugetBadge name="Shiny.DocumentDb.Sqlite" /> |
+| `Shiny.DocumentDb.Sqlite.SqlCipher` | <NugetBadge name="Shiny.DocumentDb.Sqlite.SqlCipher" /> |
+| `Shiny.DocumentDb.Sqlite.VectorSupport` | <NugetBadge name="Shiny.DocumentDb.Sqlite.VectorSupport" /> |
+| `Shiny.DocumentDb.PostgreSql` | <NugetBadge name="Shiny.DocumentDb.PostgreSql" /> |
+| `Shiny.DocumentDb.CockroachDb` | <NugetBadge name="Shiny.DocumentDb.CockroachDb" /> |
+| `Shiny.DocumentDb.SqlServer` | <NugetBadge name="Shiny.DocumentDb.SqlServer" /> |
+| `Shiny.DocumentDb.MySql` | <NugetBadge name="Shiny.DocumentDb.MySql" /> |
+| `Shiny.DocumentDb.MariaDb` | <NugetBadge name="Shiny.DocumentDb.MariaDb" /> |
+| `Shiny.DocumentDb.Oracle` | <NugetBadge name="Shiny.DocumentDb.Oracle" /> |
+| `Shiny.DocumentDb.DuckDb` | <NugetBadge name="Shiny.DocumentDb.DuckDb" /> |
+| `Shiny.DocumentDb.LiteDb` | <NugetBadge name="Shiny.DocumentDb.LiteDb" /> |
+| `Shiny.DocumentDb.IndexedDb` | <NugetBadge name="Shiny.DocumentDb.IndexedDb" /> |
+| `Shiny.DocumentDb.MongoDb` | <NugetBadge name="Shiny.DocumentDb.MongoDb" /> |
+| `Shiny.DocumentDb.CosmosDb` | <NugetBadge name="Shiny.DocumentDb.CosmosDb" /> |
+| `Shiny.DocumentDb.DocumentDb` | <NugetBadge name="Shiny.DocumentDb.DocumentDb" /> |
+| `Shiny.DocumentDb.AzureTable` | <NugetBadge name="Shiny.DocumentDb.AzureTable" /> |
+| `Shiny.DocumentDb.DynamoDb` | <NugetBadge name="Shiny.DocumentDb.DynamoDb" /> |
+| `Shiny.DocumentDb.Redis` | <NugetBadge name="Shiny.DocumentDb.Redis" /> |
+| `Shiny.DocumentDb.RavenDb` | <NugetBadge name="Shiny.DocumentDb.RavenDb" /> |
+| `Shiny.DocumentDb.Firestore` | <NugetBadge name="Shiny.DocumentDb.Firestore" /> |
+| `Shiny.DocumentDb.Geo` | <NugetBadge name="Shiny.DocumentDb.Geo" /> |
+| `Shiny.DocumentDb.JsonSchema` | <NugetBadge name="Shiny.DocumentDb.JsonSchema" /> |
+| `Shiny.DocumentDb.Extensions.AI` | <NugetBadge name="Shiny.DocumentDb.Extensions.AI" /> |
+| `Shiny.DocumentDb.OData` | <NugetBadge name="Shiny.DocumentDb.OData" /> |
+| `Shiny.DocumentDb.AspNetCore.OData` | <NugetBadge name="Shiny.DocumentDb.AspNetCore.OData" /> |
+| `Shiny.DocumentDb.AppDataSync` | <NugetBadge name="Shiny.DocumentDb.AppDataSync" /> |
+| `Shiny.DocumentDb.Orleans` | <NugetBadge name="Shiny.DocumentDb.Orleans" /> |
+| `Shiny.DocumentDb.Orleans.MongoDb` | <NugetBadge name="Shiny.DocumentDb.Orleans.MongoDb" /> |
+| `Shiny.DocumentDb.Orleans.CosmosDb` | <NugetBadge name="Shiny.DocumentDb.Orleans.CosmosDb" /> |
+| `Shiny.DocumentDb.Aspire.Hosting` | <NugetBadge name="Shiny.DocumentDb.Aspire.Hosting" /> |
+| `Shiny.DocumentDb.Aspire.Client` | <NugetBadge name="Shiny.DocumentDb.Aspire.Client" /> |
+| `Shiny.DocumentDb.Aspire.Orleans` | <NugetBadge name="Shiny.DocumentDb.Aspire.Orleans" /> |
+
+The admin UI isn't a package — it's `ghcr.io/shinyorg/shiny-docdb-myadmin`.
+
+## Links
+
+- **Docs** — [shinylib.net/documentdb](/documentdb/)
+- **Release notes** — [full v12 changelog](/documentdb/release-notes/)
+- **Admin UI** — [ShinyDocDbMyAdmin](/documentdb/admin/)
+- **JSON collections** — [/documentdb/json-collections](/documentdb/json-collections/)
+- **Soft delete** — [/documentdb/soft-delete](/documentdb/soft-delete/)
+- **Interceptors** — [/documentdb/interceptors](/documentdb/interceptors/)
+- **AOT setup** — [/documentdb/aot](/documentdb/aot/)
+- **Provider comparison** — [/documentdb/providers](/documentdb/providers/)
+- **GitHub** — [github.com/shinyorg/DocumentDb](https://github.com/shinyorg/DocumentDb)
+
+There's also a [Claude Code skill](https://github.com/shinyorg/DocumentDb/tree/main/skills/shiny-documentdb)
+that keeps an agent honest about the API surface if you're generating DocumentDb code.
