@@ -1,0 +1,248 @@
+---
+title: JSON Collections
+description: Read and write documents as raw JSON — keyed by name (schema-free) or by CLR type (late-bound) — through one API.
+---
+
+A **JSON collection** is a view over one collection of documents that works in raw
+`System.Text.Json` nodes instead of CLR instances. You get one from the store, addressed either way:
+
+```csharp
+// schema-free — no CLR type anywhere
+var orders = store.Collection("orders");
+var id  = await orders.Insert(jsonObject);
+var doc = await orders.Get(id);
+var rows = await orders.Query()
+    .Where("customer.name == 'bob' and total:number > 100")
+    .OrderBy("total:number desc")
+    .Paginate(0, 50)
+    .ToList();                       // IReadOnlyList<JsonObject>
+
+// late-bound over a registered type — full write pipeline, typed path resolution
+var users = store.Collection(typeof(User));
+await users.Insert(jsonObject);
+var admins = await users.Query().Where("roles hasflag 'Admin'").ToList();
+```
+
+Both return the same `IJsonDocumentCollection`. They are one lane: the stored row is identical
+(`Id / TypeName / Data / CreatedAt / UpdatedAt`), and a CLR type contributes exactly two things on top of a
+name — the registered mappings plus the write pipeline, and metadata for resolving a path string to a JSON
+path.
+
+:::note[Which one do I want?]
+- **`Collection(name)`** — the shape is genuinely unknown at compile time: multi-tenant custom objects, a
+  form builder, a generic intake endpoint, an ETL landing zone.
+- **`Collection(type)`** — you *have* a document type but not an instance: HTTP intake, message-bus
+  payloads, gateways, anything that already holds JSON and shouldn't pay to deserialize it.
+- **`Query<T>()`** — you have CLR instances. Nothing here replaces it.
+:::
+
+## What each keying brings
+
+Everything resolved by CLR `Type` applies to a type-keyed collection and does not exist for a schema-free
+one. That is one rule, not a list of gaps:
+
+| | `Collection(name)` | `Collection(type)` |
+|---|---|---|
+| Multi-tenancy, transactions, paging, cursors, `ToQueryString()` | ✅ | ✅ |
+| Backup / bulk export | ✅ | ✅ |
+| RFC 7396 merge (`patch: true`) | ✅ | ✅ |
+| String-grammar `Where` / `OrderBy` / `Project` / `GroupBy` | ✅ | ✅ |
+| Path resolution through naming policy / `[JsonPropertyName]` | — (paths are literal) | ✅ |
+| `hasflag`, spatial and full-text grammar functions | ❌ throws | ✅ |
+| Interceptors, temporal history, global query filters, change notifications | ❌ | ✅ |
+| Versioning / CAS, spatial + vector + blob sidecars | ❌ | ✅ |
+| Id generation | UUIDv7 string | the type's `IdKind` |
+
+Bodies are stored **as-is** on both. For a type-keyed collection that means property names must match the
+type's serialized shape — if your store uses the default camelCase policy, write `{"id": …}`, not
+`{"Id": …}`.
+
+## Provider support
+
+The relational providers: **SQLite, SQLCipher, DuckDB, PostgreSQL, CockroachDB, SQL Server, MySQL, MariaDB,
+Oracle**. Every other provider throws `NotSupportedException` from `Collection(...)`.
+
+The reason is structural rather than a to-do: this lane works against the shared envelope over ADO.NET, and
+only the relational providers expose it. The document stores (MongoDB, Cosmos, LiteDB, IndexedDB, Redis,
+RavenDB, Firestore) and the key-partitioned ones (Azure Table, DynamoDB) each store documents their own way.
+
+## Writing
+
+```csharp
+var orders = store.Collection("orders");
+
+string id = await orders.Insert(jsonObject);        // one document, returns the stored id
+int n     = await orders.Insert(jsonArray);         // many, atomically, returns the count
+
+await orders.Update(node);                          // full replace — every target must exist
+await orders.Update(node, patch: true);             // RFC 7396 deep-merge
+await orders.Upsert(node);                          // merge-or-insert (patch by default)
+await orders.Upsert(node, patchIfUpdate: false);    // replace-or-insert
+await orders.BatchUpsert([a, b, c]);                // many, one transaction
+
+await orders.Remove(id);
+await orders.BatchRemove([id1, id2]);
+await orders.Clear();
+```
+
+`Insert` takes a `JsonObject` or a `JsonArray` — deliberately not a bare `JsonNode`, because the return
+type differs between them and overload resolution would otherwise depend on how a variable happens to be
+*declared*. Call `.AsObject()` / `.AsArray()` when you hold a `JsonNode`. `Update` and `Upsert` accept
+either shape behind one signature, so they take `JsonNode`.
+
+## Ids
+
+The id contract belongs to the target, and this is the one place the two keyings genuinely differ.
+
+**Schema-free** — the id lives at a property you name (default `"id"`), is **read case-insensitively**
+(`id` / `Id` / `ID`) and **written verbatim**. An absent, JSON-null or empty id on `Insert` generates a
+sortable **UUIDv7** in `"N"` form and stamps it into your object, so the body and the `Id` column cannot
+disagree. `Insert` returns it.
+
+```csharp
+var orders = store.Collection("orders", idProperty: "orderNo");
+var id = await orders.Insert(new JsonObject { ["orderNo"] = "SO-1", ["total"] = 10 });
+```
+
+**Type-keyed** — unchanged from the typed surface: the id member and its kind come from the type, so a
+`Guid` generates a v4, `int`/`long` take the next sequence value, and a declared `string` id **refuses** to
+auto-generate.
+
+:::caution[Schema-free ids compare as literal strings]
+Pass back exactly what you stored. A `Guid` argument formats as `"N"`, so if you stored a dashed Guid
+*string* then `Get(someGuid)` will miss. `string`, `Guid`, `int` and `long` are accepted; anything else
+throws.
+:::
+
+## Querying
+
+`Query()` is the string grammar — the same one `Query<T>().Where("…")` uses, lowered to the same IR and the
+same SQL.
+
+```csharp
+var rows = await orders.Query()
+    .Where("status == 'open'")
+    .Where($"total:number > {threshold}")   // interpolated values bind as parameters
+    .OrderBy("created desc, total:number")
+    .Paginate(0, 50)
+    .ToList();
+
+long n     = await orders.Query().Where("status == 'open'").Count();
+bool any   = await orders.Query().Any();
+var page   = await orders.Query().OrderBy("created").ToCursorPage(cursor, 50);
+var picked = await orders.Query().Project("status, count() as n").ToList();
+var groups = await orders.Query().GroupBy("status").Having("count() > 5")
+                         .Project("status, count() as n, sum(total) as revenue").ToList();
+
+await orders.Query().Where("status == 'draft'").ExecuteDelete();
+await orders.Query().Where("status == 'draft'").ExecuteUpdate("status", "void");
+```
+
+There is no typed LINQ here — `Where(o => o.Total > 100)` needs a CLR type. Use `Query<T>()` for that.
+
+### Type hints, and when you need one
+
+On a **schema-free** collection there is no metadata saying what `total` is, so the type is *inferred* while
+the expression is built, in this order:
+
+1. **An explicit `path:type` hint wins** — `total:number`.
+2. **Otherwise infer from the other operand** — `total > 100` makes it an integer.
+3. **Otherwise infer from the function** — `lower(name)` is a string, `year(created)` a date,
+   `abs(total)` a double.
+4. **Otherwise it is a string** — which every dialect emits as the plain untyped extract, so the SQL is
+   byte-identical to an unhinted one.
+
+The hint vocabulary is `string`, `number`, `int`, `long`, `double`, `decimal`, `bool`, `date`, `guid`
+(`number` ≡ `double`). On a **type-keyed** collection the leaf type is known, so a `:type` suffix is a parse
+error.
+
+**You need a hint wherever nothing else pins the type** — an `OrderBy`, a `min`/`max`, or a `Project` over a
+numeric field:
+
+| | SQLite | PG · Cockroach · MySQL · MariaDB · SQL Server · Oracle · DuckDB |
+|---|---|---|
+| `Where("total > 100")` | correct | **correct** (inferred → `::BIGINT` / `CAST(… AS SIGNED)` / …) |
+| `Where("name == 'bob'")`, `Where("active == true")` | correct | correct |
+| `OrderBy("total")` *(unhinted)* | **numerically correct** | **lexicographic** — `"100"` before `"9"` |
+| `OrderBy("total:number")` | correct | **correct** |
+| `OrderBy("name")`, `OrderBy("created")` *(ISO-8601)* | correct | correct |
+| `sum(total)` / `avg(total)` / `count()` | correct | **correct** — these always extract numerically |
+| `min(x)` / `max(x)` *(unhinted)* | correct | text compare — right for strings and ISO dates, wrong for numbers; `min(total:number)` fixes it |
+| `Project("total")` | correct | returns a JSON string; `total:number` returns a number |
+
+SQLite is numerically correct either way, so a SQLite-only test proves nothing here — hint your numeric
+sort keys if you want the same query string to behave the same on every backend.
+
+### Functions that need a mapping
+
+`hasflag` needs a CLR enum to parse the flag name; the geo predicates need `MapSpatialProperty<T>`; the
+Lucene functions need `MapFullTextProperty<T>`. None of those registrations exist without a type, so on a
+schema-free collection they throw with a pointer to `Query<T>()`. Everything else in the grammar works
+identically on all three surfaces, and a test enforces that.
+
+## Field and collection naming
+
+A collection name must match `^[A-Za-z_][A-Za-z0-9_]{0,127}$`, and each dot-separated path segment must
+match `^[A-Za-z_][A-Za-z0-9_]*$` (max 16 segments). This is strict on purpose: names and paths are
+interpolated into SQL as literals, not bound as parameters, and an allow-list of identifier characters
+cannot be escaped out of.
+
+:::caution[Keys with dashes, spaces or dots are storable but not addressable]
+You can write `{"order-id": 1}`; you cannot filter, sort or index on it. A bracket/quoted-segment syntax
+(`items["order-id"]`) is a later addition.
+:::
+
+## Raw SQL escape hatch
+
+When the grammar cannot express something, `Query(whereClause, parameters)` is the non-generic twin of
+[`Query<T>(string)`](/documentdb/querying):
+
+```csharp
+var rows = await orders.Query(
+    "json_extract(Data, '$.total') > @min",
+    new Dictionary<string, object?> { ["@min"] = 100 });
+```
+
+Tenancy still applies. The clause is **not** parsed — bind values through `parameters` rather than
+concatenating them in.
+
+## Indexes
+
+```csharp
+await orders.CreateIndex(default, "status", "created");
+```
+
+Builds a JSON expression index named exactly as the library names its own. Paths are validated before
+reaching the DDL.
+
+## Migrating from the old JSON lane
+
+The `Type` + `JsonNode` members on `IDocumentStore` were removed in 12.2 in favour of this one surface.
+
+| Removed | Replacement |
+|---|---|
+| `store.Insert(type, node)` | `store.Collection(type).Insert(obj)` / `.Insert(array)` |
+| `store.Update(type, node)` | `store.Collection(type).Update(node)` |
+| `store.Update(type, node, patch)` | `store.Collection(type).Update(node, patch)` |
+| `store.Upsert(type, node)` | `store.Collection(type).Upsert(node)` |
+| `store.Upsert(type, node, patchIfUpdate)` | `store.Collection(type).Upsert(node, patchIfUpdate)` |
+| `store.Get(type, id)` | `store.Collection(type).Get(id)` |
+| `store.Query(type, where, parameters)` | `store.Collection(type).Query(where, parameters)` |
+| `store.QueryStream(type, where, parameters)` | `store.Collection(type).QueryStream(where, parameters)` |
+
+Two signature changes come with it: `Insert` of a single object now returns the **stored id** rather than a
+count of 1, and `Get` returns `JsonObject?` rather than `JsonNode?` (stored bodies are always objects).
+`Insert` also no longer accepts a bare `JsonNode` — call `.AsObject()` or `.AsArray()`.
+
+In exchange the type-keyed lane gained a fluent query builder (it previously had only the raw-SQL
+`Query(type, whereClause)`) and `Remove` / `BatchRemove` / `Clear`, which it did not have at all.
+
+## Not supported
+
+Reach a collection from a session via `session.Store.Collection(...)`: like the lane it replaces, this is a
+store-level feature and a unit of work buffers typed operations only.
+
+Schema-free collections additionally have no interceptors, temporal history, change notifications,
+versioning/CAS or spatial/vector/full-text/computed/soft-delete mappings — every one of those is registered
+against a CLR type. Global query filters are `Expression<Func<T,bool>>`, so they do not apply rather than
+being unimplemented.

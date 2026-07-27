@@ -220,18 +220,19 @@ await store.Upsert(doc, patchIfUpdate: false);  // replace the body wholesale on
 
 The merge modes strip null properties (so an unset nullable field is *left unchanged*, never deleted) and require a non-default Id. `Update(patch: true)` throws if the document doesn't exist; `Upsert` inserts instead.
 
-:::caution[Typed-object patch is coarse — prefer the JSON lane for precise partial updates]
-A typed object always serializes **every** property, so `patch: true` only skips the fields that are `null` — a non-nullable field with a default (e.g. `int Count` = `0`) is still written. For a true "change only these keys" update, either make the patch type's fields nullable (`JsonIgnoreCondition.WhenWritingNull`/`WhenWritingDefault`), or use the late-bound **JSON lane**, where you control exactly which keys are present:
+:::caution[Typed-object patch is coarse — prefer a JSON collection for precise partial updates]
+A typed object always serializes **every** property, so `patch: true` only skips the fields that are `null` — a non-nullable field with a default (e.g. `int Count` = `0`) is still written. For a true "change only these keys" update, either make the patch type's fields nullable (`JsonIgnoreCondition.WhenWritingNull`/`WhenWritingDefault`), or use a [JSON collection](/documentdb/json-collections), where you control exactly which keys are present:
 
 ```csharp
 // Only 'name' is present → only 'name' changes; every other field is untouched.
-await store.Update(typeof(User), new JsonObject { ["id"] = "user-1", ["name"] = "Bob" }, patch: true);
-await store.Upsert(typeof(User), partialJson, patchIfUpdate: false);   // replace-or-insert
+var users = store.Collection(typeof(User));
+await users.Update(new JsonObject { ["id"] = "user-1", ["name"] = "Bob" }, patch: true);
+await users.Upsert(partialJson, patchIfUpdate: false);   // replace-or-insert
 ```
 :::
 
 :::note[Provider tier]
-The merge/replace **flags** are implemented on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) and the JSON lane. The two default behaviours — `Update` (replace) and `Upsert` (merge) — work on every store; the non-default modes (`Update(patch: true)`, `Upsert(patchIfUpdate: false)`) throw `NotSupportedException` on the document-native and key-partitioned stores.
+The merge/replace **flags** are implemented on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) and JSON collections. The two default behaviours — `Update` (replace) and `Upsert` (merge) — work on every store; the non-default modes (`Update(patch: true)`, `Upsert(patchIfUpdate: false)`) throw `NotSupportedException` on the document-native and key-partitioned stores.
 :::
 
 ## Update a single property (SetProperty)
@@ -448,41 +449,51 @@ See [Querying](/documentdb/querying) for more examples of bulk delete and update
 int deletedCount = await store.Clear<User>();
 ```
 
-## Late-bound JSON lane (Type + JsonNode)
+## Working in raw JSON
 
-When you have a registered document `Type` but **not** a CLR `T` at the call site — generic HTTP intake, message-bus payloads, ETL, gateways — write and read documents by handing the store the `Type` and the JSON body directly. This skips serialization: the supplied JSON is stored **as-is**.
+When you have a registered document `Type` but **not** a CLR `T` at the call site — generic HTTP intake,
+message-bus payloads, ETL, gateways — open a [JSON collection](/documentdb/json-collections) over the type
+and hand it the body directly. This skips serialization: the supplied JSON is stored **as-is**.
 
 ```csharp
 using System.Text.Json.Nodes;
 
-// One document
-var body = JsonNode.Parse("""{ "customer": "acme", "total": 42.50 }""")!;
-int n = await store.Insert(typeof(Order), body);   // n == 1, Id auto-generated & injected into `body`
+var orders = store.Collection(typeof(Order));
+
+// One document — returns the stored id, generated and injected into `body` when absent
+var body = JsonNode.Parse("""{ "customer": "acme", "total": 42.50 }""")!.AsObject();
+string id = await orders.Insert(body);
 
 // Many at once — one atomic transaction (a mid-batch failure rolls the whole call back)
-var batch = JsonNode.Parse("""[ { "customer": "a" }, { "customer": "b" } ]""")!;
-await store.Insert(typeof(Order), batch);          // returns 2
+var batch = JsonNode.Parse("""[ { "customer": "a" }, { "customer": "b" } ]""")!.AsArray();
+await orders.Insert(batch);                        // returns 2
 
 // Update (full replace) and Upsert (RFC 7396 merge patch) mirror the typed methods
-await store.Update(typeof(Order), JsonNode.Parse("""{ "id": "ord-7", "status": "open" }""")!);
-await store.Upsert(typeof(Order), JsonNode.Parse("""{ "id": "ord-7", "status": "shipped" }""")!);
+await orders.Update(JsonNode.Parse("""{ "id": "ord-7", "status": "open" }""")!);
+await orders.Upsert(JsonNode.Parse("""{ "id": "ord-7", "status": "shipped" }""")!);
 
 // Read back as raw JSON — no deserialize to T (cheaper, and AOT-clean)
-JsonNode? doc = await store.Get(typeof(Order), "ord-7");
-IReadOnlyList<JsonNode> open = await store.Query(typeof(Order), "json_extract(Data, '$.status') = @s", new { s = "open" });
-await foreach (var node in store.QueryStream(typeof(Order), "json_extract(Data, '$.status') = @s", new { s = "open" })) { /* … */ }
+JsonObject? doc = await orders.Get("ord-7");
+var open = await orders.Query().Where("status == 'open'").ToList();
 ```
 
-This lane **rides the full normal write pipeline** — tenancy, temporal history, versioning/optimistic-CAS, spatial + vector sidecars, JSON interceptors, and change notifications all apply (unlike [`IDocumentBackup`/`BulkImport`](/documentdb/backup/), which deliberately bypasses them). The generated Id (and bumped version) is written back onto your node, exactly like the typed `Insert<T>`.
+This rides the full normal write pipeline — tenancy, temporal history, versioning/optimistic-CAS, spatial +
+vector sidecars, JSON interceptors, and change notifications all apply (unlike
+[`IDocumentBackup`/`BulkImport`](/documentdb/backup/), which deliberately bypasses them). The generated Id
+(and bumped version) is written back onto your node, exactly like the typed `Insert<T>`.
 
 Key rules:
 
-- **JSON stored AS-IS — you own the property shape.** Member names must match what `T` serializes to (camelCase by default). `Get`/`Query` read that same shape back.
-- **Object vs. array.** A `JsonObject` writes one document; a `JsonArray` writes many atomically; a primitive `JsonValue` throws `ArgumentException`.
+- **JSON stored AS-IS — you own the property shape.** Member names must match what `T` serializes to (camelCase by default). Reads return that same shape.
+- **Object vs. array.** `Insert` takes a `JsonObject` (one, returns the id) or a `JsonArray` (many, atomic, returns the count); `Update`/`Upsert` accept either.
 - **Mapped properties must be present.** Because the body is verbatim, every registered spatial/vector mapping's JSON path must be present, or `Insert`/`Update` throws `InvalidOperationException` naming it. An explicit JSON `null` is honored as a deliberate "no value" (the sidecar is skipped). `Upsert` runs this check only when the element has no Id (a guaranteed insert), so partial merge patches aren't forced to re-send the location/vector.
-- **Filtering reuses the string WHERE/OData surface** — there is no "filter by JsonNode".
 
-Two documented limitations: object-mutating interceptors are a **no-op** on this lane (there is no `T` to mutate — JSON-shaped interceptors via `ctx.GetJsonDocument()` still work fully), and **vector auto-embedding does not run** (supply the embedding in the JSON).
+Two documented limitations: object-mutating interceptors are a **no-op** here (there is no `T` to mutate — JSON-shaped interceptors via `ctx.GetJsonDocument()` still work fully), and **vector auto-embedding does not run** (supply the embedding in the JSON).
+
+:::note[No CLR type at all?]
+`store.Collection("orders")` opens a **schema-free** collection with the same API and no registered type —
+see [JSON Collections](/documentdb/json-collections).
+:::
 
 **Provider tier:** supported on the relational providers (SQLite, SQLCipher, MySQL, SQL Server, PostgreSQL, Oracle, DuckDB) via the core store. The document-native (MongoDB, Cosmos, LiteDB, IndexedDB) and key-partitioned (Azure Table, DynamoDB) providers throw `NotSupportedException` until a later cut, and the lane is not available inside a session transaction.
 

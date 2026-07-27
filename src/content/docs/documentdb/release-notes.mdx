@@ -7,6 +7,58 @@ import RN from '/src/components/ReleaseNote.astro';
 
 ## 12.2 TBD
 
+<RN type="breaking">
+**The late-bound JSON lane is now `store.Collection(type)`.** The eight `Type` + `JsonNode` members on `IDocumentStore` are removed in favour of a single [JSON collection](/documentdb/json-collections/) surface that serves both keyings. No `[Obsolete]` shims — update the call sites.
+
+| Removed | Replacement |
+|---|---|
+| `store.Insert(type, node)` | `store.Collection(type).Insert(obj)` / `.Insert(array)` |
+| `store.Update(type, node)` | `store.Collection(type).Update(node)` |
+| `store.Update(type, node, patch)` | `store.Collection(type).Update(node, patch)` |
+| `store.Upsert(type, node)` | `store.Collection(type).Upsert(node)` |
+| `store.Upsert(type, node, patchIfUpdate)` | `store.Collection(type).Upsert(node, patchIfUpdate)` |
+| `store.Get(type, id)` | `store.Collection(type).Get(id)` |
+| `store.Query(type, where, parameters)` | `store.Collection(type).Query(where, parameters)` |
+| `store.QueryStream(type, where, parameters)` | `store.Collection(type).QueryStream(where, parameters)` |
+
+Three signature changes come with it: `Insert` of a single object returns the **stored id** rather than a count of `1`; `Get` returns `JsonObject?` rather than `JsonNode?` (stored bodies are always objects); and `Insert` no longer accepts a bare `JsonNode` — call `.AsObject()` or `.AsArray()`, because the return type differs between the two shapes and overload resolution would otherwise depend on how a variable happens to be *declared*. `Update` and `Upsert` still take `JsonNode` and accept either shape.
+</RN>
+
+<RN type="feature">
+**Schema-free JSON collections — `store.Collection("orders")`.** Store and query documents whose shape is unknown at compile time: no CLR type, no registered mappings, no migrations. The same `IJsonDocumentCollection` the type-keyed form returns, so there is one API rather than two.
+
+```csharp
+var orders = store.Collection("orders");
+var id  = await orders.Insert(jsonObject);          // returns the stored id
+var doc = await orders.Get(id);
+var rows = await orders.Query()
+    .Where("customer.name == 'bob' and total:number > 100")
+    .OrderBy("total:number desc")
+    .Paginate(0, 50)
+    .ToList();                                       // IReadOnlyList<JsonObject>
+```
+
+The collection name becomes the row's `TypeName`, so a schema-free collection shares a table with your typed documents without either seeing the other — and needs **zero schema change**.
+
+**Querying is the string grammar only** (no typed LINQ — there is no `T` to write a lambda against), lowered to the same IR and the same SQL as `Query<T>().Where("…")`. Because there is no metadata saying what a field is, its type is **inferred** as the expression is built: from an explicit `path:type` hint, else from the other operand (`total > 100` is numeric), else from the function (`lower(name)` is a string, `year(created)` a date), else `string` — which every dialect emits as the plain untyped extract, so the SQL is byte-identical to an unhinted one. **You need a hint wherever nothing else pins the type** — an `OrderBy`, a `min`/`max`, or a `Project` over a numeric field — because on every provider whose plain JSON extract returns text, `OrderBy("total")` sorts lexicographically (`"100"` before `"9"`). SQLite is numerically correct either way. Hint vocabulary: `string`, `number`, `int`, `long`, `double`, `decimal`, `bool`, `date`, `guid`.
+
+**Ids:** the id property is per-collection (default `"id"`), read case-insensitively and written verbatim. An absent id generates a sortable **UUIDv7** string and stamps it into your object — deliberately different from the type-keyed lane, where a declared `Guid` generates a v4 and a declared `string` id refuses to auto-generate. Schema-free ids compare as **literal strings**: pass back exactly what you stored.
+
+**Names and paths are validated** against `^[A-Za-z_][A-Za-z0-9_]{0,127}$` before they reach the DDL, because they are interpolated into SQL as literals rather than bound as parameters. The documented consequence is that JSON keys containing dashes, spaces or dots are storable but not addressable.
+
+**Provider tier:** the relational providers (SQLite, SQLCipher, DuckDB, PostgreSQL, CockroachDB, SQL Server, MySQL, MariaDB, Oracle). Everything else throws `NotSupportedException`, and the tier is pinned by a test per provider. **Not available on a schema-free collection:** interceptors, temporal history, change notifications, versioning/CAS, spatial/vector/full-text/computed/soft-delete mappings, and the `hasflag`/geo/Lucene grammar functions — every one of those is registered against a CLR type, so those functions throw with a pointer to `Query<T>()`. Global query filters are `Expression<Func<T,bool>>` and so do not apply. Like the lane it replaces, this is a store-level feature: reach it from a session via `session.Store.Collection(...)`.
+
+See [JSON Collections](/documentdb/json-collections/).
+</RN>
+
+<RN type="enhancement">
+**Type-keyed JSON collections gained a query builder and deletes.** `store.Collection(type)` is the same object as the schema-free form, so it picks up two things the old lane never had: a fluent string-grammar `Query()` (previously the only option was the raw-SQL `Query(type, whereClause)`, which is still there as `Collection(type).Query(where, parameters)`), and `Remove` / `BatchRemove` / `Clear`, which the lane did not offer at all. Field paths resolve through the document type's metadata, so naming policies, `[JsonPropertyName]` and leaf types are all honoured — and a type-keyed collection therefore reaches the *full* function set, including `hasflag`, the geo predicates and the Lucene functions. A conformance suite runs every applicable case against both keyings, and a parity suite asserts that the same filter string selects the same documents on `Query<T>()`, `Collection(type).Query()` and `Collection(name).Query()`.
+</RN>
+
+<RN type="fix">
+**Batched merge writes no longer fail on PostgreSQL, SQL Server and CockroachDB.** The RFC 7396 fallback used by providers without a native JSON merge-patch function opened its own transaction for the row-locking read-modify-write. Inside a batch — which the caller already wraps so the whole batch is atomic — that was a nested transaction, which those drivers reject outright (`a transaction is already in progress`). It now joins the ambient transaction when there is one. This affected any array/batch upsert or `patch: true` update on those providers.
+</RN>
+
 <RN type="feature">
 **ShinyDocDbMyAdmin — a phpMyAdmin-style web UI for DocumentDb stores.** Browse, edit and query the documents in any relational store from a browser: a sampled-column grid with JSON-path filters, a formatted/collapsible JSON view, a JSON editor, inferred structure with one-click index create/drop, temporal history with version diffing and restore, a GeoJSON map, blob listing with inline preview, streaming import/export (JSON, NDJSON, CSV, envelope), and a parameterised SQL console.
 

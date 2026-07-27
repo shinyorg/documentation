@@ -517,6 +517,7 @@ export const sidebarTopics = [
           { label: 'Migrating v10 → v11', link: 'documentdb/migrate-v10-to-v11', badge: { text: 'v11', variant: 'caution' } },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
+          { label: 'JSON Collections', link: 'documentdb/json-collections' },
           { label: 'Typed Context', link: 'documentdb/context' },
           { label: 'Bulk Export & Import', link: 'documentdb/backup' },
           { label: 'Querying', link: 'documentdb/querying' },
