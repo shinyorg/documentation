@@ -194,6 +194,46 @@ const MauiProgram = (props: Props) => {
           .AddNutrition(HealthAICapabilities.ReadWrite)
       );`;
   }
+  if (has('faceintelligence')) {
+    src += `
+
+      // The ONNX models are NOT in the packages - bundle them yourself and hand the bytes over.
+      // See https://shinylib.net/faceintelligence/models/
+      builder.Services.AddFaceIntelligence(face =>
+      {
+          face.Options.MaxDistance = 0.6f; // cosine distance - lower is stricter
+
+          face.UseOnnxEmbedder(o => o.ModelBytesProvider = () => LoadBundledModel("arcface.onnx"));
+          face.UseOnnxDetector(o => o.ModelBytesProvider = () => LoadBundledModel("face_detector.onnx"));
+          face.UseSqliteStore(o => o.ConnectionString = $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "faces.db")}");
+      });
+
+      // Only needed for the MAUI controls - it holds per-camera state, so it must be transient.
+      builder.Services.AddTransient<FaceRecognitionAnalyzer>();`;
+  }
+  if (has('voiceintelligence')) {
+    src += `
+
+      // The ONNX model is NOT in the packages - bundle it yourself and hand the bytes over.
+      // See https://shinylib.net/voiceintelligence/models/
+      builder.Services.AddVoiceIntelligence(voice =>
+      {
+          voice.Options.MaxDistance = 0.4f; // MUST be measured against your model + capture path
+
+          voice.UseOnnxEmbedder(o =>
+          {
+              o.ModelBytesProvider = () => LoadBundledModel("ecapa.onnx");
+              o.Dimensions = 512; // MUST match the model
+              o.SampleRate = 16000;
+          });
+          voice.UseSqliteStore(o => o.ConnectionString = $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "voices.db")}");
+      });`;
+  }
+  if (has('documentintelligence')) {
+    src += `
+      // Registers IDocumentScanner, ITextRecognizer, IBarcodeReader, IDataDetector & IDocumentExtractor
+      builder.Services.AddDocumentIntelligence();`;
+  }
   if (has('di')) {
     src += `
       builder.Services.AddGeneratedServices();`;

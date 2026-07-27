@@ -94,6 +94,12 @@ const AppleInfoPlist = (props: Props) => {
   if (has('music')) {
     addKey('NSAppleMusicUsageDescription');
   }
+  if (has('voiceintelligence')) {
+    addKey('NSMicrophoneUsageDescription');
+  }
+  if (has('faceintelligence') || has('documentintelligence')) {
+    addKey('NSCameraUsageDescription');
+  }
   if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('spatial-geofencing') || has('bluetoothle') || has('blehosting')) {
     src += `
         <key>UIBackgroundModes</key>

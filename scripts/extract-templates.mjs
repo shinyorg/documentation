@@ -35,7 +35,8 @@ const BINARY_EXTENSIONS = new Set(['.ttf', '.png', '.ico', '.woff', '.woff2', '.
 const COPY_ONLY_EXTENSIONS = new Set(['.svg', '.ttf', '.txt', '.png', '.ico', '.woff', '.woff2', '.jpg', '.jpeg', '.gif']);
 
 // Files/dirs to skip
-const SKIP_PATTERNS = ['.template.config', '.DS_Store', '.claude-plugin', '.github', 'skills'];
+// 'bin'/'obj' are local build output — Template.csproj excludes them from the package too
+const SKIP_PATTERNS = ['.template.config', '.DS_Store', '.claude-plugin', '.github', 'skills', 'bin', 'obj'];
 
 function shouldSkip(relativePath) {
     return SKIP_PATTERNS.some(p => relativePath.startsWith(p) || relativePath.includes('/' + p) || relativePath === p);

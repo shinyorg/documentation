@@ -114,6 +114,16 @@ const AndroidManifest = (props: Props) => {
     src += addP('MODIFY_AUDIO_SETTINGS');
   }
 
+  if (has('voiceintelligence')) {
+    src += addP('RECORD_AUDIO');
+  }
+
+  // Note: documentintelligence is deliberately NOT here. The ML Kit document scanner runs its UI in the
+  // Google Play services process under that process' own camera permission, so the app must not request it.
+  if (has('faceintelligence')) {
+    src += addP('CAMERA');
+  }
+
   if (has('music')) {
     src += `
       <!-- Android 13+ (API 33+) -->`;

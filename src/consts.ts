@@ -4,6 +4,8 @@ export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussio
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
 export const DEFAULT_VERSION: string = "5.4.0-beta-0074";
+/** Recognition IQ (shinyorg/recogintelligence) — Face / Voice / Document Intelligence ship together. */
+export const RECOGNITION_VERSION: string = "1.0.0-beta-0002";
 
 // Brand colors from logo
 export const BRAND_COLORS = {
@@ -651,6 +653,36 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "3.0.0-beta-0018"
     },
     {
+        "id": "faceintelligence",
+        "nuget": "Shiny.FaceIntelligence.Onnx",
+        "description": "Face Recognition",
+        "category": "devices",
+        "version": RECOGNITION_VERSION,
+        "additionalNugets": [
+            { "nuget": "Shiny.FaceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
+            { "nuget": "Shiny.FaceIntelligence.Maui", "version": RECOGNITION_VERSION }
+        ]
+    },
+    {
+        "id": "voiceintelligence",
+        "nuget": "Shiny.VoiceIntelligence.Onnx",
+        "description": "Voice / Speaker Recognition",
+        "category": "devices",
+        "version": RECOGNITION_VERSION,
+        "additionalNugets": [
+            { "nuget": "Shiny.VoiceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
+            { "nuget": "Shiny.VoiceIntelligence.Maui", "version": RECOGNITION_VERSION }
+        ]
+    },
+    {
+        "id": "documentintelligence",
+        "nuget": "Shiny.DocumentIntelligence",
+        "description": "Document Scanning & Extraction",
+        "category": "devices",
+        "macOsSupported": true,
+        "version": RECOGNITION_VERSION
+    },
+    {
         "id": "speech",
         "nuget": "Shiny.Speech",
         "description": "Speech (STT/TTS)",
@@ -746,7 +778,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence'];
         return compos.some(x => ids.includes(x.id));
     }
 };

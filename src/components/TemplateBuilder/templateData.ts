@@ -32,7 +32,7 @@ export const VERSIONS = {
     shinyBlazorHosting: '5.1.4',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.10.26274.3',
+    devflow: '0.1.0-preview.12.26368.2',
 
     // Microsoft + third-party
     ctMvvm: '8.4.2',
@@ -144,7 +144,7 @@ const MAUI_PARAMS: TemplateParam[] = [
     // Developer tools
     { id: 'devflow', label: 'MAUI DevFlow', type: 'bool', defaultValue: true, category: 'project',
         version: VERSIONS.devflow,
-        description: 'Debug-only toolkit for visual tree inspection, performance profiling, network monitoring, and AI agent automation. Adds a DevFlow agent to your app that connects to the MAUI CLI (maui devflow) https://github.com/dotnet/maui-labs' },
+        description: 'Debug-only toolkit for visual tree inspection, performance profiling, network monitoring, and AI agent automation. Adds Microsoft.Maui.DevFlow.Agent to your app, which connects to the MAUI CLI (maui devflow) https://github.com/dotnet/maui-labs' },
 
     // Choices
     { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
