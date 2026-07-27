@@ -1,0 +1,145 @@
+---
+title: Getting Started
+description: On-device face enrollment and recognition for .NET — ArcFace embeddings, vector search, and live MAUI camera controls.
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="recogintelligence" /> |
+| Downloads | <NugetDownloads name="Shiny.FaceIntelligence" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+**Shiny.FaceIntelligence** does face **enrollment and recognition** entirely on-device. You store one or more
+face embeddings per person, and recognition is a nearest-neighbour vector lookup with a cosine-distance
+threshold. Nothing leaves the device, and there is no cloud API to pay for.
+
+<Aside type="note" title="&quot;Training&quot; here means enrollment">
+No model is trained on-device. You supply a pre-trained ArcFace model; the library crops the detected face,
+runs it through the model to get an L2-normalized vector, and stores that vector. Recognition compares a new
+vector against the stored ones. Adding a person is a database insert, not a training run — it takes
+milliseconds and works with a single photo (though several help a lot — see [Enrollment](/faceintelligence/enrollment/)).
+</Aside>
+
+## Packages
+
+The pipeline is split so you only pull what you use. The core has no ONNX and no database dependency.
+
+| Package | Role |
+|---|---|
+| `Shiny.FaceIntelligence` | **Core.** `IFaceIntelligence`, the contracts (`IFaceEmbedder`, `IFaceDetector`, `IFaceStore`), data types, and the registration builder. Depends on SkiaSharp + DI abstractions only. |
+| `Shiny.FaceIntelligence.Onnx` | ONNX ArcFace embedder + UltraFace detector (`UseOnnxEmbedder` / `UseOnnxDetector`). Also ships the iOS/Mac Catalyst linker fix. |
+| `Shiny.FaceIntelligence.DocumentDb` | Provider-agnostic vector store over [Shiny.DocumentDb](/documentdb/) (`UseDocumentDbStore`). |
+| `Shiny.FaceIntelligence.DocumentDb.Sqlite` | Turnkey SQLite + sqlite-vec store (`UseSqliteStore`). |
+| `Shiny.FaceIntelligence.Maui` | Live camera controls — `FaceRecognitionView` and the guided `FaceEnrollmentView`. |
+
+A typical mobile app installs `Shiny.FaceIntelligence.Onnx`, `Shiny.FaceIntelligence.DocumentDb.Sqlite`, and
+`Shiny.FaceIntelligence.Maui` (each pulls the core transitively). A server-side enrollment service installs the
+first two and skips MAUI entirely.
+
+## Install
+
+```bash
+dotnet add package Shiny.FaceIntelligence.Onnx
+dotnet add package Shiny.FaceIntelligence.DocumentDb.Sqlite
+dotnet add package Shiny.FaceIntelligence.Maui
+```
+
+## Register
+
+Everything is composed through one builder. `AddFaceIntelligence` validates the result and throws at startup if
+an embedder or a store is missing, naming the method you forgot to call.
+
+```csharp
+using Shiny.FaceIntelligence;
+using Shiny.FaceIntelligence.Onnx;
+using Shiny.FaceIntelligence.DocumentDb.Sqlite;
+
+builder.Services.AddFaceIntelligence(face =>
+{
+    face.Options.MaxDistance = 0.6f;   // cosine distance — lower is stricter
+
+    // Image → 512-d vector. Loaded lazily on the first enroll/recognize.
+    face.UseOnnxEmbedder(o => o.ModelBytesProvider = () => LoadBundledModel("arcface.onnx"));
+
+    // Finds the face box. Required for the live controls and the no-box overloads.
+    face.UseOnnxDetector(o => o.ModelBytesProvider = () => LoadBundledModel("face_detector.onnx"));
+
+    // Vector storage + nearest-neighbour search via sqlite-vec.
+    face.UseSqliteStore(o => o.ConnectionString = $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "faces.db")}");
+});
+
+// Only if you use the MAUI controls — it holds per-camera state, so it must be transient.
+builder.Services.AddTransient<FaceRecognitionAnalyzer>();
+```
+
+<Aside type="caution" title="You must supply the ONNX models">
+The models are not in the packages — they are several megabytes each and licensing varies by model. See
+[Models](/faceintelligence/models/) for which ones to use, where to get them, and how to bundle them so they
+load on iOS and Android.
+</Aside>
+
+## Use it
+
+```csharp
+public class CheckInService(IFaceIntelligence faces)
+{
+    public Task Enroll(string employeeId, byte[] photo, FaceBox box)
+        => faces.Enroll(employeeId, photo, box);
+
+    public async Task<string?> WhoIsThis(byte[] photo, FaceBox box)
+    {
+        var result = await faces.Recognize(photo, box);
+        return result.IsMatch ? result.PersonIdentifier : null;
+    }
+}
+```
+
+`IFaceIntelligence` is the whole consumer-facing surface:
+
+| Member | What it does |
+|---|---|
+| `Enroll(id, imageData, faceBox)` | Embed the face at that box and store it under `id`. |
+| `Enroll(id, imageData, allowDuplicate)` | Detect the face first, apply the quality gates, then store. Needs a detector. |
+| `Recognize(imageData, faceBox)` | Nearest enrolled identity within the threshold, or `RecognitionResult.NoMatch`. |
+| `Recognize(imageData)` | Detect then recognize. Needs a detector. |
+| `GetAll()` | Every stored shot, most recent first. |
+| `Forget(id)` | Delete every shot for an identity; returns how many were removed. |
+
+## In a MAUI app
+
+You rarely call `Recognize` per frame yourself. `Shiny.FaceIntelligence.Maui` wraps the camera, permissions,
+lifecycle and analyzer into two drop-in controls:
+
+```xml
+xmlns:fi="clr-namespace:Shiny.FaceIntelligence.Maui;assembly=Shiny.FaceIntelligence.Maui"
+
+<fi:FaceRecognitionView FaceRecognized="OnFaceRecognized" />
+<fi:FaceEnrollmentView PersonIdentifier="{Binding EmployeeId}" Completed="OnEnrolled" />
+```
+
+See [MAUI Controls](/faceintelligence/controls/).
+
+## Identity is yours to choose
+
+`PersonIdentifier` is an opaque string you pick — a user id, an employee number, a GUID. The library stores no
+display name and does no identity resolution of its own.
+
+<Aside type="caution" title="Two people under one identifier are silently merged">
+The identifier is the identity. Enroll two different people under `"allan"` and they will both match it; enroll
+one person under `"allan"` and `"Allan"` and the gallery fragments across two identities. Mint a stable key per
+person (a database id) rather than passing a typed-in name, and the problem disappears.
+</Aside>
+
+## Where next
+
+- [Architecture](/faceintelligence/architecture/) — how the pieces fit, and which ones you can swap
+- [Enrollment](/faceintelligence/enrollment/) — quality gates, duplicate detection, building a good gallery
+- [Recognition](/faceintelligence/recognition/) — thresholds, tuning, and what the numbers mean
+- [MAUI Controls](/faceintelligence/controls/) — live recognition and the guided enrollment wizard
+- [Models](/faceintelligence/models/) — picking, bundling and sizing the ONNX models
+- [Stores](/faceintelligence/stores/) — sqlite-vec, other DocumentDb providers, or your own

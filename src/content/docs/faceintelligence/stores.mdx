@@ -1,0 +1,94 @@
+---
+title: Stores
+description: Where face embeddings live — the turnkey sqlite-vec store, other DocumentDb providers, and writing your own.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The store is the vector database: it holds one row per enrolled shot and answers "which stored vectors are
+nearest this one".
+
+```csharp
+public interface IFaceStore
+{
+    Task Add(Person person, CancellationToken ct = default);
+    Task<IReadOnlyList<FaceMatch>> FindNearest(ReadOnlyMemory<float> embedding, int count, CancellationToken ct = default);
+    Task<IReadOnlyList<Person>> GetAll(CancellationToken ct = default);
+    Task<int> RemoveByPersonIdentifier(string personIdentifier, CancellationToken ct = default);
+}
+```
+
+## SQLite + sqlite-vec (the default)
+
+```bash
+dotnet add package Shiny.FaceIntelligence.DocumentDb.Sqlite
+```
+
+```csharp
+face.UseSqliteStore(o =>
+{
+    o.ConnectionString = $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "faces.db")}";
+});
+```
+
+This is a convenience wrapper over `UseDocumentDbStore` that wires a vector-enabled SQLite provider through
+[Shiny.DocumentDb.Sqlite](/documentdb/sqlite/), backed by **sqlite-vec** (`vec0`) for approximate
+nearest-neighbour search.
+
+<Aside type="note" title="The vec0 extension is registered as an auto-extension">
+`UseSqliteStore` registers `vec0` via SQLite's auto-extension hook so the virtual table is available on every
+connection. This is the only approach that works on iOS, where the extension is statically linked and `dlopen`
+of a loose `.dylib` is forbidden — merely flagging the extension as pre-loaded skips the load but never
+registers `vec0`, which surfaces as `no such module: vec0` on the first enroll.
+</Aside>
+
+## Any other DocumentDb provider
+
+Server-side, you probably want Postgres/pgvector, SQL Server, Cosmos or Mongo rather than SQLite. Use the
+provider-agnostic package and hand it a provider factory:
+
+```bash
+dotnet add package Shiny.FaceIntelligence.DocumentDb
+```
+
+```csharp
+face.UseDocumentDbStore(sp => new PostgreSqlDatabaseProvider(connectionString));
+```
+
+The vector dimension is **read from the registered `IFaceEmbedder`**, so it always matches the model — you never
+declare it, and it cannot drift. See [DocumentDb — Vector / ANN Search](/documentdb/vector/) for what each
+backend supports.
+
+<Aside type="caution" title="The IDocumentStore is private, deliberately">
+Neither store package registers an `IDocumentStore` in your container. It builds one and hands it straight to
+the face store, registering only `IFaceStore`.
+
+This matters as soon as an app uses **both** face and voice: two `IDocumentStore` registrations means
+`GetRequiredService<IDocumentStore>()` returns the *last* one, so the face store would silently resolve the
+voice database (mapped for `Speaker`, pointed at `voices.db`) and vice versa. Each stack owning its own store is
+what keeps them isolated. If you need a `IDocumentStore` for your own data, register your own — it won't
+collide.
+</Aside>
+
+## Your own store
+
+Implement `IFaceStore` and register it directly:
+
+```csharp
+face.UseStore(sp => new MyFaceStore(sp.GetRequiredService<IMyBackend>()));
+```
+
+Two contract details worth knowing:
+
+- **`FindNearest` returns cosine distance**, `0` = identical. If your backend reports *similarity*, convert —
+  the manager compares directly against `MaxDistance` and a flipped convention will match everything or nothing.
+- **`Person.Embedding` is `[JsonIgnore]`d.** In the DocumentDb stores it lives only in the vector sidecar table
+  and comes back empty from `GetAll()`. Your implementation may do otherwise, but callers are told not to rely
+  on reading it back.
+
+## Startup cost
+
+`new DocumentStore(...)` is built eagerly when `IFaceStore` resolves, and that is cheap on purpose: the
+constructor only creates the connection *object* and the mapping metadata, all in memory. The store opens the
+connection and loads the native vector extension itself, lazily, on the **first** operation. So the database
+open and the `vec0` load land inside the first enroll or recognize call — where your page is already catching
+errors — not at app startup.

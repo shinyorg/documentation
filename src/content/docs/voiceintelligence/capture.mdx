@@ -1,0 +1,114 @@
+---
+title: Audio Capture
+description: The capture settings that quietly destroy speaker matching — measured, with the fixes.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The library never opens a microphone. Your app captures audio and hands over `float[]` — mono PCM in `[-1, 1]`
+at the embedder's `SampleRate` (16 kHz by default).
+
+That makes capture *your* code, and capture is where speaker recognition usually breaks. This page exists
+because a working model plus a correct feature front end still produced same-person distances of ~0.88
+(effectively orthogonal) until three capture defects were fixed.
+
+<Aside type="danger" title="Record enrollment and recognition through the same path">
+A speaker embedding encodes the **channel** as well as the voice. A template captured at a different sample
+rate, through a different processing chain, or on a different route than the probe carries a systematic offset
+that no threshold tuning removes. One recording function, used by both.
+</Aside>
+
+## Three defects that each broke matching
+
+### 1. Voice-processing modes (AGC, noise suppression, echo cancellation)
+
+On iOS, `AVAudioSessionMode.VoiceChat` turns on Apple's voice-processing chain. It is adaptive and non-linear,
+and it exists to **normalize away speaker and channel characteristics** — which is precisely what a speaker
+embedding encodes. Because it adapts per session, two recordings of one person come out different.
+
+Use **`AVAudioSessionMode.Measurement`**, which disables the chain.
+
+```csharp
+var session = AVAudioSession.SharedInstance();
+session.SetCategory(AVAudioSessionCategory.PlayAndRecord, AVAudioSessionCategoryOptions.DefaultToSpeaker);
+session.SetMode(AVAudioSession.ModeMeasurement, out _);
+```
+
+Expect noticeably lower levels afterwards — that's AGC being gone, not a regression. Measured: ~0.01 RMS with
+the chain off versus ~0.07 with it on. Set your level gates against the *new* numbers.
+
+### 2. Bluetooth routes
+
+`AllowBluetooth` / `AllowBluetoothA2DP` let a paired headset move the route to 8 kHz HFP, so the captured
+bandwidth depends on what happens to be connected. Drop those options and verify the route is the built-in
+microphone — log it at capture start.
+
+### 3. Naive resampling
+
+Linear interpolation from 48 kHz to 16 kHz with no anti-alias filter discards two of every three samples and
+folds everything above 8 kHz back into the speech band. Fricatives (/s/, /ʃ/, /f/) live up there, and because
+aliasing is signal-dependent, **each recording is corrupted differently** — which is exactly the failure mode
+that looks like "the model doesn't work".
+
+Use a windowed-sinc resampler with the low-pass folded into the kernel, or capture at 16 kHz natively (Android's
+`AudioRecord` will).
+
+## Result after fixing all three
+
+8 recordings, one speaker, iPhone built-in mic, 28 pairs: **min 0.011, median 0.110, max 0.351**. See
+[Recognition & Tuning](/voiceintelligence/recognition/) for what to do with those numbers.
+
+## Implementing capture
+
+For MAUI, [Shiny.Speech](/speech/) provides cross-platform audio capture. Whatever you use, pass the
+analysis-oriented options — a default configuration that "sounds good" is usually the voice-processing one.
+
+Your recorder implements the seam the enrollment control resolves:
+
+```csharp
+public class VoiceRecorder(IAudioSource source) : IVoiceRecorder
+{
+    const int TargetSampleRate = 16000;
+
+    public async Task<float[]> RecordAsync(TimeSpan duration, CancellationToken ct = default)
+    {
+        var status = await Permissions.RequestAsync<Permissions.Microphone>();
+        if (status != PermissionStatus.Granted)
+            throw new InvalidOperationException("Microphone permission denied.");
+
+        var captured = await CaptureFor(duration, ct);              // float32 mono, device rate
+        return Resample(captured, source.SampleRate, TargetSampleRate);
+    }
+
+    // Optional: report level so VoiceEnrollmentView can draw its VU meter.
+    public async Task<float[]> RecordAsync(TimeSpan duration, IProgress<float>? level, CancellationToken ct = default)
+    { /* report linear RMS in [0,1] per captured chunk, BEFORE resampling */ }
+}
+```
+
+Two details:
+
+- **Own the permission prompt.** `VoiceEnrollmentView` has no microphone-permission concept of its own — it
+  calls this and reports whatever you throw.
+- **Report the level from the captured chunk, before resampling.** The meter should show what the microphone
+  hears now, not what the pipeline emits at the end.
+
+## Platform manifest entries
+
+| Platform | Required |
+|---|---|
+| iOS / Mac Catalyst | `NSMicrophoneUsageDescription` in `Info.plist` |
+| Android | `RECORD_AUDIO` permission |
+
+## Debugging a bad recording
+
+Dump the raw buffer to a WAV under `#if DEBUG` and listen to it. It is the fastest way to distinguish "the
+person didn't speak", "the gain is wrong", "we captured 8 kHz telephone audio", and "the model is unhappy" —
+four problems with four completely different fixes, all of which present identically as "recognition doesn't
+work".
+
+On iOS you can pull the files off-device with:
+
+```bash
+xcrun devicectl device copy from --domain-type appDataContainer \
+  --domain-identifier <your.bundle.id> --source Library/recordings
+```

@@ -1,0 +1,110 @@
+---
+title: MAUI Control
+description: VoiceEnrollmentView — the guided enrollment wizard, and the IVoiceRecorder seam it records through.
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["maui"]} os={["android", "ios", "macos"]} />
+
+```bash
+dotnet add package Shiny.VoiceIntelligence.Maui
+```
+
+`VoiceEnrollmentView` is the UI twin of [`FaceEnrollmentView`](/faceintelligence/controls/): set
+`PersonIdentifier`, call `BeginEnrollment()`, and it shows the sentences, counts down, records, checks each clip
+and keeps going until the voiceprints agree — then raises `Completed` with the `VoiceEnrollmentResult`.
+
+```xml
+xmlns:vi="clr-namespace:Shiny.VoiceIntelligence.Maui;assembly=Shiny.VoiceIntelligence.Maui"
+
+<vi:VoiceEnrollmentView PersonIdentifier="{Binding UserId}"
+                        RecordFor="0:00:05"
+                        Completed="OnEnrolled"
+                        Failed="OnFailed" />
+```
+
+```csharp
+void OnEnrolled(object? sender, VoiceEnrollmentResult e)
+    => this.Status = $"Enrolled {e.Speakers.Count} clips, agreement {e.Cohesion:0.00}" +
+                     (e.IsConfident ? "" : " (try again somewhere quieter)");
+```
+
+| Member | Notes |
+|---|---|
+| `PersonIdentifier` | Bindable. The identity to enroll under. |
+| `Options` | A `VoiceEnrollmentOptions` to override prompts and gates. Leave null to derive from the match threshold. |
+| `RecordFor` | Recording window per clip. Default 5 s. |
+| `Countdown` | Lead-in before recording starts. Default 3 s. |
+| `MaxAttempts` | Recordings *asked for*, accepted or not. Default 12. |
+| `Session` | The underlying `VoiceEnrollmentSession`. |
+| `Completed` / `Failed` / `StepCompleted` | Outcome and per-clip events. |
+| `BeginEnrollment()` / `CancelEnrollment()` | Start / stop. |
+
+## It is a driver, not a decision-maker
+
+Every judgement — is this clip usable, does it agree, is that enough — stays in `VoiceEnrollmentSession` in
+core. The control adds pacing, the sentence list, and stop/failure handling. For a server-side or non-MAUI flow,
+[drive the session directly](/voiceintelligence/enrollment/).
+
+## `IVoiceRecorder` is why the control can exist
+
+The rule that put the session in core still holds: no part of this library opens a microphone. Your app
+implements the seam and registers it; the control resolves it from `Handler.MauiContext.Services`.
+
+```csharp
+public interface IVoiceRecorder
+{
+    Task<float[]> RecordAsync(TimeSpan duration, CancellationToken ct = default);
+
+    // Default implementation forwards to the above, so a recorder that can't report
+    // levels needs no changes — the VU meter simply stays idle.
+    Task<float[]> RecordAsync(TimeSpan duration, IProgress<float>? level, CancellationToken ct = default)
+        => this.RecordAsync(duration, ct);
+}
+```
+
+```csharp
+builder.Services.AddSingleton<IVoiceRecorder, MyVoiceRecorder>();
+```
+
+See [Audio Capture](/voiceintelligence/capture/) for what a correct implementation must and must not do —
+this is the highest-risk code in the whole feature.
+
+## Design choices that were bug fixes
+
+These are documented because each one was a real, observed failure:
+
+- **The whole sentence list is shown from construction**, not once a run starts — someone should be able to read
+  what they'll be asked to say before committing. Each row shows `○` pending, `▶` current, `✓` kept.
+- **The countdown is not cosmetic.** Recording the instant a sentence appears captures someone still reading it,
+  and that near-silent clip is exactly what the session then rejects. It's drawn at 34pt; at 15pt inline it was
+  missed entirely, and a countdown nobody notices isn't doing its job. A progress bar fills across the recording
+  window alongside it, because "Recording" for five silent seconds gives no sense of how much longer to talk.
+- **The VU meter is scaled in dB and marks the gate.** Speech RMS around 0.02 and a 0.004 threshold both live in
+  the bottom 3% of a *linear* bar, where nothing visibly moves. The meter maps −60…0 dBFS across 24 segments,
+  amber below `MinSpeechLevel` and green above it. Marking the gate is the point: a bare level bar says there is
+  sound, a bar with the threshold on it says whether you are loud enough to be *accepted*. Ballistics are
+  fast-attack / slow-release, because raw per-chunk RMS flickers on every syllable gap and reads as a fault.
+- **A rejected recording stays on the same sentence** (the index lives in the session, so the two can't
+  disagree). Rotating per attempt read as "the wizard is cycling and nothing I do matters".
+- **Restarting mid-run uses a generation guard.** A cancelled loop is still parked inside `RecordAsync` for up to
+  `RecordFor`; without the guard it wakes up afterwards and writes its prompt index and status over the run that
+  replaced it — observed on-device as sentence 2 marked current with no tick on sentence 1.
+
+## Two ceilings, and they are different
+
+<Aside type="note" title="MaxSamples vs MaxAttempts">
+`VoiceEnrollmentOptions.MaxSamples` caps **accepted** clips. The control's `MaxAttempts` (12) caps **recordings
+asked for**, accepted or not — and only the latter can stop a bad room, where clips are rejected forever and
+`MaxSamples` is never reached.
+
+When you leave `Options` null the control also raises `MaxSamples` to `MaxAttempts`, so a struggling run keeps
+trying rather than settling at the default six. Supply `Options` to control that yourself.
+</Aside>
+
+Hitting the ceiling **stores something rather than nothing**: the control calls `Session.Finish()`, which prunes
+the worst-disagreeing clips to `MinSamples` and stores with `IsConfident = false`. Without that, someone who
+recorded four usable clips in a noisy room would walk away with no enrollment at all — `Submit` only writes on
+the call that completes the session. Below `MinSamples` it stores nothing and the control reports `Failed`,
+because a one-clip "enrollment" is the weak template the session exists to prevent.

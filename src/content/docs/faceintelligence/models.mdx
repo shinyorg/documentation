@@ -1,0 +1,127 @@
+---
+title: ONNX Models
+description: Which face models to use, how to bundle them on iOS and Android, app-size impact, and the iOS linker fix.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+The packages do not ship models. You supply two:
+
+| Model | Purpose | Typical size |
+|---|---|---|
+| **ArcFace** (embedder) | 112×112 face crop → 512-d vector | ~4–5 MB (MobileFaceNet) up to ~166 MB (R50) |
+| **UltraFace** (detector) | image → face boxes | ~1.3 MB |
+
+## ArcFace (the embedder)
+
+Any ArcFace-family model taking a 112×112 RGB input and emitting a fixed-width embedding works. InsightFace's
+**buffalo_s** `w600k_mbf` (MobileFaceNet) is a good on-device default: input `[-1,3,112,112]`, output
+`[1,512]`, around 13 MB.
+
+```csharp
+face.UseOnnxEmbedder(o =>
+{
+    o.ModelBytesProvider = () => LoadBundledModel("arcface.onnx");
+    // o.Dimensions = 512;   // read from the model's output metadata; only set for a dynamic axis
+});
+```
+
+`OnnxEmbedderOptions` accepts three sources, in priority order: `ModelBytesProvider` → `ModelBytes` →
+`ModelPath`.
+
+## UltraFace (the detector)
+
+The defaults target **UltraFace version-RFB-320 / slim-320** from the ONNX model zoo exactly: input
+`1×3×240×320`, outputs `scores[1,N,2]` and `boxes[1,N,4]` normalized.
+
+```csharp
+face.UseOnnxDetector(o => o.ModelBytesProvider = () => LoadBundledModel("face_detector.onnx"));
+```
+
+`OnnxDetectorOptions` tunables: `InputWidth` (320), `InputHeight` (240), `Mean` (127), `Std` (128),
+`ScoreThreshold` (0.5), `IouThreshold` (0.4). A detector with a different output layout — SCRFD, RetinaFace,
+YuNet — needs its own `IFaceDetector` registered with `UseDetector(...)`.
+
+## Bundling on iOS and Android
+
+<Aside type="caution" title="Bundled assets are not real file paths">
+On iOS and Android, an app package asset has no filesystem path you can hand to ONNX Runtime. Use
+`ModelBytesProvider` (or `ModelBytes`), not `ModelPath`.
+</Aside>
+
+Put the models in `Resources/Raw/` (the `Resources\Raw\**` glob bundles them) and read them as bytes:
+
+```csharp
+static byte[] LoadBundledModel(string fileName)
+{
+    using var stream = FileSystem.OpenAppPackageFileAsync(fileName).GetAwaiter().GetResult();
+    using var ms = new MemoryStream();
+    stream.CopyTo(ms);
+    return ms.ToArray();
+}
+```
+
+The provider runs **lazily on the first enroll/recognize**, not at startup. A missing model therefore surfaces
+as a `FileNotFoundException` from that call, where your page can catch it and show "model missing" — the app
+still launches.
+
+## App size
+
+The fixed floor is ONNX Runtime's native library, per shipped architecture, uncompressed:
+
+| Platform | Native runtime |
+|---|---|
+| iOS arm64 (static, force-loaded) | ~33 MB |
+| Android arm64-v8a (`libonnxruntime.so`) | ~17 MB |
+
+The managed binding and `Shiny.FaceIntelligence.dll` are negligible (~0.2 MB and ~36 KB). **The model is the
+swing factor**: `w600k_r50` at ~166 MB versus MobileFaceNet at ~4–5 MB. Prefer a compact ArcFace for on-device;
+download-on-first-run is the alternative for large models.
+
+If that 17–33 MB floor is a genuine constraint, a **reduced/minimal ONNX Runtime build** strips operators and
+types down to only what your model uses:
+
+- Build ORT from source with `--minimal_build --include_ops_by_config <ops.config>` (optionally
+  `--enable_reduced_operator_type_support`). The op config is generated from your model. This requires an
+  **`.ort`-format model** (convert with ORT's `convert_onnx_models_to_ort` tool) — the minimal runtime only
+  loads `.ort`. Re-run the reduction whenever the model's op set changes, or inference throws
+  "operator not found" at load.
+- The old prebuilt `Microsoft.ML.OnnxRuntime.Mobile` package (a ready-made reduced build) was deprecated after
+  ~1.13/1.14, so building from source is the supported route today.
+
+Worth doing only when binary size genuinely matters. Otherwise stay on the full package.
+
+## iOS / Mac Catalyst linker fix (handled for you)
+
+<Aside type="note" title="This is why .Onnx ships an MSBuild targets file">
+`Microsoft.ML.OnnxRuntime`'s managed binding P/Invokes `RegisterCustomOps`, a symbol the desktop ORT static
+library does not define (it ships in `onnxruntime-extensions`). On iOS and Mac Catalyst the .NET registrar
+force-references every P/Invoke target with a `-u` linker flag, so the **app head** fails to link with
+`Undefined symbols for architecture arm64: _RegisterCustomOps`. Android is unaffected — it loads the `.so`
+dynamically.
+
+`Shiny.FaceIntelligence.Onnx` ships `build/` + `buildTransitive/` targets that fix this automatically for any
+consuming app head, direct or transitive. Nothing to configure.
+</Aside>
+
+The workaround adds `-Wl,-U,_RegisterCustomOps` and removes `_RegisterCustomOps` from the forced-symbol list so
+the hard `-u` requirement is never emitted (a plain `-U` cannot override `-u` on the Xcode 16+ linker). It is
+safe only because the package never registers custom ops — if *your* app does, set
+`DisableOnnxRegisterCustomOpsWorkaround=true` and handle the symbol yourself.
+
+Two notes:
+
+- If you reference the project rather than the package (building from source), `buildTransitive` targets are not
+  consumed — `<Import>` the targets file explicitly in your app head.
+- The targets hook internal iOS SDK target names. If a future workload renames them, the target silently no-ops
+  and the link error returns — re-test on workload bumps.
+
+### Using face *and* voice together
+
+`Shiny.VoiceIntelligence.Onnx` ships the same fix. Its MSBuild target name is suffixed `_Voice` so the two
+coexist in one app without a duplicate-target-name error. The `DisableOnnxRegisterCustomOpsWorkaround` property
+and the linker flag are intentionally identical across both — one toggle governs both, and the linker de-dupes
+the repeated flag.
+
+## sqlite-vec native binary
+
+The SQLite store needs the `vec0` extension available at runtime. See [Stores](/faceintelligence/stores/).

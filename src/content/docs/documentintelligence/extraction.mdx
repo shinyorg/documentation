@@ -1,0 +1,175 @@
+---
+title: Extraction
+description: Turning scanned pages into typed data — receipts, invoices, licenses, passports and payment cards, all on-device.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+public interface IDocumentExtractor
+{
+    Task<ExtractedDocument> ExtractAsync(byte[] imageData, DocumentType type, CancellationToken ct = default);
+    Task<ExtractedDocument> ExtractAsync(DocumentScanResult scan, DocumentType type, CancellationToken ct = default);
+}
+```
+
+`ExtractedDocument` always carries `RawText` (whatever OCR produced) and populates exactly one typed payload
+according to `Type` — or none, when the parser couldn't make sense of the page. `HasStructuredData` tells the
+two apart.
+
+```csharp
+var doc = await extractor.ExtractAsync(scan, DocumentType.Receipt);
+
+if (doc.Receipt is { } receipt)
+    Console.WriteLine($"{receipt.Merchant} {receipt.Total:C} on {receipt.Date}");
+else
+    Console.WriteLine($"Nothing parsed. OCR said:\n{doc.RawText}");
+```
+
+## Receipts and invoices
+
+```csharp
+public record ReceiptData(string? Merchant, DateOnly? Date, decimal? Subtotal, decimal? Tax,
+                          decimal? Total, string? Currency, IReadOnlyList<LineItem> Items);
+
+public record InvoiceData(string? Vendor, string? InvoiceNumber, DateOnly? InvoiceDate, DateOnly? DueDate,
+                          decimal? Subtotal, decimal? Tax, decimal? Total, string? Currency,
+                          IReadOnlyList<LineItem> Items);
+```
+
+Every field is best-effort and may be null. Parsing is keyword-anchored — "the amount on the line that says
+total" — which is why OCR layout handling matters so much (see below).
+
+## Driver's licenses
+
+`DocumentType.DriversLicense` decodes the **AAMVA PDF417 barcode**, normally on the back of a US/Canadian
+licence, rather than OCR'ing the front. That makes it exact rather than heuristic.
+
+```csharp
+public record LicenseData(string? FirstName, string? MiddleName, string? LastName, DateOnly? DateOfBirth,
+                          string? LicenseNumber, DateOnly? IssueDate, DateOnly? ExpiryDate, string? Sex,
+                          string? Address, string? City, string? State, string? PostalCode,
+                          IReadOnlyDictionary<string, string> Elements);
+```
+
+The common fields are surfaced by name; `Elements` carries the **complete** AAMVA element map keyed by element
+id (`DAC` = first name, and so on) for anything else the jurisdiction encoded. Multi-page scans are searched
+page by page for a PDF417, and the first that decodes wins.
+
+## Passports
+
+`DocumentType.Passport` OCRs the **machine-readable zone** and parses it as ICAO 9303 TD3 (two 44-character
+lines).
+
+```csharp
+public record PassportData(string? DocumentCode, string? IssuingCountry, string? Surname, string? GivenNames,
+                           string? PassportNumber, string? Nationality, DateOnly? DateOfBirth, string? Sex,
+                           DateOnly? ExpiryDate, string? PersonalNumber, bool IsValid);
+```
+
+`IsValid` reflects whether the MRZ **check digits** verified — surface it, because a passport number that reads
+plausibly but fails its check digit is a misread, not a valid document.
+
+## Payment cards
+
+`DocumentType.CreditCard` OCRs the front of the card. What makes it work is the **Luhn check digit**: rather
+than guessing which digit run on a noisy card front is the PAN, every 13–19 digit candidate is tested and only a
+Luhn-valid one is accepted — which rejects dates, phone numbers and OCR noise without layout heuristics.
+
+- **Network** comes from the IIN prefix.
+- **Expiry** prefers a `VALID THRU`-labelled line, otherwise takes the *latest* MM/YY found (cards also print
+  `MEMBER SINCE` in the same shape).
+- **Cardholder** is the bottom-most all-caps multi-word line that isn't card furniture.
+
+A result is returned even when Luhn fails, with `IsValid = false`, so your UI can show what was read instead of
+"nothing found".
+
+```csharp
+var card = doc.CreditCard;
+Console.WriteLine(card.MaskedNumber);   // ••••••••••••4242
+Console.WriteLine(card.Last4);
+Console.WriteLine(card.ExpiresOn);      // last day of the printed month
+Console.WriteLine(card.IsExpired(DateOnly.FromDateTime(DateTime.Today)));
+```
+
+<Aside type="danger" title="Two security choices here are deliberate">
+**There is no CVV property, and the parser never looks for one.** PCI-DSS forbids storing the card verification
+value after authorization, and a scanning API that surfaces it invites exactly that. If you need it, take it
+from a field the user types and pass it straight to your processor. A test asserts structurally that no CVV
+property exists, so it can't be added by accident.
+
+**`ToString()` is overridden to mask the PAN.** A positional record's generated `ToString` prints every
+property, so `logger.LogInformation("{Card}", card)` — or a debugger watch, or an exception message — would put
+a full card number in your logs.
+
+Scanning a PAN brings your app into PCI-DSS scope. Keep it in memory, hand it to your processor, don't persist
+it, and display `MaskedNumber`.
+</Aside>
+
+## OCR geometry, and why it matters
+
+<Aside type="note" title="Both OCR engines split text at large whitespace gaps">
+A receipt's `TOTAL .......... 24.99` comes back as **two** observations — the label and the amount are never in
+the same string. Every parser here is keyword-anchored, so before this was handled they matched nothing and fell
+through to their fallbacks (the receipt parser took "the largest number anywhere on the page", which on a
+discounted receipt is the pre-discount subtotal). Total, tax, subtotal *and* line items were all effectively
+being guessed.
+</Aside>
+
+The fix lives in the plumbing, not the parsers. `RecognizedLine` carries `TextBounds` (normalized 0..1,
+**top-left origin** — Vision's bottom-left rects and ML Kit's pixel rects both convert on the way in, so layout
+code has one coordinate space), and `RecognizedText.FromLines` orders fragments into reading order, groups them
+into visual rows, and composes `FullText` from the **rows**.
+
+- `Lines` is still the raw engine fragments; `Rows` is the grouped view; `FullText` is the rows joined. Parsers
+  read `FullText`.
+- Grouping rule: same row when vertical centres are within **0.6 × the median fragment height**. Median, not
+  mean — a receipt's merchant name is several times the height of its line items, and a mean would stretch the
+  tolerance until adjacent rows merged. This keeps a passport's two MRZ lines separate while still landing a
+  column of amounts on its labels.
+- **Missing geometry is a passthrough, not an error.** If any fragment lacks bounds, the set is returned
+  untouched — so a custom `ITextRecognizer` that doesn't report geometry keeps working.
+
+## Data-detector enrichment
+
+On Apple platforms, `IDataDetector` (`NSDataDetector` — the engine behind tappable dates in Mail) finds dates,
+addresses, phone numbers and links in the recognized text. It is locale-aware, resolves relative phrasing, and
+returns addresses pre-split into street/city/state/ZIP.
+
+```csharp
+foreach (var e in doc.Entities)   // DetectedEntityKind.Date | Address | PhoneNumber | Link
+    Console.WriteLine($"{e.Kind}: {e.Value} {e.Date}");
+```
+
+Enrichment is strictly **additive**: it populates `Entities`, and fills a `Receipt.Date` / `Invoice.InvoiceDate`
+the type parser *missed*, but never overwrites a parsed value. A platform without a detector therefore produces
+a strict subset of the same result, not a different one. It is inert on Android and bare `net10.0`.
+
+## The seams
+
+You can replace any of these before calling `AddDocumentIntelligence` (it uses `TryAdd`):
+
+| Interface | Purpose |
+|---|---|
+| `ITextRecognizer` | OCR over a page image. `TextRecognitionOptions.Document` for prose, `.Alphanumeric` for card numbers/MRZ (language correction off, lower height floor). |
+| `IBarcodeReader` | Decode barcodes/PDF417 from a page image. |
+| `IDataDetector` | Entities from recognized text. Never throws; returns empty when unsupported. |
+
+<Aside type="caution" title="Language correction is harmful on non-prose">
+`UseLanguageCorrection` fixes genuine misreads on prose using surrounding words. On a card number, a serial or
+an MRZ line there is no linguistic context, so "correction" can only move a character toward something wrong.
+That's what `TextRecognitionOptions.Alphanumeric` is for.
+</Aside>
+
+## Known limitations
+
+Worth knowing before you rely on a field:
+
+- **Only the top OCR candidate is used.** Vision can return alternatives that could be validated with Luhn or
+  MRZ check digits — the biggest remaining accuracy win for cards and passports.
+- **MRZ character-class repair is incomplete.** OCR confusions between `<`, `K` and `«` aren't mapped.
+- **Small print can be dropped** — the document profile leaves the platform's minimum-text-height default in
+  place.
+- **No receipt arithmetic cross-validation** (`subtotal + tax ≈ total`).
+- **Grouped amounts** like `1,234.56` can defeat line-item matching.
+- **Multi-page extraction concatenates all pages into one string**, so a "bottom-most total" can cross a page
+  boundary.

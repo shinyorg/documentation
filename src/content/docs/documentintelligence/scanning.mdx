@@ -1,0 +1,106 @@
+---
+title: Scanning
+description: IDocumentScanner — the native modal document camera on each platform, its options and its results.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+public interface IDocumentScanner
+{
+    bool IsSupported { get; }
+    Task<DocumentScanResult> ScanAsync(DocumentScanRequest? request = null, CancellationToken cancellationToken = default);
+}
+```
+
+`ScanAsync` presents the platform's own scanner and completes when the user finishes or cancels. It is a
+**modal** flow — it takes over the screen — which is why it composes as a service rather than as another camera
+frame analyzer.
+
+```csharp
+var scan = await scanner.ScanAsync(new DocumentScanRequest
+{
+    PageLimit = 3,
+    AllowGalleryImport = true,
+    Formats = DocumentScanFormats.Image | DocumentScanFormats.Pdf
+});
+
+if (scan.IsCancelled)
+    return;
+
+foreach (var page in scan.Pages)
+{
+    // page.ImageData (byte[]), page.MimeType
+}
+
+if (scan.Pdf is { } pdfBytes)
+    await File.WriteAllBytesAsync(path, pdfBytes);
+```
+
+## Request options
+
+| Option | Default | Notes |
+|---|---|---|
+| `PageLimit` | `10` | Maximum pages the user may capture. Enforced natively on Android. |
+| `AllowGalleryImport` | `true` | Offer importing from the photo library where the platform supports it (Android). |
+| `Formats` | `Image` | `Image` is always produced. `Pdf` is honoured on Android and ignored elsewhere. |
+
+All platforms honour what they can and ignore the rest, so a request never fails for asking too much.
+
+## Result
+
+```csharp
+public class DocumentScanResult
+{
+    public bool IsCancelled { get; }
+    public IReadOnlyList<DocumentScannedPage> Pages { get; }   // (byte[] ImageData, string MimeType)
+    public byte[]? Pdf { get; }
+}
+```
+
+Cancellation is a **normal result** (`IsCancelled == true`), not an exception. Only an unsupported platform
+throws — `PlatformNotSupportedException`.
+
+## Per-platform behaviour
+
+### iOS / Mac Catalyst — VisionKit
+
+`VNDocumentCameraViewController`: automatic edge detection, perspective correction, multi-page capture,
+retake/reorder in the native UI. Presented from the top view controller, found natively via connected scenes —
+no MAUI page reference needed. `IsSupported` gates on iOS 13+.
+
+### Android — ML Kit
+
+`GmsDocumentScanning`: edge detect, crop and enhance, with optional gallery import and PDF output. The scan
+intent is launched from a transparent proxy activity, which sidesteps the AndroidX rule that an
+`ActivityResultLauncher` must be registered before `RESUMED`. Activity tracking is bootstrapped automatically by
+a content provider, so there is nothing to initialize.
+
+<Aside type="note" title="PDF output is Android-only">
+`DocumentScanFormats.Pdf` maps to ML Kit's PDF result. VisionKit returns page images only, so `Pdf` is null on
+Apple platforms — generate one yourself from `Pages` if you need it everywhere.
+</Aside>
+
+### macOS (AppKit) — Vision segmentation
+
+AppKit has **no** document camera. Instead the user picks one or more images through an `NSOpenPanel`, and each
+is deskewed with `VNDetectDocumentSegmentationRequest` plus a Core Image perspective correction. Same contract,
+different acquisition step.
+
+Note that MAUI on Mac targets **Catalyst**, which uses the VisionKit path — the AppKit implementation is for
+native macOS apps.
+
+### Windows and bare `net10.0`
+
+`IsSupported` is `false` and `ScanAsync` throws `PlatformNotSupportedException`. The registration still succeeds,
+so DI resolves and your UI can degrade gracefully.
+
+## Then extract
+
+Pass the whole result to the extractor rather than pulling pages apart yourself — multi-page handling differs by
+document type:
+
+```csharp
+var doc = await extractor.ExtractAsync(scan, DocumentType.Invoice);
+```
+
+See [Extraction](/documentintelligence/extraction/).

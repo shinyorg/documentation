@@ -1,0 +1,132 @@
+---
+title: Getting Started
+description: On-device speaker recognition for .NET — ECAPA voiceprints, vector search, and a guided enrollment wizard.
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="recogintelligence" /> |
+| Downloads | <NugetDownloads name="Shiny.VoiceIntelligence" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+**Shiny.VoiceIntelligence** is speaker (voice biometric) enrollment and recognition — the audio twin of
+[Shiny.FaceIntelligence](/faceintelligence/), built to the same architecture so the two read alike. An
+ECAPA-TDNN / x-vector ONNX model turns a spoken utterance into an L2-normalized "voiceprint"; recognition is the
+same nearest-neighbour vector lookup with a cosine-distance threshold.
+
+It recognizes **who is speaking**, not what they said. It is text-independent — the words don't have to match
+between enrollment and recognition.
+
+<Aside type="caution" title="This is not a security gate on its own">
+Plain voiceprint matching is defeated by a recording or a voice clone. There is no liveness or
+anti-spoofing detection in this library. Treat it as a convenience factor, and see
+[Recognition](/voiceintelligence/recognition/#anti-spoofing) for what a real gate needs.
+</Aside>
+
+## Packages
+
+| Package | Role |
+|---|---|
+| `Shiny.VoiceIntelligence` | **Core.** `IVoiceIntelligence`, the contracts (`ISpeakerEmbedder`, `IVoiceStore`), `VoiceEnrollmentSession`, and the registration builder. DI abstractions only — no image stack, no audio capture. |
+| `Shiny.VoiceIntelligence.Onnx` | ONNX speaker embedder (`UseOnnxEmbedder`), handling both waveform and filterbank model inputs. Ships the iOS linker fix. |
+| `Shiny.VoiceIntelligence.DocumentDb` | Provider-agnostic vector store over [Shiny.DocumentDb](/documentdb/). |
+| `Shiny.VoiceIntelligence.DocumentDb.Sqlite` | Turnkey SQLite + sqlite-vec store. |
+| `Shiny.VoiceIntelligence.Maui` | `VoiceEnrollmentView` — the guided enrollment control — plus the `IVoiceRecorder` seam your app implements. |
+
+## Install
+
+```bash
+dotnet add package Shiny.VoiceIntelligence.Onnx
+dotnet add package Shiny.VoiceIntelligence.DocumentDb.Sqlite
+dotnet add package Shiny.VoiceIntelligence.Maui
+```
+
+## Register
+
+```csharp
+using Shiny.VoiceIntelligence;
+using Shiny.VoiceIntelligence.Onnx;
+using Shiny.VoiceIntelligence.DocumentDb.Sqlite;
+
+builder.Services.AddVoiceIntelligence(voice =>
+{
+    voice.Options.MaxDistance = 0.4f;   // MUST be measured against your model + capture path
+
+    voice.UseOnnxEmbedder(o =>
+    {
+        o.ModelBytesProvider = () => LoadBundledModel("ecapa.onnx");
+        o.Dimensions = 512;   // MUST match the model: 512 for CAM++/WeSpeaker, 192 for many ECAPA exports
+        o.SampleRate = 16000;
+    });
+
+    voice.UseSqliteStore(o => o.ConnectionString = $"Data Source={Path.Combine(FileSystem.AppDataDirectory, "voices.db")}");
+});
+```
+
+`AddVoiceIntelligence` validates the result and throws at startup if an embedder or a store is missing, naming
+the method you forgot.
+
+## The library never opens a microphone
+
+`IVoiceIntelligence` takes a `float[]` **sample buffer** — mono PCM in `[-1, 1]` at the embedder's
+`SampleRate` (16 kHz by default). Capturing it — microphone, file, network stream — is your app's job, exactly
+as the camera is for face recognition.
+
+That keeps the core usable server-side and testable without a mic, and it means the library never fights an app
+that already owns its audio pipeline. See [Audio Capture](/voiceintelligence/capture/) — the capture path is the
+part that most often goes wrong, and it goes wrong in ways no threshold can compensate for.
+
+## Use it
+
+```csharp
+public class VoiceCheckIn(IVoiceIntelligence voices)
+{
+    public Task Enroll(string userId, float[] samples) => voices.Enroll(userId, samples);
+
+    public async Task<string?> WhoIsSpeaking(float[] samples)
+    {
+        var result = await voices.Recognize(samples);
+        return result.IsMatch ? result.PersonIdentifier : null;
+    }
+}
+```
+
+| Member | What it does |
+|---|---|
+| `Enroll(id, samples)` | Embed the utterance and store the voiceprint under `id`. |
+| `CreateEnrollment(id, options?)` | Start a **guided** enrollment session that checks each clip and decides when it has enough. |
+| `Recognize(samples)` | Nearest enrolled identity within the threshold, or `RecognitionResult.NoMatch`. |
+| `GetAll()` | Every stored utterance, most recent first. |
+| `Forget(id)` | Delete every utterance for an identity. |
+
+## Prefer guided enrollment
+
+`Enroll` stores whatever you hand it, including a clip that was mostly silence or picked up the wrong person.
+That clip then becomes a template every future match is compared against.
+
+```csharp
+var session = voices.CreateEnrollment("user-118");
+while (!session.IsComplete)
+{
+    Show(session.CurrentPrompt);
+    var step = await session.Submit(await recorder.RecordAsync(TimeSpan.FromSeconds(5)));
+    Show(step.Hint);           // "" when accepted
+}
+var result = session.Result!; // already stored; result.Cohesion is the quality number
+```
+
+See [Guided Enrollment](/voiceintelligence/enrollment/), or drop
+[`VoiceEnrollmentView`](/voiceintelligence/controls/) into a MAUI page and let it drive the whole loop.
+
+## Where next
+
+- [Guided Enrollment](/voiceintelligence/enrollment/) — the session, its gates, and why they're inverted vs face
+- [Recognition & Tuning](/voiceintelligence/recognition/) — thresholds, measurement, anti-spoofing
+- [Audio Capture](/voiceintelligence/capture/) — the settings that quietly destroy speaker matching
+- [MAUI Control](/voiceintelligence/controls/) — `VoiceEnrollmentView` and `IVoiceRecorder`
+- [ONNX Models](/voiceintelligence/models/) — CAM++/WeSpeaker vs ECAPA, input modes, dimensions

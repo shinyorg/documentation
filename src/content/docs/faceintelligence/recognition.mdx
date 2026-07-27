@@ -1,0 +1,81 @@
+---
+title: Recognition & Tuning
+description: How matching works, what cosine distance means, and how to pick a threshold you can defend.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+// You have the box already (frame analyzer, your own detector)
+var result = await faces.Recognize(imageData, box);
+
+// Raw still — detects first, picks the most confident face
+var result = await faces.Recognize(imageData);
+
+if (result.IsMatch)
+    Console.WriteLine($"{result.PersonIdentifier} at distance {result.Distance:0.000}");
+```
+
+## What happens
+
+1. The embedder turns the cropped face into an L2-normalized vector.
+2. The store returns the `CandidateCount` nearest stored vectors (default 5) with their cosine distances.
+3. If the nearest one is within `MaxDistance`, that's the result. Otherwise `RecognitionResult.NoMatch`.
+
+Only ever **one** name comes back. `CandidateCount` widens the internal candidate pull; it does not produce a
+ranked list for you.
+
+## Reading the numbers
+
+`Distance` is **cosine distance**: `0` is identical, `1` is orthogonal, `2` is opposite. `Similarity` is
+`1 - Distance`, provided for convenience.
+
+| `MaxDistance` | Behaviour |
+|---|---|
+| Lower (e.g. `0.45`) | Stricter. Fewer false accepts, more "Unknown" for genuine users. |
+| Default `0.6` | ArcFace same-person pairs typically land below this. |
+| Higher (e.g. `0.8`) | Looser. Starts accepting different people. |
+
+<Aside type="caution" title="0.6 is a starting point, not an answer">
+The right threshold depends on your model, your capture path and how costly a false accept is. Measure it:
+enroll a set of real users through your real capture path, then collect same-person and different-person
+distances and pick the threshold where the false-accept rate is acceptable. A number copied from documentation
+(including this page) is a placeholder until you've done that.
+</Aside>
+
+## The no-box overload
+
+`Recognize(imageData)` runs the registered detector, picks the **most confident** face when several are
+present, and throws `FaceDetectionException` when there is no face (or none above `MinDetectionConfidence`).
+It requires a detector to be registered — without one it throws `InvalidOperationException`.
+
+Note the asymmetry with enrollment: recognition picks the best face rather than refusing on multiple faces,
+because "who is the person in front of the camera" is answerable even in a crowd, whereas "who am I enrolling"
+is not.
+
+## Live recognition
+
+Don't call `Recognize` on every camera frame — the embed plus the vector query is far more expensive than
+detection. `FaceRecognitionAnalyzer` (in `Shiny.FaceIntelligence.Maui`) runs the detector every frame for the
+overlay box but only runs the full pipeline once a face has held steady, then throttles it. See
+[MAUI Controls](/faceintelligence/controls/).
+
+## Improving accuracy
+
+In rough order of impact:
+
+1. **More and better templates per person.** See [Enrollment](/faceintelligence/enrollment/).
+2. **One capture path for enroll and recognize.** A mismatch there is a fixed offset on every distance.
+3. **A better model.** A larger ArcFace variant separates identities better than a mobile one, at a real cost in
+   app size and latency — see [Models](/faceintelligence/models/).
+4. **Then** tune `MaxDistance`, with measured numbers.
+
+## Known limits
+
+- **`hits[0]` wins.** The nearest template decides, with no vote across the top-k. A single outlier template
+  enrolled under the wrong identity can therefore win a match on its own. Keeping the gallery clean matters more
+  than it would with a voting scheme.
+- **No liveness detection.** A photo of a face held up to the camera embeds like a face. This library has no
+  presentation-attack detection of any kind — treat face recognition as a convenience factor, not a security
+  gate, and pair it with something else if the decision matters.
+- **No landmark alignment.** The crop is an expand-and-resize around the detected box. Five-point alignment
+  would improve ArcFace accuracy, and needs a detector that returns landmarks.

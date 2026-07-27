@@ -1,0 +1,206 @@
+---
+title: MAUI Controls
+description: FaceRecognitionView and FaceEnrollmentView — live recognition and a guided multi-shot enrollment wizard.
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["maui"]} os={["android", "ios", "macos"]} />
+
+`Shiny.FaceIntelligence.Maui` targets `net10.0-android`, `net10.0-ios` and `net10.0-maccatalyst` — the camera
+frame arrives as a native buffer, so this is the one package with per-platform code. Windows is not currently
+implemented.
+
+```bash
+dotnet add package Shiny.FaceIntelligence.Maui
+```
+
+```csharp
+// The analyzer holds per-camera state, so register it transient.
+builder.Services.AddTransient<FaceRecognitionAnalyzer>();
+```
+
+Both controls resolve their services from `Handler.MauiContext.Services`, so there is nothing to inject and
+nothing to pass in.
+
+## Two controls, on purpose
+
+Recognition wants one fast, confident answer. Enrollment wants a *diverse* gallery, and needs steps, progress
+and instructions. A single control with a `Mode` flag would leave half its API dead in either mode.
+
+```xml
+xmlns:fi="clr-namespace:Shiny.FaceIntelligence.Maui;assembly=Shiny.FaceIntelligence.Maui"
+
+<fi:FaceRecognitionView FaceRecognized="OnRecognized" CameraFailed="OnCameraFailed" />
+
+<fi:FaceEnrollmentView PersonIdentifier="{Binding EmployeeId}"
+                       Completed="OnEnrolled"
+                       Rejected="OnRejected"
+                       Progress="OnProgress" />
+```
+
+## `FaceRecognitionView`
+
+A drop-in recognition camera: preview, permission, start/stop lifecycle and the analyzer, behind one control.
+
+| Member | Notes |
+|---|---|
+| `FaceRecognized` | Fires for **every** attempt, including no-match, so the UI can say "Unknown" instead of holding a stale name. Raised on the UI thread. |
+| `CameraFailed` | Permission refused or hardware error, with the reason. |
+| `Facing` | `CameraFacing.Front` by default. Bindable. |
+| `RecognitionEnabled` | Bindable. Turn the expensive pipeline off while leaving the preview running. |
+| `HasFace` | Whether the analyzer currently has a face. |
+| `Analyzer` | The underlying `FaceRecognitionAnalyzer`, for tuning (below). |
+| `EnrollAsync(id, allowDuplicate)` | One-off single-shot capture off the current frame. |
+
+```csharp
+void OnRecognized(object? sender, FaceRecognizedEventArgs e)
+{
+    // e.Result (RecognitionResult), e.Bounds (normalized RectF), e.Confidence
+    this.Status = e.Result.IsMatch ? $"Hello {e.Result.PersonIdentifier}" : "Unknown";
+}
+```
+
+<Aside type="note" title="FaceCameraView is obsolete">
+`FaceCameraView` still exists as an `[Obsolete]` subclass of `FaceRecognitionView` so existing XAML keeps
+compiling. New code should use `FaceRecognitionView`.
+</Aside>
+
+### Tuning the analyzer
+
+Detection runs on every frame (it's cheap) to drive the overlay box; the full embed-and-query pipeline runs only
+once the face has held steady, and is throttled after that.
+
+| Property | Default | What it does |
+|---|---|---|
+| `StabilityFrames` | `3` | Frames the box must stay put before recognizing. |
+| `StabilityTolerance` | `0.05` | How much it may move (fraction of the frame) and still count as steady. |
+| `RecognitionInterval` | `2 s` | Minimum gap between full recognitions. |
+| `MaxAnalysisWidth` | `720` | Frames are downscaled to this width. Cost scales with it, not with sensor size. |
+| `MinConfidence` | `0.7` | Detector confidence floor for the analyzer. |
+| `MatchColor` / `UnknownColor` / `UnknownText` | green / red / `"Unknown"` | Overlay appearance. |
+
+The camera pipeline runs analyzers max-one-in-flight and drops frames while busy, so the analyzer self-paces —
+it can take a whole frame interval without backing the camera up.
+
+## `FaceEnrollmentView`
+
+A guided, multi-shot wizard. Set `PersonIdentifier`, call `BeginEnrollment()`, and it walks the person through
+a sequence of steps, capturing one accepted shot per step.
+
+```csharp
+this.Enrollment.BeginEnrollment();
+
+void OnEnrolled(object? sender, FaceEnrollmentResult e)
+{
+    // e.People            — one Person document per accepted shot
+    // e.MinPairwiseDistance — how tightly clustered the gallery is
+    // e.SkippedSteps      — steps that timed out; non-zero is normal
+}
+```
+
+| Event | Payload |
+|---|---|
+| `Progress` | `FaceEnrollmentProgress(StepIndex, StepCount, Instruction, CapturedCount)` |
+| `Rejected` | `FaceEnrollmentRejected(Reason, Hint)` — a ready-to-show hint per rejected frame |
+| `Completed` | `FaceEnrollmentResult` |
+| `CameraFailed` | Reason string |
+
+`FaceEnrollmentRejection` covers `NoFace`, `TooFar`, `TooClose`, `NotSteady`, `TooBlurry`, `TooDark`,
+`TooBright` and `TooSimilar`.
+
+### What the wizard can actually check
+
+| Gate | Verifiable? | Notes |
+|---|---|---|
+| Fitting the target oval (`FaceGuide`) | **yes** | Position *and* size — the primary gate |
+| Face size vs frame (`MinFaceFraction` / `MaxFaceFraction`) | **yes** | Coarser distance gate |
+| Steadiness (`RequiredStableFrames`, default 3) | **yes** | Reuses the analyzer's stability counter |
+| Sharpness + brightness (`MinSharpness` 8, `MinBrightness` 0.18, `MaxBrightness` 0.92) | **yes** | Variance-of-Laplacian at a fixed working size, so the threshold is scale-independent |
+| **Novelty** (`MinNoveltyDistance`, default `0.18`) | **yes** | Embeds the candidate and rejects it if it's within that distance of a shot already captured |
+| Head angle | **no** | Instructed only |
+
+<Aside type="caution" title="Head angle cannot be verified">
+`IFaceDetector` returns a box and a confidence — no landmarks, no yaw or pitch. A prompt like "turn your head
+slightly left" can be *shown* but never *checked*. Don't write code that claims to verify it.
+
+Novelty is what does the real work instead. The purpose of a varied gallery *is* embedding spread, so measuring
+that spread directly beats trusting that someone turned their head. `MinNoveltyDistance` must clear the model's
+frame-to-frame jitter — the default of `0.18` was measured; `0.06` sat inside the noise and let every frame
+through as "novel".
+</Aside>
+
+### The face-hole overlay
+
+Each step can carry a `FaceGuide` — a target oval drawn over the preview. Everything outside it is dimmed, the
+outline is amber-dashed when off-target and solid green the moment the face fits, and the live detection is
+drawn faintly so the person can see which way to move. `FaceGuide.Correction(...)` turns a miss into a
+directional hint ("Move left into the outline", "Move closer — fill the outline").
+
+```csharp
+this.Enrollment.Steps =
+[
+    new FaceEnrollmentStep("Fit your face in the outline", Guide: new FaceGuide(0.50f, 0.50f, 0.55f)),
+    new FaceEnrollmentStep("Now move into the outline on the left", Guide: new FaceGuide(0.30f, 0.48f, 0.52f)),
+    new FaceEnrollmentStep("And the outline on the right", Guide: new FaceGuide(0.70f, 0.48f, 0.52f))
+];
+```
+
+Moving the *target* around the frame is how the wizard gets genuine pose variation: the person physically moves,
+so the camera sees them from a different angle — verifiable, unlike an instruction to turn their head. That's
+why `FaceEnrollmentStep.Default` is a sequence of outline positions (centre, left, right, top, big, small)
+rather than angle prompts.
+
+<Aside type="caution" title="Guides are authored in visible-preview coordinates">
+The preview is AspectFill, so the frame is scaled to *cover* the view and the overflow is cropped — a 720×1280
+frame in a 393×490 view loses roughly 200px vertically. A guide written in full-frame coordinates therefore
+renders oversized and partly off-screen, because the cropped-away region still counts toward `1.0`.
+`FaceGuide.ToImageSpace(imageAspect, viewAspect)` re-projects a visible-space guide into the full-frame space
+detections arrive in, and the control calls it per frame with the live view aspect. Author your guides the way
+they should *look*.
+</Aside>
+
+### Pacing, timeouts and storage
+
+- **`StepCountdown` (3 s)** shows "Get ready… 3 / 2 / 1" then "Hold still…", and captures are only accepted
+  after it. Without it the wizard fires before the instruction can be read and just takes N shots of whatever
+  was already in frame.
+- **`StepTimeout` (12 s)** skips a step that can't be satisfied — "move back" is unreachable with a phone at
+  arm's length — and reports it in `FaceEnrollmentResult.SkippedSteps`.
+- **Storage is incremental.** Each accepted shot is enrolled immediately rather than batched to the end, so one
+  impossible step doesn't discard the five shots already captured. Consequently `CancelEnrollment()` does not
+  undo anything — use `Forget(id)` for that.
+
+Per-frame cost stays off the UI thread and single-flight: the cheap geometric gates run inline, and only once
+they pass does the control decode, measure and embed on a background thread.
+
+## Dropping to the raw analyzer
+
+Use `FaceRecognitionAnalyzer` with `CameraView.Analyzer` directly when you need a camera configured in ways the
+wrapper doesn't expose. It exposes `FaceDetected`, `FaceLost` and `FaceRecognized` events plus `LastFace`, the
+`AnalyzedFace` record carrying the JPEG bytes, the pixel `FaceBox`, and `ImageWidth`/`ImageHeight` (hence
+`Aspect`) so an overlay can reproduce the AspectFill transform.
+
+<Aside type="danger" title="CameraView silently no-ops before its handler connects">
+If you use `CameraView` yourself: every method null-guards to a *silent success* until the handler is connected —
+`RequestPermissionAsync` returns `false`, `StartAsync` completes doing nothing, and nothing throws.
+`ContentPage.OnAppearing` fires **before** the handler exists, so starting the camera only from there leaves the
+preview black forever with no error anywhere. It presents as a permission problem, which it is not: on iOS
+`AVCaptureDevice.GetAuthorizationStatus` returns `Authorized` while `RequestPermissionAsync()` returns `false`
+and no prompt appears — that mismatch is the tell.
+
+Start the camera from **both** `OnAppearing` and `HandlerChanged`, guarded by an idempotency flag, so whichever
+happens last wins. The two controls above already do this for you.
+</Aside>
+
+## One coordinate space
+
+The per-platform frame converter produces an **upright, mirror-corrected** bitmap, and everything — the
+detector's pixel `FaceBox`, the embed crop, and the normalized overlay rect — is expressed against that single
+bitmap. Rotation and mirroring are applied once, up front. This is what removes the classic
+normalized-versus-pixel and front-camera-mirroring bugs.
+
+- **Apple** — the frame is already a managed BGRA copy, so it's a straight memory copy into a bitmap. No
+  CGImage round-trip.
+- **Android** — CameraX `YUV_420_888` is converted in managed code (BT.601, honouring row/pixel strides),
+  subsampling straight to `MaxAnalysisWidth` rather than converting full-res and then resizing.

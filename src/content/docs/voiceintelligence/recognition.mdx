@@ -1,0 +1,78 @@
+---
+title: Recognition & Tuning
+description: Matching speakers, picking a threshold you can defend, and what voice biometrics cannot do.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+var samples = await recorder.RecordAsync(TimeSpan.FromSeconds(5));
+var result = await voices.Recognize(samples);
+
+if (result.IsMatch)
+    Console.WriteLine($"{result.PersonIdentifier} at distance {result.Distance:0.000}");
+```
+
+Same shape as face recognition: embed the utterance, pull the `CandidateCount` nearest stored voiceprints
+(default 5), and return the single nearest one **only** if its cosine distance is within `MaxDistance`.
+Otherwise `RecognitionResult.NoMatch`.
+
+## Threshold
+
+`VoiceIntelligenceOptions.MaxDistance` defaults to **`0.7`** in the package purely as a placeholder.
+
+<Aside type="danger" title="Do not ship the default">
+Speaker-embedding score distributions vary far more by model and channel than face embeddings do. This value
+must be tuned against your actual ONNX export, through your actual capture path, with measured false-accept and
+false-reject rates. Until you've done that, the number means nothing.
+</Aside>
+
+For reference, one measured data set from this library's own sample: 8 recordings of a single speaker on an
+iPhone built-in mic (28 pairs) after the capture fixes described in [Audio Capture](/voiceintelligence/capture/)
+gave same-speaker distances of **min 0.011, median 0.110, max 0.351** — hence a `MaxDistance` of `0.40`, which
+is 0% false-reject on that set. That is one speaker on one device with one model; it is a starting point for
+your own measurement, not a value to copy.
+
+Clip quality showed up clearly in the same data: 6 of the 8 recordings clustered within 0.11, while 2 quieter
+ones sat 0.20–0.35 out and drifted toward a generic centroid. Quiet clips are the documented failure mode, which
+is why [guided enrollment](/voiceintelligence/enrollment/) gates on speech level.
+
+### Measuring false accepts
+
+<Aside type="caution" title="Synthesized speech cannot stand in for a second person">
+An attempt to synthesize impostors from macOS TTS voices was invalid: the model rates the legacy MacinTalk
+synths as the *same speaker* (0.093 apart), and even the modern voices sit only 0.31–0.43 apart. Synthetic
+speech doesn't occupy the same region of the embedding space as real speech, so it produces a false-accept rate
+that means nothing.
+
+A real FAR needs a second human enrolled through the same capture path.
+</Aside>
+
+## When matching regresses, check capture first
+
+The model and the feature front end are rarely the problem, and they can be validated independently: the same
+TTS voice reading two different sentences at a clean 16 kHz measured **0.138** apart. If that kind of check
+passes and real recordings don't match, the fault is upstream in capture — see
+[Audio Capture](/voiceintelligence/capture/), which documents three real defects that each produced
+orthogonal-looking distances (~0.88) between two recordings of the same person.
+
+## Anti-spoofing
+
+There is **no** liveness or presentation-attack detection in this library. A recording of an enrolled user, or a
+voice clone of them, matches. In rough order of value:
+
+1. **Challenge–response — the biggest win, and it needs no new model.** Generate a random prompt (random
+   digits) per attempt, require the user to say *that*, and gate on both a speech-to-text transcript matching
+   the prompt **and** the speaker embedding matching. A recording or a stockpiled voicebank can't answer an
+   unknown prompt, which kills the whole replay class. You need an STT service — see
+   [Shiny.Speech](/speech/) or platform speech recognition.
+2. **A countermeasure model** — a bonafide-vs-spoof classifier (AASIST, RawNet2, LCNN from ASVspoof) behind
+   your own seam, using the same ONNX plumbing as the embedder. Passive protection against synthetic audio, but
+   it generalizes poorly to unseen attacks: a filter, not a wall.
+3. **Multimodal liveness** — combine [face](/faceintelligence/) and voice: "look at the camera and say
+   7-4-1-9". A strong on-device gate that neither modality provides alone.
+
+## Same identity model as face
+
+`PersonIdentifier` is an opaque string you choose. `Speaker.Id` is the document id of one stored utterance;
+`RecognitionResult.DocumentId` is that id for the nearest hit. Neither is an identity. Two people enrolled under
+one identifier are silently merged — mint a stable key per person rather than passing a typed-in name.

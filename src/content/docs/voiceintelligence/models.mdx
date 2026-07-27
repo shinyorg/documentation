@@ -1,0 +1,86 @@
+---
+title: ONNX Models
+description: Picking a speaker embedding model, waveform vs filterbank input, and getting Dimensions right.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+You supply the speaker embedding model — an ECAPA-TDNN, x-vector or CAM++ export in ONNX form. Nothing is
+bundled.
+
+```csharp
+voice.UseOnnxEmbedder(o =>
+{
+    o.ModelBytesProvider = () => LoadBundledModel("ecapa.onnx");
+    o.Dimensions = 512;                          // must match the model's real output width
+    o.SampleRate = 16000;
+    // o.InputMode = OnnxSpeakerInputMode.Auto;  // Auto | Waveform | Fbank80
+});
+```
+
+`OnnxEmbedderOptions` accepts three model sources in priority order: `ModelBytesProvider` → `ModelBytes` →
+`ModelPath`. On iOS and Android, bundled assets have no real filesystem path — use the bytes provider. The model
+loads **lazily on first enroll/recognize**, so a missing model surfaces there as a `FileNotFoundException`
+rather than breaking startup.
+
+## Waveform or filterbank — detected from the model
+
+Two model families are common, and they take completely different inputs. `OnnxEcapaEmbedder` reads the model's
+declared input rank when the session loads and picks between them:
+
+| Model input | Handling |
+|---|---|
+| `[batch, samples]` (rank 2) | Raw mono waveform, fed straight through |
+| `[batch, frames, 80]` (rank 3, usually named `feats`) | 80-bin Kaldi filterbank computed first |
+
+Set `InputMode` explicitly if a model's declared shape lies. A rank-3 model wanting anything other than 80 bins
+throws `NotSupportedException` — implement `ISpeakerEmbedder` yourself and register it with `UseEmbedder(...)`.
+
+<Aside type="note" title="The filterbank front end has no cepstral mean normalization, deliberately">
+`KaldiFbank` implements kaldi-compatible features with `snip_edges=false`. Adding CMN makes matching *worse*
+against these exports — don't "fix" it. It's covered by tests for bin count, frame count, determinism and level
+dependence, the last of which fails if someone adds CMN.
+</Aside>
+
+## `Dimensions` must match the model
+
+<Aside type="danger" title="This one bites">
+`Dimensions` sizes the vector store **before** the model loads, so it cannot be inferred. Common values:
+
+- **512** — CAM++ / WeSpeaker exports
+- **192** — many ECAPA-TDNN exports (this is the option default)
+
+A mismatch throws on the first embed rather than silently corrupting stored voiceprints, but you still have to
+get it right.
+</Aside>
+
+Probe an unfamiliar model before wiring it up:
+
+```csharp
+using var session = new InferenceSession(modelBytes);
+foreach (var i in session.InputMetadata)
+    Console.WriteLine($"in  {i.Key}: [{string.Join(",", i.Value.Dimensions)}]");
+foreach (var o in session.OutputMetadata)
+    Console.WriteLine($"out {o.Key}: [{string.Join(",", o.Value.Dimensions)}]");
+
+foreach (var kv in session.ModelMetadata.CustomMetadataMap)
+    Console.WriteLine($"{kv.Key} = {kv.Value}");   // WeSpeaker/sherpa-onnx carry output_dim, sample_rate, …
+```
+
+WeSpeaker and sherpa-onnx exports carry `framework`, `output_dim`, `sample_rate` and `normalize_samples` in
+their custom metadata map, which answers most of these questions directly.
+
+## Sample rate
+
+`SampleRate` (default 16000) is the rate the embedder expects, and it is what `IVoiceIntelligence` documents its
+`float[]` buffers as being in. Resampling to it is your capture code's job — see
+[Audio Capture](/voiceintelligence/capture/), including why a naive resampler silently ruins matching.
+
+## App size and the iOS linker fix
+
+The ONNX Runtime floor (~33 MB iOS arm64, ~17 MB Android arm64-v8a per architecture) and the reduced-build
+options are the same as for face — see [Face Intelligence · Models](/faceintelligence/models/#app-size).
+Speaker models are small by comparison (typically single-digit MB).
+
+`Shiny.VoiceIntelligence.Onnx` ships the same automatic iOS / Mac Catalyst linker fix for ONNX Runtime's
+`_RegisterCustomOps` symbol, with its MSBuild target name suffixed `_Voice` so an app referencing **both** the
+face and voice ONNX packages doesn't hit a duplicate-target-name error. Nothing to configure either way.

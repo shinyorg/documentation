@@ -1,0 +1,150 @@
+---
+title: Architecture
+description: How the face pipeline is composed — detector, embedder, store — and which parts you can replace.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+Three replaceable pieces sit behind `IFaceIntelligence`, wired together by the registration builder.
+
+```
+                 ┌─────────────────────────────────────────────┐
+  image bytes ──▶│ IFaceDetector    image → FaceBox[]           │  Shiny.FaceIntelligence.Onnx
+                 └─────────────────────────────────────────────┘  (UltraFace)
+                                    │ box
+                 ┌─────────────────────────────────────────────┐
+                 │ IFaceEmbedder    image + box → float[512]    │  Shiny.FaceIntelligence.Onnx
+                 └─────────────────────────────────────────────┘  (ArcFace)
+                                    │ L2-normalized vector
+                 ┌─────────────────────────────────────────────┐
+                 │ IFaceStore       vector → nearest identity   │  .DocumentDb / .DocumentDb.Sqlite
+                 └─────────────────────────────────────────────┘  (sqlite-vec ANN)
+```
+
+`FaceIntelligenceManager` — the concrete `IFaceIntelligence` — depends on exactly those three interfaces plus
+`FaceIntelligenceOptions`. It has no knowledge of ONNX or of any database, which is why the core package pulls
+neither.
+
+## The registration builder
+
+```csharp
+services.AddFaceIntelligence(face =>
+{
+    face.Options.MaxDistance = 0.6f;
+
+    face.UseOnnxEmbedder(o => { ... });   // or face.UseEmbedder(myEmbedder)
+    face.UseOnnxDetector(o => { ... });   // or face.UseDetector(myDetector)
+    face.UseSqliteStore(o => { ... });    // or face.UseDocumentDbStore(...) / face.UseStore(...)
+});
+```
+
+`FaceIntelligenceRegistrationBuilder` exposes `Options`, the generic `UseEmbedder` / `UseDetector` / `UseStore`
+seams, and the raw `Services` collection. The `Use*Onnx*` and `Use*Store` methods are extension methods that
+live in their own packages — which is what keeps the core dependency-free.
+
+After running your configuration, `AddFaceIntelligence` registers the options and
+`IFaceIntelligence → FaceIntelligenceManager`, then **validates** that an embedder and a store were registered.
+If either is missing it throws immediately, naming `UseOnnxEmbedder` / `UseSqliteStore`, rather than failing on
+the first enroll.
+
+The detector is **optional**. The manager takes `IEnumerable<IFaceDetector>` and only the no-box overloads use
+it — but the MAUI controls require one.
+
+## The three seams
+
+### `IFaceDetector`
+
+```csharp
+public interface IFaceDetector
+{
+    IReadOnlyList<DetectedFace> Detect(ReadOnlySpan<byte> imageData);
+}
+
+public readonly record struct DetectedFace(FaceBox Box, float Confidence);
+```
+
+Returns pixel-space boxes with a confidence. `OnnxUltraFaceDetector` in the `.Onnx` package targets UltraFace
+RFB-320 / slim-320: resize → normalize → run → threshold + non-maximum suppression. A detector with a
+different output layout (SCRFD, RetinaFace, YuNet) needs its own implementation registered via `UseDetector`.
+
+### `IFaceEmbedder`
+
+```csharp
+public interface IFaceEmbedder
+{
+    int Dimensions { get; }
+    ReadOnlyMemory<float> Embed(ReadOnlySpan<byte> imageData, FaceBox face);
+}
+```
+
+`OnnxArcFaceEmbedder` crops the box with a 25% margin, resizes to 112×112 RGB, normalizes to
+`(px - 127.5) / 128`, feeds NCHW `[1,3,112,112]`, and L2-normalizes the output. `Dimensions` comes from the
+model's output metadata (falling back to 512 for a dynamic axis).
+
+<Aside type="note" title="An embedder never says &quot;bad face&quot;">
+ArcFace returns a vector for whatever box it is handed — a wall, a hand, a blurry smear. It has no notion of
+failure. Every quality judgement in this library therefore comes from the **detector**'s confidence, from
+geometry, or from measuring the resulting embeddings against each other. If you plug in your own embedder,
+don't expect it to reject anything.
+</Aside>
+
+### `IFaceStore`
+
+```csharp
+public interface IFaceStore
+{
+    Task Add(Person person, CancellationToken ct = default);
+    Task<IReadOnlyList<FaceMatch>> FindNearest(ReadOnlyMemory<float> embedding, int count, CancellationToken ct = default);
+    Task<IReadOnlyList<Person>> GetAll(CancellationToken ct = default);
+    Task<int> RemoveByPersonIdentifier(string personIdentifier, CancellationToken ct = default);
+}
+
+public readonly record struct FaceMatch(Person Person, float Distance);
+```
+
+See [Stores](/faceintelligence/stores/).
+
+## The data model
+
+Each enrollment is **one `Person` document = one shot**, with a fresh document id:
+
+```csharp
+public class Person
+{
+    public string Id { get; set; }                  // document id — one stored shot
+    public string PersonIdentifier { get; set; }    // the identity you chose
+    public ReadOnlyMemory<float> Embedding { get; set; }
+    public byte[]? Thumbnail { get; set; }          // 128px JPEG crop, for your UI
+    public DateTimeOffset EnrolledAt { get; set; }
+}
+```
+
+Three names are easy to confuse:
+
+- **`Person.PersonIdentifier`** — the identity. What you enroll under, what recognition returns, what `Forget` deletes by.
+- **`Person.Id`** — the document id of one stored shot. Not an identity.
+- **`RecognitionResult.DocumentId`** — that document id, for the nearest hit. Useful for "which template matched", not for identifying a person.
+
+`Embedding` is `[JsonIgnore]`d: it lives only in the vector sidecar table, never in the stored JSON, and comes
+back empty from document queries like `GetAll()`. Don't rely on reading it back.
+
+## The result
+
+```csharp
+public record RecognitionResult(string? PersonIdentifier, float Distance, string? DocumentId)
+{
+    public bool IsMatch => PersonIdentifier is not null;
+    public float Similarity => 1f - Distance;
+    public static readonly RecognitionResult NoMatch = new(null, float.MaxValue, null);
+}
+```
+
+`Recognize` pulls `CandidateCount` neighbours (default 5) from the store and returns **only the single
+nearest**, and only if its distance is within `MaxDistance`. Widening `CandidateCount` does not produce more
+results — it only widens the internal candidate pull.
+
+## AOT and trimming
+
+Every package is `IsAotCompatible`. `FacesJsonContext` in the core is the source-generated
+`JsonSerializerContext` for `Person`, and `UseDocumentDbStore` hands its options to the store for both
+serialization and the LINQ expression visitor. If you persist an additional document type through the same
+store, add it to that context as a `[JsonSerializable]` — do not declare a second `[JsonSerializerContext]`.

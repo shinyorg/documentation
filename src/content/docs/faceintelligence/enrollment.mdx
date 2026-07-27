@@ -1,0 +1,129 @@
+---
+title: Enrollment
+description: Storing face templates — the two Enroll overloads, quality gates, duplicate detection, and how to build a gallery that actually recognizes.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+Enrollment stores one embedding per call. Enroll a person several times and you build a **gallery** of
+templates for that identity; recognition takes the nearest across all of them.
+
+## Two overloads
+
+```csharp
+// You already have the face box (live frame analyzer, or your own detector).
+Task<Person> Enroll(string personIdentifier, byte[] imageData, FaceBox face, CancellationToken ct = default);
+
+// You have a raw still and no box. Runs the detector and applies the quality gates.
+Task<Person> Enroll(string personIdentifier, byte[] imageData, bool allowDuplicate = false, CancellationToken ct = default);
+```
+
+Use the **box overload** when a detector has already run — that's what the MAUI controls do, and it guarantees
+the crop matches recognition byte for byte. Use the **no-box overload** for a still photo, a server-side batch,
+or an upload endpoint.
+
+```csharp
+var person = await faces.Enroll("emp-4471", jpegBytes, box);
+// person.Id           — the document id of this one shot
+// person.Thumbnail    — 128px JPEG crop you can show in a list
+// person.EnrolledAt   — timestamp
+```
+
+## Quality gates (no-box overload only)
+
+The no-box overload is the one that can say "no". It runs the registered `IFaceDetector` and enforces
+`FaceIntelligenceOptions`:
+
+| Option | Default | Rejects with |
+|---|---|---|
+| `MinDetectionConfidence` | `0.6` | `FaceDetectionError.LowConfidence` |
+| `MinFaceSizeFraction` | `0.08` | `FaceDetectionError.TooSmall` |
+| `RejectMultipleFaces` | `true` | `FaceDetectionError.MultipleFaces` |
+| — | — | `FaceDetectionError.NoFace` when nothing was found |
+
+```csharp
+try
+{
+    await faces.Enroll(employeeId, photo);
+}
+catch (FaceDetectionException ex)
+{
+    var message = ex.Reason switch
+    {
+        FaceDetectionError.NoFace        => "No face found — face the camera.",
+        FaceDetectionError.LowConfidence => "Couldn't see the face clearly.",
+        FaceDetectionError.MultipleFaces => "More than one person in frame.",
+        FaceDetectionError.TooSmall      => "Move closer.",
+        _ => ex.Message
+    };
+}
+```
+
+`MinFaceSizeFraction` is measured as the face box's shorter side over the image's shorter side, so `0.08` means
+"the face fills at least 8% of the frame". Set it to `0` to disable the check.
+
+<Aside type="caution" title="The box overload does not gate">
+`Enroll(id, image, box)` trusts you: no confidence check, no size check, no duplicate check. That's deliberate —
+the caller (the frame analyzer, your own detector) has already decided this is a face worth storing. If you
+build your own capture path, do the gating there.
+</Aside>
+
+## Duplicate detection
+
+With `GateEnrollmentOnRecognition` on (the default), the no-box `Enroll` runs a recognition pass before
+storing. If the face already matches a **different** identity within `MaxDistance`, it throws instead of
+silently creating a second identity for the same person:
+
+```csharp
+try
+{
+    await faces.Enroll("emp-4471", photo);
+}
+catch (FaceEnrollmentConflictException ex)
+{
+    // ex.Match.PersonIdentifier — who it looks like
+    // ex.Match.Distance         — how close
+    if (await ConfirmWithUser($"This looks like {ex.Match.PersonIdentifier}. Enroll anyway?"))
+        await faces.Enroll("emp-4471", photo, allowDuplicate: true);
+}
+```
+
+Enrolling a second shot of the *same* identity is never a conflict — the check only fires for a different one.
+
+## Building a gallery that works
+
+The single biggest lever on recognition accuracy is the enrolled gallery, not the threshold.
+
+- **Several shots per person.** Recognition takes the nearest across all of them, so more good templates means
+  better recall on a bad day.
+- **Vary the shot.** Different angle, different lighting, glasses on and off. Six near-identical front-on shots
+  are barely better than one — they all fail in the same conditions.
+- **Quality over quantity.** A blurry or badly lit shot becomes a permanently weak template that drags every
+  future comparison. Reject it at capture time rather than storing it.
+- **Enroll and recognize through the same path.** This one is not a nicety. See below.
+
+<Aside type="danger" title="Capture templates and probes identically">
+The embedding encodes the *pipeline* as well as the face: orientation handling, front-camera mirroring, resize
+and crop all leave their mark. A template captured through a still-photo path and probed through a live-frame
+path carries a systematic offset applied to **every** distance in the gallery, and no amount of threshold
+tuning fixes it.
+
+This was a real bug in this library's own sample: enrollment used `CapturePhotoAsync` while recognition read the
+analyzed frame, and the front-camera mirror the analyzer corrected the still did not. If you add another
+enrollment entry point, route it through the same frame the recognizer sees.
+</Aside>
+
+## Guided enrollment in MAUI
+
+`FaceEnrollmentView` runs a multi-step wizard that enforces variety by measuring it — see
+[MAUI Controls](/faceintelligence/controls/). It stores each accepted shot immediately, so an unsatisfiable step
+(a "move back" prompt a phone at arm's length can't reach) doesn't discard the shots already captured.
+
+## Removing an identity
+
+```csharp
+var removed = await faces.Forget("emp-4471");   // every stored shot for that identity
+```
+
+There is no per-shot delete on `IFaceIntelligence`. Enumerate with `GetAll()` if you need to show what's stored;
+each entry carries `Id`, `PersonIdentifier`, `Thumbnail` and `EnrolledAt` (but **not** the embedding — it lives
+only in the vector table).

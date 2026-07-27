@@ -1,0 +1,96 @@
+---
+title: Getting Started
+description: Native document scanning plus on-device extraction of receipts, invoices, licenses, passports and payment cards.
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="recogintelligence" /> |
+| Downloads | <NugetDownloads name="Shiny.DocumentIntelligence" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos"]} />
+
+**Shiny.DocumentIntelligence** is two halves of one pipeline:
+
+1. **`IDocumentScanner`** — launches the platform's own document camera (edge detection, perspective
+   correction, multi-page) and hands back clean page images.
+2. **`IDocumentExtractor`** — turns those images into typed data: receipts, invoices, driver's licenses,
+   passports and payment cards.
+
+Everything runs **on-device**. No cloud OCR service, no per-page cost, no document leaving the phone.
+
+<Aside type="note" title="No MAUI dependency">
+This package gets its platform context natively — iOS walks connected scenes for the top view controller,
+Android tracks the current activity through a zero-config content provider. It works in a MAUI app, a native
+Android or iOS app, and a macOS AppKit app alike.
+</Aside>
+
+## Install & register
+
+```bash
+dotnet add package Shiny.DocumentIntelligence
+```
+
+```csharp
+builder.Services.AddDocumentIntelligence();
+```
+
+That single call registers `IDocumentScanner`, `ITextRecognizer`, `IBarcodeReader`, `IDataDetector` and
+`IDocumentExtractor` — the native implementation for the current platform in each case.
+
+iOS and Mac Catalyst need `NSCameraUsageDescription` in `Info.plist`.
+
+## Scan and extract
+
+```csharp
+public class ExpenseService(IDocumentScanner scanner, IDocumentExtractor extractor)
+{
+    public async Task<ReceiptData?> CaptureReceipt()
+    {
+        if (!scanner.IsSupported)
+            return null;
+
+        var scan = await scanner.ScanAsync(new DocumentScanRequest { PageLimit = 1 });
+        if (scan.IsCancelled)
+            return null;
+
+        var doc = await extractor.ExtractAsync(scan, DocumentType.Receipt);
+        return doc.Receipt;   // Merchant, Date, Subtotal, Tax, Total, Currency, Items
+    }
+}
+```
+
+## Platform support
+
+| Platform | Scanner | OCR | Barcodes | Data detector |
+|---|---|---|---|---|
+| iOS / Mac Catalyst | VisionKit document camera | Apple Vision | Apple Vision | `NSDataDetector` |
+| Android | ML Kit document scanner (can emit PDF) | ML Kit | ML Kit | — |
+| macOS (AppKit) | File picker + Vision deskew | Apple Vision | Apple Vision | `NSDataDetector` |
+| Windows / bare `net10.0` | throws | throws | throws | inert |
+
+Gate your UI on `IsSupported` rather than on a platform check — it also covers OS-version floors (the iOS
+document camera needs iOS 13+).
+
+## What can be extracted
+
+| `DocumentType` | Strategy | Result |
+|---|---|---|
+| `Receipt` | OCR + heuristics | `ReceiptData` — merchant, date, subtotal, tax, total, currency, line items |
+| `Invoice` | OCR + heuristics | `InvoiceData` — vendor, number, dates, totals, line items |
+| `DriversLicense` | AAMVA PDF417 barcode decode | `LicenseData` — name, DOB, licence number, address, plus the full AAMVA element map |
+| `Passport` | ICAO 9303 MRZ parse | `PassportData` — names, passport number, nationality, dates, with check-digit validation |
+| `CreditCard` | OCR + Luhn validation | `CreditCardData` — PAN, network, expiry, cardholder |
+| `Unknown` | OCR only | `RawText` |
+
+See [Extraction](/documentintelligence/extraction/) for the details, including the deliberate security choices
+in the payment-card path.
+
+## Where next
+
+- [Scanning](/documentintelligence/scanning/) — the modal scanner, per-platform behaviour, PDFs
+- [Extraction](/documentintelligence/extraction/) — typed results, OCR layout, the seams you can replace

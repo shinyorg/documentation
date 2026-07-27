@@ -306,6 +306,53 @@ export const sidebarTopics = [
     ]
   },
   {
+    label: 'On-Device Intelligence',
+    link: '/faceintelligence/',
+    icon: 'magnifier',
+    items: [
+      {
+        label: 'Face Intelligence',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'faceintelligence/' },
+          { label: 'Architecture', link: 'faceintelligence/architecture' },
+          { label: 'Enrollment', link: 'faceintelligence/enrollment' },
+          { label: 'Recognition & Tuning', link: 'faceintelligence/recognition' },
+          { label: 'MAUI Controls', link: 'faceintelligence/controls' },
+          { label: 'ONNX Models', link: 'faceintelligence/models' },
+          { label: 'Stores', link: 'faceintelligence/stores' },
+          { label: 'Release Notes', link: 'faceintelligence/release-notes' }
+        ]
+      },
+      {
+        label: 'Voice Intelligence',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'voiceintelligence/' },
+          { label: 'Guided Enrollment', link: 'voiceintelligence/enrollment' },
+          { label: 'Recognition & Tuning', link: 'voiceintelligence/recognition' },
+          { label: 'Audio Capture', link: 'voiceintelligence/capture' },
+          { label: 'MAUI Control', link: 'voiceintelligence/controls' },
+          { label: 'ONNX Models', link: 'voiceintelligence/models' },
+          { label: 'Release Notes', link: 'voiceintelligence/release-notes' }
+        ]
+      },
+      {
+        label: 'Document Intelligence',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'documentintelligence/' },
+          { label: 'Scanning', link: 'documentintelligence/scanning' },
+          { label: 'Extraction', link: 'documentintelligence/extraction' },
+          { label: 'Release Notes', link: 'documentintelligence/release-notes' }
+        ]
+      },
+    ]
+  },
+  {
     label: 'UI Controls',
     link: '/controls/',
     icon: 'seti:html',

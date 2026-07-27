@@ -1,0 +1,131 @@
+---
+title: Guided Enrollment
+description: VoiceEnrollmentSession — prompt, record, check, repeat until the voiceprints agree.
+---
+import { Aside } from '@astrojs/starlight/components';
+
+`voice.CreateEnrollment(id)` returns a **`VoiceEnrollmentSession`**: show a sentence, record it, submit it,
+repeat until the session says the voiceprints agree well enough to stop.
+
+It lives in **core**, not in a UI control, because the library never touches audio hardware — your app records
+and hands over `float[]`. That also makes it usable server-side and testable without a microphone.
+
+```csharp
+var session = voices.CreateEnrollment("user-118");
+
+while (!session.IsComplete)
+{
+    Show(session.CurrentPrompt);                                    // advances only on an accepted clip
+    var samples = await recorder.RecordAsync(TimeSpan.FromSeconds(5));
+    var step = await session.Submit(samples);
+
+    if (!step.Accepted)
+        Show(step.Hint);                                            // ready-to-display guidance
+}
+
+var result = session.Result!;   // already stored
+Console.WriteLine($"agreement {result.Cohesion:0.00}, confident: {result.IsConfident}");
+```
+
+## The gate is inverted versus face enrollment
+
+Face enrollment wants *spread* — varied poses — so it rejects shots too **similar** to ones it already has.
+
+A speaker embedding is supposed to come out the same whatever the person says, so voice enrollment rejects clips
+that **disagree**. Agreement is simultaneously the quality gate and the stop condition: the session finishes
+when the accepted clips are close enough to each other.
+
+## What each recording is checked for
+
+| Gate | Verifiable? | Option | Notes |
+|---|---|---|---|
+| Long enough / actually speech | yes | `MinSpeechSeconds` (2.5) | Energy-framed, no VAD model. Catches "tapped record and said nothing". |
+| Speech level | yes | `MinSpeechLevel` (0.004) | Measured over **speech frames only** — whole-buffer RMS would punish a pause before speaking. |
+| Clipping | yes | `MaxClippedFraction` (0.01) | Mic too close, or input gain too high. |
+| SNR | yes | `MinSnrDb` (10) | 90th vs 10th percentile frame energy. Rough — it can't tell a quiet room from a steady hum. |
+| **Agreement** | yes | `MaxOutlierDistance`, then `MaxCohesionDistance` | The one that carries the weight. |
+| The prompt was actually read | **no** | — | Would need speech-to-text; the model is text-independent anyway. |
+| The voice is live, not a replay | **no** | — | No anti-spoofing anywhere in this stack. |
+
+Every measurement is reported on the step result, accepted or not:
+
+```csharp
+public readonly record struct VoiceSampleMetrics(
+    float Seconds, float Rms, float SpeechRms, float Peak,
+    float ClippedFraction, float SpeechSeconds, float SnrDb);
+```
+
+<Aside type="note" title="Levels are device- and gain-dependent">
+These are raw `[-1, 1]` sample-domain numbers. With Apple's voice-processing chain disabled — which it must be,
+see [Audio Capture](/voiceintelligence/capture/) — a good iPhone recording sits around **0.01 RMS**, not 0.1.
+Judge `MinSpeechLevel` against what your own capture path produces, not against a number from another app.
+</Aside>
+
+## Distance gates are derived, not hardcoded
+
+`CreateEnrollment` uses `VoiceEnrollmentOptions.ForThreshold(maxDistance)`:
+
+```csharp
+MaxCohesionDistance = 0.75f * maxDistance;   // how far apart the kept clips may be
+MaxOutlierDistance  = maxDistance;           // beyond this a clip is rejected outright
+```
+
+The reasoning: a probe is later compared against these templates, so any spread the templates already have comes
+straight out of the matching budget. And a clip that wouldn't even *recognize* as the same person is a bad
+capture or a different person — either way it doesn't belong in this person's template set.
+
+## Rejection reasons
+
+`VoiceEnrollmentRejection`: `None`, `TooShort`, `TooLittleSpeech`, `TooQuiet`, `Clipped`, `TooNoisy`,
+`Inconsistent`. `VoiceEnrollmentSession.Hint(reason)` gives a ready-to-show string, and `step.Hint` already
+carries it.
+
+## Session mechanics worth knowing
+
+- **Nothing is stored until it completes.** `Reset()` or abandoning the session leaves no half-enrolled speaker.
+  On completion the already-computed embeddings are written straight to the store rather than re-running
+  inference on every clip for an identical result.
+- **Bad-first-clip rescue.** If the first accepted recording was the broken one, everything after it gets
+  rejected as inconsistent — a deadlock. So a clip rejected as `Inconsistent` is held for one round: if the next
+  one agrees with *it* rather than with the lone survivor, those two out-vote the survivor and it is dropped.
+- **Running out of attempts.** At `MaxSamples` (default 6) the session drops the worst-disagreeing clips down to
+  `MinSamples` (default 3) and stores what's left with `IsConfident = false`. Enrollment succeeds, flagged.
+- **`Finish()`** does the same on demand, for a caller that stops asking. It stores nothing and returns `null`
+  below `MinSamples` — a one-clip "enrollment" is exactly the weak template the session exists to prevent.
+- **The prompt index advances on an accepted clip, not on every attempt.** A rejected recording stays on the
+  same sentence. Rotating per attempt reads as "the wizard is cycling and nothing I do matters", and there is
+  nothing to gain from moving on — the model is text-independent, so varying the words buys the embedding
+  nothing, while re-reading a line you already know isolates what actually failed.
+
+## Prompts are pairs of sentences
+
+The default `Prompts` are Harvard sentences, **two per prompt**, and that is not cosmetic. One sentence takes
+about 2–2.5 s to read while `MinSpeechSeconds` asks for 2.5 s of detected speech — so single-sentence prompts
+sat right on the gate and were rejected roughly half the time from someone who had read the line perfectly
+(measured: 16 clips, 2.14–3.62 s of speech, median ~2.45 s, healthy level and 30+ dB SNR throughout). Only the
+longest sentence passed reliably, which presented as *"it accepts the first one and then nothing works"*.
+
+<Aside type="caution" title="Don't lower MinSpeechSeconds to fix rejections">
+The gate was not the problem — a speaker embedding needs voiced material, and dropping this trades a visible
+rejection for a quietly weaker template. The prompts were lengthened instead. When a clip is rejected, measure
+the audio before touching a threshold.
+</Aside>
+
+## The result
+
+```csharp
+public record VoiceEnrollmentResult(
+    string PersonIdentifier,
+    IReadOnlyList<Speaker> Speakers,   // one document per accepted recording, already stored
+    float Cohesion,                    // largest pairwise distance — the headline quality number
+    bool IsConfident);                 // false = ran out of attempts, stored its best subset anyway
+```
+
+`Cohesion` is how much of the matching budget this person's own templates already consume. Show it — the sample
+app labels it "agreement".
+
+<Aside type="note" title="Cohesion is within one session only">
+Re-enrolling an identity says nothing about how the new clips relate to the ones already stored. If someone
+re-enrolls in a different room on a different device, they end up with two clusters under one identity — which
+recognition tolerates (nearest wins) but cohesion never measured.
+</Aside>
