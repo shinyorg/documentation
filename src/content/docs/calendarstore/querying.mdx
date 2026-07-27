@@ -1,63 +1,93 @@
 ---
 title: Querying
-description: LINQ querying of calendar events with native fetch hints and in-memory fallback
+description: Fluent async event queries with native fetch hints and an in-memory pass
 ---
 
-`ICalendarStore.Query()` returns an `IQueryable<CalendarEvent>`. The query provider inspects your
-`Where` predicate and pushes three things down to the **native fetch** — the calendar id and the
-start/end date window — because those map directly onto the platform event query. Every other part of
-the predicate (title/location/description text, attendee filters, availability, …) is applied
-**in-memory** after the fetch. The full predicate is always re-applied in-memory, so results are exact
-regardless of native window semantics.
+## The query builder
+
+`ICalendarStore.Query()` returns a **`CalendarEventQuery`** — a small fluent builder. Nothing runs
+until you call a terminal method (`ToListAsync`, `FirstOrDefaultAsync`, `CountAsync`), and the native
+calendar read is performed off the calling thread, so it is **safe to await straight from the UI
+thread**.
+
+```csharp
+var upcoming = await store
+    .Query()
+    .ForCalendar(calId)
+    .Between(DateTimeOffset.Now, DateTimeOffset.Now.AddDays(7))
+    .OrderBy(CalendarEventSortField.Start)
+    .ToListAsync(ct);
+```
+
+Two things are pushed down to the **native fetch** — the calendar id and the start/end window —
+because those map directly onto the platform event query. Everything else (title/location/description
+text, attendee filters, availability, sorting, paging) is applied to the fetched events.
 
 ## Native fetch hints
 
-| Expression                      | Effect |
-|---------------------------------|--------|
-| `e.CalendarId == "id"`          | Restricts the fetch to that calendar. |
-| `e.Start >= someDate`           | Sets the window lower bound. |
-| `e.End <= someDate`             | Sets the window upper bound. |
+| Builder call | Effect |
+|--------------|--------|
+| `ForCalendar(id)` | Restricts the fetch to that calendar. `null` (the default) queries all of them. |
+| `From(date)` | Sets the window lower bound. |
+| `To(date)` | Sets the window upper bound. |
+| `Between(from, to)` | Both at once. Throws if `to` precedes `from`. |
 
-Everything else runs in-memory.
-
-## Examples
+## In-memory filters
 
 ```csharp
-// Events on one calendar in the next week (fully native window)
-var upcoming = store.Query()
-    .Where(e => e.CalendarId == calId
-             && e.Start >= DateTimeOffset.Now
-             && e.End <= DateTimeOffset.Now.AddDays(7))
-    .ToList();
+// Free-text title filter (case-insensitive)
+var standups = await store.Query()
+    .From(DateTimeOffset.Now.AddDays(-30))
+    .TitleContains("standup")
+    .ToListAsync();
 
-// Free-text title filter (window native, title in-memory)
-var standups = store.Query()
-    .Where(e => e.Start >= DateTimeOffset.Now.AddDays(-30)
-             && e.Title.Contains("Standup"))
-    .ToList();
-
-// Attendee filter (in-memory) with paging
-var withAlice = store.Query()
+// Any predicate you like — multiple calls are ANDed
+var withAlice = await store.Query()
     .Where(e => e.Attendees.Any(a => a.Email == "alice@example.com"))
+    .Where(e => e.Availability == EventAvailability.Busy)
+    .ToListAsync();
+```
+
+## Sorting and paging
+
+```csharp
+var page = await store.Query()
+    .Between(from, to)
+    .OrderBy(CalendarEventSortField.Start)
+    .ThenBy(CalendarEventSortField.Title)
     .Skip(0)
     .Take(20)
-    .ToList();
+    .ToListAsync();
+```
 
-// Count
-var count = store.Query()
+`CalendarEventSortField` is `Start`, `End`, or `Title`. `OrderBy` replaces any previous sort; `ThenBy`
+adds a secondary one and throws if no `OrderBy` precedes it. Both take a `descending` flag.
+
+## Terminal methods
+
+| Method | Returns |
+|--------|---------|
+| `ToListAsync(ct)` | `IReadOnlyList<CalendarEvent>` |
+| `FirstOrDefaultAsync(ct)` | `CalendarEvent?` |
+| `CountAsync(ct)` | `int` |
+
+```csharp
+var count = await store.Query()
+    .Between(from, to)
     .Where(e => e.Availability == EventAvailability.Busy)
-    .Count();
+    .CountAsync();
 ```
 
 :::note
 If you supply **no** date window, the fetch defaults to a bounded range (roughly one month back to
-three months ahead) so the platform query stays fast. Always add a `Start`/`End` window when you need
-a specific range.
+three months ahead) so the platform query stays fast. Always set a window with `Between`/`From`/`To`
+when you need a specific range.
 :::
 
 ## Direct fetch
 
-When you already know the window, `GetEvents` is the direct equivalent of the native fetch:
+When you already know the window and need no extra filtering, `GetEvents` is the direct equivalent of
+the native fetch:
 
 ```csharp
 var events = await store.GetEvents(

@@ -573,6 +573,7 @@ export const sidebarTopics = [
           {
             label: 'Integrations',
             items: [
+              { label: 'Admin UI', link: 'documentdb/admin' },
               { label: 'JSON Schema Validation', link: 'documentdb/validation' },
               { label: 'OData Endpoints', link: 'documentdb/odata' },
               { label: 'Offline Sync (Shiny.Data.Sync)', link: 'documentdb/data-sync' },

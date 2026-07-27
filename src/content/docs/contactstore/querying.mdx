@@ -1,92 +1,128 @@
 ---
 title: Querying
-description: LINQ query support with native translation for device contacts
+description: Fluent async contact queries with native translation
 ---
 
-## IQueryable Support
+## The query builder
 
-`IContactStore.Query()` returns an `IQueryable<Contact>` that translates LINQ predicates to native queries where possible, with automatic in-memory fallback for unsupported filters.
-
-On Android, predicates are translated to `ContentProvider` selection queries. On iOS, predicates are translated to `CNContact` fetch predicates.
-
-## Basic Queries
-
-### Filter by Name
+`IContactStore.Query()` returns a **`ContactQuery`** — a small fluent builder. Nothing runs until you
+call a terminal method (`ToListAsync`, `FirstOrDefaultAsync`, `CountAsync`), and the native read is
+performed off the calling thread, so it is **safe to await straight from the UI thread**.
 
 ```csharp
-var results = contactStore.Query()
-    .Where(c => c.GivenName.Contains("John"))
-    .ToList();
+var results = await contactStore
+    .Query()
+    .Where(ContactField.FamilyName, "Smith", ContactFilterOperation.StartsWith)
+    .OrderBy(ContactSortField.FamilyName)
+    .ThenBy(ContactSortField.GivenName)
+    .Take(50)
+    .ToListAsync(ct);
 ```
 
-### Filter by Phone Number
+Field filters are pushed down to the native query where the platform supports it — `ContentProvider`
+selections on Android, a `CNContact` fetch predicate on iOS — and are **always re-applied in-memory**,
+so the result is exact no matter how much the platform could translate.
+
+## Filtering
+
+### By field
 
 ```csharp
-var results = contactStore.Query()
-    .Where(c => c.Phones.Any(p => p.Number.Contains("555")))
-    .ToList();
+// default operation is Contains
+var johns = await contactStore.Query()
+    .Where(ContactField.GivenName, "John")
+    .ToListAsync();
+
+// by phone number — matches if ANY of the contact's numbers match
+var byPhone = await contactStore.Query()
+    .Where(ContactField.Phone, "555")
+    .ToListAsync();
+
+// by email
+var byEmail = await contactStore.Query()
+    .Where(ContactField.Email, "@example.com")
+    .ToListAsync();
 ```
 
-### Filter by Email
+Multiple field filters are **ANDed** by default:
 
 ```csharp
-var results = contactStore.Query()
-    .Where(c => c.Emails.Any(e => e.Address.Contains("@example.com")))
-    .ToList();
+var results = await contactStore.Query()
+    .Where(ContactField.GivenName, "J", ContactFilterOperation.StartsWith)
+    .Where(ContactField.FamilyName, "Smith")
+    .ToListAsync();
 ```
 
-### Combine Filters
+Call `Match(ContactFilterMatch.Any)` to OR them instead.
+
+### Search box
+
+`Search(text)` is the "one text box over everything" filter — it matches given name, family name,
+display name, phone numbers and email addresses, and switches the query to `Match.Any`:
 
 ```csharp
-var results = contactStore.Query()
-    .Where(c => c.GivenName.StartsWith("J") && c.FamilyName.Contains("Smith"))
-    .ToList();
+var results = await contactStore.Query()
+    .Search(searchText)
+    .OrderBy(ContactSortField.FamilyName)
+    .ToListAsync();
 ```
 
-### Paging
+### Anything else
+
+Pass a plain predicate for anything the fields don't cover. It runs in-memory after the fetch, and
+multiple predicates are ANDed:
 
 ```csharp
-var page = contactStore.Query()
-    .Where(c => c.FamilyName.StartsWith("A"))
+var birthdays = await contactStore.Query()
+    .Where(c => c.Dates.Any(d => d.Type == ContactDateType.Birthday))
+    .ToListAsync();
+```
+
+## Sorting and paging
+
+```csharp
+var page = await contactStore.Query()
+    .Where(ContactField.FamilyName, "A", ContactFilterOperation.StartsWith)
+    .OrderBy(ContactSortField.FamilyName)
+    .ThenBy(ContactSortField.GivenName)
     .Skip(10)
     .Take(20)
-    .ToList();
+    .ToListAsync();
 ```
 
-## Supported Operations
+`OrderBy` replaces any previous sort; `ThenBy` adds a secondary one and throws if no `OrderBy`
+precedes it. Both take a `descending` flag. Sorting and paging are applied after the fetch.
 
-| Operation | Example |
-|-----------|---------|
-| `Contains` | `c.GivenName.Contains("John")` |
-| `StartsWith` | `c.GivenName.StartsWith("J")` |
-| `EndsWith` | `c.GivenName.EndsWith("son")` |
-| `Equals` | `c.GivenName.Equals("John")` |
+## Terminal methods
 
-## Filterable Properties
+| Method | Returns |
+|--------|---------|
+| `ToListAsync(ct)` | `IReadOnlyList<Contact>` |
+| `FirstOrDefaultAsync(ct)` | `Contact?` |
+| `CountAsync(ct)` | `int` |
 
-### Direct Properties
+## Fields and operations
 
-These string properties support all four operations above:
+`ContactField`: `GivenName`, `FamilyName`, `MiddleName`, `NamePrefix`, `NameSuffix`, `Nickname`,
+`DisplayName`, `Note`, `Company`, `JobTitle`, `Department`, `Phone`, `Email`.
 
-- `GivenName`
-- `FamilyName`
-- `MiddleName`
-- `NamePrefix`
-- `NameSuffix`
-- `Nickname`
-- `DisplayName`
-- `Note`
+`ContactFilterOperation`: `Contains` (default), `StartsWith`, `EndsWith`, `Equals`. All comparisons
+are **case-insensitive**.
 
-### Collection Properties
+### What gets translated natively
 
-These collections support filtering with `.Any()`:
+| Field | Android | iOS |
+|-------|---------|-----|
+| Name fields (`GivenName`, `FamilyName`, `MiddleName`, `NamePrefix`, `NameSuffix`, `DisplayName`, `Nickname`) | ✅ selection query | ✅ for `StartsWith`/`Equals` on given/family/display name |
+| `Phone`, `Email` | ✅ selection query | ❌ |
+| `Note`, `Company`, `JobTitle`, `Department` | ❌ | ❌ |
+| Predicate `Where(Func<Contact,bool>)` | ❌ | ❌ |
 
-| Collection | Filterable Field |
-|------------|-----------------|
-| `Phones` | `Number` |
-| `Emails` | `Address` |
+❌ means the platform reads the full contact list and the builder filters it in-memory — correct, just
+more work. `CNContact`'s only search predicate matches on a **name-token prefix**, which is why iOS
+pushes down `StartsWith`/`Equals` but not `Contains`/`EndsWith`, and never in `Match.Any` mode.
 
-## Extension Methods
+## Extension methods
 
 ### Get Family Name First Letters
 
@@ -99,14 +135,7 @@ var letters = await contactStore.GetFamilyNameFirstLetters();
 
 This is useful for building alphabetical index/jump lists in contact list UIs.
 
-## How Native Translation Works
-
-When you write a LINQ query, the library's expression visitor extracts the predicate and translates it:
-
-1. **Supported filters** are converted to native queries (SQL-like selection on Android, `NSPredicate` on iOS)
-2. **Unsupported filters** cause a fallback to loading all contacts and filtering in memory
-3. **Multiple supported filters** are intersected — each filter narrows the result set
-
 :::tip
-For best performance, prefer the filterable properties listed above. Filtering on other properties like `Addresses` or `Organization` will load all contacts and filter in memory.
+Prefer the name/phone/email fields when you can — they are the ones that narrow the native read.
+Filtering on `Note`, organization fields, or a raw predicate always loads every contact first.
 :::
