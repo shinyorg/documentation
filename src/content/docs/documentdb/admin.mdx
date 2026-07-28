@@ -78,10 +78,18 @@ pretty-printed text.
 Every value is HTML-escaped on the way out: document content belongs to whoever wrote it, and this markup
 is rendered raw.
 
+Long numeric arrays — embeddings — render as `float[1536] [0.021, -0.114, …]` in both the grid and the
+formatted view rather than component by component. Nothing is hidden: the raw toggle still shows the whole
+body. It is the difference between a summary and tens of kilobytes of markup per row.
+
 ## Edit
 
-A JSON editor with format and validation. Insert, edit, duplicate-by-id, single and bulk delete. Deleting
-a document also clears its blob sidecar rows.
+A JSON editor with format and validation. Insert, edit, duplicate-by-id, single and bulk delete.
+
+Writes carry the sidecars with them, because nothing in the database does it for you: deleting a document
+clears its blob rows, a temporal type records the version, and a **vector-mapped type has its embedding
+re-indexed** — or, where the tool cannot write the sidecar, says so instead of leaving a search index
+quietly disagreeing with the documents. See [Vectors](#vectors).
 
 <Image src={editImg} alt="The edit document dialog showing the id field and a formatted JSON body" />
 
@@ -89,7 +97,15 @@ a document also clears its blob sidecar rows.
 
 The inferred shape of a type — paths, types, **how often each field is actually present**, and examples —
 plus row and size statistics and one-click create/drop of JSON property indexes, named exactly as
-DocumentDb names its own.
+DocumentDb names its own. Enter several comma-separated paths to build a **composite** index.
+
+The index list covers **every** index on the table, not only DocumentDb's — an index someone added by hand
+is often exactly what explains a query's speed, and hiding it would make the tool lie by omission. External
+ones are labelled and cannot be dropped from here. Where the engine tracks it, each index shows its size and
+how often the planner has used it: PostgreSQL and SQL Server report both, Oracle reports size, and SQLite,
+MySQL and DuckDB report neither — shown as `—` rather than a fabricated zero. An index the planner has never
+used is flagged **unused** (on SQL Server the counter resets with the instance, so that means "not since
+startup").
 
 <Image src={structureImg} alt="Structure tab showing inferred paths, types, presence percentages and per-path index buttons" />
 
@@ -123,6 +139,62 @@ actual value and is identical everywhere. So this works on **every** provider, i
 spatial support at all. Parsing goes through the library's own `GeometryJsonConverter`, so the tool
 inherits the real OGC model rather than reimplementing it.
 
+## Full text
+
+Appears when a type actually has a [full-text index](/documentdb/full-text) — not merely when the backend
+could support one, since a search box that can only ever return nothing is worse than no tab. Ranked search
+runs through the provider's own engine (FTS5 BM25, PostgreSQL `ts_rank`, SQL Server `FREETEXTTABLE`, Oracle
+`CONTAINS`, DuckDB `match_bm25`), with the SQL it ran available underneath. Scores are higher-is-better and
+provider-specific in scale, so compare within a result set rather than across backends.
+
+Searching needs **no registered mapping**: every provider derives the index table or column from the table
+and type name alone. The one exception is PostgreSQL, which needs the `to_tsquery` language — hence the
+language selector, which must match the language the index was built with or the search quietly matches
+nothing. Every other backend ignores it.
+
+**Unlike the vector sidecar, there is nothing here to keep in sync.** These indexes are maintained by the
+database itself — FTS5 triggers, generated or computed columns, an on-commit CONTEXT index — so a document
+edited or deleted in this tool is immediately searchable, or immediately gone. The exception is **DuckDB**,
+whose index is a snapshot the library rebuilds before each query rather than something the engine maintains;
+there the tab says plainly that writes leave it stale until your application runs a full-text query, and
+that this tool cannot rebuild it — doing so needs the list of indexed fields, which lives only in the
+`MapFullTextProperty` registration.
+
+That same limit means the tab can tell you a type **is** indexed but not **which fields** the index covers,
+on the backends where the catalog does not keep the expression.
+
+## Vectors
+
+Appears when a type stores [embeddings](/documentdb/vector) — an array of numbers long enough not to be a
+coordinate pair — or has a `{table}_vec_{type}` sidecar. Like Geometry, it reads from the **document body**,
+which is where the library serialises the mapped `ReadOnlyMemory<float>` property, so it works on every
+backend rather than only the vector-capable ones.
+
+**Inspect.** Dimensions, how many documents carry a vector and how many do not, the average L2 norm and how
+many vectors are unit length (i.e. normalised before storage), plus counts of all-zero and NaN/infinity
+vectors. An all-zero vector is the signature of an embedding that was never generated: it is perfectly
+valid, so nothing errors — it just ranks meaninglessly. Mixed dimensions at one path are called out too,
+because only one of them can match the sidecar column.
+
+**Sidecar health.** The sidecar is the index an ANN query actually searches, and nothing in the database
+keeps it in step with the documents. The tab compares the two and reports documents whose embedding never
+reached the index (so a search can never return them) and rows pointing at documents that no longer exist.
+**Rebuild sidecar from documents** repairs both from the bodies, which are the source of truth.
+
+**Nearest neighbours.** Search from an existing document's own embedding — no embedding model needed in the
+tool — or paste a raw vector, under cosine, Euclidean or dot-product distance. Distances are computed in the
+tool over a bounded scan rather than pushed down to the engine, which makes the ranking *exact* rather than
+approximate, identical on every backend, and unaffected by a sidecar that is out of date — which is exactly
+when you are looking. Documents whose dimension differs from the probe are skipped rather than ranked.
+
+**Writes.** Clearing a document's vector removes it from the body and the sidecar together. Editing 1536
+floats by hand is not a workflow the tab offers.
+
+One provider caveat: on SQLite the sidecar is a `vec0` virtual table and every statement against it needs
+the sqlite-vec extension, which the library loads and this tool — which does not ship the native binaries —
+does not. Drift detection still works there (it reads the companion map table), but the tab says plainly
+that it cannot write the sidecar rather than pretending otherwise.
+
 ## Blobs
 
 Appears when the table has a `{table}_blobs` sidecar. Lists payloads **without ever selecting the blob
@@ -134,12 +206,74 @@ confirm. Downloads stream over a plain HTTP endpoint rather than crossing the Bl
 Stream a type out as JSON, NDJSON, envelope JSON (round-trippable) or CSV; import JSON or NDJSON back with
 fail / replace / skip handling for duplicate ids.
 
+### Generate
+
+Makes more documents that look like the ones already there — for filling a dev database, giving a query plan
+something to chew on, or reproducing "it gets slow past 100k".
+
+**Analyze** reads a sample of the type's documents and works out how to make more: the range every number
+occupies, the span every date covers, the set every categorical field draws from, how often each optional
+field is actually present, the shape of nested objects and the length of arrays. It reports what it inferred
+per field, with the values it will draw from, so the inference is inspectable rather than magic.
+
+Every generated value comes from the real data. That is the point: data generated from a schema alone has
+plausible *types* and implausible *values*, which is no use for judging a query plan or reading a grid. Ids
+are the exception — they are always replaced, and if the existing ones follow a scheme (`art-0001 …
+art-0400`) generation continues it at `art-0401` rather than mixing GUIDs in beside them.
+
+**Preview** shows the first few records and **Write** commits them. The two are the same documents: the
+preview's seed is replayed on commit, so it is a promise rather than an illustration.
+
+Two things to know. Bulk generation writes through the [schema-free lane](/documentdb/json-collections/) —
+one transaction for the whole batch instead of one per document — and **that lane maintains no sidecars**, so
+generated rows are absent from a type's temporal history, vector index and spatial index. The tool says which
+ones apply to the type you generated into, and links to the Vectors tab's rebuild. Full-text is *not*
+affected: those indexes are engine-maintained, so generated rows are searchable immediately. Second, a free-
+text field with more distinct values than are worth tracking is sampled rather than invented, so long strings
+repeat — the honest limit of generating without a model.
+
 <Image src={transferImg} alt="Import and export tab offering JSON array, NDJSON, CSV and envelope JSON exports" />
 
-## SQL console
+## Query console
 
-Whatever you type, in the target database's dialect, with `@name` parameters bound from a JSON box so the
-types stay honest — `450` binds a number, `"450"` binds text.
+Two modes over the same connection.
+
+**Filter grammar** is DocumentDb's own [string query syntax](/documentdb/querying) — the same text
+`Query<T>().Where("…")` takes — with boxes for `Where`, `OrderBy` and an optional `Project`. Pick a table and
+a type and the rest reads exactly like your application code:
+
+```
+status == 'Shipped' and total:number > 100
+```
+
+It is **not a reimplementation**: the console opens `store.Collection(typeName)` — the schema-free
+[JSON collection](/documentdb/json-collections/) lane — and runs your text through the same parser,
+translator and SQL builder the library does. So the answer is the answer your code would get.
+
+The compiled SQL is shown next to the results, with its bound parameters, and **Open in raw SQL** drops it
+straight into the other mode — which makes the grammar something you can learn by using rather than by
+reading.
+
+**Explain** runs the provider's own query plan over that SQL — `EXPLAIN QUERY PLAN` on SQLite, `EXPLAIN` on
+PostgreSQL/MySQL/DuckDB, `SHOWPLAN_TEXT` on SQL Server, `DBMS_XPLAN` on Oracle. The statement is *planned,
+not executed*, so this is safe on a read-only connection, which is where you most want to ask why something
+is slow. Below the plan, any field the query filters or sorts on that has **no index** is offered as a
+one-click create — individually or as a composite over all of them — after which the query re-runs and
+re-explains, so what you see is the plan *after* the change rather than a claim that it helped.
+
+Two honest limits. The unindexed-field list is read from your filter text, not from the plan: engines name
+the object they scanned, not the JSON path inside it, so the plan tells you whether it matters and the
+filter tells you what to do about it. And the "this looks like a scan" hint is a text match on the plan —
+on a small table a scan is often the right choice, which is why the plan itself is always shown. Because there is no CLR type to infer from, field paths take an optional `:type` hint
+(`number`, `int`, `date`, `bool`, `guid`, …) and **need one wherever nothing else pins the type** — most
+often an `OrderBy` over a numeric field, which otherwise sorts as text and puts `"100"` before `"9"`.
+
+Two limits worth knowing: a store configured with `TypeNameResolution.FullName` writes dotted type names,
+which the collection lane will not address (the console says so and points at the SQL mode); and the grammar
+addresses fields inside `Data`, not the envelope columns — use SQL for those.
+
+**Raw SQL** is whatever you type, in the target database's dialect, with `@name` parameters bound from a JSON
+box so the types stay honest — `450` binds a number, `"450"` binds text.
 
 <Image src={sqlImg} alt="SQL console running a parameterised aggregate query with its result grid" />
 

@@ -5,6 +5,194 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 12.3.0 - July 28, 2026
+
+<RN type="feature">
+**A data generator in ShinyDocDbMyAdmin.** Analyze a type and make more documents that look like the ones
+already there — for filling a dev database, giving a query plan something to chew on, or reproducing "it gets
+slow past 100k".
+
+The analysis learns the range every number occupies, the span every date covers, the set every categorical
+field draws from, how often each optional field is present, and the shape of nested objects and arrays; it
+reports all of it per field, with the values it will draw from, so the inference is inspectable. **Every
+generated value comes from the real data** — data generated from a schema alone has plausible types and
+implausible values, which is no use for judging a plan. Ids are the exception: always replaced, and if the
+existing ones follow a scheme (`art-0001 … art-0400`) generation continues at `art-0401` rather than mixing
+GUIDs in beside them.
+
+Preview then commit, and the two are the same documents: the preview's seed is replayed on write.
+
+Two documented limits. Bulk generation goes through the schema-free lane — one transaction for the batch
+rather than one per document — and **that lane maintains no sidecars**, so generated rows are absent from a
+type's temporal history, vector index and spatial index; the tool reports which of those apply to the type
+you generated into and links to the vector rebuild. Full-text is unaffected, being engine-maintained. And a
+free-text field with more distinct values than are worth tracking is sampled rather than invented, so long
+strings repeat.
+</RN>
+
+<RN type="enhancement">
+**The document-type workspace holds still while you scroll.** The type name and its tabs stay put, the panel
+between them scrolls, and pagers and footer summaries ride the bottom of the window — so switching tabs never
+means scrolling back up to find them, and the row count and next-page button are where you left them. In the
+Browse grid the column headers stay too, which is what makes a long page of rows readable.
+
+Narrow screens keep one ordinary page scroll: the shell stops being a fixed-height frame below 860px, and
+vertical space there is too scarce to spend on pinned chrome.
+</RN>
+
+<RN type="feature">
+**Query plans and one-click indexing in the ShinyDocDbMyAdmin filter console.** **Explain** runs the
+provider's own plan over the SQL a filter compiled to — `EXPLAIN QUERY PLAN` (SQLite), `EXPLAIN`
+(PostgreSQL, CockroachDB, MySQL, MariaDB, DuckDB), `SHOWPLAN_TEXT` (SQL Server), `DBMS_XPLAN` (Oracle). The
+statement is **planned, not executed**, so it works on a read-only connection, which is where "why is this
+slow" is usually asked.
+
+Underneath the plan, any field the query filters or sorts on that has **no index** is offered as a one-click
+create — individually or as a composite over all of them — and the query then re-runs and re-explains, so
+the plan on screen is the one *after* the change rather than a claim that it helped.
+
+Two limits stated in the UI: the unindexed-field list comes from the filter text rather than the plan
+(engines name the object scanned, not the JSON path inside it), and the "looks like a scan" note is a text
+match on the plan — on a small table a scan is often correct, so the plan itself is always shown.
+</RN>
+
+<RN type="feature">
+**A Full text tab in ShinyDocDbMyAdmin.** Ranked search through the provider's own engine — FTS5 BM25,
+PostgreSQL `ts_rank`, SQL Server `FREETEXTTABLE`, Oracle `CONTAINS`, DuckDB `match_bm25` — with the SQL it
+ran shown underneath. It needs **no registered mapping**: every provider derives the index table or column
+from the table and type name alone. PostgreSQL is the one exception, needing the `to_tsquery` language,
+hence a language selector that must match the language the index was built with.
+
+Worth stating explicitly, because it differs from the vector sidecar: **there is nothing here to keep in
+sync**. Full-text indexes are maintained by the database itself, so a document written or deleted through
+the admin tool is immediately searchable, or immediately gone. The exception is **DuckDB**, whose index is a
+snapshot the library rebuilds before each query; the tab reports that writes leave it stale and that the
+tool cannot rebuild it, since that needs the field list only `MapFullTextProperty` has.
+</RN>
+
+<RN type="enhancement">
+**ShinyDocDbMyAdmin lists every index, and can build composite ones.** The Structure tab showed only indexes
+named `idx_json_*`, so an index added by hand was invisible — and invisible is exactly the wrong thing for
+the index that explains why a query is fast. It now lists all of them, labelling the ones DocumentDb did not
+create and refusing to drop those. Where the engine tracks it, each index shows its size and how often the
+planner has used it (PostgreSQL and SQL Server report both, Oracle size only; SQLite, MySQL and DuckDB
+report neither, shown as `—` rather than a fabricated zero), and a never-used index is flagged.
+
+Index creation now accepts several comma-separated paths and builds a **composite** index through the
+provider's multi-path builder — the capability existed on `IDatabaseProvider` but the tool only ever called
+the single-path form. Composite index names are also split back into their paths for display instead of
+being shown as the raw `a__b`.
+</RN>
+
+<RN type="enhancement">
+**`IDatabaseProvider` gained `BuildExplainSql`, `BuildListAllIndexesSql` and `BuildFullTextProbeSql`.**
+`BuildExplainSql` returns a *list* of statements because two providers need more than one to produce a plan
+(Oracle populates a plan table then formats it; SQL Server toggles a session setting around the statement) —
+the plan is the last result set that returns rows. `BuildListAllIndexesSql` selects name, definition, size
+and scan count, with nulls where an engine tracks neither. `BuildFullTextProbeSql` is a catalog query
+returning rows when a type is indexed — deliberately a row count rather than a statement that throws,
+because a failed statement poisons an open transaction on PostgreSQL. All three are default interface
+members returning null/empty, so no provider outside this repo needs a change.
+
+`FullTextMappingFactory.SanitizeSuffix` now forwards to `IDatabaseProvider.SanitizeTypeSuffix` rather than
+being a second character-identical copy of it.
+</RN>
+
+<RN type="feature">
+**A filter-grammar mode in the ShinyDocDbMyAdmin query console.** Alongside the raw SQL tab, the console now
+takes DocumentDb's own [string query syntax](/documentdb/querying) — `Where`, `OrderBy` and an optional
+`Project`, against a table and type you pick:
+
+```
+status == 'Shipped' and total:number > 100
+```
+
+It is not a second implementation of the grammar. The console opens `store.Collection(typeName)` — the
+schema-free [JSON collection](/documentdb/json-collections/) lane, which needs no CLR type, exactly like the
+tool — so your text goes through the same parser, translator and SQL builder your application uses, and the
+answer is the answer your code would get. The **compiled SQL is shown next to the results** with its bound
+parameters, and one button drops it into the raw SQL tab, which makes the grammar learnable by using it.
+
+Two documented limits: a store configured with `TypeNameResolution.FullName` writes dotted type names, which
+the collection lane's name validation will not address (the console says so and points at the SQL tab), and
+the grammar addresses fields inside `Data` rather than the envelope columns.
+</RN>
+
+<RN type="feature">
+**`DocumentStoreOptions.SkipTableInitialization`.** Suppresses the lazy `CREATE TABLE IF NOT EXISTS` / index
+DDL that otherwise runs once per table on the first operation against it — **including on reads**. For
+pointing a store at a database this process does not own: a read replica, an account with no DDL rights, or a
+tool that has told the user it will not change anything. The table must already exist; if it does not, the
+first query fails with the provider's own "no such table" error rather than creating one. Defaults to `false`,
+so nothing changes unless you ask for it.
+
+```csharp
+var store = new DocumentStore(new DocumentStoreOptions
+{
+    DatabaseProvider = provider,
+    SkipTableInitialization = true
+});
+```
+</RN>
+
+<RN type="fix">
+**Re-embedding a document on SQLite no longer throws.** `Update`/`Upsert` of a vector-mapped document that
+already had an embedding failed with `SQLite Error 1: 'UNIQUE constraint failed on {table}_vec_{type} primary
+key'`. The sidecar upsert used `INSERT OR REPLACE`, and sqlite-vec's `vec0` virtual table does not implement
+SQLite's conflict-resolution clauses — so replacing an existing rowid was a hard constraint failure rather
+than a replace, and only the *first* write to a given document ever succeeded. The upsert now deletes the row
+before re-inserting it. SQLite only; every other vector-capable provider used a real upsert already.
+</RN>
+
+<RN type="fix">
+**ShinyDocDbMyAdmin no longer desynchronises the vector sidecar.** Document writes in the admin tool go
+through raw SQL, and while they already maintained the blob and temporal sidecars, they ignored
+`{table}_vec_{type}` entirely — so editing a document left a **stale embedding** in the ANN index, deleting
+one left an **orphan row**, and clearing a type left the whole sidecar populated. None of it errored; a
+nearest-neighbour query simply started returning wrong answers. Saves now re-index the embedding, deletes
+remove its row, and `Clear` empties the sidecar, all inside the same transaction as the document write.
+
+Where the sidecar cannot be written, the tool **says so** rather than silently proceeding: SQLite's sidecar
+is a `vec0` virtual table that needs the sqlite-vec extension, which the library loads and the admin
+container does not ship. That case now reports "the document was saved, but the vector sidecar now holds the
+previous embedding" and links to the repair.
+</RN>
+
+<RN type="feature">
+**A Vectors tab in ShinyDocDbMyAdmin.** Embeddings are discovered by sampling document bodies — no CLR type
+or registered mapping needed — and the tab reports dimensions, L2 norms and how many vectors are unit
+length, plus the failure modes that never raise an error: all-zero vectors (an embedding that was never
+generated), NaN/infinity components, and mixed dimensions at one path.
+
+It also reconciles the `{table}_vec_{type}` sidecar against the documents, listing embeddings that never
+reached the index and rows pointing at deleted documents, with a one-click **rebuild from the document
+bodies**. Nearest-neighbour search runs from an existing document's own embedding or a pasted vector under
+cosine, Euclidean or dot-product distance — computed in the tool over a bounded scan rather than pushed
+down, which makes it exact rather than approximate, identical on every backend, and usable precisely when
+the sidecar is the thing you suspect.
+
+See [Admin UI](/documentdb/admin/#vectors).
+</RN>
+
+<RN type="enhancement">
+**Embeddings no longer flood the admin's read-only views.** A mapped 1536-dimension vector was rendered
+element by element in the JSON tree and, in the browse grid, written out in full as both the cell text and
+its `title` attribute — tens of kilobytes per row over the Blazor circuit to display numbers nobody reads.
+Long numeric arrays now render as `float[1536] [0.021, -0.114, …]`; the raw toggle still shows every
+component.
+</RN>
+
+<RN type="enhancement">
+**`IDatabaseProvider` gained `VectorTableName(table, type)` and `BuildVectorDocIdsSql(table, type)`.** The
+first defines the `{table}_vec_{type}` sidecar naming convention in one place — the counterpart to the
+existing `HistoryTableName` and `BlobTableName` — replacing six identical private copies across the
+vector-capable providers, and letting a tool locate the sidecar without a registered `VectorMapping`. The
+second selects the document ids the sidecar currently holds so it can be reconciled against the documents
+table; SQLite overrides it to read the companion map table, which is both where the ids actually live and
+the only half readable without sqlite-vec loaded. Both are default interface members, so no provider outside
+this repo needs a change.
+</RN>
+
 ## 12.2.1 - July 27, 2026
 
 <RN type="fix">
