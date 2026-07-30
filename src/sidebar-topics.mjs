@@ -238,6 +238,7 @@ export const sidebarTopics = [
           { label: 'OpenAI', link: 'speech/openai' },
           { label: 'Typecast', link: 'speech/typecast' },
           { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
+          { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper' },
           { label: 'Custom Provider', link: 'speech/custom-provider' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'speech/release-notes' }

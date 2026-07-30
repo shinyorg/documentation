@@ -1,0 +1,205 @@
+---
+title: Whisper (Linux, On-Device)
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+| | |
+|---------|---------|
+| Downloads | <NugetDownloads name="Shiny.Speech.Linux.Whisper" /> |
+
+<PlatformSupport frameworks={["dotnet"]} os={["linux"]} />
+
+## Overview
+
+`Shiny.Speech.Linux.Whisper` runs OpenAI's **Whisper** locally through
+[whisper.cpp](https://github.com/ggerganov/whisper.cpp) (via
+[Whisper.net](https://github.com/sandrohanea/whisper.net)) — the closest thing Linux has to the
+native recognizers iOS, Android and Windows ship with.
+
+No cloud account. No API key. No network at runtime. No per-minute billing. It exists because Linux
+is the one platform in this library with **no OS speech engine to wrap**, so until now recognition
+there meant sending audio to somebody else's server.
+
+Typical homes for it: Raspberry Pi voice appliances, kiosks, air-gapped machines, and anywhere
+privacy or connectivity rules out a cloud provider.
+
+> **Speech-to-text only.** Whisper is a recognition model — there is no Whisper text-to-speech. Pair
+> it with a cloud TTS provider (Azure / OpenAI / ElevenLabs / Typecast) if you need speech output.
+
+## Setup
+
+```bash
+dotnet add package Shiny.Audio.Linux
+dotnet add package Shiny.Speech.Linux.Whisper
+```
+
+```csharp
+using Shiny;
+using Shiny.Speech.Linux;
+using Whisper.net.Ggml;
+
+// MUST come first — recognition consumes the mic through IAudioSource, and
+// Shiny.Audio registers no capture implementation on Linux.
+services.AddLinuxAudio();
+
+services.AddLinuxWhisperSpeechToText(GgmlType.BaseEn, QuantizationType.Q5_1);
+```
+
+Or with full control:
+
+```csharp
+services.AddLinuxWhisperSpeechToText(new WhisperConfig
+{
+    ModelType = GgmlType.BaseEn,
+    Quantization = QuantizationType.Q5_1,
+    InitialPrompt = "Shiny, MAUI, Blazor",   // bias the decoder toward your vocabulary
+    SilenceRmsThreshold = 500                // VAD sensitivity
+});
+```
+
+This registers a normal `ISpeechToTextService`, so everything else in the library works unchanged:
+
+```csharp
+var stt = provider.GetRequiredService<ISpeechToTextService>();
+
+var text = await stt.ListenUntilSilence();
+
+// keyword/wake-word helpers work too
+var command = await stt.StatementAfterKeyword(["computer"]);
+```
+
+Registration is a **no-op off Linux**, so it is safe to leave in shared startup code.
+
+## Preloading the model
+
+The ggml model is downloaded from Hugging Face on first use and cached in
+`~/.local/share/shiny.speech/whisper`. That first call costs a download (75 MB – 466 MB depending on
+size) plus several seconds of model load. Call `PrepareAsync()` at startup so the user's first
+utterance doesn't pay for it:
+
+```csharp
+var stt = (WhisperSpeechToTextProvider)host.Services.GetRequiredService<ISpeechToTextProvider>();
+await stt.PrepareAsync();
+```
+
+Set `AutoDownloadModel = false` to require a pre-provisioned model instead — a missing file then
+throws rather than pulling hundreds of megabytes. Set `HF_TOKEN` in the environment if you hit
+Hugging Face rate limiting.
+
+## How recognition works
+
+Whisper is a **batch model with a 30-second window**, not a streaming recognizer. The provider runs
+client-side voice activity detection over the PCM mic stream and turns each speech→silence segment
+into one inference pass and one result — the same shape as the ElevenLabs Scribe provider.
+
+That means **there are no partial results**: every `SpeechRecognitionResult` has `IsFinal = true`.
+The session runs continuously until you `Stop()`.
+
+Tune the segmentation with `SilenceRmsThreshold` (raise it in noisy rooms, lower it for quiet
+speakers), `MinUtteranceDurationMs` and `MaxUtteranceDurationMs`.
+
+## Choosing a model
+
+| Model | Size | Where it fits |
+|-------|------|---------------|
+| `Tiny` / `TinyEn` | ~75 MB | Comfortably faster than realtime on a Pi 4 |
+| `Base` / `BaseEn` | ~142 MB | The sweet spot on a Pi 4/5 for short commands |
+| `Small` / `SmallEn` | ~466 MB | Around or below realtime on a Pi 5; fine on x64 |
+| `Medium`, `LargeV3`, `LargeV3Turbo` | 1.5 GB+ | Desktop / server class only |
+
+The `*En` variants are English-only and noticeably more accurate than the multilingual model of the
+same size when you only need English. `Quantization` (e.g. `Q5_1`) makes models substantially smaller
+and faster for a modest accuracy cost — usually the right trade on ARM boards.
+
+On constrained hardware this suits **push-to-talk** and **wake-word-then-command** far better than
+continuous dictation.
+
+## Configuration
+
+```csharp
+public record WhisperConfig
+{
+    // Model
+    public GgmlType ModelType { get; set; } = GgmlType.Base;
+    public QuantizationType Quantization { get; set; } = QuantizationType.NoQuantization;
+    public string? ModelPath { get; set; }
+    public string? ModelDirectory { get; set; }
+    public bool AutoDownloadModel { get; set; } = true;
+
+    // Inference
+    public int? Threads { get; set; }
+    public bool UseGpu { get; set; }
+    public string Language { get; set; } = "auto";
+    public bool Translate { get; set; }
+    public string? InitialPrompt { get; set; }
+    public bool CarryContextBetweenUtterances { get; set; }
+    public float NoSpeechThreshold { get; set; } = 0.6f;
+    public bool FilterNonSpeechAnnotations { get; set; } = true;
+
+    // Voice activity detection
+    public int SilenceRmsThreshold { get; set; } = 500;
+    public int MinUtteranceDurationMs { get; set; } = 300;
+    public int MaxUtteranceDurationMs { get; set; } = 30_000;
+    public TimeSpan TranscriptionTimeout { get; set; } = TimeSpan.FromMinutes(5);
+}
+```
+
+| Property | Description | Default |
+|----------|-------------|---------|
+| `ModelType` | Which ggml model to run | `Base` |
+| `Quantization` | Quantization of the downloaded model | `NoQuantization` |
+| `ModelPath` | Explicit path to a `.bin` model file | *(cache path)* |
+| `ModelDirectory` | Model cache directory | `~/.local/share/shiny.speech/whisper` |
+| `AutoDownloadModel` | Download from Hugging Face when missing | `true` |
+| `Threads` | Inference threads | `min(ProcessorCount - 1, 4)` |
+| `UseGpu` | Request a GPU runtime (needs a GPU runtime package) | `false` |
+| `Language` | BCP-47 code, or `"auto"` to detect | `"auto"` |
+| `Translate` | Translate to English rather than transcribe | `false` |
+| `InitialPrompt` | Bias the decoder toward domain vocabulary | `null` |
+| `CarryContextBetweenUtterances` | Feed the previous utterance in as context | `false` |
+| `NoSpeechThreshold` | Drop segments Whisper marks as non-speech | `0.6` |
+| `FilterNonSpeechAnnotations` | Strip `[BLANK_AUDIO]` / `(wind blowing)` / `♪` | `true` |
+| `SilenceRmsThreshold` | VAD energy threshold (0–32767) | `500` |
+| `MinUtteranceDurationMs` | Ignore speech shorter than this | `300` |
+| `MaxUtteranceDurationMs` | Force-flush a non-stop speaker | `30000` |
+| `TranscriptionTimeout` | Ceiling on one inference pass | `5 min` |
+
+`SpeechRecognitionOptions.Culture` overrides `Language` per session.
+
+### Hallucination guards
+
+Whisper famously invents text for silence and background noise, emitting annotations like
+`[BLANK_AUDIO]` or `(wind blowing)`. Two defaults handle this:
+
+- `FilterNonSpeechAnnotations` strips bracketed annotations and discards results that filter down to
+  nothing — without it, an open mic in a quiet room periodically "recognizes" `[BLANK_AUDIO]`.
+- `CarryContextBetweenUtterances` is **off**, so one bad transcription can't poison everything after
+  it via Whisper's well-known repetition loops. Turn it on for dictation continuity if you want it.
+
+## Requirements
+
+Supported on **all mainstream Linux, not just Raspberry Pi** — `linux-x64`, `linux-arm64` and
+`linux-arm` natives all ship.
+
+- `libstdc++6` and **glibc 2.31+** — Debian 11+, Ubuntu 20.04+, Raspberry Pi OS Bullseye+
+- On **x86/x64 the CPU must support AVX, AVX2, FMA and F16C**. Older CPUs need an added
+  `Whisper.net.Runtime.NoAvx` package reference; Whisper.net's native loader picks it up
+  automatically. ARM has no such requirement.
+- Publishing with an explicit RID (`dotnet publish -r linux-arm64`) copies only the natives you need,
+  instead of every platform Whisper.net supports.
+
+### GPU
+
+GPU acceleration is opt-in. Add `Whisper.net.Runtime.Cuda` (or `.Vulkan`) alongside this package and
+set `UseGpu = true` — the CPU runtime bundled here ignores the flag.
+
+## Adding text-to-speech
+
+Whisper is recognition only. For a full voice loop on Linux, pair it with a cloud TTS provider:
+
+```csharp
+services.AddLinuxAudio();
+services.AddLinuxWhisperSpeechToText(GgmlType.BaseEn);      // offline STT
+services.AddCloudTextToSpeech<AzureTextToSpeechProvider>(); // cloud TTS
+```
