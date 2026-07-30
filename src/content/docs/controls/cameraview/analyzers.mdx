@@ -134,6 +134,44 @@ In XAML bind `ScanWindow` to a `RectF?` view-model property (it's a struct — t
 
 `CameraOverlayView` styles the guide with **`ScanWindowColor`** (reticle outline, default white) and **`ScanWindowScrimColor`** (the dim outside, default ~43% black); set either to `null` to drop that part.
 
+#### Reading small, distant text
+
+For OCR the scan window is not just an optimisation — it is the difference between finding small text and never seeing it. The platform engines **discard text below a minimum height** (Apple Vision's default is 1/32 of the image height, so ~34px in a 1080p frame) and **downscale the image before recognizing**, so a license plate through a windscreen or a sign across a car park never survives whole-frame OCR regardless of how you filter the results.
+
+`OcrAnalyzer` therefore **crops to the scan window and recognizes the crop**, and adds two knobs for exactly this case:
+
+| Property | Meaning |
+|---|---|
+| `MinimumTextHeight` | The floor, as a fraction of the recognized image's height. `0` = platform default. Apple only — MLKit and Windows expose no equivalent. |
+| `MinimumInputHeight` | Upscale the crop to at least this many pixels tall before recognizing. `0` = off; only applies when a scan window is set. This is what buys small text back on Android. |
+
+```csharp
+var ocr = new OcrAnalyzer
+{
+    ScanWindow         = new RectF(0.2f, 0.55f, 0.6f, 0.25f),
+    MinimumTextHeight  = 0.012f,   // Vision's 1/32 default would drop this text outright
+    MinimumInputHeight = 720       // the crop is ~270px tall off 1080p; take it to 720
+};
+```
+
+Writing your own analyzer? Call the shared recognizer directly. Boxes always come back in **full-frame** coordinates, never crop space:
+
+```csharp
+var text = await this.recognizer.RecognizeAsync(
+    frame,
+    new TextRecognitionOptions(
+        RegionOfInterest:   region,      // normalized upright rect, null = whole frame
+        MinimumTextHeight:  0.012f,
+        MinimumInputHeight: 720),
+    ct);
+```
+
+`TextRecognitionOptions` is the per-frame cache key, so two analyzers asking for the **same** region on one frame still cost a single OCR pass; one watching a different region gets its own, which is usually still cheaper than a whole-frame pass.
+
+:::caution[Range is physics, not tuning]
+Small-text OCR is bounded by how many pixels the characters occupy, and no threshold changes that. License plate characters are ~70mm tall, which at a typical phone focal length is around 20px at 5m and under 10px by 10m. Cropping and upscaling recovers the text the engine was throwing away; it cannot recover detail the sensor never resolved.
+:::
+
 ## Capture & stop on detection ("scan then freeze")
 
 A common flow is "scan until you get a result, then freeze the preview and keep the photo." Do it explicitly inside the analyzer's **`OnDetected`** — arm with `Scan()`, then on the confirmed detection capture and/or stop, and `return false` to disarm:

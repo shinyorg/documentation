@@ -195,7 +195,7 @@ public class DashboardData
 
 The BLE transport:
 
-1. **Scans** for a peripheral matching the configured service UUID and optional device name filter (or uses a pre-provided peripheral / discovered device)
+1. **Scans** for a peripheral matching the optional device name filter (or uses a pre-provided peripheral / discovered device). The scan itself is deliberately unfiltered — see [Why the scan isn't filtered by service UUID](#why-the-scan-isnt-filtered-by-service-uuid)
 2. **Connects** using Shiny's task-based `ConnectAsync`
 3. **Subscribes** to notifications on the read characteristic via `NotifyCharacteristic`
 4. **Sends commands** by writing bytes to the write characteristic via `WriteCharacteristicAsync`
@@ -203,3 +203,42 @@ The BLE transport:
 6. **Returns** the complete response string
 
 Commands are serialized with a semaphore — only one command executes at a time, which matches the ELM327's single-threaded request-response protocol.
+
+### Device names during a scan
+
+Both the scanner and the transport's auto-scan match on the peripheral's name if it has one, and fall back to the local name in the advertisement payload otherwise.
+
+That fallback matters on iOS. `CBPeripheral.Name` is null while scanning a peripheral the device has never connected to — the name lives only in the advertisement — so matching on the peripheral name alone finds almost nothing on iPhone. Android and Windows populate the name from the scan record, which is why this only shows up on Apple platforms.
+
+### Why the scan isn't filtered by service UUID
+
+`ServiceUuid` is used to talk to the adapter after connecting. It is deliberately **not** used as a scan filter.
+
+CoreBluetooth matches a scan filter against the *advertisement* only, and most ELM327 clones advertise nothing but a local name — their GATT service is discoverable only once you connect. Filtering the scan on `FFF0` would therefore find nothing at all on iOS.
+
+## Troubleshooting
+
+### The adapter never shows up in the scan
+
+`BleObdDeviceScanner` logs every advertisement it sees at `Debug` level, before any filtering is applied:
+
+```
+BLE advertisement - Name: VEEPEAK, Peripheral.Name: (null), Id: 9E4A..., RSSI: -63, Services: (none advertised)
+```
+
+Enable debug logging to see it:
+
+```csharp
+builder.Logging.AddDebug().SetMinimumLevel(LogLevel.Debug);
+```
+
+Read the line as follows:
+
+- **The adapter isn't in the log at all** — it isn't advertising, is out of range, or BLE permissions were denied.
+- **It's in the log but not in your callback** — your `DeviceNameFilter` doesn't match the `Name` shown. Note that the filter is a case-insensitive *substring* match.
+- **`Name: (none)`** — the adapter advertises no name at all, so no name filter can match it. Leave `DeviceNameFilter` null and select the device by `Id` instead.
+- **`Services: (none advertised)`** — normal for ELM327 clones, and harmless. The service is found after connecting.
+
+### Connects, but every command times out
+
+The adapter's GATT UUIDs don't match your configuration. `Services:` in the log above only lists what was *advertised*, which usually isn't the full picture — connect with a BLE scanner app (like nRF Connect) and read the real service and characteristic UUIDs off the device, then set them on `BleObdConfiguration`.
