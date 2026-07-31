@@ -117,16 +117,6 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'Live Activities',
-        jumpTo: true,
-        items: [
-          { label: 'Getting Started', link: 'liveactivities/' },
-          { label: 'Widget Extension (iOS)', link: 'liveactivities/widget-extension' },
-          { label: 'Server Driven Updates', link: 'liveactivities/push' },
-          { label: 'Release Notes', link: 'liveactivities/release-notes' }
-        ]
-      },
-      {
         label: 'Configuration',
         jumpTo: true,
         items: [
