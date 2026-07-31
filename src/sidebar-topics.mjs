@@ -41,6 +41,7 @@ export const sidebarTopics = [
           { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
           { label: 'Message Store', link: 'aiconversation/message-store' },
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
+          { label: 'Structured Turns & Questions', link: 'aiconversation/structured-turns' },
           { label: 'Wake Word', link: 'aiconversation/wake-word' },
           { label: 'AI Tools', link: 'aiconversation/ai-tools' },
           { label: 'MAUI Chat UI', link: 'aiconversation/chat-view' },

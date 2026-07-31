@@ -10,7 +10,7 @@ The `IMessageStore` interface provides optional chat history persistence. When c
 ```csharp
 public interface IMessageStore
 {
-    Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken);
+    Task Store(string? userTriggeringMessage, string? assistantMessage, ChatResponse response, CancellationToken cancellationToken);
     Task Clear(DateTimeOffset? beforeDate = null);
     Task<IReadOnlyList<AiChatMessage>> Query(
         string? messageContains = null,
@@ -22,7 +22,15 @@ public interface IMessageStore
 }
 ```
 
-The `Store` method is called once after the AI finishes responding, with the complete `ChatResponse` and the triggering user message.
+The `Store` method is called once after the AI finishes responding, with the triggering user message, the AI's display text, and the complete `ChatResponse`.
+
+:::caution
+Persist `assistantMessage`, **not** `response.Text`. With [structured turns](/aiconversation/structured-turns)
+enabled (the default), `response.Text` is the raw JSON envelope — storing it would put JSON into your chat
+history and feed it back into later prompts through the [chat lookup tool](/aiconversation/ai-tools).
+`assistantMessage` is the parsed reply, or the raw text when the turn was unstructured. `response` is still
+passed for metadata such as token usage.
+:::
 
 ## Registration
 
@@ -83,9 +91,10 @@ public class InMemoryMessageStore : IMessageStore
     readonly List<AiChatMessage> messages = [];
     readonly object sync = new();
 
-    public Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken)
+    public Task Store(string? userTriggeringMessage, string? assistantMessage, ChatResponse response, CancellationToken cancellationToken)
     {
-        if (response.Text is not { } text)
+        // assistantMessage, NOT response.Text - the latter is the raw structured turn envelope
+        if (assistantMessage is not { } text)
             return Task.CompletedTask;
 
         lock (sync)
@@ -145,9 +154,10 @@ The MAUI sample uses [Shiny.DocumentDb](https://www.nuget.org/packages/Shiny.Doc
 ```csharp
 public class DocumentDbMessageStore(IDocumentStore store) : IMessageStore
 {
-    public Task Store(string? userTriggeringMessage, ChatResponse response, CancellationToken cancellationToken)
+    public Task Store(string? userTriggeringMessage, string? assistantMessage, ChatResponse response, CancellationToken cancellationToken)
     {
-        if (response.Text is not { } text)
+        // assistantMessage, NOT response.Text - the latter is the raw structured turn envelope
+        if (assistantMessage is not { } text)
             return Task.CompletedTask;
 
         return store.Insert(
