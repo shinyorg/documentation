@@ -1,0 +1,130 @@
+---
+title: Live Activities
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="liveactivities" /> |
+| Downloads | <NugetDownloads name="Shiny.Mobile.LiveActivities" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["ios", "android"]} />
+
+A live activity is the glanceable, continuously updating surface a user sees *without opening your app* —
+the Lock Screen card and Dynamic Island on iOS, the status bar chip and always-on display on Android 16.
+Deliveries, timers, matches, rides.
+
+```csharp
+var activity = await manager.Start(new LiveActivityRequest
+{
+    Attributes = new Dictionary<string, string> { ["orderNumber"] = "A-1234" },
+    Content = new LiveActivityContent
+    {
+        Title       = "Out for delivery",
+        Body        = "2 stops away",
+        ShortStatus = "12 min",
+        Progress    = LiveActivityProgress.FromRange(DateTimeOffset.UtcNow, eta)
+    }
+});
+
+await manager.Update(activity.Id, content with { ShortStatus = "4 min" });
+await manager.End(activity.Id, finalContent, dismissAt: DateTimeOffset.UtcNow.AddMinutes(5));
+```
+
+## Platform Notes
+
+| Platform | Behaviour |
+|---|---|
+| iOS 16.2+ | ActivityKit — Lock Screen, Dynamic Island, push updates |
+| iOS 17.2+ | Adds push-to-start: a server can start an activity with the app closed |
+| Android 16+ | `Notification.ProgressStyle` + promoted ongoing — status bar chip, always-on display |
+| Android 8–15 | Ongoing notification with a progress bar |
+| Everything else | `IsSupported == false`; every call is a safe no-op |
+
+The two platforms are genuinely different — iOS renders arbitrary SwiftUI from a widget extension,
+Android renders a notification — so the shared contract is a typed **content state**, not a UI tree.
+Anything platform-specific rides in `LiveActivityContent.Data` for your own widget to read.
+
+## Setup
+
+```csharp
+builder.Services.AddLiveActivities<MyLiveActivityDelegate>();
+```
+
+iOS needs two more things:
+
+1. `NSSupportsLiveActivities` set to `true` in the app's `Info.plist`.
+2. A **widget extension** — WidgetKit renders the activity and requires SwiftUI, so C# can't do it. The
+   library ships a data-driven one you add once; see [Widget Extension](/liveactivities/widget-extension).
+
+Android needs notification permission on API 33+, which `RequestAccess()` handles.
+
+## Content
+
+`LiveActivityContent` is the part that changes while the activity runs. Send the complete content on
+every update — it replaces the previous state rather than merging.
+
+```csharp
+new LiveActivityContent
+{
+    Title       = "Out for delivery",     // headline
+    Body        = "2 stops away",         // supporting detail
+    ShortStatus = "12 min",               // Dynamic Island compact / Android status chip
+    Progress    = LiveActivityProgress.FromValue(0.65),
+    StaleDate   = DateTimeOffset.UtcNow.AddMinutes(30),
+    Data        = new Dictionary<string, string> { ["driver"] = "Sam" }
+}
+```
+
+`LiveActivityRequest.Attributes` are the opposite: fixed for the activity's whole lifetime (order number,
+team names). `Kind` selects which layout a multi-activity app should render.
+
+:::tip[Use a range, not a stream of fractions]
+`LiveActivityProgress.FromRange(start, end)` hands the system a time range it animates on its own. A
+countdown built this way costs one update instead of one per minute — and update budget is finite,
+especially on iOS.
+:::
+
+## Lifecycle
+
+```csharp
+if (!manager.IsSupported)
+    return;                                    // Windows/macOS/Linux/Blazor, or iOS < 16.2
+
+await manager.RequestAccess();
+
+var activity = await manager.Start(request);
+await manager.Update(activity.Id, content);
+await manager.Update(activity.Id, content, new LiveActivityAlert("Arriving now"));   // alerting
+await manager.End(activity.Id, finalContent);
+await manager.EndAll();                        // e.g. on logout
+
+manager.GetAll();                              // running activities, including from a previous launch
+```
+
+Activities outlive your process. After a relaunch, `GetAll()` still returns them and the delegate still
+fires — which is exactly why the token callbacks belong in a delegate rather than in the call site that
+started the activity.
+
+## Delegate
+
+```csharp
+public class MyLiveActivityDelegate(IMyApi api) : LiveActivityDelegate
+{
+    public override Task OnStarted(LiveActivity activity) => Task.CompletedTask;
+
+    public override Task OnPushToStartTokenChanged(string token)
+        => api.RegisterPushToStartToken(token);
+
+    public override Task OnPushTokenChanged(LiveActivity activity, string token)
+        => api.RegisterActivityToken(activity.Id, token);
+
+    public override Task OnStateChanged(LiveActivity activity) => Task.CompletedTask;
+}
+```
+
+See [Server Driven Updates](/liveactivities/push) for what to do with those tokens.

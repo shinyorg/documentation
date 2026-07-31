@@ -1,6 +1,12 @@
 import React, { useMemo, useState } from 'react';
+import Prism from 'prismjs';
+import 'prismjs/components/prism-json';
+import 'prismjs/components/prism-csharp';
+import 'prismjs/components/prism-markdown';
+import 'prismjs/themes/prism-tomorrow.css';
 import './ThemeCreator.css';
-import { buildThemeData, emitCss, emitJson, emitMauiDictionary, emitMauiTheme } from './emit';
+import { buildThemeData, buildThemeFiles } from './emit';
+import { generateThemeZip } from './generateZip';
 import { kebab, type SeedKey, type Seeds } from './tokens';
 
 interface Preset {
@@ -77,6 +83,49 @@ function toSlug(name: string): string {
     return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'custom';
 }
 
+const MIME: Record<string, string> = {
+    json: 'application/json',
+    css: 'text/css',
+    csharp: 'text/plain',
+    markdown: 'text/markdown',
+};
+
+function saveAs(blob: Blob, fileName: string): void {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    a.click();
+    URL.revokeObjectURL(url);
+}
+
+const Icon = {
+    copy: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+            <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+        </svg>
+    ),
+    check: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <polyline points="20 6 9 17 4 12" />
+        </svg>
+    ),
+    download: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
+        </svg>
+    ),
+    file: (
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+        </svg>
+    ),
+};
+
 function pickText(hex: string): string {
     const h = hex.replace('#', '');
     const r = parseInt(h.substring(0, 2), 16) / 255;
@@ -92,8 +141,10 @@ export default function ThemeCreator() {
     const [description, setDescription] = useState('A custom Shiny Controls theme.');
     const [seeds, setSeeds] = useState<Seeds>({ ...PRESETS.Basic.seeds });
     const [mode, setMode] = useState<'light' | 'dark'>('light');
-    const [tab, setTab] = useState<'json' | 'css' | 'maui'>('json');
+    const [platformId, setPlatformId] = useState('json');
+    const [fileIndex, setFileIndex] = useState(0);
     const [copied, setCopied] = useState(false);
+    const [zipping, setZipping] = useState(false);
 
     const slug = toSlug(name);
     const theme = useMemo(
@@ -108,17 +159,13 @@ export default function ThemeCreator() {
         return o as React.CSSProperties;
     }, [roles]);
 
-    const outputs = useMemo(
-        () => ({
-            json: emitJson(theme),
-            css: emitCss(theme),
-            maui:
-                emitMauiTheme(theme) + '\n' +
-                emitMauiDictionary(theme, false) + '\n' +
-                emitMauiDictionary(theme, true),
-        }),
-        [theme],
-    );
+    const platforms = useMemo(() => buildThemeFiles(theme), [theme]);
+    const platform = platforms.find((p) => p.id === platformId) ?? platforms[0];
+    const file = platform.files[Math.min(fileIndex, platform.files.length - 1)];
+    const highlighted = useMemo(() => {
+        const grammar = Prism.languages[file.language];
+        return grammar ? Prism.highlight(file.content, grammar, file.language) : null;
+    }, [file]);
 
     const setSeed = (k: SeedKey, v: string) => setSeeds((s) => ({ ...s, [k]: v }));
     const loadPreset = (p: Preset) => {
@@ -127,37 +174,59 @@ export default function ThemeCreator() {
         setSeeds({ ...p.seeds });
     };
 
-    const current = outputs[tab];
-    const fileName = tab === 'json' ? `${slug}.json` : tab === 'css' ? `shiny-theme-${slug}.css` : `${slug}-maui-themes.cs`;
+    const selectPlatform = (id: string) => {
+        setPlatformId(id);
+        setFileIndex(0);
+        setCopied(false);
+    };
+    const selectFile = (i: number) => {
+        setFileIndex(i);
+        setCopied(false);
+    };
 
     const copy = async () => {
         try {
-            await navigator.clipboard.writeText(current);
+            await navigator.clipboard.writeText(file.content);
             setCopied(true);
             setTimeout(() => setCopied(false), 1500);
         } catch { /* clipboard unavailable */ }
     };
-    const download = () => {
-        const blob = new Blob([current], { type: 'text/plain' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = fileName;
-        a.click();
-        URL.revokeObjectURL(url);
+    const downloadFile = () => {
+        saveAs(new Blob([file.content], { type: MIME[file.language] ?? 'text/plain' }), file.fileName);
+    };
+    const downloadZip = async () => {
+        setZipping(true);
+        try {
+            saveAs(await generateThemeZip(slug, platforms), `${slug}-theme.zip`);
+        } finally {
+            setZipping(false);
+        }
     };
 
+    // `not-content` opts out of Starlight's markdown styles — its adjacent-sibling rule
+    // otherwise drops a 1rem margin-top on every button after the first, which wrecks
+    // the alignment of every toolbar, tab strip and segmented control below.
     return (
-        <div className="theme-creator">
+        <div className="theme-creator not-content">
             <div className="theme-creator__toolbar">
-                <button className={`tc-btn ${mode === 'light' ? 'tc-btn--active' : ''}`} onClick={() => setMode('light')}>Light</button>
-                <button className={`tc-btn ${mode === 'dark' ? 'tc-btn--active' : ''}`} onClick={() => setMode('dark')}>Dark</button>
-                <span className="theme-creator__presets">
-                    <span className="tc-slug" style={{ alignSelf: 'center', marginRight: '0.25rem' }}>Start from:</span>
-                    {Object.values(PRESETS).map((p) => (
-                        <button key={p.name} className="tc-btn" onClick={() => loadPreset(p)}>{p.name}</button>
+                <div className="tc-segment" role="group" aria-label="Preview scheme">
+                    {(['light', 'dark'] as const).map((m) => (
+                        <button
+                            key={m}
+                            className={`tc-segment__btn ${mode === m ? 'tc-segment__btn--active' : ''}`}
+                            aria-pressed={mode === m}
+                            onClick={() => setMode(m)}
+                        >
+                            {m === 'light' ? 'Light' : 'Dark'}
+                        </button>
                     ))}
-                </span>
+                </div>
+                <div className="theme-creator__presets">
+                    <span className="tc-label">Start from</span>
+                    {Object.values(PRESETS).map((p) => (
+                        <button key={p.name} className="tc-chip-btn" onClick={() => loadPreset(p)}>{p.name}</button>
+                    ))}
+                </div>
             </div>
 
             <div className="theme-creator__grid">
@@ -269,18 +338,69 @@ export default function ThemeCreator() {
 
             {/* Export */}
             <div className="theme-creator__export">
-                <div className="theme-creator__tabs">
-                    <button className={`tc-btn ${tab === 'json' ? 'tc-btn--active' : ''}`} onClick={() => setTab('json')}>Theme JSON</button>
-                    <button className={`tc-btn ${tab === 'css' ? 'tc-btn--active' : ''}`} onClick={() => setTab('css')}>Blazor CSS</button>
-                    <button className={`tc-btn ${tab === 'maui' ? 'tc-btn--active' : ''}`} onClick={() => setTab('maui')}>MAUI C#</button>
-                </div>
-                <div className="theme-creator__code-wrap">
-                    <div className="theme-creator__actions">
-                        <button className="tc-btn" onClick={copy}>{copied ? 'Copied!' : 'Copy'}</button>
-                        <button className="tc-btn" onClick={download}>Download {fileName}</button>
+                <div className="tc-tabbar">
+                    <div className="tc-tabs" role="tablist" aria-label="Target platform">
+                        {platforms.map((p) => (
+                            <button
+                                key={p.id}
+                                role="tab"
+                                aria-selected={p.id === platform.id}
+                                className={`tc-tab ${p.id === platform.id ? 'tc-tab--active' : ''}`}
+                                onClick={() => selectPlatform(p.id)}
+                            >
+                                {p.label}
+                                {p.files.length > 1 && <span className="tc-tab__count">{p.files.length}</span>}
+                            </button>
+                        ))}
                     </div>
-                    <pre className="theme-creator__code"><code>{current}</code></pre>
+                    <button className="tc-action" onClick={downloadZip} disabled={zipping}>
+                        {Icon.download}
+                        {zipping ? 'Generating…' : 'Download all (.zip)'}
+                    </button>
                 </div>
+
+                <p className="tc-export-blurb">{platform.blurb}</p>
+
+                {platform.files.length > 1 && (
+                    <div className="tc-segment tc-segment--files" role="tablist" aria-label="Generated files">
+                        {platform.files.map((f, i) => (
+                            <button
+                                key={f.path}
+                                role="tab"
+                                aria-selected={f === file}
+                                className={`tc-segment__btn ${f === file ? 'tc-segment__btn--active' : ''}`}
+                                onClick={() => selectFile(i)}
+                            >
+                                {f.fileName}
+                            </button>
+                        ))}
+                    </div>
+                )}
+
+                <div className="tc-code-wrap">
+                    <div className="tc-code-header">
+                        <span className="tc-code-icon">{Icon.file}</span>
+                        <code className="tc-code-path">{file.path}</code>
+                        <button
+                            className={`tc-ghost-btn ${copied ? 'tc-ghost-btn--ok' : ''}`}
+                            onClick={copy}
+                            title="Copy to clipboard"
+                        >
+                            {copied ? Icon.check : Icon.copy}
+                            {copied ? 'Copied' : 'Copy'}
+                        </button>
+                        <button className="tc-ghost-btn" onClick={downloadFile} title={`Download ${file.fileName}`}>
+                            {Icon.download}
+                            Download
+                        </button>
+                    </div>
+                    <pre className="tc-code">
+                        {highlighted !== null
+                            ? <code className={`language-${file.language}`} dangerouslySetInnerHTML={{ __html: highlighted }} />
+                            : <code>{file.content}</code>}
+                    </pre>
+                </div>
+                <p className="tc-code-hint">{file.hint}</p>
             </div>
         </div>
     );

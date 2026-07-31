@@ -338,6 +338,8 @@ export default defineConfig({
         Sidebar: './src/components/Sidebar.astro',
         // Inject giscus comments under page content (blog posts + opt-in via `comments: true` frontmatter).
         MarkdownContent: './src/components/MarkdownContent.astro',
+        // Adds the ShinySoft header link beside starlight-blog's "Blog" link.
+        ThemeSelect: './src/components/ThemeSelect.astro',
       },
       plugins:[
         //https://frostybee.github.io/starlight-announcement/

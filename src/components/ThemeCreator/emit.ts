@@ -163,3 +163,127 @@ export function emitJson(t: ThemeData): string {
     };
     return JSON.stringify(obj, null, 4) + '\n';
 }
+
+// ============================================================ File manifest
+
+/** A single generated artifact, ready to preview, copy, or write into the zip. */
+export interface ThemeFile {
+    /** Path inside the generated zip, e.g. "maui/OceanTheme.cs". */
+    path: string;
+    /** File name on its own — used for single-file downloads and tab labels. */
+    fileName: string;
+    /** Prism language id for the preview. */
+    language: 'json' | 'css' | 'csharp' | 'markdown';
+    /** Short line explaining where the file belongs. */
+    hint: string;
+    content: string;
+}
+
+export interface ThemePlatform {
+    id: string;
+    label: string;
+    /** Rendered above the file tabs. */
+    blurb: string;
+    files: ThemeFile[];
+}
+
+export function emitReadme(t: ThemeData): string {
+    const ident = safeIdent(t.name);
+    return (
+        `# ${t.name}\n\n` +
+        `${t.description}\n\n` +
+        'Generated with the [Shiny Theme Creator](https://www.shinylib.net/controls/theming/creator/).\n' +
+        'The output is byte-identical to running `dotnet run --project tools/ShinyThemeGen` against the theme JSON.\n\n' +
+        '## Seeds\n\n' +
+        '| Role | Hex |\n| --- | --- |\n' +
+        Object.entries(t.seeds).map(([k, v]) => `| ${k} | \`${v}\` |`).join('\n') +
+        '\n\n## Files\n\n' +
+        `- \`themes/${t.slug}.json\` — the source of truth. Drop it into \`/themes/\` in your fork of the\n` +
+        '  controls repo and run `dotnet run --project tools/ShinyThemeGen` to regenerate both platforms.\n' +
+        `- \`blazor/shiny-theme-${t.slug}.css\` — ship as a static asset and \`<link>\` it **after** the core\n` +
+        '  `shiny-theme.css`. Toggle `.shiny-theme-dark` / `.shiny-theme-light` on `<html>` to force a scheme;\n' +
+        '  otherwise it follows the OS preference.\n' +
+        `- \`maui/${ident}Theme.cs\`, \`maui/${ident}LightTheme.cs\`, \`maui/${ident}DarkTheme.cs\` — add to your\n` +
+        '  MAUI project and register it:\n\n' +
+        '```csharp\n' +
+        'builder.UseShinyControls(cfg => cfg.UseTheme(new ' + ident + 'Theme()));\n' +
+        '```\n'
+    );
+}
+
+/** Everything the creator can hand you, grouped by the platform it targets. */
+export function buildThemeFiles(t: ThemeData): ThemePlatform[] {
+    const ident = safeIdent(t.name);
+    return [
+        {
+            id: 'json',
+            label: 'Theme JSON',
+            blurb: 'The source of truth — everything else is generated from these seeds.',
+            files: [
+                {
+                    path: `themes/${t.slug}.json`,
+                    fileName: `${t.slug}.json`,
+                    language: 'json',
+                    hint: 'Drop into /themes/ and run the ShinyThemeGen tool to regenerate both platforms.',
+                    content: emitJson(t),
+                },
+            ],
+        },
+        {
+            id: 'blazor',
+            label: 'Blazor',
+            blurb: 'CSS custom properties for both schemes, plus an OS dark-preference fallback.',
+            files: [
+                {
+                    path: `blazor/shiny-theme-${t.slug}.css`,
+                    fileName: `shiny-theme-${t.slug}.css`,
+                    language: 'css',
+                    hint: 'Ship as a static asset and link it after the core shiny-theme.css.',
+                    content: emitCss(t),
+                },
+            ],
+        },
+        {
+            id: 'maui',
+            label: '.NET MAUI',
+            blurb: `Register with UseShinyControls(cfg => cfg.UseTheme(new ${ident}Theme())).`,
+            files: [
+                {
+                    path: `maui/${ident}Theme.cs`,
+                    fileName: `${ident}Theme.cs`,
+                    language: 'csharp',
+                    hint: 'The IShinyTheme entry point pairing the light and dark dictionaries.',
+                    content: emitMauiTheme(t),
+                },
+                {
+                    path: `maui/${ident}LightTheme.cs`,
+                    fileName: `${ident}LightTheme.cs`,
+                    language: 'csharp',
+                    hint: 'ResourceDictionary for the light scheme.',
+                    content: emitMauiDictionary(t, false),
+                },
+                {
+                    path: `maui/${ident}DarkTheme.cs`,
+                    fileName: `${ident}DarkTheme.cs`,
+                    language: 'csharp',
+                    hint: 'ResourceDictionary for the dark scheme.',
+                    content: emitMauiDictionary(t, true),
+                },
+            ],
+        },
+        {
+            id: 'readme',
+            label: 'README',
+            blurb: 'Wiring instructions, shipped in the zip alongside the generated files.',
+            files: [
+                {
+                    path: 'README.md',
+                    fileName: 'README.md',
+                    language: 'markdown',
+                    hint: 'Included at the root of the downloaded zip.',
+                    content: emitReadme(t),
+                },
+            ],
+        },
+    ];
+}

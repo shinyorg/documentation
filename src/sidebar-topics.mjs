@@ -116,6 +116,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Live Activities',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'liveactivities/' },
+          { label: 'Widget Extension (iOS)', link: 'liveactivities/widget-extension' },
+          { label: 'Server Driven Updates', link: 'liveactivities/push' },
+          { label: 'Release Notes', link: 'liveactivities/release-notes' }
+        ]
+      },
+      {
         label: 'Configuration',
         jumpTo: true,
         items: [
@@ -456,6 +466,7 @@ export const sidebarTopics = [
           },
         ]
       },
+      { label: 'FrostedGlassView', link: 'controls/frostedglass/', jumpTo: true },
       {
         label: 'ImageEditor',
         jumpTo: true,
@@ -814,6 +825,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'extensions-push/' },
           { label: 'Sending', link: 'extensions-push/sending' },
           { label: 'APNs', link: 'extensions-push/apns' },
+          { label: 'Live Activities', link: 'extensions-push/live-activities' },
           { label: 'Persistence', link: 'extensions-push/persistence' },
           { label: 'Metrics', link: 'extensions-push/metrics' },
           { label: 'Release Notes', link: 'extensions-push/release-notes' }
@@ -896,8 +908,6 @@ export const sidebarTopicsOptions = {
   exclude: [
     '/blog',
     '/blog/**/*',
-    '/controls/aiprompt',
-    '/controls/aiprompt/**/*',
     '/foundation/hosting/uno',
     '/other/androidforeground',
     '/mediator/extensions',

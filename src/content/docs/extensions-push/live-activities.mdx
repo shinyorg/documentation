@@ -1,0 +1,167 @@
+---
+title: Live Activities
+---
+
+Live Activities (ActivityKit, iOS 16.1+) are delivered over APNs, but almost nothing about the request
+looks like a normal push: a different push type, a different topic, a different `aps` body, and a
+different token. Set `Apple.LiveActivity` and the transport handles all of it.
+
+```csharp
+using Shiny.Extensions.Push;
+
+await pushManager.SendLiveActivityToTokens(
+    [activityToken],
+    LiveActivityPush.Update(new Dictionary<string, LiveActivityValue>
+    {
+        ["driverName"]     = "Sam",
+        ["stopsRemaining"] = 3,
+        ["progress"]       = 0.65,
+        ["eta"]            = DateTimeOffset.UtcNow.AddMinutes(12)
+    })
+);
+```
+
+## Three kinds of token
+
+This is where most Live Activity integrations go wrong. Apple issues tokens that *look* like device
+tokens but are only valid for the `liveactivity` topic:
+
+| Token | Lifetime | `PushTokenKind` |
+|---|---|---|
+| Device token | the install | `Device` |
+| Push-to-start (iOS 17.2+) | the install — valid before any activity exists | `LiveActivityStart` |
+| Per-activity update token | born and dead with that one activity | `LiveActivityUpdate` |
+
+Send an ordinary alert to a Live Activity token and APNs answers `DeviceTokenNotForTopic` — which the
+manager treats as an invalid token and **prunes**. So registrations carry a `TokenKind`, and
+`PushFilter.TokenKind` defaults to `PushTokenKind.Device`: a `Broadcast` can never reach them by
+accident.
+
+```csharp
+await pushManager.RegisterLiveActivityToken(
+    new DeviceRegistration
+    {
+        DeviceToken    = "<push-to-start-token>",
+        Platform       = DevicePlatform.iOS,
+        DeviceId       = "install-guid",      // may match the device registration's DeviceId
+        UserIdentifier = "user-42"
+    },
+    PushTokenKind.LiveActivityStart
+);
+```
+
+A `410 Unregistered` on an update token is normal and expected — it means that activity has ended.
+
+## Start, update, end
+
+`LiveActivityPush` builds the three lifecycle pushes and enforces the fields each one requires.
+
+```csharp
+// Start — push-to-start, iOS 17.2+. Goes to a LiveActivityStart token.
+await pushManager.SendLiveActivity(
+    LiveActivityPush.Start(
+        attributesType: "DeliveryAttributes",   // the Swift ActivityAttributes struct name
+        attributes:     new Dictionary<string, LiveActivityValue> { ["orderNumber"] = "A-1234" },
+        contentState:   state,
+        alertTitle:     "Your order is on the way"
+    ),
+    new PushFilter { UserIdentifier = "user-42" }
+);
+
+// Update — goes to that activity's own token.
+await pushManager.SendLiveActivityToTokens([activityToken], LiveActivityPush.Update(state));
+
+// End — optional final state, and when it should leave the Lock Screen.
+await pushManager.SendLiveActivityToTokens(
+    [activityToken],
+    LiveActivityPush.End(finalState, dismissalDate: DateTimeOffset.UtcNow.AddMinutes(5))
+);
+```
+
+`SendLiveActivity` infers the token kind from the event, so you rarely set `PushFilter.TokenKind`
+yourself. For the full option set, use the record directly:
+
+```csharp
+new PushNotification
+{
+    Title   = "Almost there",             // used only when Alert = true
+    Message = "2 stops away",
+    Apple = new ApplePushOptions
+    {
+        LiveActivity = new LiveActivityPushOptions
+        {
+            Event          = LiveActivityEvent.Update,
+            ContentState   = state,
+            StaleDate      = DateTimeOffset.UtcNow.AddMinutes(30),
+            RelevanceScore = 75,
+            Alert          = true
+        }
+    }
+};
+```
+
+## Typed content state
+
+`ContentState` is a `IReadOnlyDictionary<string, LiveActivityValue>` rather than the string dictionary
+used elsewhere in this library. The widget's `ContentState` is a strongly typed Swift `Codable` struct:
+send `"3"` where it expects an `Int` and decoding fails — the update is dropped with no error surfaced
+anywhere. `LiveActivityValue` carries real JSON types while keeping the payload builder reflection-free
+and AOT-safe.
+
+```csharp
+new Dictionary<string, LiveActivityValue>
+{
+    ["team"]     = "Leafs",                                     // string
+    ["score"]    = 3,                                           // int
+    ["progress"] = 0.65,                                        // double
+    ["final"]    = false,                                       // bool
+    ["periods"]  = LiveActivityValue.Array(1, 2, 0),            // array
+    ["home"]     = LiveActivityValue.Object(nested),            // nested Codable struct
+    ["custom"]   = LiveActivityValue.Json("""{"a":[1,2]}"""),   // escape hatch
+    ["nothing"]  = LiveActivityValue.Null
+}
+```
+
+:::caution[Dates are not Unix timestamps]
+ActivityKit decodes `content-state` with a stock Swift `JSONDecoder`, whose default strategy reads a
+`Date` as **seconds since 2001-01-01** — not the Unix epoch. Get it wrong and the widget renders a date
+about 31 years off, or fails to decode the whole state.
+
+`LiveActivityValue.Date(...)` (and the implicit `DateTimeOffset` conversion) defaults to that Apple
+reference encoding, which matches an unmodified Swift struct. Override with
+`LiveActivityDateEncoding.UnixSeconds` or `.Iso8601` only if your widget declares a matching strategy.
+
+The `aps` fields themselves — `timestamp`, `stale-date`, `dismissal-date` — are Unix seconds per Apple's
+spec, and the library writes them correctly regardless.
+:::
+
+Payloads are capped at 4KB, and update frequency is budgeted by the system — high-rate updates need the
+`NSSupportsLiveActivitiesFrequentUpdates` entitlement in the app.
+
+## Broadcast channels (iOS 18+)
+
+For one-to-many activities — sports scores, transit arrivals — broadcast replaces "track N activity
+tokens and send N pushes" with a single push to a channel. Resolve `ApnsBroadcastClient` from DI (keyed
+by the same app key as `AddApns`, or unkeyed for the default registration):
+
+```csharp
+using Shiny.Extensions.Push.Apns;
+
+var created = await broadcast.CreateChannel(ApnsChannelStoragePolicy.Store);
+var channelId = created.ChannelId!;   // hand this to the app; it passes it to ActivityKit
+
+await broadcast.Broadcast(channelId, LiveActivityPush.Update(state));
+
+var channels = await broadcast.GetAllChannels();
+await broadcast.DeleteChannel(channelId);
+```
+
+Channel management runs against Apple's separate management host; the broadcast itself goes to the
+ordinary APNs host. Channels are environment-specific — a sandbox channel id is meaningless in
+production.
+
+## The client side
+
+This page covers the **server**. Starting activities on device, reporting the two token kinds back to
+your server, and the Android equivalent are handled by
+[Shiny.Mobile.LiveActivities](https://github.com/shinyorg/liveactivities).

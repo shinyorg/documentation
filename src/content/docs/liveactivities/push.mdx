@@ -1,0 +1,107 @@
+---
+title: Server Driven Updates
+---
+
+The point of a live activity is usually that a *server* knows something the app doesn't — the driver
+moved, the goal was scored. On iOS, ActivityKit issues push tokens for exactly that.
+
+## Two tokens, neither of which is your device token
+
+This is where most integrations go wrong. Apple issues Live Activity tokens that look like ordinary APNs
+device tokens but are only valid for the `liveactivity` push type and its own topic.
+
+| Token | Lifetime | What it can do |
+|---|---|---|
+| Push-to-start (iOS 17.2+) | one per install, survives launches | **Start** an activity with the app closed |
+| Per-activity | born and dead with one activity | **Update** or **end** that activity |
+
+Send an ordinary alert to either and APNs answers `DeviceTokenNotForTopic` — which most servers treat as
+a dead token and prune. [Shiny.Extensions.Push](/extensions-push/live-activities) tracks a
+`PushTokenKind` per registration for precisely this reason.
+
+## Reporting the tokens
+
+The tokens only arrive through the delegate — there is no synchronous "get token" call, and the callback
+can fire on a background relaunch for an activity you never saw start.
+
+```csharp
+public class MyLiveActivityDelegate(IMyApi api) : LiveActivityDelegate
+{
+    public override Task OnPushToStartTokenChanged(string token)
+        => api.RegisterLiveActivityToken(token, "LiveActivityStart");
+
+    public override Task OnPushTokenChanged(LiveActivity activity, string token)
+        => api.RegisterLiveActivityToken(token, "LiveActivityUpdate");
+}
+```
+
+```csharp
+builder.Services.AddLiveActivities<MyLiveActivityDelegate>();
+```
+
+Set `LiveActivityRequest.RequestPushToken = false` for activities your server will never touch — no
+token is issued and nothing needs reporting.
+
+## Sending from the server
+
+With `Shiny.Extensions.Push`:
+
+```csharp
+// start one on a device that isn't running the app (iOS 17.2+)
+await pushManager.SendLiveActivity(
+    LiveActivityPush.Start(
+        attributesType: "ShinyActivityAttributes",   // always this — see Widget Extension
+        attributes:     new Dictionary<string, LiveActivityValue> { ["values"] = LiveActivityValue.Object(values) },
+        contentState:   state
+    ),
+    new PushFilter { UserIdentifier = "user-42" }
+);
+
+// update / end a known activity
+await pushManager.SendLiveActivityToTokens([activityToken], LiveActivityPush.Update(state));
+await pushManager.SendLiveActivityToTokens([activityToken], LiveActivityPush.End(dismissalDate: dismissAt));
+```
+
+The `content-state` you push must match the schema the widget decodes. `LiveActivityContentSchema.ToJson`
+on the client produces exactly that shape, so the easiest way to get a server payload right is to build
+the content in C# and post the JSON to your own API.
+
+```json
+{
+  "title": "Out for delivery",
+  "body": "2 stops away",
+  "shortStatus": "12 min",
+  "progress": 0.65,
+  "progressStart": 774835200.0,
+  "progressEnd": 774838800.0,
+  "indeterminate": false,
+  "data": { "orderId": "A-1234" }
+}
+```
+
+:::caution[Dates use Swift's epoch, not Unix]
+ActivityKit decodes `content-state` with a stock Swift `JSONDecoder`, whose default `Date` strategy reads
+**seconds since 2001-01-01**. Send Unix seconds and the widget's timer lands about 31 years out — or the
+whole state fails to decode and the update silently disappears. `LiveActivityContentSchema` and
+`LiveActivityValue.Date` both default to the correct encoding.
+:::
+
+A `410 Unregistered` on a per-activity token is not an error worth alerting on — it means the activity
+ended.
+
+## Android
+
+Android has no live-activity push token. Update an Android live activity from your own code — typically
+from an FCM data message handled by `Shiny.Push` — by calling `ILiveActivityManager.Update` in the push
+delegate:
+
+```csharp
+public class MyPushDelegate(ILiveActivityManager activities) : PushDelegate
+{
+    public override async Task OnReceived(PushNotification notification)
+    {
+        if (notification.Data.TryGetValue("activityId", out var id))
+            await activities.Update(id, ContentFrom(notification));
+    }
+}
+```
