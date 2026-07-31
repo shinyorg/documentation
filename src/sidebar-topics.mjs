@@ -43,6 +43,7 @@ export const sidebarTopics = [
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
           { label: 'Wake Word', link: 'aiconversation/wake-word' },
           { label: 'AI Tools', link: 'aiconversation/ai-tools' },
+          { label: 'MAUI Chat UI', link: 'aiconversation/chat-view' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },
