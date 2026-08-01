@@ -581,7 +581,7 @@ export const sidebarTopics = [
           { label: 'Soft Delete', link: 'documentdb/soft-delete' },
           { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
-          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/DocumentDb/', attrs: { target: '_blank' } },
+          { label: 'Blazor Playground', link: 'https://docdbmyadmin.acrhome.ca/', attrs: { target: '_blank' } },
           {
             label: 'Spatial, Vector & Temporal',
             collapsed: true,
@@ -867,7 +867,7 @@ export const sidebarTopics = [
     items: [
       { label: 'AI Conversation + Speech', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
       { label: 'Controls',        link: 'https://shinyorg.github.io/controls/',       attrs: { target: '_blank' } },
-      { label: 'DocumentDb',      link: 'https://shinyorg.github.io/DocumentDb/',     attrs: { target: '_blank' } },
+      { label: 'DocumentDb',      link: 'https://docdbmyadmin.acrhome.ca/',          attrs: { target: '_blank' } },
       { label: 'Mediator',        link: 'https://shinyorg.github.io/mediator/',       attrs: { target: '_blank' } },
       { label: 'Shiny Core',      link: 'https://shinyorg.github.io/shiny/',          attrs: { target: '_blank' } },
     ],

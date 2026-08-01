@@ -32,27 +32,27 @@ Astro + Starlight site for [shinylib.net](https://www.shinylib.net), deployed to
 
 ## Blazor playground demos
 
-Each library demo lives in its own sibling repo and deploys to its own GitHub Pages site. This docs repo links out to them — it does not build or host them.
+Each library demo lives in its own sibling repo and deploys to its own GitHub Pages site — except DocumentDb, which is a hosted ShinyDocDbMyAdmin container (see below). This docs repo links out to them — it does not build or host them.
 
 | Library            | URL                                            | Source repo                                     |
 | :----------------- | :--------------------------------------------- | :---------------------------------------------- |
 | AI Conversation    | https://shinyorg.github.io/speech/             | [shinyorg/speech][r-ai]                         |
 | Controls           | https://shinyorg.github.io/controls/           | [shinyorg/controls][r-ctl]                      |
-| DocumentDb         | https://shinyorg.github.io/DocumentDb/         | [shinyorg/DocumentDb][r-db]                     |
+| DocumentDb         | https://docdbmyadmin.acrhome.ca/               | [shinyorg/DocumentDb][r-db]                     |
 | Mediator           | https://shinyorg.github.io/mediator/           | [shinyorg/mediator][r-med]                      |
 | Shiny Core         | https://shinyorg.github.io/shiny/              | [shinyorg/shiny][r-sh]                          |
 | Speech             | https://shinyorg.github.io/speech/             | [shinyorg/speech][r-sp]                         |
 
 [r-ai]: https://github.com/shinyorg/speech/tree/v2/samples/BlazorSample
 [r-ctl]: https://github.com/shinyorg/controls/tree/main/samples/Sample.Blazor
-[r-db]:  https://github.com/shinyorg/DocumentDb/tree/v6/samples/Sample.Blazor
+[r-db]:  https://github.com/shinyorg/DocumentDb/tree/v12/src/ShinyDocDbMyAdmin
 [r-med]: https://github.com/shinyorg/mediator/tree/main/samples/Sample.Blazor
 [r-sh]:  https://github.com/shinyorg/shiny/tree/v5/samples/Sample.Blazor
 [r-sp]:  https://github.com/shinyorg/speech/tree/v2/samples/BlazorSample
 
 `public/playground/index.html` is a static landing page on this site that cards out to those URLs — kept so old `/playground/` bookmarks still resolve. Each library's sidebar in Starlight also has a direct "Blazor Playground" link to the corresponding external URL.
 
-Each demo is deployed by its own `.github/workflows/deploy-blazor-sample.yml` in the sibling repo: triggers on push to that repo's active branch (paths-scoped to the sample + relevant src), publishes the WASM app, rewrites `<base href>` to `/<repo-name>/`, and uploads to GitHub Pages.
+Each WASM demo is deployed by its own `.github/workflows/deploy-blazor-sample.yml` in the sibling repo: triggers on push to that repo's active branch (paths-scoped to the sample + relevant src), publishes the WASM app, rewrites `<base href>` to `/<repo-name>/`, and uploads to GitHub Pages. DocumentDb is the exception — its GitHub Pages site is retired and the playground is the `shinyorg/ShinyDocDbMyAdmin:demo` container, deployed from the DocumentDb repo's `admin-image.yml`.
 
 ## Comments (giscus)
 
@@ -210,8 +210,9 @@ that execute JavaScript.
 ### Scope
 
 This covers `shinylib.net` only. The Blazor playground demos are served from separate
-GitHub Pages sites on the `shinyorg/*` repos (`shinyorg.github.io/{speech,controls,DocumentDb,mediator,shiny}`)
-and are unaffected by anything configured here. Each would need its own Cloudflare zone.
+GitHub Pages sites on the `shinyorg/*` repos (`shinyorg.github.io/{speech,controls,mediator,shiny}`),
+plus the self-hosted DocumentDb admin demo at `docdbmyadmin.acrhome.ca`, and are unaffected by
+anything configured here. Each would need its own Cloudflare zone.
 
 GitHub Pages' soft bandwidth limit is 100 GB/month per site.
 
