@@ -297,6 +297,11 @@ occupies, the span every date covers, the set every categorical field draws from
 field is actually present, the shape of nested objects and the length of arrays. It reports what it inferred
 per field, with the values it will draw from, so the inference is inspectable rather than magic.
 
+An array that is the **same length in every sampled document** is treated as a tuple and profiled per
+position, because its slots are not interchangeable — the two halves of a GeoJSON `coordinates` pair, an RGB
+triplet, a min/max range. Variable-length arrays are ordinary collections and generate from one merged shape,
+as do fixed arrays longer than eight elements.
+
 Every generated value comes from the real data. That is the point: data generated from a schema alone has
 plausible *types* and implausible *values*, which is no use for judging a query plan or reading a grid. Ids
 are the exception — they are always replaced, and if the existing ones follow a scheme (`art-0001 …
@@ -364,6 +369,10 @@ A documents table (using the provider's own DDL) and a type (by writing its firs
 whose store has never run isn't a dead end.
 
 ## Running it
+
+Two published tags, one build. `:latest` is the ordinary tool; `:demo` is the same image with
+[demo mode](#demo-mode) already on, for a public playground. Pin `:<version>` or `:demo-<version>` when
+you want them to hold still.
 
 The volume holds saved connections, saved queries and uploaded database files; drop it and the UI starts
 empty every time.
@@ -433,6 +442,7 @@ living at a host path is invisible inside the container unless you mount it, hen
 | `ShinyDocDbMyAdmin:SecretKey` | `SHINYDOCDBMYADMIN_KEY` | generated into `<data>/secret.key` |
 | `ShinyDocDbMyAdmin:ReadOnly` | `ShinyDocDbMyAdmin__ReadOnly` | `false` |
 | `ShinyDocDbMyAdmin:DisableAi` | `ShinyDocDbMyAdmin__DisableAi` | `false` |
+| `ShinyDocDbMyAdmin:DemoMode` | `ShinyDocDbMyAdmin__DemoMode` | `false` |
 
 The data directory holds the tool's own SQLite document store (connection profiles and saved queries —
 dogfooding the library) plus any uploaded database files.
@@ -453,6 +463,78 @@ whenever the tool is pointed at something you didn't create five minutes ago.
 
 `DisableAi` removes the [Assistant](#assistant) entirely — see
 [Turning it off entirely](#turning-it-off-entirely).
+
+`DemoMode` turns the whole app into a public playground — see [Demo mode](#demo-mode). It forces
+both `ReadOnly` and `DisableAi` on.
+
+## Import / export connections
+
+Moves the connection list — with each connection's saved queries and assistant settings — between
+instances, as plain JSON you can read, diff and edit before importing.
+
+**Secrets are left out by default.** A connection string is a credential, and an export that carries
+them is a credential file — which is exactly what you don't want to drop in a ticket, a chat or a
+repository. The default bundle says which connections exist and how they're configured; whoever
+imports it supplies the secrets.
+
+Tick the box and they travel, encrypted under a **passphrase you type** — deliberately not this
+instance's own key, which would make the file useless anywhere but the machine that wrote it, the one
+place an export isn't needed. PBKDF2-SHA256 stretches the passphrase, AES-GCM encrypts each value, and
+the salt is fresh per export so the same passphrase never produces the same key twice. There is no
+recovery: without the passphrase the file cannot be opened.
+
+Importing never writes until you've seen what it would do. The review screen lists every connection in
+the file, whether one already exists by that id or name, and what will happen to it — **defaulting to
+skip for anything already there**, add for anything new. A wrong passphrase is caught before the first
+write rather than halfway through.
+
+Host-provided connections are not exported: they're declared by an AppHost or by configuration, so
+they're not this instance's to hand out, and an import would produce something the target couldn't edit
+either. Uploaded database files aren't in the bundle — a database isn't a setting.
+
+Switched off entirely in [demo mode](#demo-mode).
+
+## Demo mode
+
+There is a published tag for it, so putting this on a public URL is one command:
+
+```bash
+docker run -p 8085:8080 -v shiny-demo:/data ghcr.io/shinyorg/shiny-docdb-myadmin:demo
+```
+
+`:demo` is the ordinary image with `ShinyDocDbMyAdmin__DemoMode` already set — same build, one extra
+layer, every other layer shared. The two are interchangeable with the flag: setting
+`ShinyDocDbMyAdmin__DemoMode=true` on `:latest` behaves identically, and `=false` on `:demo` gives you
+the ordinary tool back. Pin `:demo-<version>` alongside `:<version>` when you want it to hold still.
+
+On first start the app **builds its own SQLite sample** from data embedded in the image, publishes
+it as a read-only connection, and closes what a public instance should not offer. There is no
+seeding sidecar to keep in step with it, and no `ReadOnly` / `DisableAi` pair to remember — demo
+mode forces both.
+
+The sample is written **once**. If the database file is already there it is left completely alone,
+so an image update never discards what someone is looking at, and nothing in the UI offers a rebuild
+— a visitor cannot wipe the thing everyone else came to see. Deleting the file on the host is the
+only way to rebuild it.
+
+| Closed | Still open |
+|---|---|
+| Editing data — the sample is read-only | Browsing, searching, filtering |
+| Adding, editing or removing connections | The query console, plans, index management |
+| Importing data | Structure, statistics, full text |
+| Importing or exporting settings | History, geometry, blobs |
+| The AI assistant | **Exporting data** — JSON, NDJSON, envelope JSON, CSV |
+| Rebuilding the sample | |
+
+**Exporting data stays open on purpose.** It is most of what someone is at a playground to try, it
+only reads, and the data is a published sample. Importing does not, because that writes.
+
+A bright band across the top of every page says the instance is a demo, and expands to list exactly
+what is switched off — so a visitor knows the missing buttons are policy rather than breakage.
+
+Each closure is enforced below the UI, not just by hiding a control: saving a connection is refused
+in `ProfileStore` itself, importing is refused in the import service, and the AI services are not
+registered at all. A deep link to a closed page renders a refusal.
 
 ## Safety
 
