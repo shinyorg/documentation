@@ -1,0 +1,76 @@
+---
+title: Generate test data
+description: Fill a development database with documents that look like the ones already there — inferred from a sample of real data, previewed before they're written.
+---
+
+import { Image } from 'astro:assets';
+import generateImg from '/src/assets/documentdb/admin-generate.jpg';
+import previewImg from '/src/assets/documentdb/admin-generate-preview.jpg';
+
+On the **Import / Export** tab of any type. Makes more documents that look like the ones already there —
+for filling a dev database, giving a query plan something to chew on, or reproducing "it gets slow past
+100k".
+
+## Analyze
+
+**Analyze** reads a sample of the type's documents and works out how to make more.
+
+<Image src={generateImg} alt="Generate panel reporting what it inferred per field — presence, what it will generate, and the values it will draw from" />
+
+It reports what it inferred per field, with the values it will draw from, so the inference is inspectable
+rather than magic:
+
+| It sees | It infers |
+|---|---|
+| a number | the range the observed values occupy |
+| a date or timestamp | the span they cover |
+| a small set of repeated strings | a categorical field, and picks from that set |
+| a field missing from some documents | how often it is actually present, and matches that rate |
+| a nested object | the same analysis, one level down |
+| an array | its observed length distribution and element shape |
+| the id | always replaced — see below |
+
+An array that is the **same length in every sampled document** is treated as a tuple and profiled per
+position, because its slots are not interchangeable — the two halves of a GeoJSON `coordinates` pair, an
+RGB triplet, a min/max range. Variable-length arrays are ordinary collections and generate from one merged
+shape, as do fixed arrays longer than eight elements.
+
+## Every value comes from the real data
+
+That is the point. Data generated from a schema alone has plausible *types* and implausible *values*,
+which is no use for judging a query plan or reading a grid: `"string1"` in a city column tells you nothing
+about how your `shipTo.city` filter will behave, and a uniformly random `total` tells you nothing about
+how a range query will select.
+
+**Ids are the exception** — they are always replaced, because two documents cannot share one. If the
+existing ids follow a scheme (`art-0001 … art-0400`) generation continues it at `art-0401` rather than
+mixing GUIDs in beside them.
+
+## Preview, then write
+
+<Image src={previewImg} alt="Preview showing the first generated documents in full before anything is written" />
+
+**Preview** shows the first few records and **Write** commits them. The two are the same documents: the
+preview's seed is replayed on commit, so it is a promise rather than an illustration. Preview again and
+you get a different draw, from a fresh seed.
+
+## Two things to know
+
+**Bulk generation writes through the [schema-free lane](/documentdb/json-collections/)** — one transaction
+for the whole batch instead of one per document — and **that lane maintains no sidecars**. Generated rows
+are therefore absent from a type's [temporal history](/documentdb/admin/history/), [vector
+index](/documentdb/admin/vectors/) and spatial index. The tool says which of those apply to the type you
+generated into, and links to the Vectors tab's rebuild.
+
+[Full text](/documentdb/admin/full-text/) is *not* affected: those indexes are engine-maintained, so
+generated rows are searchable immediately.
+
+**Free text is sampled, not invented.** A field with more distinct values than are worth tracking is drawn
+from the observed values, so long strings repeat. That is the honest limit of generating without a model —
+and it is still better for a query plan than lorem ipsum.
+
+## Where it isn't offered
+
+Generate needs at least one document to learn from, so an empty type has nothing to copy. It also writes,
+so it is absent on a [read-only connection](/documentdb/admin/connections/#read-only-connections) and in
+[demo mode](/documentdb/admin/demo-mode/).

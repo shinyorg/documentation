@@ -1,0 +1,82 @@
+---
+title: Connections
+description: Point the Admin UI at a database — a server, an uploaded SQLite/DuckDB file, or a connection your host declares — and move the connection list between instances.
+---
+
+import { Image } from 'astro:assets';
+import connectionsImg from '/src/assets/documentdb/admin-connections.jpg';
+
+A connection is a provider, a connection string and a name. There is no user management and no server
+administration here: the tool connects with the credentials you give it and does exactly what that
+account is allowed to do.
+
+<Image src={connectionsImg} alt="The connections page listing a host-provided SQLite connection above the supported provider table" />
+
+## Where connections come from
+
+**Saved in the tool.** *+ Connection* takes a provider, a connection string and a name, and writes it to
+the tool's own store in the data directory. Secret-bearing parts — the connection string and any SQLCipher
+key — are encrypted at rest with AES-GCM under the [secret key](/documentdb/admin/configuration/).
+
+**Uploaded.** SQLite, SQLCipher and DuckDB are files, so you can upload one instead of typing a path. It
+lands in `<data>/uploads/<profile-id>/` and is treated like any other connection afterwards.
+
+**Declared by the host.** Anything the environment supplies as a `ConnectionStrings:{name}` +
+`Shiny:DocumentDb:{name}:Provider` pair is picked up at startup and shown under a **from host** badge.
+These are never written to the tool's own store — they live in memory for as long as the process does —
+and they can't be edited or deleted from the UI, because they're declared somewhere else and that's
+where they change. This is the mechanism the [Aspire integration](/documentdb/admin/aspire/) uses.
+
+A connection string with no matching provider key is ignored, so a Redis or blob reference in the same
+environment doesn't turn into a junk connection.
+
+## Read-only connections
+
+Any connection can be marked **read-only**, and `ShinyDocDbMyAdmin:ReadOnly` marks every host-provided
+one at once — the setting you want whenever the tool is pointed at something you didn't create five
+minutes ago.
+
+Read-only blocks every write path: no insert, edit, duplicate or delete, no import, no index create or
+drop, no sidecar rebuild, and non-`SELECT` statements are refused in the [SQL
+console](/documentdb/admin/query-console/#raw-sql). Exporting still works, because it only reads.
+
+The flag is enforced below the UI rather than by hiding buttons, so a deep link to a write page produces
+a refusal instead of a form that fails on submit.
+
+## Testing a connection
+
+**Test** opens the connection and closes it, reporting the provider's own error when it can't. It is the
+fastest way to find out whether a container can actually reach the host you named — which, for a tool that
+lives inside Docker, is the failure worth catching first.
+
+## Import / export the connection list
+
+Moves the connection list — with each connection's saved queries and assistant settings — between
+instances, as plain JSON you can read, diff and edit before importing.
+
+**Secrets are left out by default.** A connection string is a credential, and an export that carries them
+is a credential file — which is exactly what you don't want to drop in a ticket, a chat or a repository.
+The default bundle says which connections exist and how they're configured; whoever imports it supplies
+the secrets.
+
+Tick the box and they travel, encrypted under a **passphrase you type** — deliberately not this instance's
+own key, which would make the file useless anywhere but the machine that wrote it, the one place an export
+isn't needed. PBKDF2-SHA256 stretches the passphrase, AES-GCM encrypts each value, and the salt is fresh
+per export so the same passphrase never produces the same key twice. There is no recovery: without the
+passphrase the file cannot be opened.
+
+Importing never writes until you've seen what it would do. The review screen lists every connection in the
+file, whether one already exists by that id or name, and what will happen to it — **defaulting to skip for
+anything already there**, add for anything new. A wrong passphrase is caught before the first write rather
+than halfway through.
+
+Host-provided connections are not exported: they're declared by an AppHost or by configuration, so they're
+not this instance's to hand out, and an import would produce something the target couldn't edit either.
+Uploaded database files aren't in the bundle — a database isn't a setting.
+
+Switched off entirely in [demo mode](/documentdb/admin/demo-mode/).
+
+## Deleting a connection
+
+Two clicks, and it removes the profile plus its saved queries and assistant settings. An uploaded database
+file goes with it; a server database obviously does not.

@@ -1,0 +1,69 @@
+---
+title: Aspire AppHost
+description: Model the Admin UI as an Aspire resource so it comes up with the rest of your app, with every store you reference already connected.
+---
+
+`Shiny.DocumentDb.Aspire.Hosting` models this tool as a resource, so it comes up with the rest of your app
+and every store you reference is already connected:
+
+```csharp
+var store = builder.AddPostgresDocumentStore("orders");
+
+builder.AddDocumentDbAdmin(port: 8085)
+       .WithReference(store)
+       .WaitFor(store);
+```
+
+`WithReference` is the same call a consuming service makes: the tool reads the `ConnectionStrings:{name}`
++ `Shiny:DocumentDb:{name}:Provider` pair the [hosting integration](/documentdb/aspire) already emits. A
+connection string with no matching provider key is ignored, so a Redis or blob reference in the same
+AppHost doesn't turn into a junk connection.
+
+Referenced stores show up under a **from host** badge and can't be edited or deleted from the UI — they're
+declared in the AppHost, so that's where they change. See
+[Connections](/documentdb/admin/connections/#where-connections-come-from).
+
+It's the same image either way — running the AppHost and publishing it — tagged to match the hosting
+package's own version, so an integration upgrade brings the matching UI with it.
+
+## The full builder
+
+```csharp
+builder.AddDocumentDbAdmin(port: 8085)
+       .WithReference(store)
+       .WithDataVolume()                                  // keep saved connections across runs
+       .WithHostPath("/Users/me/databases", "/databases") // make a file-backed store reachable
+       .WithSecretKey(builder.AddParameter("admin-key", secret: true))
+       .WithReadOnly()                                    // for anything you didn't create
+       .WithoutAi()                                       // for a public demo — see the Assistant
+       .WaitFor(store);
+```
+
+| Call | What it does |
+|---|---|
+| `AddDocumentDbAdmin(name, port)` | Adds the resource. Leave `port` null and Aspire picks a free one — fine for poking around, worth pinning when you want a bookmarkable URL. |
+| `WithHostPort(port)` | Changes that port after the fact. |
+| `WithDataVolume(name?)` | Keeps the tool's own state — saved connections, saved queries, uploaded files — in a named volume. Without it, anything saved in the UI is gone at the end of the run. |
+| `WithHostPath(host, container)` | Bind-mounts a directory so a file-backed store is reachable. |
+| `WithSecretKey(parameter)` | Sets the key that encrypts saved connection strings. See [Configuration](/documentdb/admin/configuration/#secret-key). |
+| `WithReadOnly()` | Blocks every write path for every host-provided connection. |
+| `WithoutAi()` | Removes the [assistant](/documentdb/admin/assistant/) entirely. |
+
+## Why `WithHostPath` exists
+
+It's a container, so it reaches the databases the AppHost models over the container network — which Aspire
+wires up for you. What it *cannot* reach is a **file** on your machine: a SQLite, SQLCipher or DuckDB
+store living at a host path is invisible inside the container unless you mount it.
+
+So the connection string in the AppHost has to be the path the *container* will see:
+
+```csharp
+builder.AddDocumentDbAdmin()
+       .WithHostPath("/Users/me/databases", "/databases");
+// then reference a store whose connection string is Data Source=/databases/orders.db
+```
+
+## Health and startup
+
+The resource carries an HTTP health check on `/`, so `WaitFor` on it behaves, and the dashboard shows it
+as unhealthy rather than running while the app is still starting.

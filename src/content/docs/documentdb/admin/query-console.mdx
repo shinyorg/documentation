@@ -1,0 +1,85 @@
+---
+title: Query console
+description: Two modes over the same connection — DocumentDb's own string query grammar, compiled and explained, and the database's raw SQL with bound parameters.
+---
+
+import { Image } from 'astro:assets';
+import filterImg from '/src/assets/documentdb/admin-filter.jpg';
+import explainImg from '/src/assets/documentdb/admin-explain.jpg';
+import sqlImg from '/src/assets/documentdb/admin-sql.jpg';
+
+Two ways to ask the same connection the same question.
+
+## Filter grammar
+
+DocumentDb's own [string query syntax](/documentdb/querying) — the same text `Query<T>().Where("…")` takes
+— with boxes for `Where`, `OrderBy` and an optional `Project`. Pick a table and a type and the rest reads
+exactly like your application code:
+
+```
+status == 'shipped' and total:number > 25000
+```
+
+<Image src={filterImg} alt="Query console in filter-grammar mode with the compiled SQL, its bound parameters and the matching rows" />
+
+It is **not a reimplementation**: the console opens `store.Collection(typeName)` — the schema-free
+[JSON collection](/documentdb/json-collections/) lane — and runs your text through the same parser,
+translator and SQL builder the library does. So the answer is the answer your code would get.
+
+The compiled SQL is shown next to the results, with its bound parameters, and **Open in raw SQL** drops it
+straight into the other mode — which makes the grammar something you can learn by using rather than by
+reading.
+
+### Type hints
+
+Because there is no CLR type to infer from, field paths take an optional `:type` hint (`number`, `int`,
+`date`, `bool`, `guid`, …) and **need one wherever nothing else pins the type** — most often an `OrderBy`
+over a numeric field, which otherwise sorts as text and puts `"100"` before `"9"`.
+
+### Two limits worth knowing
+
+- A store configured with `TypeNameResolution.FullName` writes dotted type names, which the collection
+  lane will not address. The console says so and points at the SQL mode.
+- The grammar addresses fields inside `Data`, not the envelope columns — use SQL for those.
+
+## Explain
+
+**Explain** runs the provider's own query plan over that SQL — `EXPLAIN QUERY PLAN` on SQLite, `EXPLAIN`
+on PostgreSQL/MySQL/DuckDB, `SHOWPLAN_TEXT` on SQL Server, `DBMS_XPLAN` on Oracle. The statement is
+*planned, not executed*, so this is safe on a read-only connection, which is where you most want to ask
+why something is slow.
+
+<Image src={explainImg} alt="A SQLite query plan with the scan hint and one-click index buttons for the unindexed fields in the query" />
+
+Below the plan, any field the query filters or sorts on that has **no index** is offered as a one-click
+create — individually or as a composite over all of them — after which the query re-runs and re-explains,
+so what you see is the plan *after* the change rather than a claim that it helped.
+
+Two honest limits. The unindexed-field list is read from your filter text, not from the plan: engines name
+the object they scanned, not the JSON path inside it, so the plan tells you whether it matters and the
+filter tells you what to do about it. And the "this looks like a scan" hint is a text match on the plan —
+on a small table a scan is often the right choice, which is why the plan itself is always shown.
+
+## Raw SQL
+
+Whatever you type, in the target database's own dialect.
+
+<Image src={sqlImg} alt="Raw SQL mode running a parameterised aggregate over the documents table with its result grid" />
+
+`@name` placeholders work on **every** provider — each connection rewrites them to whatever its own driver
+expects — and are bound from a JSON box, so the types stay honest: `450` binds a number, `"450"` binds
+text. On SQLite that is the difference between a numeric and a lexical comparison.
+
+Results are capped at 1,000 rows, and the console says when it truncated rather than quietly showing you
+the first page as if it were everything. Statements that return no grid report the affected-row count
+instead. Recent statements are kept per session in a dropdown.
+
+:::danger[The SQL console is an open prompt]
+There is no statement allow-list and no parsing. Give the tool a database account with the privileges you
+actually want it to have.
+:::
+
+On a [read-only connection](/documentdb/admin/connections/#read-only-connections) the console refuses
+anything that is not a lone `SELECT` / `WITH` / `SHOW` / `EXPLAIN` / `DESCRIBE` / `PRAGMA`, and rejects a
+statement containing a second one. That check is a guard on the flag, not a security boundary — the
+database account is.

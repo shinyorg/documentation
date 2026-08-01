@@ -623,9 +623,30 @@ export const sidebarTopics = [
             ]
           },
           {
+            label: 'Admin UI',
+            collapsed: true,
+            items: [
+              { label: 'Overview', link: 'documentdb/admin/' },
+              { label: 'Connections', link: 'documentdb/admin/connections' },
+              { label: 'Browse & Edit', link: 'documentdb/admin/browse' },
+              { label: 'Structure & Indexes', link: 'documentdb/admin/structure' },
+              { label: 'Query Console', link: 'documentdb/admin/query-console' },
+              { label: 'History', link: 'documentdb/admin/history' },
+              { label: 'Geometry', link: 'documentdb/admin/geometry' },
+              { label: 'Full Text', link: 'documentdb/admin/full-text' },
+              { label: 'Vectors', link: 'documentdb/admin/vectors' },
+              { label: 'Blobs', link: 'documentdb/admin/blobs' },
+              { label: 'Generate Test Data', link: 'documentdb/admin/generate' },
+              { label: 'Import & Export', link: 'documentdb/admin/import-export' },
+              { label: 'AI Assistant', link: 'documentdb/admin/assistant' },
+              { label: 'Aspire AppHost', link: 'documentdb/admin/aspire' },
+              { label: 'Configuration & Security', link: 'documentdb/admin/configuration' },
+              { label: 'Demo Mode', link: 'documentdb/admin/demo-mode' },
+            ]
+          },
+          {
             label: 'Integrations',
             items: [
-              { label: 'Admin UI', link: 'documentdb/admin' },
               { label: 'JSON Schema Validation', link: 'documentdb/validation' },
               { label: 'OData Endpoints', link: 'documentdb/odata' },
               { label: 'Offline Sync (Shiny.Data.Sync)', link: 'documentdb/data-sync' },

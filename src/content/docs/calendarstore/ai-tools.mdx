@@ -1,14 +1,15 @@
 ---
 title: AI Tools
-description: Expose ICalendarStore to LLM agents as Microsoft.Extensions.AI tools with per-operation allow-listing
+description: Expose ICalendarStore to LLM agents as Microsoft.Extensions.AI tools with per-operation and per-calendar allow-listing
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 
 The optional **`Shiny.Calendar.Extensions.AI`** package exposes `ICalendarStore` as
 [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions (`AIFunction`s) for
-LLM agents. You opt-in **per operation** — read, create, update, delete — an allow-list you control on
-behalf of the agent (this is **not** an OS permission prompt; the platform calendar permission must
-already be granted). AOT-compatible: hand-built schemas and `JsonNode` results, no reflection.
+LLM agents. You opt-in **per operation** — read, create, update, delete — and optionally **per
+calendar**, an allow-list you control on behalf of the agent (this is **not** an OS permission prompt;
+the platform calendar permission must already be granted). AOT-compatible: hand-built schemas and
+`JsonNode` results, no reflection.
 
 <NugetDownloads name="Shiny.Calendar.Extensions.AI" />
 
@@ -55,12 +56,69 @@ var response = await chatClient.GetResponseAsync(
 .AddCalendar(CalendarAICapabilities.All)
 ```
 
+## Scoping to specific calendars
+
+`AddCalendar(capabilities)` applies to **every** calendar on the device.
+`AddCalendar(calendarId, capabilities)` applies to **one** calendar and **replaces** the global set for
+it — so a per-calendar entry can widen *or* narrow access. That covers the three shapes you normally
+want:
+
+```csharp
+// 1. global — every calendar, same rules
+builder.Services.AddCalendarAITools(tools => tools
+    .AddCalendar(CalendarAICapabilities.Read)
+);
+
+// 2. mixed — read everything, but full read/write on the work calendar, and hide the private one
+builder.Services.AddCalendarAITools(tools => tools
+    .AddCalendar(CalendarAICapabilities.Read)
+    .AddCalendar(workCalendarId, CalendarAICapabilities.All)
+    .AddCalendar(privateCalendarId, CalendarAICapabilities.None)
+);
+
+// 3. strict allow-list — no global grant, so ONLY these calendars exist to the agent
+builder.Services.AddCalendarAITools(tools => tools
+    .AddCalendar(workCalendarId, CalendarAICapabilities.All)
+    .AddCalendars([teamCalendarId, holidayCalendarId], CalendarAICapabilities.Read)
+);
+```
+
+The tools enforce this on **every call** — the model cannot talk its way around the filter:
+
+- `list_calendars` returns only calendars with at least one capability, each with an
+  `allowedOperations` array (`read` / `create` / `update` / `delete`) so the model knows where it may
+  write.
+- `search_events` searches only readable calendars; passing a `calendarId` outside the filter is an
+  error.
+- `get_event`, `update_event`, and `delete_event` resolve the event's calendar first and refuse when it
+  isn't allowed.
+- `create_event` refuses a disallowed `calendarId`. When `Create` isn't granted globally, omitting
+  `calendarId` is an error too — the device default calendar can't be vetted up front, so the model is
+  told to pick a calendar from `list_calendars`.
+
+A tool is generated when **any** calendar grants that capability, so `AddCalendar(workId, All)` on its
+own still produces `create_event` / `update_event` / `delete_event` — scoped to that calendar.
+
+### Filters chosen at runtime
+
+Calendar ids are platform-assigned, so the ids you want are usually picked by the user and persisted.
+Use the service-provider overload — the callback runs when `CalendarAITools` is first resolved, so it
+can read your own services:
+
+```csharp
+builder.Services.AddCalendarAITools((sp, tools) =>
+{
+    var settings = sp.GetRequiredService<AppSettings>();   // the ids the user picked
+    tools.AddCalendars(settings.AgentCalendarIds, CalendarAICapabilities.All);
+});
+```
+
 ## Generated Tools
 
 | Tool | Capability | Description |
 |------|-----------|-------------|
-| `list_calendars` | Read | Lists device calendars (id, name, colour, read-only). |
-| `search_events`  | Read | Events in a date window, optional calendar id + free-text query. |
+| `list_calendars` | Read | Lists the allowed calendars (id, name, colour, read-only, `allowedOperations`). |
+| `search_events`  | Read | Events in a date window across the readable calendars, optional calendar id + free-text query. |
 | `get_event`      | Read | Full detail for one event (attendees, reminders, recurrence). |
 | `create_event`   | Create | Creates an event (title, start, end required; ISO-8601 dates). |
 | `update_event`   | Update | Updates supplied fields on an existing event. |
@@ -69,7 +127,8 @@ var response = await chatClient.GetResponseAsync(
 ## Key Types
 
 - `AddCalendarAITools(Action<ICalendarAIToolBuilder>)` — DI extension; throws if nothing is added.
-- `ICalendarAIToolBuilder` — `AddCalendar(CalendarAICapabilities)`.
+- `AddCalendarAITools(Action<IServiceProvider, ICalendarAIToolBuilder>)` — same, but the callback runs on first resolve so the filter can come from your own services.
+- `ICalendarAIToolBuilder` — `AddCalendar(CalendarAICapabilities)` (global), `AddCalendar(string calendarId, CalendarAICapabilities)`, `AddCalendars(IEnumerable<string> calendarIds, CalendarAICapabilities)`.
 - `CalendarAICapabilities` `[Flags]` — `None`, `Read`, `Create`, `Update`, `Delete`, `Write`, `All`.
 - `CalendarAITools` — resolve from DI; `.Tools` is `IReadOnlyList<AITool>`.
 

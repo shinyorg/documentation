@@ -35,13 +35,6 @@ export default defineConfig({
       'import.meta.env.GISCUS': JSON.stringify(giscusConfig),
     },
   },
-  // Astro 6 made `markdown.gfm` optional with no default (the `.md` processor
-  // enables GFM internally), but @astrojs/mdx still reads this flag to decide
-  // whether to add remark-gfm. Without it, GFM tables break in every .mdx page.
-  markdown: {
-    gfm: true,
-    smartypants: true,
-  },
   redirects: {
       // Blog post redirects (flat → date-based)
       '/blog/v3/': '/blog/2023/09/v3/',
@@ -289,7 +282,11 @@ export default defineConfig({
         }
       }
     }),
-    mdx(),
+    // `.md` gets GFM + smartypants from the default markdown processor, but
+    // @astrojs/mdx only enables them when the flags are set explicitly. They used
+    // to live on `markdown.{gfm,smartypants}`, which Astro 6 deprecated — setting
+    // them here keeps GFM tables working in `.mdx` without the deprecation warning.
+    mdx({ gfm: true, smartypants: true }),
     starlight({
       title: 'Shiny.NET',
       pagefind: false,

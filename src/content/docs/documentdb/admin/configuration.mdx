@@ -1,0 +1,85 @@
+---
+title: Configuration & security
+description: Every setting the Admin UI reads, where its own state lives, how saved secrets are encrypted, and what the tool defends against.
+---
+
+## Settings
+
+| Setting | Environment variable | Default |
+|---|---|---|
+| `ShinyDocDbMyAdmin:DataDirectory` | `SHINYDOCDBMYADMIN_DATA` | `~/.shinydocdbmyadmin` |
+| `ShinyDocDbMyAdmin:SecretKey` | `SHINYDOCDBMYADMIN_KEY` | generated into `<data>/secret.key` |
+| `ShinyDocDbMyAdmin:ReadOnly` | `ShinyDocDbMyAdmin__ReadOnly` | `false` |
+| `ShinyDocDbMyAdmin:DisableAi` | `ShinyDocDbMyAdmin__DisableAi` | `false` |
+| `ShinyDocDbMyAdmin:DemoMode` | `ShinyDocDbMyAdmin__DemoMode` | `false` |
+
+Connections themselves are configuration too — see [where connections come
+from](/documentdb/admin/connections/#where-connections-come-from).
+
+## The data directory
+
+Holds the tool's own SQLite document store (connection profiles and saved queries — dogfooding the
+library) plus any uploaded database files, under `<data>/uploads/<profile-id>/`.
+
+In the container it's `/data`, which is why the `docker run` examples mount a volume there. Drop the
+volume and the UI starts empty every time.
+
+Connections handed over by a host are never written to that store at all — they live in memory for as long
+as the process does.
+
+## Secret key
+
+`SecretKey` encrypts the secret-bearing parts of a saved profile — connection strings, SQLCipher keys and
+assistant API keys — with AES-GCM. Either a base64 32-byte key or a passphrase.
+
+:::caution[Set `SecretKey` out of band for any shared deployment]
+With no key configured, a random one is generated *next to* the database it protects. That guards against
+a stray backup or synced folder, but **not** against anyone who can read the data directory.
+:::
+
+From an Aspire AppHost, [`WithSecretKey`](/documentdb/admin/aspire/) takes a parameter, which is the
+supported way to pass one without putting it in the compose file.
+
+## Read-only
+
+`ReadOnly` blocks every write path for every host-provided connection, which is the setting you want
+whenever the tool is pointed at something you didn't create five minutes ago. Individual saved connections
+carry their own flag — see [read-only
+connections](/documentdb/admin/connections/#read-only-connections) for exactly what it closes.
+
+## Disable AI
+
+`DisableAi` removes the [assistant](/documentdb/admin/assistant/) entirely — no tab, no settings link, and
+the services aren't registered at all, so the routes refuse to render rather than being merely unlinked.
+
+## Demo mode
+
+`DemoMode` turns the whole app into a public playground — see [Demo
+mode](/documentdb/admin/demo-mode/). It forces both `ReadOnly` and `DisableAi` on.
+
+## Safety
+
+There is no authentication in this tool. It is a database client, and it assumes the network in front of
+it is doing the access control — put it behind whatever you'd put a database admin console behind.
+
+What it *does* defend against:
+
+**Destructive clicks.** Deleting a connection and bulk-deleting documents each take two clicks. Passwords
+are masked wherever a connection string is displayed.
+
+**Other people's bytes.** Blob payloads come from whoever wrote the document, so serving them from our own
+origin is a real XSS surface. Every response carries `nosniff` and a `default-src 'none'` CSP, and
+anything not on the short raster-image allowlist is sent as an attachment rather than rendered — SVG
+deliberately included, because it's a document format that can carry script. Document values are
+HTML-escaped everywhere they're rendered.
+
+**A quietly wrong audit trail.** Writes to a temporal-mapped type record a version, stamped with the actor
+`shiny-docdb-myadmin` — see [History](/documentdb/admin/history/#why-writes-here-are-tracked).
+
+**Secrets in an export.** The [connection bundle](/documentdb/admin/connections/#import--export-the-connection-list)
+leaves secrets out by default, and encrypts them under a passphrase you type when you opt in.
+
+:::danger[The SQL console is an open prompt]
+There is no statement allow-list. Give the tool a database account with the privileges you actually want
+it to have — that account, not the read-only checkbox, is the boundary that matters.
+:::
