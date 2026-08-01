@@ -282,11 +282,7 @@ export default defineConfig({
         }
       }
     }),
-    // `.md` gets GFM + smartypants from the default markdown processor, but
-    // @astrojs/mdx only enables them when the flags are set explicitly. They used
-    // to live on `markdown.{gfm,smartypants}`, which Astro 6 deprecated — setting
-    // them here keeps GFM tables working in `.mdx` without the deprecation warning.
-    mdx({ gfm: true, smartypants: true }),
+    mdx(),
     starlight({
       title: 'Shiny.NET',
       pagefind: false,
