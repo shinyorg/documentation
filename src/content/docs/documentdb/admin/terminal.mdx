@@ -1,0 +1,327 @@
+---
+title: Terminal UI
+description: The same admin tool as a terminal app — installed as a dotnet tool, sharing the web front end's connections, secrets and bundles.
+---
+
+import { Image } from 'astro:assets';
+import browseImg from '/src/assets/documentdb/admin-tui-browse.png';
+import connectionsImg from '/src/assets/documentdb/admin-tui-connections.png';
+import databaseImg from '/src/assets/documentdb/admin-tui-database.png';
+import tableImg from '/src/assets/documentdb/admin-tui-table.png';
+import connectionEditImg from '/src/assets/documentdb/admin-tui-connection-edit.png';
+import transferImg from '/src/assets/documentdb/admin-tui-transfer.png';
+import queryConsoleImg from '/src/assets/documentdb/admin-tui-query-console.png';
+import structureImg from '/src/assets/documentdb/admin-tui-structure.png';
+import historyImg from '/src/assets/documentdb/admin-tui-history.png';
+import geometryImg from '/src/assets/documentdb/admin-tui-geometry.png';
+import fullTextImg from '/src/assets/documentdb/admin-tui-full-text.png';
+import vectorsImg from '/src/assets/documentdb/admin-tui-vectors.png';
+import blobsImg from '/src/assets/documentdb/admin-tui-blobs.png';
+import importExportImg from '/src/assets/documentdb/admin-tui-import-export.png';
+
+**ShinyDocDbMyAdmin has two front ends.** The [web one](/documentdb/admin/) ships as a container image;
+this one ships as a `dotnet tool` and runs in your terminal. They are not two tools that read the same
+files — they are the same admin layer with two ways to look at it, so a connection saved in one is a
+connection the other opens.
+
+```bash
+dotnet tool install -g ShinyDocDbMyAdmin.Tui
+shinydocdb
+```
+
+:::caution[It is a big install]
+The package is around **150 MB**, and about 400 MB once unpacked. Nearly all of that is native provider
+binaries for every platform the tool might run on — DuckDB alone is 300 MB of it, because it ships a
+full engine per RID.
+
+That is the same arithmetic that keeps the web app container-only. The difference is that a terminal tool
+is worth installing anyway: it is the thing you reach for when you are already in a terminal, and a
+container is not. If you only ever point it at SQLite and PostgreSQL you are still paying for DuckDB and
+Oracle, and there is currently no way to opt out — a `dotnet tool` is RID-agnostic, so it carries every
+platform's binaries or none.
+:::
+
+<Image src={browseImg} alt="The browse grid for the Order type, with columns inferred from the JSON bodies and the explorer tree on the left" />
+
+## Why a second front end
+
+The web app is a container. That is the right shape for something a team points at a staging database
+and leaves running — and the wrong shape for the thing you reach for when you are already in a terminal,
+already SSH'd into the box, and want to know what is in a SQLite file.
+
+Everything below `Components/` in the web app — connection profiles, the document, schema, index and
+sidecar services, import and export — lives in a shared project both front ends reference. That is why
+the feature list here is not a subset: it is the same list.
+
+## What is the same, and what is not
+
+| | Web | Terminal |
+|---|---|---|
+| Connections, saved queries, assistant settings | `~/.shinydocdbmyadmin/admin.db` | the same file |
+| Secrets at rest | AES-GCM under the instance key | the same key file |
+| Connection bundles | `ConnectionTransferService` | the same serializer |
+| Providers | every relational backend | the same nine |
+| Upload a database file | copies the bytes into the data directory | you give it a path — it is your machine |
+| Download a blob or an export | streamed to the browser | written to a path you name |
+| Draw geometry | server-rendered SVG | braille cells |
+| Demo mode | a public playground deployment | not applicable |
+
+:::caution[Secrets do not cross machines]
+Both front ends encrypt secrets under an **instance** key in the data directory. If your web app is in a
+container and your terminal tool is on the host, they have different keys and cannot read each other's
+stored credentials — even pointed at the same volume.
+
+That is what the passphrase-encrypted [connection bundle](#moving-connections-between-them) is for. It is
+the supported way to move connections between instances, and the reason it exists.
+:::
+
+## Getting around
+
+The web app navigates by URL, which gives it a back button and deep links for free. A terminal has
+neither, so the equivalents are an explicit screen stack and a command palette.
+
+| Key | What it does |
+|---|---|
+| `Ctrl+P` | Command palette — everything the tool can do, by name |
+| `F2` | Jump to the explorer — the tree is where navigation starts |
+| `Esc` | Back one screen, or close the dialog |
+| `F5` | Refresh the screen and the explorer |
+| `F1` | Keyboard help |
+| `Ctrl+Q` | Quit |
+| `Tab` / `Shift+Tab` | Move between controls |
+| `Enter` | Open the selected row |
+| `Ctrl+F` | Search inside a grid |
+| `PgUp` / `PgDn` | Previous / next page of documents |
+| `Ctrl+S` | Save the open document or query |
+| `Delete` | Delete the selected row — always asks first |
+
+The app opens with the cursor in the explorer, and `F2` puts it back there — expand a connection with `→`,
+walk it with `↑`/`↓`, open with `Enter`.
+
+Workspace tabs move with `←`/`→` once the tab strip has focus, or by name from the palette
+(**Next tab** / **Previous tab**). There is deliberately no `Ctrl+arrow` shortcut for it: the terminal
+sequences for modified arrows are not decoded here, so binding one would give you a key that silently does
+nothing.
+
+The palette is the one to learn. In a terminal it is the only way to reach something you cannot currently
+see, so anything reachable by clicking is also reachable by typing part of its name.
+
+## Command line
+
+```
+shinydocdb [options]                 open the connection list
+shinydocdb --profile <name|id>       open straight into a connection
+shinydocdb export <file> [--secrets] write the connection bundle and exit
+shinydocdb import <file>             read a connection bundle and exit
+shinydocdb help | version
+
+  -p, --profile <name|id>  connection to open (name match is case-insensitive)
+      --data-dir <path>    where the tool keeps its own state
+                           (default ~/.shinydocdbmyadmin, same as the web front end)
+      --theme <light|dark> override the saved theme for this run
+      --no-ai              run without the assistant, and without registering it
+      --no-splash          skip the Shiny mark on startup
+      --secrets            include secrets in an export, encrypted under a passphrase
+                           you are prompted for
+```
+
+`export` and `import` never draw anything. They are the scriptable half of the transfer screen, which is
+the difference between "you can move your connections" and "you can put your connections in your
+dotfiles".
+
+Starting the tool draws the Shiny mark for a moment while the connection store opens — on the normal
+screen, so it scrolls into your session's history rather than costing the app a frame. It is skipped
+automatically when output is redirected, when the terminal has no colour and when `NO_COLOR` is set, and
+`--no-splash` turns it off for good.
+
+## Connections
+
+<Image src={connectionsImg} alt="The connection list showing a host-provided SQLite connection with its provider, target and last-opened time" />
+
+The same list the web app shows, from the same store — including anything the host declares through
+`ConnectionStrings:{name}` + `Shiny:DocumentDb:{name}:Provider`, which appears under a **from host** flag
+and cannot be edited here. See [Connections](/documentdb/admin/connections/) for where they come from and
+what read-only blocks.
+
+The **Target** column shows what a connection points at — the file path, or the host and database — and
+never the credentials. Those only leave the store when a connection is actually opened.
+
+<Image src={connectionEditImg} alt="The new-connection form with provider picker, connection string, and the read-only toggle" />
+
+The one field with no terminal equivalent is the file upload. On the web it exists because a browser
+cannot hand the server a path, only bytes. A tool running on your own machine already has the path, so the
+file-backed providers simply take one and no copy of your database is made.
+
+## Moving connections between them
+
+<Image src={transferImg} alt="The transfer screen: export options above, and an import review listing each connection with its action" />
+
+**Secrets are left out of an export unless you ask for them.** A connection string is a credential, and an
+export that carries them is a credential file — which is exactly what an export invites you to drop in a
+ticket. Opting in re-encrypts them under a passphrase you type, not under the instance key, because the
+instance key would make the file useless anywhere but the machine that wrote it.
+
+Import writes nothing until you have reviewed what it would do, and defaults every conflict to **skip**.
+`Enter` on a row cycles skip → add → replace.
+
+Both directions work: a bundle written by the web app imports here, and one written here imports there.
+There is a test that does exactly that round-trip, because it is the claim this whole page rests on.
+
+## Databases and types
+
+<Image src={databaseImg} alt="The database overview listing the documents table with its statistics and the history and blob sidecars beneath it" />
+
+Sidecars are listed rather than hidden. They are not browsable — the envelope is not in them — but their
+presence is what tells you a type has history, blobs, geometry or vectors.
+
+<Image src={tableImg} alt="The type list for the documents table, with document and index counts per type" />
+
+DocumentDb keeps every type in one table and tells them apart by the `TypeName` column, so what
+phpMyAdmin would call a table is a *type* here. Both levels are real, so both are shown.
+
+## The workspace
+
+Opening a type gives you the same tabs the web app does, and only the tabs whose backing data exists — a
+type with no `{table}_history` has no History tab, because offering an empty one would suggest the feature
+was configured and idle rather than absent.
+
+### Browse
+
+Columns are inferred from the documents rather than declared, with `Id` always leading. Filtering, sorting
+and paging all happen in the database: the grid holds one page of a type that may have millions of
+documents, so a client-side sort would reorder twenty-five rows and look like it had sorted the type.
+
+`Enter` on a row opens the JSON editor, with syntax colouring, validation before save, and the same
+sidecar reporting the web app does — if a write could not update the vector index, you are told, rather
+than left with a search that quietly returns the old neighbours.
+
+### Structure
+
+<Image src={structureImg} alt="The inferred shape of the Product type above the full index list for the table" />
+
+The shape is a description of what the sampled documents contain, not a contract. A field below 100% is
+simply absent from some of them.
+
+Every index on the table is listed, not only DocumentDb's — an index someone added by hand is often what
+explains a query's speed. Only DocumentDb's own can be dropped from here.
+
+### History
+
+<Image src={historyImg} alt="The temporal history for the Order type, one row per version with operation, interval, duration and actor" />
+
+Leave the document blank for the newest versions across the whole type — an audit log, and the way in when
+you do not already know which document you are looking for. Mark a version, select another, and **Diff
+against mark** shows the field-level differences.
+
+Restoring writes the old body back as a *new* version rather than rewinding the sidecar. History moves
+forward; that is what makes it an audit trail.
+
+### Geometry
+
+<Image src={geometryImg} alt="Service-area polygons drawn in braille cells across North America, with the feature list and its measurements underneath" />
+
+Drawn with braille cells — U+2800's eight dots give 2×4 subcells per character, so a full-width pane draws
+at roughly 240×120. Colour is by geometry family, capped at three, the same three the SVG map uses.
+
+There is deliberately **no basemap**. Any tile layer means sending the coordinates of whatever is in the
+database to a third party on every pan, which is not a reasonable default for a tool that gets pointed at
+production.
+
+Geometry is read from the document bodies, not the spatial sidecar: the sidecar holds bounding boxes for
+R\*Tree pruning, and the GeoJSON in `Data` is the value. Parsing goes through the library's own converter,
+so Centroid, Area and Length are the real OGC model rather than anything reimplemented here.
+
+### Full text
+
+<Image src={fullTextImg} alt="A ranked full-text search for 'rugged wireless' across the Product type, with BM25 scores" />
+
+Ranked search through the provider's own engine. Unlike every other sidecar, a full-text index is
+maintained by the engine — FTS5 triggers, generated or computed columns, an on-commit CONTEXT index — so a
+write from here updates it exactly as a write from the library would. DuckDB is the one backend where that
+is not true, and the panel says so.
+
+### Vectors
+
+<Image src={vectorsImg} alt="Embedding statistics for the Product type: dimensions, norms and per-document components" />
+
+Embedding statistics, sidecar drift, and nearest-neighbour search. The search is **exact** — it scans the
+bodies and scores every one — which is the opposite of what the sidecar is for, and deliberately so: a tool
+that searched through the index could not tell you the index was wrong.
+
+The document bodies are the source of truth and the sidecar is an index built from them, so anything
+reported as drift means a similarity search is currently returning wrong answers. **Rebuild sidecar** is
+how that is fixed.
+
+### Blobs
+
+<Image src={blobsImg} alt="Attached payloads for the Product type with their content types, sizes and timestamps" />
+
+The listing never selects the payload column — a list of a hundred attachments should not move a hundred
+megabytes to render five columns of metadata. Bytes are read only when you preview or save one, and then
+they go to a file you name.
+
+Text payloads preview inline; anything else is save-only, because a terminal has nothing useful to do with
+a JPEG.
+
+### Import / export
+
+<Image src={importExportImg} alt="Per-type document export, import and the test-data generator" />
+
+Export streams straight to the file, so exporting a million documents costs the same memory as exporting
+ten. Only the envelope format round-trips ids and timestamps; the body formats carry what is inside
+`Data`.
+
+The generator learns from the documents already there — numbers from the observed range, dates from the
+observed span, categorical values from the set actually in use. It is seeded, so the preview is a promise:
+committing replays the same seed and writes the documents you were shown.
+
+## Query consoles
+
+<Image src={queryConsoleImg} alt="The filter grammar console, with the table, type, where, order-by and project fields" />
+
+Two tabs, because a query belongs to the connection rather than to one type.
+
+**Filter grammar** runs DocumentDb's own string queries through the library's parser and translator, so
+what runs here is exactly what `store.Collection(name).Where("…")` would run in an application — and it
+shows you the SQL it compiled to, which is the point of the console. **Open in SQL console** hands that
+statement over so you can edit it.
+
+**SQL** is the phpMyAdmin tab: whatever you type is what runs. There is no statement parsing and no
+allow-list; the only guard is the read-only profile flag, which refuses anything that is not a `SELECT`.
+`@name` placeholders work on every backend because each provider's connection rewrites them.
+
+Both offer **Explain**, and the filter console additionally names the paths a query filtered on that have
+no index — paired with the plan, because the plan says whether it matters and the paths say what to do
+about it.
+
+## The assistant
+
+Configured per connection, exactly as on the web, and reading the same settings. It is read-only by
+construction rather than by instruction: the write paths are never registered as tools, so there is no
+function for a model to call however it is asked.
+
+`--no-ai` (or `ShinyDocDbMyAdmin:DisableAi`) removes the feature rather than hiding it — nothing behind it
+is registered, so the tab cannot appear.
+
+See [AI assistant](/documentdb/admin/assistant/) for what it can read and what that means.
+
+## Configuration
+
+The same keys as the web front end, read from the environment or from an optional
+`~/.shinydocdbmyadmin/appsettings.json`:
+
+| Setting | Default | What it does |
+|---|---|---|
+| `ShinyDocDbMyAdmin:DataDirectory` | `~/.shinydocdbmyadmin` | Profiles, the secret key, preferences |
+| `ShinyDocDbMyAdmin:SecretKey` | generated into the data directory | The key secrets are encrypted under |
+| `ShinyDocDbMyAdmin:ReadOnly` | `false` | Marks every host-provided connection read-only |
+| `ShinyDocDbMyAdmin:DisableAi` | `false` | Removes the assistant entirely |
+
+Logs go to `~/.shinydocdbmyadmin/shinydocdb.log`, truncated at each start. They cannot go to the console —
+the console is the frame buffer, and one stray line from a background task tears the render.
+
+## Running it from a clone
+
+```bash
+dotnet run --project src/ShinyDocDbMyAdmin.Tui
+```

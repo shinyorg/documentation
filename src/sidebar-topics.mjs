@@ -641,6 +641,7 @@ export const sidebarTopics = [
               { label: 'Generate Test Data', link: 'documentdb/admin/generate' },
               { label: 'Import & Export', link: 'documentdb/admin/import-export' },
               { label: 'AI Assistant', link: 'documentdb/admin/assistant' },
+              { label: 'Terminal UI', link: 'documentdb/admin/terminal' },
               { label: 'Aspire AppHost', link: 'documentdb/admin/aspire' },
               { label: 'Configuration & Security', link: 'documentdb/admin/configuration' },
               { label: 'Demo Mode', link: 'documentdb/admin/demo-mode' },
