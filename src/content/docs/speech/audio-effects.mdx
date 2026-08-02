@@ -1,0 +1,213 @@
+---
+title: Effects & Recording
+---
+
+`Shiny.Audio` can apply real-time DSP to the microphone — pitch, echo, reverb, filters — and record
+the result straight to a WAV file. Both live in the base `Shiny.Audio` package; there is nothing
+extra to install.
+
+## Why this is managed code
+
+The native capture APIs do not offer a consistent feature set. **No platform supports pitch shift on
+capture at all**; Windows and iOS offer echo and reverb; Android and Linux offer neither. On the
+other hand, every backend already normalizes capture to the same thing — 16 kHz mono PCM16 — so a
+managed DSP chain at that point behaves identically on iOS, Android, Windows, Linux and the browser,
+and is testable without a device.
+
+| | Pitch | Echo | Reverb | Filters |
+| --- | --- | --- | --- | --- |
+| iOS / macOS (AVAudioEngine) | ✅ | ✅ | ✅ | ✅ |
+| Windows (AudioGraph) | ❌ | ✅ | ✅ | ✅ |
+| Android (AudioRecord) | ❌ | ❌ | ❌ | ❌ |
+| Linux (Pulse/PipeWire) | ❌ | ❌ | ❌ | ❌ |
+| Browser (Web Audio) | ❌ | ✅ | ✅ | ✅ |
+
+## Controlling effects live
+
+This is the part worth getting right. An effect is **an object you own** — not a snapshot of
+settings passed at start. Build a chain, keep the references, and mutate them; the audio thread picks
+up each change on the next buffer.
+
+```csharp
+using Shiny.Audio;
+
+var chain = new AudioEffectChain();
+var pitch = chain.Add(new PitchShiftEffect { Semitones = 0 });     // Add returns the instance
+var echo  = chain.Add(new EchoEffect { DelayMs = 250, Mix = 0.35f, Enabled = false });
+
+var stream = await audio.Source.StartCaptureAsync(new AudioCaptureOptions { Effects = chain });
+
+// All of this applies mid-capture, from any thread — no restart, nothing to "apply":
+pitch.Semitones = 5;      // change a value
+echo.Enabled = true;      // switch one effect on
+chain.Enabled = false;    // master bypass
+```
+
+There are three levels of on/off:
+
+| Control | Scope |
+| --- | --- |
+| `chain.Enabled` | Everything — master bypass |
+| `effect.Enabled` | One effect in or out of circuit |
+| `effect.Mix` | Wet/dry blend, on effects that have one |
+
+Composition can change while audio flows too — `Add` and `Remove` publish a new array atomically, and
+the audio thread snapshots it once per buffer, so it never sees a half-built chain.
+
+### Why it doesn't click
+
+Two things would otherwise make live control unusable, and both are handled for you:
+
+- **Parameters are ramped**, not stepped. Assigning a new value moves it across ~15 ms instead of
+  jumping, so dragging a slider doesn't put a discontinuity in the waveform.
+- **Bypass is crossfaded** over ~12 ms rather than hard-switched, so flipping a switch mid-take is
+  inaudible. An effect that has fully faded out is also reset, so switching it back on doesn't
+  replay a stale reverb tail from a minute ago.
+
+Every parameter is a `float` and every setter clamps to its valid range, so you can bind a slider
+directly without validating.
+
+## The effects
+
+```csharp
+new GainEffect          { Gain = 1f };                                       // also GainDb
+new NoiseGateEffect     { ThresholdDb = -45f, AttackMs = 5f, ReleaseMs = 150f };
+new BiquadFilterEffect  { Type = BiquadFilterType.LowPass, Frequency = 1000f, Q = 0.707f };
+BiquadFilterEffect.Telephone();                                              // 1.2 kHz band-pass
+new DistortionEffect    { Drive = 8f, Mix = 1f };
+new RingModEffect       { Frequency = 50f, Mix = 1f };                       // 20–80 Hz = robot voice
+new EchoEffect          { DelayMs = 250f, Feedback = 0.35f, Mix = 0.35f };
+new ChorusEffect        { RateHz = 0.8f, DepthMs = 6f, Mix = 0.5f, Feedback = 0f };
+new ReverbEffect        { RoomSize = 0.6f, Damping = 0.4f, Mix = 0.35f };
+new PitchShiftEffect    { Semitones = 0f };                                  // ±24
+```
+
+`ReverbEffect` is a Freeverb — eight damped comb filters into four allpass diffusers, with the
+classic tunings scaled to the session's sample rate. `PitchShiftEffect` writes into a delay line at
+normal speed while two read heads sweep it at the pitch ratio, crossfading as they wrap; that
+crossfade is what changes pitch while holding duration exactly.
+
+### Presets
+
+```csharp
+var chain = AudioEffectPresets.Create(AudioEffectPreset.Robot);
+```
+
+`Robot`, `Chipmunk`, `DeepVoice`, `Cathedral`, `Telephone`, `Megaphone`, `Ensemble`. A preset returns
+an ordinary chain, so you can keep adjusting it:
+
+```csharp
+var chain = AudioEffectPresets.Create(AudioEffectPreset.Robot);
+var ring = chain.Effects.OfType<RingModEffect>().First();
+ring.Frequency = 80f;
+```
+
+## Recording
+
+`IAudioRecorder` owns the capture session and its drain loop, so there is no PCM stream to pump
+yourself. Output is 16 kHz mono PCM16 WAV.
+
+```csharp
+using Shiny.Audio;
+using Shiny;   // AccessState
+
+var recorder = audio.Recorder;      // transient — one per recording
+
+if (await recorder.RequestAccess() != AccessState.Available)
+    return;
+
+recorder.InputLevelChanged += (_, level) => { /* VU of the signal being written */ };
+
+await recorder.StartAsync(new AudioRecordingOptions
+{
+    Path = null,                    // null → timestamped file under the app's local data dir
+    Mode = AudioRecordMode.Both,    // Wet (default) | Dry | Both
+    Effects = chain,
+    MaxDuration = TimeSpan.FromMinutes(5)
+});
+
+// ... adjust the chain live while it records ...
+
+var recording = await recorder.StopAsync();
+if (recording != null)
+    await audio.Player.PlayAsync(recording.Path);
+```
+
+`StopAsync()` returns `null` when nothing was captured (and leaves no unplayable header-only file
+behind), so always null-check it.
+
+### What gets written
+
+| `Mode` | Result |
+| --- | --- |
+| `Wet` | The processed take — what the effect chain produced. The default. |
+| `Dry` | The untouched microphone. The effect chain is ignored. |
+| `Both` | Two files. `AudioRecording.Path` is the processed one, `AudioRecording.DryPath` the raw one. |
+
+Recording always captures **dry** from the source and applies the chain in the recorder's own loop.
+That is what makes `Both` possible without splitting the capture stream — `PipeStream` is
+single-reader, so there is nothing to tee.
+
+### Re-rendering a dry take
+
+Because `Dry` and `Both` keep the clean recording, you can try different settings later instead of
+asking someone to perform it again:
+
+```csharp
+AudioEffectProcessor.ProcessFile(
+    recording.DryPath!,
+    "take-cathedral.wav",
+    AudioEffectPresets.Create(AudioEffectPreset.Cathedral)
+);
+
+// Or over samples already in memory:
+AudioEffectProcessor.Process(pcm16Samples, chain, sampleRate: 16000);
+```
+
+### WAV I/O
+
+`WavWriter` and `WavReader` are public if you want to handle PCM ↔ WAV yourself. The writer streams —
+it emits the header with placeholder sizes and patches them on close — so a long recording never sits
+in memory.
+
+```csharp
+await using var writer = new WavWriter(File.Create(path), sampleRate: 16000, channels: 1);
+writer.Write(pcmSamples);                       // ReadOnlySpan<short> or ReadOnlySpan<byte>
+
+var bytes = WavWriter.CreateFile(pcmBytes);     // whole file in memory, for short clips
+```
+
+The reader walks the RIFF chunk list rather than assuming a 44-byte header, so files carrying
+`LIST`/`fact` chunks parse correctly; non-PCM formats throw `NotSupportedException`.
+
+:::note[WAV only]
+There is no AAC/MP3 encoder. Compressed output would need a different native encoder on every
+platform — `AVAssetWriter`, `MediaCodec`, Media Foundation — and Linux has none at all.
+:::
+
+## Things to know
+
+:::caution[Never put effects on recognition audio]
+Pitch, reverb and the rest destroy speech-recognition and wake-word accuracy. Don't set
+`AudioCaptureOptions.Effects` on capture that backs an `ISpeechToTextService`, and never wire a chain
+into an `IAiConversationService` voice loop. This is the same hazard
+[`AudioProcessingOptions.Analysis`](/speech/audio) warns about, one step worse.
+:::
+
+**Latency.** Everything except pitch shift is latency-free. `PitchShiftEffect` adds up to one
+crossfade window (~50 ms), and beyond roughly ±7 semitones a voice starts to sound obviously
+processed.
+
+**Cost.** All of it is cheap at 16 kHz mono — comfortable on a Raspberry Pi.
+
+**Fidelity.** Capture is 16 kHz mono, so reverb and pitch sound thinner than they would on
+full-bandwidth stereo. These are voice effects, not mastering tools.
+
+**Metering.** When effects are set on `AudioCaptureOptions`, they run *before* the level is computed,
+so `IAudioSource.InputLevelChanged` reflects the processed signal — a meter shows what you will
+actually hear.
+
+## Live monitor
+
+`IAudioMonitor` (the mic-to-speaker PA) does **not** currently run the effect chain. Effects apply to
+`IAudioSource` capture and to `IAudioRecorder`.

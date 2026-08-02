@@ -123,6 +123,43 @@ await this.Camera.StartVideoRecordingAsync(new VideoRecordingOptions { IncludeAu
 var video = await this.Camera.StopVideoRecordingAsync();   // CameraVideo { FilePath, Duration }
 ```
 
+### Quality, bitrate and frame rate
+
+Recording quality is set on the **control**, not on `VideoRecordingOptions`:
+
+```xml
+<cam:CameraView x:Name="Camera"
+                VideoQuality="High"
+                VideoFrameRate="30" />
+```
+
+```csharp
+this.Camera.VideoQuality  = VideoQuality.Medium;   // 720p
+this.Camera.VideoFrameRate = 24;                   // null = platform default
+this.Camera.VideoBitrate   = 8_000_000;            // null = platform default for the resolution
+```
+
+| `VideoQuality` | Target | Android (CameraX) | Apple (session preset) | Windows |
+|---|---|---|---|---|
+| `Lowest` | Device minimum | `Quality.Lowest` | `Low` | `Qvga` |
+| `Low` | ~480p | `Quality.SD` | `640x480` | `Vga` |
+| `Medium` | 720p | `Quality.HD` | `1280x720` | `HD720p` |
+| `High` *(default)* | 1080p | `Quality.FHD` | `1920x1080` | `HD1080p` |
+| `UltraHigh` | 2160p (4K) | `Quality.UHD` | `3840x2160` | `Uhd2160p` |
+| `Highest` | Device maximum | `Quality.Highest` | `High` | `Uhd2160p` |
+
+A device that cannot deliver the requested rung **falls back to the nearest one it supports** rather than failing to start — capture ladders vary enormously across hardware, and the front camera usually tops out below the back one.
+
+:::caution[These are session settings, not per-recording ones]
+Both AVFoundation (session preset) and CameraX (`QualitySelector` on the `Recorder`) fix the capture resolution when the session is configured. Changing any of these while the camera is running **reconfigures the session**, so set them once or bind them to a preference — don't toggle them per clip. A change made **during** a recording is ignored and applies to the next one: reconfiguring underneath the writer would truncate the file being written.
+
+On Apple the preset sizes the *whole* session, so dropping `VideoQuality` also reduces what the preview and any frame analyzer receive.
+:::
+
+:::tip[If size or heat is the problem, drop the frame rate first]
+`Highest` resolves to 4K on modern hardware — for a continuously-recording app that fills storage fast and runs the device hot. Halving `VideoFrameRate` roughly halves encode work per second of footage and costs far less perceptually on a mostly-static scene than halving resolution does.
+:::
+
 > **Burning a detection into the recording.** Analyzer geometry (`OverlayBox`, `RecognizedText.BoundingBox`) is normalized upright coordinates and `IVideoOverlayRenderer` draws in encoded-frame pixel space, so boxing a detection in the saved file is `box.X * context.Width`, `box.Y * context.Height`. That holds because the analyzed frame and the encoded frame share a field of view — on Apple platforms they are the same sample buffer, and on Android the handler binds a shared CameraX `ViewPort` whenever analysis and recording run together. Without it CameraX would size analysis 4:3 and the recorder 16:9 and the box would land off its subject.
 
 > **Recording and analyzing at the same time** is supported on every platform — a dash-cam-style app can read signs or plates off its own live feed while it records. On **Android** there is one cost: `Preview + VideoCapture + ImageAnalysis` is a guaranteed CameraX combination at LIMITED hardware level, but a *fourth* use case needs LEVEL_3, so **`ImageCapture` is dropped for the duration of a recording that has an enabled analyzer attached**. `CapturePhotoAsync` says exactly that if you call it, and photo capture returns automatically when the recording stops. Outside a recording, an analyzer and `ImageCapture` bind together as before.
@@ -192,6 +229,9 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `ShowDetectionOverlay` | `bool` | `true` | Whether overlay boxes are surfaced for the overlay |
 | `Analyzer` | `IFrameAnalyzer?` | `null` | The single frame analyzer (also the XAML content property); swap live or toggle it via its `IsEnabled`, set `null` for no analysis — see [Frame Analyzers](/controls/cameraview/analyzers/) |
 | `ScanWindow` | `RectF?` (read-only) | `null` | Mirrors the active analyzer's `ScanWindow` (normalized 0..1; `null` = whole frame) |
+| `VideoQuality` | `VideoQuality` | `High` | Target capture resolution for recording — see [Quality, bitrate and frame rate](#quality-bitrate-and-frame-rate) |
+| `VideoBitrate` | `int?` | `null` | Target video encoding bitrate in bits/sec; `null` lets the platform choose for the resolution |
+| `VideoFrameRate` | `int?` | `null` | Target capture frame rate; `null` lets the platform choose. Clamped to what the device's active format supports |
 | `IsRecording` | `bool` (read-only) | `false` | Whether a recording is in progress |
 | `Overlays` | `IReadOnlyList<OverlayBox>` | empty | Latest aggregated overlay boxes (read-only) |
 

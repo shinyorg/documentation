@@ -122,6 +122,37 @@ The connection automatically handles these ELM327 error responses:
 
 Informational prefixes like `SEARCHING...` and `BUS INIT: ...OK` are stripped automatically before parsing.
 
+## Response parsing
+
+A single-frame reply is one line of hex bytes:
+
+```
+41 0D 50
+```
+
+A reply too large for one CAN frame — the VIN (mode 09 PID 02), or mode 03 carrying three or more
+trouble codes — is printed as a **byte count followed by numbered frames**:
+
+```
+014
+0: 49 02 01 57 42 41
+1: 31 32 33 34 35 36 37
+2: 38 39 30 31 32 33 34
+```
+
+The leading `014` is the total number of data bytes (`0x14` = 20: the `49 02 01` header plus 17 VIN
+characters). It is framing, not payload, and is discarded — as is the `N:` index on each frame. The
+remaining bytes are concatenated in frame order and handed to the command's parser.
+
+:::caution
+The count line parses perfectly well as a byte in its own right, so treating it as data shifts the
+whole response along by one and the mode-echo check then rejects a good reply. If you write your own
+`IObdConnection`, drop it explicitly rather than relying on it failing to parse.
+:::
+
+Hex is read whether or not the adapter is spacing it, so `0: 49 02 01` and `0:490201` are equivalent.
+Adapters are asked for spaces during initialization (`ATS1`), but clones ignore it.
+
 ## IObdConnection Interface
 
 ```csharp
