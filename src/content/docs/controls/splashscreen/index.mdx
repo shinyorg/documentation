@@ -1,0 +1,291 @@
+---
+title: Splash Screen (Blazor Only)
+description: A customizable boot splash that paints before Blazor starts — static index.html markup plus splash.js, driven afterwards by ISplashScreen and SplashScreenHost
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+`SplashScreen` covers the gap between "the browser has the page" and "the app is ready" — the blank
+white flash every Blazor app shows while the framework boots and the first data loads.
+
+- <NugetDownloads name="Shiny.Blazor.Controls" />
+
+<PlatformSupport frameworks={["blazor"]} />
+
+{/* TODO: capture screenshots for splashscreen */}
+
+:::caution[This one is not wired up like the other controls, and it cannot be]
+The whole point is to be on screen **before Blazor exists**, so there is no component tree to render
+it into. It ships as three pieces instead:
+
+| Piece | Where | Job |
+|---|---|---|
+| `splash.js` | `_content/Shiny.Blazor.Controls/splash.js` | Classic (non-module) script exposing a global `shinySplash`. Paints on the first frame. |
+| `shiny-splash.css` | `_content/Shiny.Blazor.Controls/css/shiny-splash.css` | Plain stylesheet — it cannot be a scoped `.razor.css`, because that needs Blazor. |
+| `ISplashScreen` / `<SplashScreenHost />` | `Shiny.Blazor.Controls.Splash` | The managed end: status, progress, and the handoff to the app. |
+:::
+
+:::note[No MAUI equivalent, by design]
+MAUI already has a native splash — set `<MauiSplashScreen>` in your `.csproj`. In a **MAUI Blazor
+Hybrid** app you want *both*: the native splash covers window creation → WebView ready, and this one
+covers WebView → Blazor booted. See [Blazor Hybrid](#maui-blazor-hybrid) below.
+:::
+
+## The one rule
+
+**The host `<div>` goes outside `#app`.**
+
+Blazor wipes `#app`'s contents the instant it attaches the root component — which is well before your
+app has loaded anything. A splash placed *inside* `#app` therefore vanishes too early and you get the
+blank flash you were trying to remove. Make it a sibling and dismiss it explicitly.
+
+Load order matters too: `splash.js` must come **before** `blazor.webassembly.js` / `blazor.webview.js`
+so it paints first.
+
+## Setup
+
+```html title="wwwroot/index.html"
+<head>
+    <link href="_content/Shiny.Blazor.Controls/css/shiny-splash.css" rel="stylesheet" />
+</head>
+<body>
+    <div id="app">...</div>
+
+    <div id="shiny-splash"
+         data-shiny-splash
+         data-title="My App"
+         data-subtitle="by Contoso"
+         data-logo="img/logo.svg"
+         data-spinner="ring"
+         data-status="Starting up…"
+         data-min-duration="600"
+         data-fade="300"></div>
+
+    <script src="_content/Shiny.Blazor.Controls/splash.js"></script>
+    <script src="_framework/blazor.webassembly.js"></script>
+</body>
+```
+
+```csharp title="Program.cs"
+using Shiny.Blazor.Controls.Splash;
+
+builder.Services.AddShinySplashScreen();
+```
+
+```razor title="MainLayout.razor"
+@using Shiny.Blazor.Controls.Splash
+
+<SplashScreenHost />
+```
+
+`SplashScreenHost` renders nothing — it exists to dismiss the splash once the app is up. That is
+already a complete, working splash.
+
+## Reporting real startup progress
+
+The interesting version holds the splash through your actual startup work instead of dropping the
+user into an empty shell:
+
+```razor
+<SplashScreenHost Until="StartupAsync" />
+
+@code {
+    [Inject] ISplashScreen Splash { get; set; } = default!;
+
+    async Task StartupAsync()
+    {
+        await Splash.SetStatusAsync("Loading accounts…");
+        await Splash.SetProgressAsync(0.3);
+        await this.accounts.LoadAsync();
+
+        await Splash.SetStatusAsync("Refreshing repositories…");
+        await Splash.SetProgressAsync(0.8);
+        await this.repos.RefreshAsync();
+    }
+}
+```
+
+`Until` runs after the first render and the splash is dismissed in a `finally` — a startup exception
+still ends up visible instead of trapped behind the splash.
+
+To dismiss it from somewhere else entirely, set `AutoHide="false"` and call
+`ISplashScreen.HideAsync()` yourself.
+
+## Replacing the stock template loader
+
+The WebAssembly template ships its own loading UI **inside `#app`**:
+
+```html
+<div id="app">
+    <svg class="loading-progress">…</svg>
+    <div class="loading-progress-text"></div>
+</div>
+```
+
+That placement is exactly why it only ever covers the framework download — Blazor wipes it the
+moment it attaches, so you still get download → blank → pop. `SplashScreen` replaces it outright:
+empty `#app`, put the host beside it, and turn on `blazorLoadProgress` to keep the percentage
+behaviour (both read the same `--blazor-load-percentage`). The difference is that the splash now
+spans **both** phases — the download *and* your startup work.
+
+```html
+<div id="app"></div>
+<div id="shiny-splash" data-shiny-splash data-blazor-progress="true" data-title="My App"></div>
+```
+
+The Blazor Hybrid template's `<div id="app">Loading...</div>` is redundant for the same reason.
+Leave `#blazor-error-ui` alone — it is unrelated, and the [fail-safe](#shinysplashshow-options) is
+what makes a boot error reachable instead of hidden behind a spinner.
+
+## Customization
+
+Because it renders before Blazor, "customizable" cannot mean a `RenderFragment`. There are three
+tiers, in increasing order of control.
+
+### 1. Data attributes
+
+The form shown above — no `<script>` block of your own. Every option in the table below has a
+`data-` equivalent (`minDurationMs` → `data-min-duration`, `failSafeMs` → `data-fail-safe`,
+`blazorLoadProgress` → `data-blazor-progress`, …).
+
+### 2. A config object
+
+```html
+<div id="shiny-splash"></div>
+<script src="_content/Shiny.Blazor.Controls/splash.js"></script>
+<script>
+    shinySplash.show({
+        title: 'My App',
+        logo: 'img/logo.svg',
+        spinner: 'dots',
+        accent: '#7C3AED',
+        background: '#0F172A',
+        foreground: '#F8FAFC',
+        minDurationMs: 400,
+        fadeMs: 250
+    });
+</script>
+```
+
+### 3. Bring your own markup
+
+If the host `<div>` already has children, the script **leaves them completely alone** — it only owns
+show / status / progress / fade / hide. This is the right tier for anything bespoke: an animated
+brand mark, a video, whatever you like.
+
+```html
+<div id="shiny-splash" data-shiny-splash>
+    <div class="my-brand">
+        <svg><!-- your animated logo --></svg>
+        <p data-shiny-splash-status>Starting up…</p>
+        <div class="my-track">
+            <div data-shiny-splash-progress-fill></div>
+        </div>
+        <span data-shiny-splash-percent></span>
+    </div>
+</div>
+```
+
+| Hook | What the script sets |
+|---|---|
+| `[data-shiny-splash-status]` | `textContent` — the status text |
+| `[data-shiny-splash-progress-fill]` | `style.width` — e.g. `42%` |
+| `[data-shiny-splash-percent]` | `textContent` — e.g. `42%` |
+| CSS vars on the host | `--shiny-splash-progress` (`0`–`1`) and `--shiny-splash-progress-pct` (`42%`) |
+
+### Theming the built-in look
+
+Four CSS custom properties, each defaulting to the matching Shiny theme token:
+`--shiny-splash-bg`, `--shiny-splash-fg`, `--shiny-splash-accent`, `--shiny-splash-muted`.
+Set them via the `background` / `foreground` / `accent` / `muted` options, or in your own CSS.
+
+## `shinySplash.show` options
+
+| Option | Type | Default | Description |
+|---|---|---|---|
+| `hostId` | `string` | `'shiny-splash'` | Element id to use; created and appended to `<body>` if missing |
+| `title` | `string?` | `null` | Headline (ignored when you supply your own markup) |
+| `subtitle` | `string?` | `null` | Secondary line |
+| `logo` | `string?` | `null` | Image `src` |
+| `logoAlt` | `string` | `''` | Image alt text |
+| `spinner` | `string` | `'ring'` | `ring` \| `dots` \| `bar` \| `pulse` \| `none` |
+| `status` | `string?` | `null` | Initial status line |
+| `progress` | `number?` | `null` | `0`–`1`; `null` means indeterminate |
+| `background` / `foreground` / `accent` / `muted` | `string?` | theme tokens | Written as `--shiny-splash-*` CSS vars on the host |
+| `cssClass` | `string?` | `null` | Extra class on the host |
+| `minDurationMs` | `number` | `0` | Minimum time on screen — stops a warm start flickering |
+| `fadeMs` | `number` | `250` | Fade-out duration |
+| `failSafeMs` | `number` | `30000` | Auto-hide if `hide()` is never called (`0` disables) |
+| `blazorLoadProgress` | `bool` | `false` | **WASM only** — mirror Blazor's `--blazor-load-percentage` into the progress bar |
+| `removeOnHide` | `bool` | `true` | Remove the host from the DOM on hide; `false` just hides it so it can be re-shown |
+| `lockScroll` | `bool` | `true` | Adds `shiny-splash-locked` to `<html>` while visible |
+
+:::tip[The fail-safe is not optional cleverness]
+If your app throws during startup, `hide()` never runs and the user stares at a spinner forever. The
+fail-safe dismisses the splash after `failSafeMs` and logs a console warning explaining what
+happened, so the real error becomes visible.
+:::
+
+## `shinySplash` globals
+
+| Call | Notes |
+|---|---|
+| `shinySplash.show(options)` | No-op if already showing |
+| `shinySplash.status(text)` | |
+| `shinySplash.progress(value)` | `0`–`1`, or `null` for indeterminate. Also cancels the `blazorLoadProgress` tracker — an explicit call always wins. |
+| `shinySplash.hide(fadeMs?)` | Idempotent; honours `minDurationMs`. Fires a `shiny-splash-hidden` event on `document`. |
+| `shinySplash.isVisible()` | |
+
+## `ISplashScreen`
+
+| Member | Notes |
+|---|---|
+| `ValueTask<bool> IsVisibleAsync()` | |
+| `ValueTask SetStatusAsync(string?)` | |
+| `ValueTask SetProgressAsync(double?)` | Clamped to `0`–`1`; `null` = indeterminate |
+| `ValueTask HideAsync(int? fadeMs = null)` | Idempotent |
+
+Every call is a best-effort no-op if `splash.js` was never referenced — forgetting the `<script>` tag
+should not take your app down at startup.
+
+## `<SplashScreenHost />`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `AutoHide` | `bool` | `true` | Hide once the app has rendered |
+| `Until` | `Func<Task>?` | `null` | Startup work awaited before hiding; exceptions surface, but the splash is dismissed first |
+| `Delay` | `int` | `0` | Extra milliseconds to hold after ready |
+| `FadeDuration` | `int?` | `null` | Overrides the fade configured at show time |
+| `Hidden` | `EventCallback` | — | Raised after dismissal |
+
+## WebAssembly load progress
+
+During the initial download Blazor WASM writes `--blazor-load-percentage` onto `:root`. Set
+`blazorLoadProgress` and the splash mirrors it into the progress bar, so the bar reflects the real
+runtime download rather than a fake animation. The tracker stops at 100% (or on your first explicit
+`SetProgressAsync`) and hands the bar over to your own startup reporting.
+
+This is meaningless outside WASM — Blazor Server and Blazor Hybrid have no download phase, and the
+variable simply never appears.
+
+## MAUI Blazor Hybrid
+
+There are two splashes in a Hybrid app:
+
+1. the native `MauiSplashScreen` — window creation → WebView ready
+2. this one — WebView → Blazor booted
+
+Give them the same background colour, along with `<body>` and the `BlazorWebView` background, or you
+get a white flash at each seam. Skip `blazorLoadProgress`; drive the bar from your own startup work
+instead.
+
+## Accessibility
+
+The host is `role="progressbar"` with `aria-live="polite"`, `aria-busy`, and `aria-valuenow` tracking
+determinate progress. Under `prefers-reduced-motion` every indicator degrades to a static, legible
+shape rather than being animated to nothing, and the fade is disabled.
+
+## AI Skill
+
+<AiSkill skillName="shiny-controls" />

@@ -543,6 +543,7 @@ export const sidebarTopics = [
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
+          { label: 'Splash Screen (Blazor Only)', link: 'controls/splashscreen/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
