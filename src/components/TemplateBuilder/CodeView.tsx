@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import Prism from 'prismjs';
+import Prism from '../prism';
 import 'prismjs/components/prism-csharp';
 import 'prismjs/themes/prism-tomorrow.css';
 import CopyToClipboardButton from '../CopyToClipboardButton';

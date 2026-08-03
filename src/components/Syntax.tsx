@@ -1,5 +1,5 @@
 import CopyToClipboardButton from './CopyToClipboardButton';
-import Prism from "prismjs";
+import Prism from "./prism";
 import "prismjs/components/prism-csharp";
 import "prismjs/themes/prism-tomorrow.css";
 import React from 'react';

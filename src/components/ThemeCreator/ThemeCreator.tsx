@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import Prism from 'prismjs';
+import Prism from '../prism';
 import 'prismjs/components/prism-json';
 import 'prismjs/components/prism-csharp';
 import 'prismjs/components/prism-markdown';
