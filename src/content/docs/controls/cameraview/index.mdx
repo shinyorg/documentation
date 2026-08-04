@@ -1,15 +1,26 @@
 ---
 title: CameraView
-description: Cross-platform .NET MAUI & Blazor camera preview with zoom, torch, lens selection, photo + video capture, live filters, and a pluggable frame-analysis pipeline (barcode, face, motion, OCR)
+description: Cross-platform .NET MAUI & Blazor camera preview with zoom, torch, lens selection, photo + video capture, a pluggable effects pipeline (colour grades, comic/sketch looks, face masks, AI stylization) and a pluggable frame-analysis pipeline (barcode, face, motion, OCR, documents, AI)
 ---
 import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 import AiSkill from '/src/components/AiSkill.astro';
 
-`Shiny.Maui.Controls.Camera` is a cross-platform `CameraView` for .NET MAUI — live preview with **zoom, torch, lens selection, photo & video capture, and live color filters** — backed by AVFoundation (iOS / Mac Catalyst / macOS AppKit), CameraX (Android) and Media Capture (Windows). A matching `Shiny.Blazor.Controls.Camera` brings the same control to Blazor WebAssembly via `getUserMedia`.
+`Shiny.Maui.Controls.Camera` is a cross-platform `CameraView` for .NET MAUI — live preview with **zoom, torch, lens selection, photo & video capture, and a live effects pipeline** — backed by AVFoundation (iOS / Mac Catalyst / macOS AppKit), CameraX (Android) and Media Capture (Windows). A matching `Shiny.Blazor.Controls.Camera` brings the same control to Blazor WebAssembly via `getUserMedia`.
 
-What sets it apart from other camera controls is the **pluggable frame-analysis pipeline**: assign a single analyzer to the view and it streams frames to it off the UI thread. The analyzer draws styled bounding boxes continuously (via the built-in `CameraOverlayView`) but delivers a result only on a **gated "scan trigger"** — arm with `Scan()` / `ScanCommand` and the next confirmed detection fires once (an `OnDetected` handler returning `true` keeps scanning). The analyzer can be **declared right in XAML** (it's the content property of `CameraView`), and an optional **`ScanWindow`** restricts detection to a region and draws an aim reticle. Ships with analyzers for **barcode/QR scanning, face detection, motion detection, OCR**, and **structured documents** — invoices (with order lines), receipts (line items + per-tax breakdown + totals), business cards (emails + typed phones + name/title/company), AAMVA driver's licenses, Canadian-province-aware health cards, credit cards, and passports (MRZ). Each document is a strong record with nullable fields.
+Two pluggable pipelines are what set it apart from other camera controls, and they compose:
+
+**The frame-analysis pipeline** — assign a single analyzer to the view and it streams frames to it off the UI thread. The analyzer draws styled bounding boxes continuously (via the built-in `CameraOverlayView`) but delivers a result only on a **gated "scan trigger"** — arm with `Scan()` / `ScanCommand` and the next confirmed detection fires once (an `OnDetected` handler returning `true` keeps scanning). The analyzer can be **declared right in XAML** (it's the content property of `CameraView`), and an optional **`ScanWindow`** restricts detection to a region and draws an aim reticle. Ships with analyzers for **barcode/QR scanning, face detection, motion detection, OCR**, and **structured documents** — invoices (with order lines), receipts (line items + per-tax breakdown + totals), business cards (emails + typed phones + name/title/company), AAMVA driver's licenses, Canadian-province-aware health cards, credit cards, and passports (MRZ). Each document is a strong record with nullable fields. When the document is free-form — or you'd rather not write parse rules — the **AI document scanner** detects that a document is present cheaply on every frame and sends just that one frame to a `Microsoft.Extensions.AI` `IChatClient` for structured extraction.
+
+**The effects pipeline** — `Effects` is an ordered, live collection applied to the preview, captured stills and (on Apple) recorded video: eleven colour grades, five spatial GPU looks (comic, sketch, posterize, pixelate, blur), compositing draw effects for watermarks and **face masks** anchored to tracked facial landmarks, and slow post-capture transforms such as **AI photo stylization**. `Filter` is sugar over it — always applied first in the chain.
+
+- [Frame Analyzers](/controls/cameraview/analyzers/) — barcode, face, motion, OCR, documents, custom
+- [Effects & Filters](/controls/cameraview/effects/) — the four effect kinds, built-ins, per-platform coverage
+- [Face Masks](/controls/cameraview/face-masks/) — Messenger-style masks anchored to landmarks
+- [AI Document Scanner](/controls/cameraview/ai/) — detect a document, then let an `IChatClient` read it
+- [AI Photo Stylizer](/controls/cameraview/ai-stylize/) — "redraw my photo as a comic" on the shutter
+- [Blazor Usage](/controls/cameraview/blazor/) — the WebAssembly specifics
 
 - <NugetDownloads name="Shiny.Maui.Controls.Camera" />
 - <NugetDownloads name="Shiny.Blazor.Controls.Camera" />
@@ -20,13 +31,34 @@ What sets it apart from other camera controls is the **pluggable frame-analysis 
 
 ## Features
 
-- **Live preview** with `AspectFill` / `AspectFit` scaling.
-- **Lens & device selection** — `Facing` (Back / Front) or pick an exact device (multiple back lenses, USB webcams on macOS) via `GetAvailableCamerasAsync()` + `CameraId`.
-- **Zoom** (clamped to the device's reported range), optionally driven by **pinch-to-zoom**, and **torch / flashlight**.
-- **Photo capture** → JPEG bytes, and **video recording** with optional audio.
-- **Live color filters** — Mono, Noir, Sepia, Invert, Vivid, Cool, Warm, Fade, Chrome, Instant, Tonal (Apple Core Image, Android RenderEffect, Blazor CSS).
-- **Frame-analysis pipeline** — a single pluggable `IFrameAnalyzer` with back-pressure (drop-on-busy); boxes draw every frame, results are delivered on a gated scan trigger (`Scan()` / `OnDetected`), optionally restricted to a `ScanWindow`. See [Frame Analyzers](/controls/cameraview/analyzers/).
-- **Modular analyzer packages** — add only what you need: `.Camera.Barcode`, `.Camera.Face`, `.Camera.Motion`, `.Camera.Ocr`, `.Camera.Documents`.
+### Capture
+
+- **Live preview** with `AspectFill` / `AspectFit` scaling, auto-starting and self-permissioning, with interruptions (phone call, another app taking the camera, thermal throttling) reported through `CameraError` and recovered from automatically.
+- **Lens & device selection** — `Facing` (Back / Front / External) or pin an exact device (multiple back lenses, USB webcams on macOS) via `GetAvailableCamerasAsync()` + `CameraId`.
+- **Zoom** (clamped to the device's reported `MinZoom`..`MaxZoom`), optionally driven by **pinch-to-zoom**.
+- **Torch / flashlight** (`IsTorchOn`, continuous) and **still-capture flash** (`FlashMode` — Off / On / Auto).
+- **Photo capture** → JPEG bytes with the effects chain baked in, plus `CaptureAndStopAsync()` for a "scan then freeze" flow.
+- **Video recording** with optional audio, and session-level **quality, bitrate and frame-rate** control (`VideoQuality` `Lowest`…`Highest`, with fallback to the nearest rung the device supports).
+- **Burn-in video overlays** — composite a watermark, timestamp or telemetry into every *encoded* frame via `VideoRecordingOptions.Overlay`, drawn with `Microsoft.Maui.Graphics` so one implementation covers every platform.
+- **Recording and analyzing at the same time** on every platform — a dash-cam app can read signs off its own live feed while it records.
+
+### Effects — [Effects & Filters](/controls/cameraview/effects/)
+
+- **Ordered, live effects chain** (`Effects`) applied to the preview, captured photos and recorded video — mutate it while the camera runs and the change lands on the next frame.
+- **Eleven colour grades** — Mono, Noir, Sepia, Invert, Vivid, Cool, Warm, Fade, Chrome, Instant, Tonal (Apple Core Image, Android `RenderEffect`, Blazor CSS), reachable as `Filter` or as `CameraEffects.*`.
+- **Five spatial GPU looks** — Comic, Sketch, Posterize, Pixelate, Blur — things no colour matrix can express.
+- **Four extension points** — `IColorEffect` (a colour matrix, honoured everywhere), `INativeEffect` (a per-backend GPU program), `IDrawEffect` (compositing over preview + stills + video), `ICaptureEffect` (slow post-capture work).
+- **[Face masks](/controls/cameraview/face-masks/)** — anchor an image or custom drawing to tracked facial landmarks with smoothing (`FaceMaskEffect` + `FaceAnalyzer { DetectLandmarks = true }`).
+- **[AI photo stylization](/controls/cameraview/ai-stylize/)** — `AiPhotoStylizer` over a `Microsoft.Extensions.AI` `IImageGenerator`, so `CapturePhotoAsync` returns the regenerated image.
+- **Honest per-platform coverage** — `CameraView.GetEffectSupport(effect)` returns `Full` / `ColorOnly` / `StillOnly` / `Unsupported` so a UI can grey out what would silently do nothing.
+
+### Analysis — [Frame Analyzers](/controls/cameraview/analyzers/)
+
+- **Frame-analysis pipeline** — a single pluggable `IFrameAnalyzer` with back-pressure (drop-on-busy); boxes draw every frame, results are delivered on a gated scan trigger (`Scan()` / `OnDetected`), optionally restricted to a `ScanWindow` that the overlay frames as a viewfinder.
+- **Built-in analyzers** — barcode/QR (native Vision / MLKit, restrictable to specific symbologies), face (with landmarks), motion (clustered into regions, debounced), OCR (with scan-window crop + upscale for small text), and structured documents.
+- **[AI document scanner](/controls/cameraview/ai/)** — `AiDocumentAnalyzer<T>` detects presence natively every frame but calls the model at most once per document, straight into your record via MEAI structured output.
+- **Drop-in overlay** — `CameraOverlayView` layered over the preview auto-subscribes, tracks `ScaleMode`/aspect, and dims + reticles the scan window; box and reticle colours are tunable.
+- **Modular analyzer packages** — add only what you need: `.Camera.Barcode`, `.Camera.Face`, `.Camera.Motion`, `.Camera.Ocr`, `.Camera.Documents`, `.Camera.Ai`.
 
 ## AI Skill
 
@@ -38,6 +70,14 @@ What sets it apart from other camera controls is the **pluggable frame-analysis 
 
 ```bash
 dotnet add package Shiny.Maui.Controls.Camera
+
+# optional — add only the analyzers you need
+dotnet add package Shiny.Maui.Controls.Camera.Barcode
+dotnet add package Shiny.Maui.Controls.Camera.Face
+dotnet add package Shiny.Maui.Controls.Camera.Motion
+dotnet add package Shiny.Maui.Controls.Camera.Ocr
+dotnet add package Shiny.Maui.Controls.Camera.Documents   # invoice / receipt / business card / licence / health card / credit card / passport
+dotnet add package Shiny.Maui.Controls.Camera.Ai          # AI document scanner + AI photo stylizer
 ```
 
 Register the handler alongside `UseShinyControls()`:
@@ -100,9 +140,12 @@ protected override void OnDisappearing()
     this.Camera.IsActive = false;   // release the camera while off-screen
 }
 
-// Capture a still — the current Filter is baked into the JPEG, so preview and photo match
+// Capture a still — the whole effects chain is baked into the JPEG, so preview and photo match
 var photo = await this.Camera.CapturePhotoAsync();
 await File.WriteAllBytesAsync(path, photo.Data);
+
+// Or capture and stop the session in one step (handy from an analyzer's OnDetected — "scan then freeze")
+var frozen = await this.Camera.CaptureAndStopAsync();
 
 // Flip the lens
 this.Camera.Facing = this.Camera.Facing == CameraFacing.Back
@@ -208,7 +251,7 @@ On Apple the preset sizes the *whole* session, so dropping `VideoQuality` also r
 
 > **Recording and analyzing at the same time** is supported on every platform — a dash-cam-style app can read signs or plates off its own live feed while it records. On **Android** there is one cost: `Preview + VideoCapture + ImageAnalysis` is a guaranteed CameraX combination at LIMITED hardware level, but a *fourth* use case needs LEVEL_3, so **`ImageCapture` is dropped for the duration of a recording that has an enabled analyzer attached**. `CapturePhotoAsync` says exactly that if you call it, and photo capture returns automatically when the recording stops. Outside a recording, an analyzer and `ImageCapture` bind together as before.
 >
-> Recorded video is **not** filtered — it records the raw feed even when a `Filter` is set (filters apply to the preview and captured photos only).
+> **Effects in the recorded file are platform-dependent.** On Apple the whole chain (colour, spatial and draw effects, including `Filter`) is composited into the recording, so the file matches the preview. On **Android** only *draw* effects reach the file — the preview's `RenderEffect` lives on `PreviewView`, not on the `VideoCapture` use case, so a colour or comic look is not recorded. On **Windows and Blazor** the recording is the raw feed. See [Effects & Filters](/controls/cameraview/effects/) for the full coverage table.
 
 ### Burn overlays into the recording
 
@@ -235,15 +278,25 @@ Two ship-ready implementations are included: `DelegateVideoOverlay` (an inline d
 >
 > When `Overlay` is `null` the fast native recorder is used unchanged (no performance or behavior change). Burn-in overlays are supported on **iOS, Mac Catalyst, macOS, and Android**; on **Windows** `StartVideoRecordingAsync` throws `PlatformNotSupportedException` when an overlay is set — record without it, or use the on-preview `CameraOverlayView`.
 
-## Live Filters
+## Live Filters & Effects
 
 ```xml
 <cam:CameraView Filter="Noir" />
 ```
 
-`Filter` accepts `None`, `Mono`, `Noir`, `Sepia`, `Invert`, `Vivid`, `Cool`, `Warm`, `Fade`, `Chrome`, `Instant`, `Tonal`. Filtering is applied to the live preview (Apple `CIFilter` — the `Fade`/`Chrome`/`Instant`/`Tonal` set maps to the Core Image `CIPhotoEffect*` filters; Android `RenderEffect` color matrix on API 31+; Blazor CSS); on Windows it is best-effort.
+`Filter` accepts `None`, `Mono`, `Noir`, `Sepia`, `Invert`, `Vivid`, `Cool`, `Warm`, `Fade`, `Chrome`, `Instant`, `Tonal`. Filtering is applied to the live preview (Apple `CIFilter` — the `Fade`/`Chrome`/`Instant`/`Tonal` set maps to the Core Image `CIPhotoEffect*` filters; Android `RenderEffect` color matrix on API 31+; Blazor CSS); on Windows it applies to captured stills only.
 
-The same filter is also baked into **captured photos** (`CapturePhotoAsync`) on Apple and Android, so a still matches the preview. **Recorded video is not filtered** (it records the raw feed), and Windows photos are unfiltered (it has no live filter). On **Android below API 31** the live preview is unfiltered (no `RenderEffect`), but captured photos are still filtered.
+The same filter is baked into **captured photos** (`CapturePhotoAsync`) on every platform, so a still matches the preview. On **Android below API 31** the live preview is unfiltered (no `RenderEffect`), but captured photos still come back filtered via a managed CPU pass.
+
+`Filter` is **sugar over the `Effects` chain** — the chosen grade is materialized as the *first* effect, so setting both is well-defined rather than depending on assignment order:
+
+```csharp
+this.Camera.Filter = CameraFilter.Noir;             // applied first
+this.Camera.Effects.Add(CameraEffects.Comic);       // then this
+this.Camera.Effects.Add(new DelegateDrawEffect("stamp", (canvas, frame, ctx) => { /* ... */ }));
+```
+
+For anything beyond the eleven built-in colour grades — comic/sketch/blur looks, watermarks, face masks, AI stylization — and for the per-platform coverage table, see [Effects & Filters](/controls/cameraview/effects/).
 
 ## Selecting a Camera
 
@@ -270,7 +323,10 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `IsTorchOn` | `bool` | `false` | Continuous flashlight/torch |
 | `FlashMode` | `CameraFlashMode` | `Off` | Flash behaviour for still capture (`Off`/`On`/`Auto`) |
 | `ScaleMode` | `PreviewScaleMode` | `AspectFill` | How the preview fills the view |
-| `Filter` | `CameraFilter` | `None` | Color filter — applied to the preview and captured photos (not recorded video; no-op on Windows) |
+| `Filter` | `CameraFilter` | `None` | Color grade — sugar over `Effects`, always applied **first** in the chain |
+| `Effects` | `IList<ICameraEffect>` | empty | Ordered, live effects chain — colour, spatial, compositing and post-capture. Mutate while running; see [Effects & Filters](/controls/cameraview/effects/) |
+| `EffectChain` | `CameraEffectChain` (read-only) | `Empty` | Immutable snapshot of `Filter` + `Effects` that the handlers render against |
+| `LastAnalyzerResult` | `object?` (read-only) | `null` | The active analyzer's latest **ungated** result (updated every frame), handed to draw effects as `ctx.AnalyzerResult` |
 | `ShowDetectionOverlay` | `bool` | `true` | Whether overlay boxes are surfaced for the overlay |
 | `Analyzer` | `IFrameAnalyzer?` | `null` | The single frame analyzer (also the XAML content property); swap live or toggle it via its `IsEnabled`, set `null` for no analysis — see [Frame Analyzers](/controls/cameraview/analyzers/) |
 | `ScanWindow` | `RectF?` (read-only) | `null` | Mirrors the active analyzer's `ScanWindow` (normalized 0..1; `null` = whole frame) |
@@ -288,9 +344,12 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `StopScanning()` | Disarm the analyzer |
 | `RequestPermissionAsync()` | Request camera permission |
 | `StartAsync()` / `StopAsync()` | Start / stop the session |
-| `CapturePhotoAsync()` | Capture a still → `CameraPhoto` |
+| `CapturePhotoAsync()` | Capture a still → `CameraPhoto` (`Data` / `Width` / `Height`, with the effects chain applied) |
+| `CaptureAndStopAsync()` | Capture a still **and** stop the session, atomically → `CameraPhoto` |
 | `StartVideoRecordingAsync()` / `StopVideoRecordingAsync()` | Record video → `CameraVideo` |
 | `GetAvailableCamerasAsync()` | Enumerate cameras → `IReadOnlyList<CameraInfo>` |
+| `CameraView.GetEffectSupport(effect)` *(static)* | How much of an effect this platform honours → `Full` / `ColorOnly` / `StillOnly` / `Unsupported` |
+| `RebuildEffectChain()` | Re-snapshot the chain after mutating state *inside* an effect (the collection can't observe that) |
 | `MediaCaptured` / `VideoCaptured` | Raised after a photo / video is captured |
 | `OverlaysChanged` | Raised with the latest aggregated overlay boxes (presentation only) |
 | `CameraError` | Raised on a camera or pipeline error |
@@ -299,7 +358,9 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 
 ## When to Use What
 
-Assign the matching analyzer to `CameraView.Analyzer` (one runs at a time). To offer several detectors, build them up front and swap the chosen one into `Analyzer` (e.g. from a picker) — see [Frame Analyzers](/controls/cameraview/analyzers/).
+Assign the matching analyzer to `CameraView.Analyzer` (one runs at a time). To offer several detectors, build them up front and swap the chosen one into `Analyzer` (e.g. from a picker) — see [Frame Analyzers](/controls/cameraview/analyzers/). Effects are additive by contrast: add as many as you like to `Effects`, in order.
+
+### Detecting something
 
 - **Scan a barcode / QR** → `BarcodeAnalyzer` ([Frame Analyzers](/controls/cameraview/analyzers/)).
 - **Detect / box faces** → `FaceAnalyzer`.
@@ -311,4 +372,16 @@ Assign the matching analyzer to `CameraView.Analyzer` (one runs at a time). To o
 - **Scan a driver's license / health card** → `DriversLicenseAnalyzer` (deterministic AAMVA, incl. Canadian provinces + jurisdiction) or a Canadian-province-aware `HealthCardAnalyzer` from `.Camera.Documents`.
 - **Scan a passport** → `PassportAnalyzer` (deterministic MRZ → number, names, nationality, DOB, expiry).
 - **Read a credit card** → `CreditCardAnalyzer` (brand + number deterministic; name/expiry best-effort).
+- **Parse a free-form or unknown document** → `AiDocumentAnalyzer` / `AiDocumentAnalyzer<T>` from `.Camera.Ai` — see [AI Document Scanner](/controls/cameraview/ai/).
+- **Restrict scanning to a band** → set the analyzer's `ScanWindow` (the overlay dims outside it and frames a reticle).
 - **Just take a photo or record video** → no analyzer required; use `CapturePhotoAsync` / `StartVideoRecordingAsync`.
+
+### Changing how it looks
+
+- **Apply a live colour grade** → set `Filter` (or add the matching `CameraEffects.*` to `Effects`).
+- **Apply a comic / sketch / posterize / pixelate / blur look** → add `CameraEffects.Comic` (etc.) to `Effects` — procedural, offline, live on the preview.
+- **Ship your own look** → add a `ColorEffect` (a matrix, works everywhere) or an `INativeEffect` carrying a `NativeEffectDescriptor` — see [Effects & Filters](/controls/cameraview/effects/).
+- **Stick something on the user's face** → `FaceAnalyzer { DetectLandmarks = true }` + a `FaceMaskEffect` — see [Face Masks](/controls/cameraview/face-masks/).
+- **Draw a watermark / timestamp across preview, photos and video** → add a `DelegateDrawEffect` to `Effects`.
+- **Burn something into the recorded file only** → `VideoRecordingOptions.Overlay` (see [Burn overlays into the recording](#burn-overlays-into-the-recording)).
+- **"Redraw my photo as a comic"** → add an `AiPhotoStylizer` to `Effects` — see [AI Photo Stylizer](/controls/cameraview/ai-stylize/). Pair it with `CameraEffects.Comic` for a matching live viewfinder.

@@ -116,10 +116,42 @@ A value that is not an envelope is read back as-is, so mapping a property on a p
 | [Replication / a second store](/documentdb/providers/) | Same: the target needs the same keys to materialize the property. |
 | [JSON collections](/documentdb/json-collections/) | Envelope passthrough, no decryption. |
 | [Raw JSON terminals](/documentdb/querying/#raw-json-results) | Throw `NotSupportedException` naming the encrypted properties. Handing back the stored body would emit ciphertext on the zero-copy providers and plaintext on the rest — one call, two answers — so the lane refuses the type outright. Read it typed. |
+| [OData](/documentdb/odata/) and the [AI tools](/documentdb/ai-tools/) | Return the **decrypted** value, matching `Get<T>()`. See "Encryption is at rest" below. |
+| `GetDiff` / `GetDiffBetween` | Compare the decrypted documents, so an unchanged encrypted property produces no operation. |
 | [Computed properties](/documentdb/computed-columns/), [full text](/documentdb/full-text/), [vectors](/documentdb/vector/) | Do not map them over an encrypted property — the engine only sees ciphertext. |
 | [Soft delete](/documentdb/soft-delete/), interceptors, sessions | Unaffected. |
 | [SQLCipher](/documentdb/sqlcipher/) | Complementary: SQLCipher encrypts the whole SQLite file at rest, this encrypts named properties on every provider. Use both if you want both. |
 | AOT | Clean. Every converter instantiation is explicit — no `MakeGenericType`. |
+
+## Encryption is at rest — plan the wire separately
+
+A mapped property is ciphertext **in the database**. Everywhere else it is the value: `Get<T>()`, `ToList()`,
+the [OData](/documentdb/odata/) entity set and the [AI tools](/documentdb/ai-tools/) all hand back
+`"123-45-6789"`, because they all hand back a materialized document.
+
+:::caution[If a property must not leave the process, do not expose it]
+Mapping a property for encryption does **not** keep it out of an HTTP response. An entity set over a type with
+encrypted properties serves them like any other. Project to a DTO, or don't map that type as an entity set.
+:::
+
+The reason this needs saying: the converters are symmetric — reading a stored body decrypts, writing encrypts.
+Anything that turns a materialized document back into JSON therefore has to serialize through a plaintext
+writer, or it re-encrypts what it just decrypted. Library code that does this uses
+`DocumentEncryption.PlaintextView(...)`; if you serialize documents yourself with the store's
+`JsonSerializerOptions`, use it too:
+
+```csharp
+var patients = await store.Query<Patient>().ToList();
+
+// wrong — re-encrypts every mapped property, with a new envelope each time under Randomized
+var wrong = JsonSerializer.Serialize(patients, storeOptions);
+
+// right
+var json = JsonSerializer.Serialize(patients, DocumentEncryption.PlaintextView(storeOptions));
+```
+
+It returns the very same instance when nothing on those options is encrypted, so it costs nothing to use by
+default. It is a **writer**: point it at documents, never at a stored body — it does not decrypt.
 
 ## Limits
 
