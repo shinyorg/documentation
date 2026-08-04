@@ -8,6 +8,45 @@ import RN from '/src/components/ReleaseNote.astro';
 ## 13.0 TBD
 
 <RN type="feature">
+**Tenant-per-database routing, hardened.** `AddMultiTenantDocumentStore` now survives a real deployment: a
+**bounded** store cache (LRU + idle eviction, with lease-based deferred disposal so eviction never pulls a
+store out from under a running request), a new overload taking a **built store** so tenants can live on any
+provider rather than relational only, per-tenant initialization, and `IDocumentSession` /
+`IDocumentSessionFactory` wired to the current tenant (they were not registered at all before).
+
+```csharp
+services.AddMultiTenantDocumentStore(
+    tenantId => new MongoDbDocumentStore(MongoOptionsFor(tenantId)),   // any provider
+    o =>
+    {
+        o.MaxCachedStores = 250;
+        o.IdleTimeout = TimeSpan.FromMinutes(30);
+        o.SeedFromRegisteredSeeders();      // startup seeders now run per tenant, on first touch
+    });
+```
+
+Each tenant's store tags its telemetry with `db.namespace` = the tenant id (bucket it with
+`StoreNameFactory` at high tenant counts), and the new `ITenantStoreManager` adds `ActiveTenants`,
+`WarmAsync` and `EvictAsync` for onboarding/offboarding without a restart. See
+[Multi-Tenancy](/documentdb/multi-tenancy).
+</RN>
+
+<RN type="fix">
+**Tenant stores were closed by the first request that finished.** The scoped `IDocumentStore` registration
+handed the cached store to the DI scope, and the container disposes any `IDisposable` a scoped factory
+returns — so a tenant's shared store was disposed at the end of the first request that touched it. The cache
+now owns store lifetime; the scope owns a lease.
+</RN>
+
+<RN type="breaking">
+**Tenant stores can be disposed while the process lives.** Idle/LRU eviction means a captured
+`IDocumentStore` from a tenant-routed registration may become disposed — resolve it per scope instead. Opt
+out with `IdleTimeout = null` and `MaxCachedStores = int.MaxValue`. The internal
+`MultiTenantDocumentStoreFactory` is deleted (it was never public); the existing
+`AddMultiTenantDocumentStore(Func<string, DocumentStoreOptions>)` call site is unchanged.
+</RN>
+
+<RN type="feature">
 **Transactional outbox.** Record "this happened" in the *same transaction* as the write that made it happen,
 and have it delivered to a bus, an HTTP endpoint or an in-process mediator — with no second datastore and no
 dual-write window.

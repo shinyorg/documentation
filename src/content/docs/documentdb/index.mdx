@@ -76,7 +76,7 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Clear the whole store** — `((IDocumentMaintenance)store).ClearAll()` wipes every document type plus temporal-history, spatial, and vector sidecars (test/dev resets) without touching the system catalogs. Implemented on the relational `DocumentStore` (SQLite, SQL Server, PostgreSQL, MySQL, DuckDB, Oracle), MongoDB, and CosmosDB; the older `SqliteDocumentStore.ClearAllAsync()` delegates to it
 - **Database seeding** — register `IDocumentSeeder`s to populate initial data once at startup. Schema-free seeding is just idempotent writes, so seeders are provider-agnostic; run-once is versioned via a `DocumentSeedMarker` (bump `Version` to re-run). Wire with `AddDocumentSeeder<T>()` / `AddDocumentSeeder(name, version, delegate)` at host startup, or call `DocumentSeedRunner.RunAsync(store, seeders)` directly (e.g. on MAUI)
 - **SQLCipher encryption** — separate `Shiny.DocumentDb.Sqlite.SqlCipher` package with AES-256 encryption, password-aware backup, and `RekeyAsync` to change the encryption key
-- **Multi-tenancy** — two isolation strategies: **shared-table** (single database with automatic `TenantId` column filtering) and **tenant-per-database** (separate database per tenant via lazy factory). Both resolve the current tenant via a user-implemented `ITenantResolver`. Consumer code is unchanged — tenant isolation is applied transparently
+- **Multi-tenancy** — two isolation strategies: **shared-table** (single database with automatic `TenantId` column filtering) and **tenant-per-database** (a store per tenant on any provider, built on first use and held in a bounded cache with per-tenant seeding, eviction control and per-tenant telemetry). Both resolve the current tenant via a user-implemented `ITenantResolver`. Consumer code is unchanged — tenant isolation is applied transparently
 - **Change monitoring** — consume an `IAsyncEnumerable<DocumentChange<T>>` of insert/update/remove/clear events with `await foreach (var c in store.NotifyOnChange<User>(ct))`. Filter to a single document with `WhenDocumentChanged<T>(id)` or to the result set of a fluent query with `query.NotifyOnChange()`. Buffered in a session and emitted on commit. [Learn more](/documentdb/change-monitoring/)
 - **Native change feeds** — `IChangeFeedDocumentStore.SubscribeChanges<T>` observes all writers via the database's own mechanism: **PostgreSQL** `LISTEN`/`NOTIFY` triggers, **SQL Server** Change Tracking (optionally with `SqlDependency` query notifications), and **Cosmos DB** native Change Feed. Provisioning is automatic and idempotent
 - **Temporal history (system-time versioning)** — `cfg.MapTemporal(o => { o.Retention = ...; o.MaxVersions = ...; o.CaptureActor = ...; })` opts a type into append-only versioning. Every Insert/Update/Upsert/Remove/SetProperty/RemoveProperty/BatchInsert records a snapshot to a per-type history sidecar. Read it back with `History<T>(id)`, `AsOf<T>(id, when)`, `Restore<T>(id, version)`, `GetDiffBetween<T>(id, from, to)`, plus fleet-wide `AsOfAll<T>(when)`, `ChangesByActor<T>(actor)`, and `ChangesBetween<T>(from, to)` — on the `ITemporalDocumentStore` capability interface, not `IDocumentStore`. Opt-in per type, on every provider (relational and document/NoSQL). [Learn more](/documentdb/temporal/)
@@ -258,13 +258,16 @@ A lightweight, database-agnostic document store for .NET that turns your databas
        opts.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=...");
    }, multiTenant: true);
 
-   // Tenant-per-database: separate database per tenant (scoped IDocumentStore)
+   // Tenant-per-database: separate database per tenant (scoped IDocumentStore, bounded cache)
    services.AddSingleton<ITenantResolver, MyTenantResolver>();
    services.AddMultiTenantDocumentStore(tenantId => new DocumentStoreOptions
    {
        DatabaseProvider = new SqliteDatabaseProvider($"Data Source={tenantId}.db")
    });
    ```
+
+   See [Multi-Tenancy](/documentdb/multi-tenancy) for choosing between them, the store-cache knobs,
+   per-tenant seeding, and `ITenantStoreManager`.
 
    Both require an `ITenantResolver` implementation:
 

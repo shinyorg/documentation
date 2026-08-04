@@ -583,6 +583,7 @@ export const sidebarTopics = [
           { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
           { label: 'Write Interceptors', link: 'documentdb/interceptors' },
           { label: 'Query Filters', link: 'documentdb/query-filters' },
+          { label: 'Multi-Tenancy', link: 'documentdb/multi-tenancy' },
           { label: 'Soft Delete', link: 'documentdb/soft-delete' },
           { label: 'Transactional Outbox', link: 'documentdb/outbox' },
           { label: 'Field-Level Encryption', link: 'documentdb/encryption' },

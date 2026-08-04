@@ -1,0 +1,187 @@
+---
+title: Multi-Tenancy
+---
+
+Two isolation models ship in the box, and they compose. Both answer "who am I?" the same way — a
+user-implemented `ITenantResolver` — and both leave consumer code untouched: you inject `IDocumentStore`
+and the right data comes back.
+
+| | Shared-table | Tenant-per-database |
+|---|---|---|
+| Registration | `AddDocumentStore(configure, multiTenant: true)` | `AddMultiTenantDocumentStore(factory)` |
+| Isolation | A `TenantId` column, filtered on every read and write | A separate physical database per tenant |
+| Backup / restore granularity | Whole table (all tenants) | Per tenant |
+| Noisy neighbour | Shared connection pool, shared indexes | Isolated per tenant |
+| Cost at 5,000 tenants | One database | 5,000 databases to provision and pay for |
+| Cross-tenant reporting | One query | Iterate tenants yourself |
+| Schema/seed rollout | Once | Once per tenant (automated — see below) |
+| Providers | Relational + every provider that supports query filters | Any provider implementing `IDocumentStore` |
+
+Rule of thumb: shared-table until a tenant's data must be physically separable (contractual, regulatory,
+or per-tenant restore), then tenant-per-database.
+
+## `ITenantResolver`
+
+```csharp
+public interface ITenantResolver
+{
+    string GetCurrentTenant();
+}
+
+public class HttpContextTenantResolver(IHttpContextAccessor http) : ITenantResolver
+{
+    public string GetCurrentTenant()
+        => http.HttpContext?.User.FindFirst("tenant_id")?.Value
+           ?? throw new InvalidOperationException("No tenant context");
+}
+```
+
+Register it **scoped** and it resolves from the caller's own DI scope when reading/writing through a scoped
+`IDocumentSession` or `DocumentContext` — the request's tenant, without an ambient `IHttpContextAccessor`.
+The immediate path (`store.Insert`, no scope) falls back to the root.
+
+## Shared-table
+
+One database, a dedicated `TenantId` column and index added for you, every query filtered and every insert
+stamped:
+
+```csharp
+services.AddSingleton<ITenantResolver, HttpContextTenantResolver>();
+services.AddDocumentStore(o =>
+{
+    o.DatabaseProvider = new PostgreSqlDatabaseProvider("Host=…");
+}, multiTenant: true);
+```
+
+Without DI, set `TenantIdAccessor` on the options directly. See
+[Query Filters](/documentdb/query-filters#relationship-to-tenantidaccessor) for how this relates to the
+general filter mechanism.
+
+## Tenant-per-database
+
+Each tenant's store is built on first use and cached. `IDocumentStore`, `IDocumentSession` and
+`IDocumentSessionFactory` are all wired to the current tenant:
+
+```csharp
+services.AddSingleton<ITenantResolver, HttpContextTenantResolver>();
+
+services.AddMultiTenantDocumentStore(tenantId => new DocumentStoreOptions
+{
+    DatabaseProvider = new PostgreSqlDatabaseProvider(ConnectionStringFor(tenantId))
+});
+```
+
+That overload is the relational convenience — you hand back options, the store is built for you. The other
+overload hands back a **built store**, so tenants can live on any provider:
+
+```csharp
+services.AddMultiTenantDocumentStore(tenantId => new MongoDbDocumentStore(new MongoDbDocumentStoreOptions
+{
+    ConnectionString = "mongodb://…",
+    DatabaseName = $"tenant_{tenantId}"
+}));
+```
+
+Provisioning the database itself stays yours (or your IaC/Aspire pipeline's). DocumentDb creates its tables
+inside a database that already exists.
+
+### The store cache
+
+Stores are expensive — each one holds a connection pool. The cache is therefore **bounded**, and every knob
+lives on `TenantStoreOptions`:
+
+```csharp
+services.AddMultiTenantDocumentStore(
+    tenantId => new DocumentStoreOptions { DatabaseProvider = … },
+    o =>
+    {
+        o.MaxCachedStores = 250;                     // LRU beyond this is evicted
+        o.IdleTimeout = TimeSpan.FromMinutes(30);    // null disables idle eviction
+        o.StoreNameFactory = t => t.Split('-')[0];   // db.namespace bucketing
+        o.SeedFromRegisteredSeeders();               // run AddDocumentSeeder seeders per tenant
+    });
+```
+
+| Option | Default | What it does |
+|---|---|---|
+| `MaxCachedStores` | `100` | Cap on open tenant stores. Resolving one more evicts the least recently used. `int.MaxValue` never evicts on size |
+| `IdleTimeout` | `20 min` | Evicts a store that has not been resolved for this long. `null` disables it — and the background sweeper with it |
+| `OnTenantStoreCreated` | `null` | Runs once per tenant, after the store is built and **before** it is handed to the first caller |
+| `StoreNameFactory` | tenant id | Names the tenant's store for telemetry (`db.namespace`). Relational overload only |
+
+:::caution[Eviction disposes stores while the process lives]
+A tenant store can be closed at any time. Resolve `IDocumentStore` **per scope** — capturing one in a
+singleton and using it later throws `ObjectDisposedException`. Eviction never pulls a store out from under a
+running request: the DI scope holds a lease, and disposal waits for the last one to be returned. Opt out
+entirely with `IdleTimeout = null` and `MaxCachedStores = int.MaxValue`.
+:::
+
+### Per-tenant seeding and initialization
+
+Startup seeding runs once, against the store registered at startup — a tenant whose database is first touched
+at 3pm never sees it. So under tenant routing, seeders run per tenant instead, when that tenant's store is
+built:
+
+```csharp
+services.AddDocumentSeeder<ReferenceDataSeeder>();
+services.AddMultiTenantDocumentStore(OptionsFor, o => o.SeedFromRegisteredSeeders());
+```
+
+Run-once semantics are unchanged — each tenant's database carries its own version marker, so a seeder runs
+once per tenant and re-runs there when you bump its `Version`. The startup hosted service skips the default
+store when tenant routing is registered (keyed stores still seed at startup as usual).
+
+For anything else — migrations, warming a cache, provisioning-side checks — use the hook directly:
+
+```csharp
+o.OnTenantStoreCreated = async ctx =>
+{
+    ctx.Services.GetRequiredService<ILogger<Startup>>().LogInformation("Opening {Tenant}", ctx.TenantId);
+    await ctx.Store.Insert(new TenantMarker { Id = ctx.TenantId }, cancellationToken: ctx.CancellationToken);
+};
+```
+
+A throwing hook fails that resolution and caches nothing, so the next request retries it.
+
+### Operating the cache
+
+```csharp
+public class TenantAdminService(ITenantStoreManager tenants)
+{
+    public IReadOnlyCollection<string> Open => tenants.ActiveTenants;
+
+    public Task OnboardAsync(string tenantId) => tenants.WarmAsync(tenantId);   // build + seed off the request path
+    public Task OffboardAsync(string tenantId) => tenants.EvictAsync(tenantId); // close, waiting for in-flight requests
+}
+```
+
+`WarmAsync` and `EvictAsync` are both idempotent, and an evicted tenant simply gets a fresh store on its next
+request.
+
+### Telemetry
+
+Each tenant's store tags its spans and metrics with `db.namespace` = the tenant id, so you can see *which*
+tenant is slow. At tens of tenants that is exactly what you want; at thousands it is unbounded metric
+cardinality — bucket it (or collapse it to a constant) with `StoreNameFactory`.
+
+## Combining the two
+
+They are independent. A tenant-routed store may itself be shared-table, which is how you give large tenants
+their own database and pack the long tail into a shared one:
+
+```csharp
+services.AddMultiTenantDocumentStore(tenantId => new DocumentStoreOptions
+{
+    DatabaseProvider = new PostgreSqlDatabaseProvider(ConnectionStringFor(tenantId)),
+    TenantIdAccessor = IsDedicated(tenantId) ? null : () => subTenants.Current
+});
+```
+
+## Limits
+
+- **No tenant provisioning.** Creating the database or schema is yours; DocumentDb initializes tables inside it.
+- **No cross-tenant queries.** Aggregating across tenants means iterating tenants yourself.
+- **A source-generated [`DocumentContext`](/documentdb/context) keeps its own store** (keyed by the context
+  type) and is not tenant-routed — inject `IDocumentStore`/`IDocumentSession` in a tenant-routed app.
+- **A hand-rolled `IDocumentStore`** that is `IDisposable` and does not derive from `DocumentProviderBase`
+  will be disposed by the resolving DI scope; stores built by this library know the cache owns them.
