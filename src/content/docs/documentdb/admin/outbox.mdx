@@ -1,0 +1,112 @@
+---
+title: Outbox
+description: Queue depth, dead-letter triage and requeue for the transactional outbox — a database-level screen in the Admin UI, so an operator can answer "is anything stuck?" without a deploy.
+---
+
+Appears when a database holds [transactional outbox](/documentdb/outbox) messages. A **database-level**
+screen rather than a type tab, because the question it answers is "what is stuck in this database" — not
+"what facets does this type have".
+
+An outbox is the first thing in DocumentDb whose failure mode is *operational* rather than *data*: the order
+was saved but the email never went out. Answering that means asking a live database four questions, and then
+doing exactly one thing about it.
+
+:::caution[This tool cannot deliver messages]
+Delivery is `IOutboxDispatcher` — an application-side implementation over a transport this tool has no
+access to. **Requeue** only makes a message *eligible* again; your application's running processor does the
+delivery. A "dispatch now" button would be a lie of the same shape as the tool pretending it can run your
+interceptors.
+:::
+
+## The health strip
+
+Pending, scheduled, dead-lettered, processed — and **oldest pending**, which is the number that matters.
+
+A healthy busy system has a large pending count. A system whose processor died has an *old* one. Depth alone
+cannot tell those apart; age can. When the oldest pending message has been waiting more than about a minute,
+the tile turns amber and the screen says the only thing worth saying:
+
+> Nothing has drained recently — is the outbox processor running?
+
+Live refresh is off by default and only polls while the tab is open. An admin tool has no business holding a
+connection open on a schedule.
+
+## The four states
+
+Derived from three nullable timestamps, not stored:
+
+| State | Meaning |
+|---|---|
+| **Pending** | Undelivered and eligible now |
+| **Scheduled** | Undelivered, waiting out a retry backoff |
+| **Dead-lettered** | Out of attempts. Never removed automatically |
+| **Processed** | Delivered and acknowledged |
+
+The chips above the grid are canned filters over those, alongside free-text message-type and partition-key
+boxes. Clicking a row opens its payload, its headers, and its `traceparent` — paste that into your APM and
+you have the request that caused the event.
+
+## The failures panel
+
+Visible only when there are dead letters: message type × error summary × count, each with **Requeue these**.
+
+This is the view that finds the one poison consumer, which the flat grid cannot. Errors are collapsed by
+their first line with embedded ids normalised away, so a hundred instances of the same failure are one row
+rather than a hundred. The grouping scan is capped, and the cap is stated when it bites.
+
+## Actions
+
+Hidden entirely on a [read-only connection](/documentdb/admin/connections) — a read-only profile gets a
+read-only screen, not a broken one. Each is a two-click confirm stating the exact count.
+
+**Requeue selected** / **Requeue all dead letters** clears the dead-letter state, blanks the error, zeroes
+the attempt counter and sets `availableAt` to now. The dead-letter guard is in the *predicate*, not just the
+UI: requeueing a merely scheduled message would reset its backoff, and requeueing a processed one would
+redeliver a business event that already happened, so both are refused even when named explicitly.
+
+When any selected message has a partition key the confirm adds a warning: requeueing re-inserts it *behind*
+messages already delivered for that key, so ordering for that partition was already broken by the
+dead-letter and will not be restored.
+
+**Purge processed** deletes acknowledged messages older than the chosen cut-off. It is structurally
+incapable of touching a pending or dead-lettered row — only a delivered message has a `processedAt` at all.
+
+:::note
+Requeue is a **business-event redelivery**. Consumers are required to be idempotent (delivery is
+at-least-once by design), but the person clicking is often the one about to find out whether they actually
+are.
+:::
+
+Both writes are set-based, so no interceptors run and no [temporal version](/documentdb/temporal) is
+recorded — which matches what the library's own `ExecuteUpdate` and `ExecuteDelete` do.
+
+## Where it looks
+
+The outbox is discovered by scanning each browsable table's type list for the message type, never by
+assuming a table name. That works whether the messages sit in the default dedicated `outbox` table, a
+shared one, or wherever the application mapped them. More than one hit puts a table picker in the header;
+none hides every entry point, so there is no dead end.
+
+A store using `TypeNameResolution.FullName` writes a dotted type name, which can be browsed but not
+addressed through the JSON-collection lane (collection names are validated because they are interpolated
+into DDL). The screen says so and points at the [query console](/documentdb/admin/query-console).
+
+## Terminal UI
+
+The same screen is in the [terminal front end](/documentdb/admin/terminal) — health line, grid, state
+filters, `Enter` for the payload, `r` to requeue, `p` to purge — and every action is also a named command in
+the palette, because in a terminal the palette is the address bar.
+
+## The assistant
+
+The [AI assistant](/documentdb/admin/assistant) gets one new read-only tool, `outbox_status`: the health
+record plus the top failure groups, in a single call. It answers "is anything stuck?" and "what is failing?"
+together, which is the pair of questions worth a tool.
+
+Requeue and purge stay off the tool surface. The assistant may diagnose; the human acts.
+
+## Provider support
+
+Relational databases only, like every other screen in this tool — it sits on `IDatabaseProvider`, which is a
+SQL dialect. A [LiteDB outbox](/documentdb/litedb) is fully supported by the library but has no screen here.
+That is a whole-tool limitation, not an outbox one.

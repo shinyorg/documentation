@@ -1,0 +1,325 @@
+---
+title: Transactional Outbox
+---
+
+An outbox lets your application record "this happened" **in the same transaction as the write that made it
+happen**, then deliver it to a bus, an HTTP endpoint, or an in-process mediator — with no second datastore
+and no dual-write window.
+
+```csharp
+services.AddDocumentStore(o =>
+{
+    o.DatabaseProvider = new SqliteDatabaseProvider(path);
+    o.AddOutbox();                              // maps OutboxMessage → its own "outbox" table
+});
+services.AddDocumentOutbox<BusDispatcher>();    // the background processor + IOutboxAdmin
+```
+
+```csharp
+await using var session = store.OpenSession();
+session.Add(order).Enqueue(new OrderPlaced(order.Id, order.Total));
+await session.SaveChanges();      // the order row and the outbox row commit together, or neither does
+```
+
+## The problem it solves
+
+Without an outbox, saving an order and publishing `OrderPlaced` are two writes to two systems:
+
+```csharp
+await store.Insert(order);
+await bus.Publish(new OrderPlaced(order.Id, order.Total));   // ← crash here and the event is lost forever
+```
+
+There is no ordering of those two calls that is safe. Publish first and a failed insert means an event for
+an order that does not exist; insert first and a crash means an order nobody downstream ever hears about.
+The outbox removes the second system from the write path entirely: the event is a row in *your* database,
+written by the same transaction, and a background processor delivers it afterwards.
+
+## Two ways to enqueue
+
+### Explicitly, inside your own unit of work
+
+`Enqueue` buffers an `OutboxMessage` in the session alongside everything else. `SaveChanges` flushes the lot
+in one transaction.
+
+```csharp
+await using var session = store.OpenSession();
+
+session.Add(order)
+       .Enqueue(new OrderPlaced(order.Id, order.Total))
+       .Enqueue(new InventoryReserved(order.Id), partitionKey: order.Id);
+
+await session.SaveChanges();
+```
+
+:::caution
+Always enqueue through the **session** that is doing the aggregate write. A `store.Insert(message)` in a
+separate call is a dual write with extra steps — exactly the failure the outbox exists to remove.
+:::
+
+### Declaratively, per document type
+
+`PublishToOutbox` publishes an event for every write of a type. It runs in the interceptor pipeline's
+`AfterWrite` hook, which fires **inside the same transaction as the write**, after it succeeds and before it
+commits.
+
+```csharp
+o.ConfigureDocument<Order>(cfg => cfg.PublishToOutbox(
+    ctx => new OrderChanged((string)ctx.Id!, ctx.Operation),
+    OutboxOperations.Insert | OutboxOperations.Update,
+    partitionKey: ctx => (string)ctx.Id!));
+```
+
+Return `null` from the factory to publish nothing for that write — the hook for "only when the status
+actually changed". `ctx.Document` is null for a delete-by-id, where only `ctx.Id` is available.
+
+## The delivery contract
+
+Delivery is **at-least-once**. A dispatcher that succeeds and then crashes before its acknowledgement is
+written will deliver the same message again. **Consumers must be idempotent.** There is no distributed
+transaction with your bus — that is the whole point of an outbox.
+
+Write a dispatcher:
+
+```csharp
+public sealed class BusDispatcher(IBus bus) : IOutboxDispatcher
+{
+    public Task Dispatch(OutboxMessage message, CancellationToken ct)
+        // Throw to retry (with backoff); return normally to acknowledge.
+        => bus.Publish(message.MessageType, message.Payload, ct);
+}
+```
+
+…or skip the type for a transport that needs no injected state:
+
+```csharp
+services.AddDocumentOutbox((msg, ct) => bus.Publish(msg.MessageType, msg.Payload, ct));
+```
+
+The dispatcher is resolved from a **fresh DI scope per message**, so scoped dependencies behave the way they
+would in a request.
+
+### Shiny.Mediator
+
+```csharp
+public sealed class MediatorDispatcher(IMediator mediator) : IOutboxDispatcher
+{
+    public async Task Dispatch(OutboxMessage message, CancellationToken ct)
+    {
+        var type = Type.GetType(message.MessageType)
+            ?? throw new InvalidOperationException($"Unknown message type '{message.MessageType}'.");
+
+        var evt = (IEvent)JsonSerializer.Deserialize(message.Payload, type)!;
+        await mediator.Publish(evt, cancellationToken: ct);
+    }
+}
+```
+
+### MassTransit
+
+```csharp
+public sealed class MassTransitDispatcher(IPublishEndpoint endpoint) : IOutboxDispatcher
+{
+    public async Task Dispatch(OutboxMessage message, CancellationToken ct)
+    {
+        var type = Type.GetType(message.MessageType)
+            ?? throw new InvalidOperationException($"Unknown message type '{message.MessageType}'.");
+
+        await endpoint.Publish(JsonSerializer.Deserialize(message.Payload, type)!, type, ct);
+    }
+}
+```
+
+## How the processor works
+
+`AddDocumentOutbox` registers a `BackgroundService` that loops:
+
+1. **Select candidates** — undelivered, not dead-lettered, and past their `AvailableAt` gate, ordered by id.
+   Ids are monotonic version-7 UUIDs, so ordering by id is FIFO without a second index.
+2. **Claim each** — bump `Attempts`, push `AvailableAt` forward by the backoff, and write the message back
+   with its row version. A `ConcurrencyException` means another worker got there first, so this one moves on.
+   That is the entire concurrency design: no leases table, no leader election, and any number of workers
+   scale by just running.
+3. **Dispatch** — resolve `IOutboxDispatcher` from a fresh scope, restore the trace context, and call it
+   inside an `outbox.dispatch` span.
+4. **Acknowledge or fail** — success sets `ProcessedAt`; failure records the error, and dead-letters the
+   message once `Attempts` reaches `MaxAttempts`.
+5. **Sweep** — periodically delete acknowledged messages older than `Retention`.
+
+Because the claim pushes `AvailableAt` forward, the backoff doubles as a **visibility timeout**: a processor
+that dies mid-dispatch releases its message rather than stranding it.
+
+### Options
+
+```csharp
+services.AddDocumentOutbox<BusDispatcher>(o =>
+{
+    o.BatchSize = 50;                                   // messages claimed per poll
+    o.MaxParallelism = 4;                               // concurrent dispatches
+    o.MaxAttempts = 8;                                  // attempts before dead-lettering
+    o.PollInterval = TimeSpan.FromSeconds(5);           // how often an empty queue is checked
+    o.Backoff = n => TimeSpan.FromSeconds(Math.Pow(2, n));
+    o.Retention = TimeSpan.FromDays(7);                 // null keeps acknowledged messages forever
+    o.OrderedPartitions = false;
+});
+```
+
+The **table** is not among them — it is a store mapping, chosen once by `o.AddOutbox("my_outbox")`, so the
+two halves cannot disagree about where the messages live.
+
+### Ordering
+
+`OrderedPartitions` dispatches messages sharing a `PartitionKey` strictly in order, one at a time. Different
+partitions still run in parallel, and a message with no partition key has no ordering requirement.
+
+A message that fails blocks **its own partition only**, and only until it dead-letters. Once it does, the
+ordering guarantee for that key is broken by definition — the messages behind it will be delivered without
+it. There is no ordering across partitions and none at all without a partition key.
+
+## Watching the queue
+
+`WatchOutbox` is a read-only async stream — for a dashboard, a health check, or a test:
+
+```csharp
+await foreach (var msg in store.WatchOutbox(o => o.States = OutboxStates.DeadLettered, ct))
+    logger.LogError("Outbox dead letter {Id}: {Error}", msg.Id, msg.Error);
+```
+
+```csharp
+// Decoded, narrowed to one event type
+await foreach (var envelope in store.WatchOutbox<OrderPlaced>(cancellationToken: ct))
+    Console.WriteLine(envelope.Event.OrderId);
+```
+
+It **never claims, acknowledges or mutates** a message, so it cannot compete with the processor for work.
+
+It is a poll, nudged early by change notification where the store supports it — and that order matters. A
+failed message becomes pending again purely because its `AvailableAt` elapsed, which is a *clock* event with
+no write behind it, so a notification-driven stream would never yield it. In-process notifications are also
+blind to other writers, and an outbox usually has several. Polling is the correctness floor; the nudge only
+shortens the latency.
+
+:::caution
+`WatchOutbox` does **not** promise every revision. A message enqueued, dispatched and acknowledged between
+two polls is never observed, which is correct for a monitor. If you need to see every message, you are the
+dispatcher — register one with `AddDocumentOutbox` rather than watching, or you have built a second,
+competing consumer and duplicated a side effect in production.
+:::
+
+## The operational runbook
+
+Four questions, and one thing to do about them.
+
+| Question | In-process | Admin tool |
+|---|---|---|
+| How deep is the queue? | `IOutboxAdmin.PendingCount()` | The health strip |
+| Is it draining? | `IOutboxAdmin.OldestPendingAt()` | "Oldest pending" |
+| What is dead-lettered? | `IOutboxAdmin.DeadLetters()` | The failures panel |
+| Put it back | `IOutboxAdmin.Requeue(ids)` | *Requeue* |
+
+**Alert on age, not depth.** A healthy busy system has a large pending count; a system whose processor died
+has an *old* one. `OldestPendingAt` is the number that separates them, and `db.client.outbox.pending` is the
+metric to graph beside it.
+
+```csharp
+app.MapHealthChecks("/health/outbox");
+
+services.AddHealthChecks().AddCheck("outbox", async () =>
+{
+    var admin = app.Services.GetRequiredService<IOutboxAdmin>();
+    var oldest = await admin.OldestPendingAt();
+    return oldest < DateTimeOffset.UtcNow.AddMinutes(-5)
+        ? HealthCheckResult.Unhealthy($"oldest pending message is from {oldest:O}")
+        : HealthCheckResult.Healthy();
+});
+```
+
+Requeue clears the dead-letter state, zeroes the attempt counter, and makes the message eligible again.
+Messages that are merely *scheduled* or already *processed* are skipped even when named explicitly —
+resetting a backoff and redelivering a business event that already happened are both worse than doing
+nothing.
+
+For the same runbook from outside the application — no code change, no deploy — see the
+[admin tool's outbox screen](/documentdb/admin/outbox).
+
+## Telemetry
+
+The [embedded instrumentation](/documentdb/diagnostics) covers the outbox without any extra setup:
+
+| Signal | Name |
+|---|---|
+| Span | `outbox.dispatch` (message type, attempt, partition) |
+| Counter | `db.client.outbox.dispatched` |
+| Counter | `db.client.outbox.dead_lettered` |
+| Histogram | `db.client.outbox.dispatch.duration` |
+| Gauge | `db.client.outbox.pending` |
+
+The `traceparent` is captured at **enqueue** and restored at dispatch, so a consumer's span links back to
+the request that caused the event rather than to a background loop.
+
+## Provider support
+
+The outbox requires a store whose unit of work is a **real transaction**. `AddDocumentOutbox` checks
+`IDocumentStore.SupportsTransactions` once at host startup and throws by name where the guarantee cannot be
+met, rather than silently degrading to a dual write.
+
+| Tier | Providers | |
+|---|---|---|
+| Supported | SQLite, SQLCipher, PostgreSQL, CockroachDB, SQL Server, MySQL, MariaDB, Oracle, DuckDB, LiteDB | A real database transaction |
+| Not supported | MongoDB, Cosmos DB, Redis, RavenDB, Azure Table, DynamoDB, Firestore, IndexedDB | Compensating unit only |
+
+On the unsupported backends a unit of work undoes the inserts of a unit whose later work threw, but a
+process that dies **mid**-unit runs no compensation at all — which is precisely the dual-write window an
+outbox exists to close. Cosmos DB is a further no: "same transaction" there means "same logical partition",
+and the store partitions by type name, so an outbox message and the aggregate that produced it are always in
+different partitions.
+
+On those backends, drive events from [`IChangeFeedDocumentStore`](/documentdb/change-monitoring) instead.
+
+## Storage
+
+Messages are ordinary documents in their own table (`outbox` by default) — query them, back them up,
+replicate them. Every property carries an explicit `[JsonPropertyName]`, because these rows are read by
+other processes and their wire shape must not follow whatever `PropertyNamingPolicy` the application
+configures.
+
+| Property | Wire name | |
+|---|---|---|
+| `Id` | `id` | Monotonic v7 UUID in "N" form — ordering by id is FIFO |
+| `MessageType` | `messageType` | The logical event name a dispatcher switches on |
+| `Payload` | `payload` | The serialized event body |
+| `PartitionKey` | `partitionKey` | Ordering scope; null means unordered |
+| `Headers` | `headers` | Transport metadata, including `traceparent` |
+| `CreatedAt` | `createdAt` | |
+| `AvailableAt` | `availableAt` | Backoff gate |
+| `Attempts` | `attempts` | |
+| `ProcessedAt` | `processedAt` | Null while in flight |
+| `DeadLetteredAt` | `deadLetteredAt` | Never deleted automatically |
+| `Error` | `error` | Last dispatch failure |
+| `Version` | `version` | Optimistic concurrency — the claim primitive |
+
+Pass `o.MessageTypeInfo = OutboxJsonContext.Default.OutboxMessage` when the store runs
+[without a reflection fallback](/documentdb/aot).
+
+## Without a generic host
+
+`OutboxRunner` is the processor's work as a plain object — for a mobile app, a scheduled job, or a test that
+wants one deterministic pass instead of a background timer:
+
+```csharp
+var runner = new OutboxRunner(store, dispatcher, options, timeProvider);
+
+await runner.DrainOnce();      // claim + dispatch one batch
+await runner.PurgeExpired();   // retention sweep
+var depth = await runner.PendingDepth();
+```
+
+## What this is not
+
+- **Not a message bus.** No transport, no consumer side. `IOutboxDispatcher` hands you a message; publishing
+  it is your implementation.
+- **Not change data capture.** [`IChangeFeedDocumentStore`](/documentdb/change-monitoring) exposes
+  engine-level change streams. The outbox carries the domain events the application *chose* to publish,
+  which is a different and much smaller set.
+- **No inbox or dedup store.** Consumer-side idempotency is the consumer's problem; delivery is
+  at-least-once and says so.

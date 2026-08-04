@@ -7,6 +7,72 @@ import RN from '/src/components/ReleaseNote.astro';
 
 ## 13.0 TBD
 
+<RN type="feature">
+**Transactional outbox.** Record "this happened" in the *same transaction* as the write that made it happen,
+and have it delivered to a bus, an HTTP endpoint or an in-process mediator — with no second datastore and no
+dual-write window.
+
+```csharp
+o.AddOutbox();                                  // maps OutboxMessage → its own "outbox" table
+services.AddDocumentOutbox<BusDispatcher>();    // the processor + IOutboxAdmin
+
+await using var session = store.OpenSession();
+session.Add(order).Enqueue(new OrderPlaced(order.Id, order.Total));
+await session.SaveChanges();                    // both rows commit together, or neither does
+```
+
+Or declaratively, per type: `cfg.PublishToOutbox(ctx => new OrderChanged(...))`.
+
+Delivery is at-least-once with an attempt counter, exponential backoff and dead-lettering; claiming is
+per-message optimistic concurrency, so any number of workers scale by just running. `store.WatchOutbox(…)` is
+a read-only stream for dashboards and health checks, `IOutboxAdmin` is the in-process operational view, and
+the `traceparent` captured at enqueue is restored at dispatch so a consumer's span links back to the request
+that caused it. New span `outbox.dispatch` plus `db.client.outbox.*` counters and a pending-depth gauge.
+
+**Provider tier:** relational (SQLite, SQLCipher, PostgreSQL, CockroachDB, SQL Server, MySQL, MariaDB, Oracle,
+DuckDB) and LiteDB. The rest implement a unit of work by *compensation*, which does nothing for a process that
+dies mid-unit — the exact window an outbox exists to close — so a new `IDocumentStore.SupportsTransactions`
+capability gates them out at host startup, by name, instead of shipping a promise that does not hold. Cosmos DB
+is a further no: "same transaction" there means "same logical partition", and the store partitions by type
+name. Point those backends at `IChangeFeedDocumentStore` instead.
+
+See [Transactional Outbox](/documentdb/outbox/).
+</RN>
+
+<RN type="feature">
+**Outbox queue screen in ShinyDocDbMyAdmin**, in both the web and terminal front ends. Health strip (pending /
+scheduled / dead-lettered / processed, plus **oldest pending** — the number that separates "busy" from "the
+processor died"), state filters, dead letters grouped by message type and error, and requeue / purge behind a
+confirm. It cannot dispatch, and says so: delivery is your application's `IOutboxDispatcher`, over a transport
+the tool cannot reach.
+
+The assistant gets one new read-only tool, `outbox_status`. Requeue stays a deliberate human click.
+See [Admin: Outbox](/documentdb/admin/outbox/).
+</RN>
+
+<RN type="fix">
+**SQL Server: `ExecuteUpdate` and `SetProperty` rejected date and `Guid` values.** `JSON_MODIFY` only accepts
+the scalar types it can map onto a JSON value, so a `datetimeoffset`, `date` or `uniqueidentifier` parameter
+failed outright with *"invalid for argument 3 of json_modify"*. Those types are now bound as the exact text a
+normal document write would have serialized — which is also the form the ISO-8601 comparisons behind date
+predicates need in order to match.
+</RN>
+
+<RN type="fix">
+**In-memory query evaluation could not order dates, strings or `Guid`s.** The interpreter behind LiteDB and the
+other client-side query paths coerced both sides of a relational comparison to `double`, so
+`x.CreatedAt > cutoff` threw `InvalidCastException`. Non-numeric ordered values now compare through
+`IComparable` (with `DateTime`/`DateTimeOffset` normalized to UTC), and a comparison involving `null` is false
+rather than a coercion of zero — matching the SQL the relational providers emit for the same predicate.
+</RN>
+
+<RN type="enhancement">
+**New `:datetimeoffset` type hint in the string query grammar**, alongside `:date`. Schema-free dates are
+compared as ISO-8601 *text*, so the argument has to be written the way the document body was: a `DateTime`
+renders `…Z` (or no suffix), a `DateTimeOffset` renders `…+00:00`, and comparing one against the other gives
+wrong answers around fractional seconds. Hint whichever the stored property actually is.
+</RN>
+
 <RN type="breaking">
 **Encrypted properties now leave the library as plaintext, not as re-encrypted envelopes.** The encrypting
 converters are symmetric — reading a stored body decrypts, writing encrypts — so any code that materialized a
