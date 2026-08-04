@@ -689,6 +689,84 @@ The terminal takes the first row **of the current window**, not of the whole res
 `Query<User>().OrderBy(u => u.Age).Paginate(20, 10).First()` is the 21st user by age. Drop the `Paginate` if you meant the first overall.
 :::
 
+## Raw JSON results
+
+Sometimes the document never needs to become an object. A web API that reads `Order` only to write it straight back into the response body pays for a deserialize **and** a re-serialize, for nothing. The JSON terminals end the same typed query with raw JSON instead of `T`:
+
+```csharp
+// The whole typed builder still applies — this is the same query, materialized differently.
+var json = await store.Query<Order>()
+    .Where(o => o.Status == "open")
+    .OrderByDescending(o => o.CreatedAt)
+    .Paginate(0, 50)
+    .ToJsonList();                    // IReadOnlyList<JsonObject>
+```
+
+There are two lanes. The **node lane** parses each body into a mutable `JsonObject`, which is what you want when the result still needs a tweak on the way out. The **raw lane** does not parse at all:
+
+```csharp
+// One document — hand the stored body straight to the client
+var raw = await store.Query<Order>().Where(o => o.Id == id).FirstOrDefaultRawJson();
+return raw is null ? Results.NotFound() : Results.Content(raw, "application/json");
+
+// A whole list — written to the response as one array, never buffered, never parsed
+ctx.Response.ContentType = "application/json";
+await store.Query<Order>()
+    .Where(o => o.Status == "open")
+    .WriteJsonArrayTo(ctx.Response.Body, ct);
+```
+
+| Terminal | Returns | Typed twin |
+|---|---|---|
+| `ToJsonList()` | `IReadOnlyList<JsonObject>` | `ToList()` |
+| `ToJsonAsyncEnumerable()` | `IAsyncEnumerable<JsonObject>` | `ToAsyncEnumerable()` |
+| `FirstJson()` / `FirstOrDefaultJson()` | `JsonObject` / `JsonObject?` | `First()` / `FirstOrDefault()` |
+| `SingleJson()` / `SingleOrDefaultJson()` | `JsonObject` / `JsonObject?` | `Single()` / `SingleOrDefault()` |
+| `FirstOrDefaultRawJson()` | `string?` | — |
+| `ToRawJsonAsyncEnumerable()` | `IAsyncEnumerable<string>` | — |
+| `WriteJsonArrayTo(stream)` | `Task<int>` (rows written) | — |
+| `ToJsonCursorPage(cursor, take)` | `CursorPage<JsonObject>` | `ToCursorPage()` |
+| `RawJsonRows(maxRows)` | `IAsyncEnumerable<string>` | the primitive the rest are built on |
+| `SupportsRawJson` | `bool` | whether this query can use the lane at all |
+
+Everything the typed lane honours, the JSON lane honours: `Where`, `OrderBy`, `Paginate`, global [query filters](/documentdb/query-filters/), soft delete, tenancy. The single-row terminals still push the row limit down, and `WriteJsonArrayTo` writes `[]` when nothing matches.
+
+### How much you actually save, per provider
+
+| Tier | Providers | What happens |
+|---|---|---|
+| **Zero-copy** | SQLite, SQLCipher, DuckDB, MySQL, MariaDB, PostgreSQL, CockroachDB, SQL Server, Oracle, Cosmos DB | The persisted body goes straight from the engine to you. Nothing is deserialized, nothing is re-serialized. |
+| **Re-serialized** | MongoDB, LiteDB, IndexedDB, Redis, RavenDB, Firestore, Azure Table, DynamoDB | The provider must materialize `T` to finish the query, so the body is serialized back through the type's `JsonTypeInfo`. Same JSON, same API — but the round trip is real. |
+
+The API is identical either way; only the cost differs. Reach for these terminals for the pass-through shape on any provider, and expect the win on the zero-copy tier.
+
+:::caution[The raw body is not always the same shape as the object]
+- **Materialized [computed properties](/documentdb/computed-columns/)** live outside the body, so they do not appear. The typed lane recomputes them on read.
+- **[Blobs](/documentdb/blobs/)** appear as their metadata envelope; there is no `T` to attach a loader to.
+- **[Encrypted properties](/documentdb/encryption/)** make the raw terminals throw `NotSupportedException` — the stored body holds ciphertext and only the typed deserialize decrypts it.
+:::
+
+### When JSON is an optimization, not a requirement
+
+If the typed path would also be correct and you just want the cheaper one, **probe instead of catching**:
+
+```csharp
+var query = store.Query<Order>().Where(o => o.Status == "open");
+
+IReadOnlyList<JsonNode> value = query.SupportsRawJson
+    ? await query.ToJsonList(ct)                          // cheap lane
+    : (await query.ToList(ct)).Select(o => Serialize(o)); // still correct
+```
+
+`SupportsRawJson` is `false` for a type with encrypted properties and for a query that no longer returns
+stored documents (after `Select` / `Project` / `GroupBy`). This is how the built-in
+[OData engine](/documentdb/odata/) and the [AI query tool](/documentdb/ai-tools/) pick their lane, so an
+encrypted type keeps working instead of turning into a `501`.
+
+:::note[Related: JSON collections]
+These terminals are the *typed builder* with a JSON result. If you have no CLR type at all — or want to build the query from strings — use a [JSON collection](/documentdb/json-collections/) instead: `store.Collection("audit")` for a schema-free collection, or `store.Collection<Order>()` / `store.Collection(typeof(Order))` for a late-bound view over a registered type.
+:::
+
 ## Bulk delete with ExecuteDelete
 
 Delete documents matching a predicate in a single SQL DELETE — no need to query first.

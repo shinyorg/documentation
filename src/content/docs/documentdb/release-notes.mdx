@@ -43,6 +43,52 @@ replace the first; it now throws, naming both properties. The old behavior hid r
 </RN>
 
 <RN type="feature">
+**Raw JSON terminals on the typed query** — end a `Query<T>()` with JSON instead of `T`, so a document that
+only has to reach an HTTP response never becomes an object:
+
+```csharp
+// one document, no parse at all
+var raw = await store.Query<Order>().Where(o => o.Id == id).FirstOrDefaultRawJson();
+return Results.Content(raw, "application/json");
+
+// a whole list, written straight to the response — never buffered, never re-serialized
+ctx.Response.ContentType = "application/json";
+await store.Query<Order>().Where(o => o.Status == "open")
+    .OrderByDescending(o => o.CreatedAt)
+    .WriteJsonArrayTo(ctx.Response.Body, ct);
+```
+
+The full typed builder still applies — `Where`, `OrderBy`, `Paginate`, global query filters, soft delete,
+tenancy — and the single-row terminals still push their row limit down. Alongside the raw lane there is a node
+lane returning `JsonObject`: `ToJsonList`, `ToJsonAsyncEnumerable`, `FirstJson` / `FirstOrDefaultJson`,
+`SingleJson` / `SingleOrDefaultJson`, `ToJsonCursorPage`, all over the new `RawJsonRows` primitive.
+
+Available on every provider. The relational stores and Cosmos DB hand back the persisted body untouched;
+elsewhere the provider has to materialize `T` to finish the query, so the body is re-serialized through the
+type's `JsonTypeInfo` — same JSON, same API, but the round trip is real. A type with encrypted properties
+throws: the stored body is ciphertext and only the typed terminals decrypt. Materialized computed properties
+and blob payloads live outside the body and so do not appear. See
+[Raw JSON results](/documentdb/querying/#raw-json-results).
+</RN>
+
+<RN type="enhancement">
+**OData and the AI `query` tool read through the JSON lane.** Both built the response by deserializing each
+document and immediately serializing it back — `ODataDocumentQuery.Execute` did two passes per document plus a
+discarded object graph, and the AI query tool did three (deserialize → serialize → parse). Both now read the
+stored bodies instead, so a whole-entity OData page and an LLM tool result cost one parse. No API change and
+no change to the response shape; `$select` was already `JsonObject`-native and is untouched.
+
+Each picks its lane through a new `IDocumentQuery<T>.SupportsRawJson` — `false` for a type with encrypted
+properties and after `Select`/`Project`/`GroupBy` — and falls back to the typed path rather than failing, so an
+encrypted entity set keeps behaving exactly as it did.
+</RN>
+
+<RN type="enhancement">
+**`store.Collection<T>()`** — the generic spelling of `store.Collection(typeof(T))` for the
+[JSON collection](/documentdb/json-collections/) lane. Identical behavior.
+</RN>
+
+<RN type="feature">
 **Validate-on-build** — one configuration sweep when the store is constructed, reporting **every** problem
 together through a new `DocumentConfigurationException` instead of one per restart. It catches features the
 chosen backend does not have (a vector mapping on LiteDB, `cfg.Table` on RavenDB) and randomized-encrypted
