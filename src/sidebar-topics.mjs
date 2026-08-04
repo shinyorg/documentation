@@ -387,7 +387,10 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/cameraview/' },
           { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
+          { label: 'Effects & Filters', link: 'controls/cameraview/effects' },
+          { label: 'Face Masks', link: 'controls/cameraview/face-masks' },
           { label: 'AI Document Scanner', link: 'controls/cameraview/ai' },
+          { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize' },
           { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
         ]
       },
@@ -567,7 +570,6 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'documentdb/' },
           { label: 'Why DocumentDb', link: 'documentdb/comparison' },
-          { label: 'Migrating v10 → v11', link: 'documentdb/migrate-v10-to-v11', badge: { text: 'v11', variant: 'caution' } },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
           { label: 'JSON Collections', link: 'documentdb/json-collections' },

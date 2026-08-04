@@ -1,0 +1,86 @@
+---
+title: CameraView AI Photo Stylizer
+description: Redraw a captured photo through a Microsoft.Extensions.AI IImageGenerator — the "turn my selfie into a comic" flow — as a CameraView capture effect
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+{/* TODO: capture screenshots for the AI photo stylizer (MAUI + Blazor) */}
+
+`AiPhotoStylizer` redraws a captured still through an image-generation model. It is the flow the photo-toy apps
+on the store ship: you press the shutter, and what comes back is your photo drawn as a comic.
+
+It is deliberately a **capture** effect, not a live one. A round-trip to a hosted model is seconds of latency
+and a per-image cost, so it belongs on the shutter and never on a frame loop. For a live comic *viewfinder*,
+add the procedural [`CameraEffects.Comic`](/controls/cameraview/effects) alongside it — that one is offline,
+free, and runs on the preview. The two compose: the user previews a comic look and gets a generated one when
+they capture.
+
+## Install
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera.Ai" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Camera.Ai" />
+
+```bash
+# MAUI
+dotnet add package Shiny.Maui.Controls.Camera.Ai
+# Blazor
+dotnet add package Shiny.Blazor.Controls.Camera.Ai
+```
+
+You register an `IImageGenerator` yourself — that is what keeps the package provider-agnostic. It must support
+**image-to-image editing**; note that plenty of chat-capable providers do not offer image generation at all.
+
+:::caution[MEAI001]
+`IImageGenerator` is still marked *evaluation-only* by Microsoft.Extensions.AI, so constructing one raises
+`MEAI001` in your project. Add `<NoWarn>$(NoWarn);MEAI001</NoWarn>` until that API ships stable.
+:::
+
+## MAUI
+
+```csharp
+camera.Effects.Add(CameraEffects.Comic);            // free live viewfinder
+camera.Effects.Add(new AiPhotoStylizer(generator)   // generated image on the shutter
+{
+    Prompt = "Redraw this photo as a comic-book illustration: bold black ink outlines, " +
+             "flat cel shading, halftone shadows and punchy saturated colour. Keep the subject, " +
+             "composition and pose exactly as they are — restyle the image, do not reimagine the scene.",
+    Timeout = TimeSpan.FromSeconds(60)
+});
+
+// returns the stylized image — show a busy state, this takes seconds
+var photo = await camera.CapturePhotoAsync();
+```
+
+`CapturePhotoAsync` applies the chain in three stages: pixel effects are baked in by the platform capture path,
+draw effects are composited on top, and capture effects run last.
+
+## Blazor
+
+The browser component has no async post-capture stage, so call the stylizer yourself:
+
+```csharp
+var jpeg = await camera.CapturePhotoAsync();
+var comic = await stylizer.StylizeAsync(jpeg);
+```
+
+## Prompting
+
+The default asks for inked comic art. The prompt is the whole knob — watercolour, oil painting, pixel art, line
+drawing and the rest are a string away. The one instruction worth keeping is the last clause: telling the model
+to **restyle rather than reimagine** is what stops it inventing a different scene.
+
+## Failure never costs the capture
+
+A model outage, a timeout, an auth failure or a provider that replies with a URL instead of inline bytes all
+raise `Error` and return the **original photo** untouched. Treat the event as "the style didn't apply", not
+"the photo was lost" — and surface it to the user that way.
+
+Cancelling the `CancellationToken` you passed to `CapturePhotoAsync` cancels the capture properly and
+propagates; the internal `Timeout` does not, it just gives up and hands the plain photo back.
+
+## Testing offline
+
+The sample app registers a stand-in `IImageGenerator` that redraws the photo with an obvious treatment instead
+of calling a model, so the whole round trip — shutter → bytes out → bytes back → that's what
+`CapturePhotoAsync` returns — is demonstrable without an API key or a bill. Doing the same in your own tests is
+a good way to exercise the flow cheaply.

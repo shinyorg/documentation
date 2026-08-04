@@ -1,0 +1,100 @@
+---
+title: CameraView Face Masks
+description: Pin an image or your own drawing to every tracked face on the Shiny CameraView — scaled from eye distance, rotated to head roll, and smoothed against the analysis pipeline's dropped frames
+---
+
+{/* TODO: capture screenshots for CameraView face masks (MAUI) */}
+
+`FaceMaskEffect` is the Messenger-style funny-face overlay: it follows every face the camera is tracking and
+draws whatever you give it — pinned to a feature, scaled to the head, rotated with it. Because it is an
+[`IDrawEffect`](/controls/cameraview/effects), the one implementation paints on the preview, into captured
+stills **and** into recorded video.
+
+## Setup
+
+```csharp
+// landmarks are what the mask follows — off by default, because they cost more per frame
+camera.Analyzer = new FaceAnalyzer { DetectLandmarks = true };
+
+camera.Effects.Add(new FaceMaskEffect
+{
+    Mask = await LoadImageAsync("shades.png"),
+    Anchor = FaceAnchor.EyeCenter,
+    Scale = 2.4f,        // multiples of the eye distance
+    Smoothing = 0.35f
+});
+```
+
+`FaceMaskEffect` needs a `FaceAnalyzer` assigned to `CameraView.Analyzer` — there is nothing else publishing
+faces to follow. If it finds none it raises `Error` **once** (not per frame) with a message saying so, rather
+than silently drawing nothing.
+
+## Landmarks
+
+`FaceAnalyzer.DetectLandmarks` populates `DetectedFace.Landmarks` with a typed `FaceLandmarks`:
+
+| Member | Notes |
+|---|---|
+| `LeftEye` / `RightEye` | named **as seen on screen** — front-camera mirroring is already accounted for |
+| `NoseBase` | |
+| `MouthLeft` / `MouthRight` / `MouthBottom` | Apple reports the mouth as one region, so corners are Android-only |
+| `EyeCenter` | derived midpoint |
+| `EyeDistance` | derived — the natural scale reference, far steadier than the bounding box |
+| `Roll` | derived from the eye line, in radians |
+
+Populated by **Apple Vision** and **Android MLKit**. Windows and the managed head report bounding boxes only,
+so `Landmarks` stays `null` there and a mask falls back to the face box for position and scale.
+
+`DetectedFace.TrackingId` is supplied where the backend tracks faces across frames (Android MLKit). The mask
+keys its smoothing on it, so masks stay attached to the right person when several people are in frame and the
+detector reports them in a different order.
+
+## Custom drawing
+
+Set `OnDraw` instead of `Mask` for anything an image can't express. The canvas arrives already translated to
+the anchor and rotated to the head's roll, so draw around the origin and it tracks the face for free:
+
+```csharp
+new FaceMaskEffect
+{
+    Anchor = FaceAnchor.EyeCenter,
+    Scale = 2.6f,
+    AspectRatio = 2.4f,
+    OnDraw = (canvas, p) =>
+    {
+        canvas.FillColor = Colors.Black;
+        canvas.FillRoundedRectangle(-p.Width / 2f, -p.Height / 4f, p.Width * 0.4f, p.Height / 2f, 8);
+        canvas.FillRoundedRectangle(p.Width / 10f, -p.Height / 4f, p.Width * 0.4f, p.Height / 2f, 8);
+    }
+}
+```
+
+`GetPlacements(context)` returns the same placements the effect would draw — useful for hit-testing or driving
+your own renderer.
+
+## Anchors
+
+`FaceAnchor.EyeCenter` (glasses, most overlays), `FaceCenter`, `Forehead` (hats, crowns), `Nose`
+(moustaches, noses), `Mouth` (beards). Anchors that need a landmark fall back to the face box when none is
+available.
+
+`Offset` nudges the mask from the anchor in multiples of the mask's own size, so it scales with the head:
+`Offset = new PointF(0f, -0.5f)` lifts it half its height.
+
+## Why smoothing matters
+
+The analysis pipeline runs one frame at a time and **drops frames while it is busy**, so raw detections arrive
+in bursts at well under the display rate. Drawn directly, a mask visibly judders. Every placement is therefore
+run through an exponential smoother keyed on the face and the surface.
+
+- `Smoothing = 0` — raw detections, no easing. Useful to see what the detector is actually reporting.
+- `Smoothing = 0.35` (default) — steady without noticeable lag.
+- Higher — steadier still, but the mask trails fast head movement.
+
+Rotation is interpolated the short way round, so a head crossing ±180° doesn't spin the mask the long way.
+
+Call `ResetTracking()` after flipping the camera or restarting the session so the next frame snaps into place
+rather than easing in from a stale position.
+
+Preview and recording smooth **independently** — they are separate surfaces drawn on separate threads, and
+sharing one smoother between them would make each fight the other's frame rate.

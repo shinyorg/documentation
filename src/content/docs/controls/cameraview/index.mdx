@@ -22,7 +22,7 @@ What sets it apart from other camera controls is the **pluggable frame-analysis 
 
 - **Live preview** with `AspectFill` / `AspectFit` scaling.
 - **Lens & device selection** — `Facing` (Back / Front) or pick an exact device (multiple back lenses, USB webcams on macOS) via `GetAvailableCamerasAsync()` + `CameraId`.
-- **Zoom** (clamped to the device's reported range) and **torch / flashlight**.
+- **Zoom** (clamped to the device's reported range), optionally driven by **pinch-to-zoom**, and **torch / flashlight**.
 - **Photo capture** → JPEG bytes, and **video recording** with optional audio.
 - **Live color filters** — Mono, Noir, Sepia, Invert, Vivid, Cool, Warm, Fade, Chrome, Instant, Tonal (Apple Core Image, Android RenderEffect, Blazor CSS).
 - **Frame-analysis pipeline** — a single pluggable `IFrameAnalyzer` with back-pressure (drop-on-busy); boxes draw every frame, results are delivered on a gated scan trigger (`Scan()` / `OnDetected`), optionally restricted to a `ScanWindow`. See [Frame Analyzers](/controls/cameraview/analyzers/).
@@ -78,6 +78,7 @@ See [Blazor Usage](/controls/cameraview/blazor/) for the WebAssembly specifics.
                 Facing="Back"
                 ScaleMode="AspectFill"
                 Zoom="1"
+                IsPinchToZoomEnabled="True"
                 IsTorchOn="False"
                 Filter="None" />
 ```
@@ -111,6 +112,49 @@ this.Camera.Facing = this.Camera.Facing == CameraFacing.Back
 
 :::caution[Don't gate startup on RequestPermissionAsync()]
 `RequestPermissionAsync()` / `StartAsync()` / `GetAvailableCamerasAsync()` route through the platform handler and **no-op (return `false`/empty) if the handler isn't connected yet** — e.g. when called in `OnAppearing` on first show. Gating startup on `RequestPermissionAsync()` there yields a false "permission denied" (and leaves the lens list empty) even though the preview works. Rely on auto-start + `CameraError`, and call `GetAvailableCamerasAsync()` once the view is loaded.
+:::
+
+:::caution[On iOS, handle CameraError if you record unattended]
+AVFoundation suspends a capture session for reasons you do not control — a phone call, another app claiming the
+camera, a second foreground app in Split View, or the system throttling under thermal/power pressure — and the
+framework raises nothing to your app. The preview simply holds its last frame and a running recording stops
+receiving any, so the saved clip ends at the moment of the interruption while everything else carries on working
+normally. `CameraView` reports this through **`CameraError`** and restarts the session when the interruption ends
+(or after a recoverable `AVCaptureSession` runtime error), provided `IsActive` is still `true` — but the frames
+between are gone. For anything recording without someone watching the screen, `CameraError` is the only signal
+that capture stopped. Backgrounding raises the same underlying notification on every app switch, so it resumes
+the same way but is deliberately **not** reported as an error.
+:::
+
+## Pinch to zoom
+
+`Zoom` is an ordinary bindable property — set it from code, bind it to a slider, bind it to a view model. Setting
+`IsPinchToZoomEnabled="True"` adds a **two-finger pinch on the preview** as a second driver of that *same* property:
+
+```xml
+<cam:CameraView x:Name="Camera"
+                Facing="Back"
+                IsPinchToZoomEnabled="True" />
+
+<!-- tracks the pinch live, because both write the same Zoom property -->
+<Slider Minimum="{Binding MinZoom, Source={x:Reference Camera}}"
+        Maximum="{Binding MaxZoom, Source={x:Reference Camera}}"
+        Value="{Binding Zoom, Source={x:Reference Camera}, Mode=TwoWay}" />
+```
+
+Because the gesture writes through `Zoom`, it inherits the same clamp everything else gets: the value can never
+leave **`MinZoom`..`MaxZoom`**, the range the handler reports from the active device (`AVCaptureDevice`'s
+`MinAvailableVideoZoomFactor`/`VideoMaxZoomFactor` capped at 10x on Apple platforms, CameraX's `ZoomState` on
+Android, `ZoomControl.Min`/`Max` on Windows). Pinching past either end simply pins there, and pinching back the
+other way responds immediately.
+
+The gesture is off by default so it can't collide with an app that already handles touches over the preview —
+turn it on per view.
+
+:::note[Platform support]
+Pinch-to-zoom is **MAUI only**, and no-ops wherever the device reports no zoom range (`MinZoom == MaxZoom`) —
+which is every macOS camera. The Blazor `CameraView` has no zoom property at all: browser zoom would mean
+`MediaStreamTrack` constraints, which are Chromium-only.
 :::
 
 ## Video Recording
@@ -222,6 +266,7 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `IsActive` | `bool` | `true` | Whether the session is running |
 | `Zoom` | `double` | `1` | Zoom factor, clamped to `MinZoom`..`MaxZoom` |
 | `MinZoom` / `MaxZoom` | `double` | `1` | Supported zoom range (reported by the handler) |
+| `IsPinchToZoomEnabled` | `bool` | `false` | Two-finger pinch on the preview drives `Zoom` — see [Pinch to zoom](#pinch-to-zoom) (MAUI only) |
 | `IsTorchOn` | `bool` | `false` | Continuous flashlight/torch |
 | `FlashMode` | `CameraFlashMode` | `Off` | Flash behaviour for still capture (`Off`/`On`/`Auto`) |
 | `ScaleMode` | `PreviewScaleMode` | `AspectFill` | How the preview fills the view |

@@ -1,0 +1,143 @@
+---
+title: CameraView Effects & Filters
+description: A pluggable effects pipeline for the Shiny CameraView — colour grades, comic and sketch looks, compositing overlays and post-capture transforms, applied to the preview, captured photos and recorded video
+---
+
+{/* TODO: capture screenshots for CameraView effects (MAUI + Blazor) */}
+
+`CameraView.Effects` is an ordered, live collection applied to **the preview, captured photos and recorded
+video**. Add, remove or reorder while the camera is running and the change lands on the next frame.
+
+```csharp
+camera.Filter = CameraFilter.Noir;          // applied first — see below
+camera.Effects.Add(CameraEffects.Comic);    // then this
+```
+
+## The four kinds of effect
+
+There are four, because there are four genuinely different mechanisms and no single method signature honours
+all of them without lying about what a platform can do. Implement one — or several, which is what the built-ins
+do so that an effect still does *something* where its preferred path is unavailable.
+
+| Interface | Carries | Good for |
+|---|---|---|
+| `IColorEffect` | a `ColorMatrix4x5` | colour grades — the only kind honoured on **every** platform and surface |
+| `INativeEffect` | a `NativeEffectDescriptor` | spatial looks that need a pixel's neighbours — comic, sketch, blur |
+| `IDrawEffect` | `Draw(ICanvas, RectF, CameraEffectContext)` | compositing — face masks, stickers, watermarks |
+| `ICaptureEffect` | `ValueTask<byte[]> ApplyAsync(byte[], ct)` | slow post-capture work — AI stylization |
+
+A `NativeEffectDescriptor` describes the effect as **data** — a Core Image filter name, an AGSL shader, an SVG
+filter, a managed CPU pass — so no platform type ever leaks into the public API. Each backend takes the field
+it understands; where it finds nothing it falls back to the effect's colour matrix, and where there is no
+matrix either it reports the effect as unsupported rather than silently skipping it.
+
+## Built-ins
+
+```csharp
+// twelve colour grades — the same looks as the CameraFilter enum
+CameraEffects.Mono   CameraEffects.Noir    CameraEffects.Sepia    CameraEffects.Invert
+CameraEffects.Vivid  CameraEffects.Cool    CameraEffects.Warm     CameraEffects.Fade
+CameraEffects.Chrome CameraEffects.Instant CameraEffects.Tonal
+
+// five spatial looks — no colour matrix can express these
+CameraEffects.Comic  CameraEffects.Sketch  CameraEffects.Posterize
+CameraEffects.Pixelate  CameraEffects.Blur
+```
+
+`CameraView.Filter` still works exactly as before and is now sugar over the chain: the chosen filter is applied
+**first**, so setting both `Filter` and `Effects` is well-defined rather than depending on which you assigned
+last.
+
+Order is meaningful and preserved — `[Comic, Mono]` is not the same image as `[Mono, Comic]`. Consecutive
+*colour* effects are collapsed into a single matrix for speed, but a spatial effect between them stops the
+fold, so nothing is silently reordered.
+
+## Custom effects
+
+A colour effect is the safest thing to ship, because it works everywhere:
+
+```csharp
+camera.Effects.Add(new ColorEffect("my.look", new ColorMatrix4x5([
+    1.0f, 0,    0,    0, 0.02f,
+    0,    0.9f, 0,    0, 0.02f,
+    0,    0,    1.0f, 0, 0.02f,
+    0,    0,    0,    1, 0
+])));
+```
+
+A draw effect composites over the frame, and the one implementation covers preview, stills and recordings:
+
+```csharp
+camera.Effects.Add(new DelegateDrawEffect("timestamp", (canvas, frame, ctx) =>
+{
+    canvas.FontColor = Colors.White;
+    canvas.FontSize = frame.Height * 0.04f;
+    canvas.DrawString($"{ctx.Elapsed:mm\\:ss}", 20, 20, 300, 40,
+        HorizontalAlignment.Left, VerticalAlignment.Top);
+}));
+```
+
+`Draw` runs **off the UI thread**, once per frame, in **frame pixel space** (origin top-left,
+`ctx.Width`/`ctx.Height`), with front-camera frames already un-mirrored. Read mutable state through a volatile
+field or an immutable snapshot, and never touch UI objects from inside it — and expect to be called
+concurrently for the preview and an in-progress recording, which is why anything stateful should key on
+`ctx.Surface`.
+
+`ctx.Overlays` carries the analyzer's latest boxes and `ctx.AnalyzerResult` its latest **ungated** typed
+result, updated every frame. That is how an effect anchors to something the camera is tracking — the analyzer's
+own typed event is one-shot by design and would leave an overlay frozen in place.
+
+## Coverage differs — ask before you offer
+
+```csharp
+if (CameraView.GetEffectSupport(CameraEffects.Comic) != EffectSupport.Full)
+    ComicButton.IsEnabled = false;
+```
+
+`EffectSupport` is `Full`, `ColorOnly` (degraded to a matrix here), `StillOnly` (photos yes, preview no) or
+`Unsupported`. Reporting it honestly is better than shipping a button that does nothing.
+
+| | Apple (iOS/Catalyst/macOS) | Android | Blazor | Windows |
+|---|---|---|---|---|
+| Colour effects, preview | ✅ | ✅ API 31+ | ✅ CSS | ❌ |
+| Colour effects, photo | ✅ | ✅ all API levels | ✅ | ✅ |
+| Spatial effects, preview | ✅ Core Image | ✅ API 33+ (Blur 31+) | ✅ SVG (no `Pixelate`) | ❌ |
+| Spatial effects, photo | ✅ | ✅ managed CPU pass | ⚠️ CSS/SVG only | ✅ managed CPU pass |
+| Draw effects | ✅ all surfaces | ✅ all surfaces | ❌ not yet | preview + photo |
+| Effects in recorded video | ✅ pixel + draw | ⚠️ draw only | ❌ | ❌ |
+
+## Known limitations
+
+- **Android recorded video gets draw effects but not pixel effects.** The preview's `RenderEffect` lives on the
+  `PreviewView`, not on the `VideoCapture` use case, so a colour or comic look does not reach the saved file.
+  Closing that gap means moving Android onto a CameraX `CameraEffect` with a GL surface processor bound to
+  preview, video and capture together — planned, not shipped.
+- **Windows has no live-preview effect hook.** `MediaCapture` would need an `IBasicVideoEffect` plus a Win2D
+  pipeline. Effects there apply to captured photos only, reported as `StillOnly`.
+- **Safari and SVG filters.** WebKit's support for `url()` filters on a live `<video>` and in `canvas.filter`
+  has historically been unreliable. Every built-in colour grade carries a plain-CSS form that needs no SVG, so
+  the twelve grades are safe there; a custom colour matrix falls back to an SVG `feColorMatrix` and may render
+  flat.
+- **The Android preview must stay in `PreviewView` *Compatible* (TextureView) mode** for `RenderEffect` to
+  apply. The handler sets this; *Performance* mode (SurfaceView) ignores the effect entirely.
+
+## Writing an AGSL shader
+
+If your custom `INativeEffect` carries an `AgslShader`, be aware it compiles **only on a device at API 33+** —
+nothing validates it at build time. A compile error is not thrown to you either: the step is dropped and the
+effect silently does nothing, which looks identical to "not supported on this platform". Subscribe to
+`CameraView.CameraError`, which reports the compiler message.
+
+The trap that caught two of the built-ins: **`flat` is a reserved interpolation qualifier**, so
+`float3 flat = …` fails the whole shader. The same applies to `smooth`, `sample`, `varying`, `attribute`,
+`centroid`, `patch` and `noperspective`.
+
+```glsl
+uniform shader content;              // name must match Descriptor.AgslInputName (default "content")
+
+half4 main(float2 coord) {
+    float4 c = float4(content.eval(coord));
+    float3 cel = floor(c.rgb * 4.0 + 0.5) / 4.0;    // not `flat`
+    return half4(half3(cel), half(c.a));
+}
+```
