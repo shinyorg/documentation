@@ -1,0 +1,128 @@
+---
+title: Field-Level Encryption
+---
+
+Encrypt named properties at rest, on every provider, without changing how the application reads or writes documents. It is part of the core `Shiny.DocumentDb` package — no extra dependency, nothing to install.
+
+```csharp
+var encryptor = new AesGcmDocumentEncryptor("k1", key);   // key is 32 bytes
+
+opts.UseEncryptor(encryptor);
+opts.MapEncryptedProperty<Patient>(x => x.Ssn);                                   // opaque
+opts.MapEncryptedProperty<Member>(x => x.Email, EncryptionMode.Deterministic);    // still queryable by equality
+```
+
+```csharp
+await store.Insert(new Patient { Id = "p1", Ssn = "123-45-6789" });
+// stored:  { "id": "p1", "ssn": "enc:1:k1:BASE64…" }
+
+var patient = await store.Get<Patient>("p1");
+// patient.Ssn == "123-45-6789"
+```
+
+The database, its backups, its replicas, its [temporal history](/documentdb/temporal/) and the admin UI only ever hold ciphertext. Nothing in your code changes.
+
+## How it works — and why that matters
+
+Encryption is installed as a **`JsonTypeInfo` modifier** that swaps in an encrypting `JsonConverter` for the mapped property. It is a serialization-level transform, which has three consequences worth knowing:
+
+- **No provider support is needed.** Every backend stores a JSON string. SQLite, PostgreSQL, Mongo, Cosmos, DynamoDB — all identical.
+- **Every write path is covered by construction** — `Insert`, `Update`, `Upsert`, `BatchInsert`, sessions, temporal history writes, and `IDocumentBackup` export. There is no path that serializes a document without going through the converter.
+- **The raw JSON lanes are not decrypted.** `store.Collection(...)` and the [JSON collection](/documentdb/json-collections/) surface return the envelope as-is, because there is no CLR type to attach a converter to. That is usually what you want from a raw lane; it is not a way to read the plaintext.
+
+It is deliberately **not** an interceptor: interceptors are write-only, so an interceptor could encrypt but nothing would decrypt on the way back.
+
+## Choosing a mode
+
+| | `Randomized` (default) | `Deterministic` |
+|---|---|---|
+| Same value written twice | different ciphertext | **same** ciphertext |
+| Equality filter (`==`, `!=`, `WhereIn`) | throws | works |
+| Range, `StartsWith`, `Contains`, `OrderBy`, full text, vectors, `GroupBy` | throws / meaningless | throws / meaningless |
+| JSON index over the property | pointless | works (equality lookups) |
+| Leaks | nothing | **which documents share a value, and how often each value occurs** |
+| Property types | string, bool, int, long, double, decimal, Guid, DateTime, DateTimeOffset (+ nullable) | string only |
+
+:::caution[Deterministic mode is a real disclosure]
+Anyone who can read the table can group documents by equal values and count them — for a low-cardinality field (a country, a diagnosis code, a boolean-ish string) that can be close to reading it. Choose it per property, only where a query genuinely needs it.
+:::
+
+Deterministic mode is string-only because the query rewrite replaces the *constant* in `x.Email == "a@b.com"` with its ciphertext, and a ciphertext is a string — a `decimal` property cannot be compared against one without changing the type of the expression.
+
+## Querying encrypted properties
+
+A deterministic property is queried exactly as before. The predicate's constant is encrypted the same way before it reaches the store, across every query surface — typed LINQ, the string grammar, the interpolated form, OData, and the AI tools:
+
+```csharp
+await store.Query<Member>().Where(x => x.Email == "a@x.com").ToList();
+await store.Query<Member>().Where("Email == 'a@x.com'").Count();
+await store.Query<Member>().First(x => x.Email == email);
+```
+
+Anything that cannot be answered against ciphertext throws `NotSupportedException` with an explanation rather than silently matching nothing:
+
+```csharp
+await store.Query<Member>().Where(x => x.Email.StartsWith("a")).ToList();
+// NotSupportedException: 'Member.Email' is encrypted at rest, so the store cannot evaluate 'StartsWith' —
+// only equality against a deterministic property can be answered against ciphertext.
+```
+
+`null` comparisons keep working in both modes: a null property is stored as JSON `null`, not as an envelope, so `x.Ssn == null` and `x.Ssn != null` are ordinary predicates.
+
+:::note[Ordering is not rejected — it is just meaningless]
+`OrderBy(x => x.Ssn)` sorts by ciphertext. The rewriter only sees predicates, so this does not throw today. Don't do it.
+:::
+
+## Keys and rotation
+
+`IDocumentEncryptor` is the seam: implement it to put a KMS, Key Vault or HSM behind the mapping. `AesGcmDocumentEncryptor` is the in-process implementation — AES-256-GCM (authenticated, so a tampered value throws instead of decrypting to garbage), with a key **ring** so old documents stay readable while new writes use the current key.
+
+```csharp
+var key = AesGcmDocumentEncryptor.GenerateKey();   // 32 bytes — store it somewhere real
+```
+
+The stored envelope is `enc:<version>:<keyId>:<base64>`, so every value says which key it needs. Rotation is four steps, in this order:
+
+```csharp
+// 1. Add the new key alongside the old one, and make it current
+var encryptor = new AesGcmDocumentEncryptor("k2", new Dictionary<string, byte[]>
+{
+    ["k1"] = oldKey,
+    ["k2"] = newKey
+});
+
+// 2. Documents written under k1 still read — the envelope names their key
+
+// 3. Move them across
+await store.RewrapAsync<Patient>();
+
+// 4. Only now retire k1
+```
+
+Retiring a key before the rewrap makes every document still holding an old envelope unreadable — the error says which key id it wanted.
+
+`RewrapAsync<T>` reads a page at a time and writes back with `BatchUpdate`; reading decrypts under whichever key the envelope names and writing re-encrypts under the current one, so a plain round trip *is* the rewrap. It touches every document of the type — run it from a job, not a request.
+
+## Turning it on for an existing store
+
+A value that is not an envelope is read back as-is, so mapping a property on a populated store does not break its existing documents: they read as plaintext, and any document you write is encrypted. Convert the backlog with the same `RewrapAsync<T>` used for rotation.
+
+## Interaction with the rest of the library
+
+| Feature | Behavior |
+|---|---|
+| [Temporal history](/documentdb/temporal/) | History rows hold ciphertext; `History`/`AsOf` decrypt on materialization. |
+| [Backup / bulk export](/documentdb/backup/) | Ciphertext moves verbatim. A restore into a store without the key ring stores unreadable values — it does not fail. |
+| [Replication / a second store](/documentdb/providers/) | Same: the target needs the same keys to materialize the property. |
+| [JSON collections](/documentdb/json-collections/) | Envelope passthrough, no decryption. |
+| [Computed properties](/documentdb/computed-columns/), [full text](/documentdb/full-text/), [vectors](/documentdb/vector/) | Do not map them over an encrypted property — the engine only sees ciphertext. |
+| [Soft delete](/documentdb/soft-delete/), interceptors, sessions | Unaffected. |
+| [SQLCipher](/documentdb/sqlcipher/) | Complementary: SQLCipher encrypts the whole SQLite file at rest, this encrypts named properties on every provider. Use both if you want both. |
+| AOT | Clean. Every converter instantiation is explicit — no `MakeGenericType`. |
+
+## Limits
+
+- One encryption mapping per property, process-wide: mapping the same property with a different mode or a different encryptor throws, because documents written under one would not decrypt under the other.
+- The property must be a direct property of the document type (`x => x.Ssn`). To encrypt something nested, map it on the nested type.
+- Collections, arrays and complex objects are not encryptable — hold the value as a string and convert it yourself.
+- The store's `JsonSerializerOptions` must have a `TypeInfoResolver` (your `JsonSerializerContext` in AOT), and `MapEncryptedProperty` must be called while configuring the store, before the first read or write.

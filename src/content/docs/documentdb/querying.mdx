@@ -41,8 +41,11 @@ This is the `IQueryable`/EF Core contract, and as of **12.0** it is the contract
 | `.ToAsyncEnumerable()` | `IAsyncEnumerable<T>` | Stream results one-at-a-time without buffering. |
 | `.Count()` | `Task<long>` | Count matching documents. |
 | `.Any()` | `Task<bool>` | Check if any documents match. |
+| `.First()` / `.FirstOrDefault()` | `Task<T>` / `Task<T?>` | The first match — fetches **one row**, not the whole set. See [Single-row terminals](#single-row-terminals). |
+| `.Single()` / `.SingleOrDefault()` | `Task<T>` / `Task<T?>` | The only match; throws when more than one matches. Fetches two rows to detect it. |
 | `.ExecuteDelete()` | `Task<int>` | Delete matching documents and return count deleted. |
 | `.ExecuteUpdate(property, value)` | `Task<int>` | Update a property on all matching documents and return count updated. |
+| `.ExecuteUpdate(build)` | `Task<int>` | Update **several** properties in one statement — see [Bulk update](#bulk-update-with-executeupdate). |
 | `.Max(selector)` | `Task<TValue>` | Maximum value of a property. |
 | `.Min(selector)` | `Task<TValue>` | Minimum value of a property. |
 | `.Sum(selector)` | `Task<TValue>` | Sum of a property. |
@@ -651,6 +654,41 @@ Server, Oracle, DuckDB) and on LiteDB, IndexedDB and MongoDB (the document/in-me
 client-side). The key-partitioned NoSQL providers (Cosmos, DynamoDB, Azure Table) don't opt in yet and throw
 `NotSupportedException` — native-continuation-token support for those is a follow-up.
 
+## Single-row terminals
+
+`First`, `FirstOrDefault`, `Single` and `SingleOrDefault` end a query with one document instead of a list. They are not sugar over `ToList()`: the row limit reaches the provider, so a relational store emits `LIMIT 1` (or the dialect's equivalent) and MongoDB/Cosmos page server-side, rather than materializing every match to use the first.
+
+```csharp
+// Ordering decides which one "first" is — without OrderBy the store picks.
+var youngest = await store.Query<User>().OrderBy(u => u.Age).First();
+
+// null instead of throwing when nothing matches
+var maybe = await store.Query<User>().Where(u => u.Email == email).FirstOrDefault();
+
+// Single throws when a second document matches — the check costs no extra round trip
+var byKey = await store.Query<User>().Single(u => u.Id == id);
+
+// A predicate overload saves the Where
+var alice = await store.Query<User>().FirstOrDefault(u => u.Name == "Alice");
+
+// The string grammar works the same way
+var open = await store.Query<Order>().First("status == 'open'");
+```
+
+| Method | Nothing matches | More than one matches |
+|---|---|---|
+| `First()` | throws `InvalidOperationException` | returns the first |
+| `FirstOrDefault()` | `null` | returns the first |
+| `Single()` | throws `InvalidOperationException` | throws `InvalidOperationException` |
+| `SingleOrDefault()` | `null` | throws `InvalidOperationException` |
+
+Global [query filters](/documentdb/query-filters/) apply, so a soft-deleted document is never `First`.
+
+:::note[Interaction with `Paginate`]
+The terminal takes the first row **of the current window**, not of the whole result set:
+`Query<User>().OrderBy(u => u.Age).Paginate(20, 10).First()` is the 21st user by age. Drop the `Paginate` if you meant the first overall.
+:::
+
 ## Bulk delete with ExecuteDelete
 
 Delete documents matching a predicate in a single SQL DELETE — no need to query first.
@@ -692,6 +730,23 @@ int updated = await store.Query<User>()
 // Update all documents of a type (no Where)
 int updated = await store.Query<User>().ExecuteUpdate(u => u.Age, 0);
 ```
+
+### Several properties at once
+
+The builder overload sets many properties in **one** statement, so the predicate is evaluated once and the write is atomic on its own — three separate `ExecuteUpdate` calls are three statements with a window between them.
+
+```csharp
+int updated = await store.Query<Order>()
+    .Where(o => o.Status == "open" && o.CreatedAt < cutoff)
+    .ExecuteUpdate(b => b
+        .Set(o => o.Status, "expired")
+        .Set(o => o.ClosedAt, DateTimeOffset.UtcNow)
+        .Set(o => o.AssignedTo, null));
+```
+
+Assignments apply in the order declared, and nested paths (`o => o.ShippingAddress.City`) work as they do in the single-property form. Setting the same property twice throws — an implicit last-one-wins is not worth guessing at.
+
+Relational providers render the dialect's JSON-set expression nested N deep (`json_set(json_set(Data, …), …)`, `JSON_MODIFY(JSON_MODIFY(…))`, chained `jsonb_set`, Oracle `JSON_TRANSFORM`), MongoDB combines them into one `$set`, and Cosmos applies them in the same read-modify-write pass. A provider without a multi-path primitive applies them one at a time — correct, but not atomic unless you wrap the call in a [session](/documentdb/context/) transaction.
 
 ## Raw SQL queries
 

@@ -5,6 +5,117 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 13.0 TBD
+
+<RN type="feature">
+**`Microsoft.Extensions.VectorData` connector** — new `Shiny.DocumentDb.Extensions.VectorData` package. Point the
+.NET AI ecosystem (MEAI, the Microsoft Agent Framework, Semantic Kernel) at a document store through MEVD's
+`VectorStore` / `VectorStoreCollection<TKey, TRecord>`:
+
+```csharp
+builder.Services.AddDocumentDbVectorStore(o =>
+{
+    o.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db") { EnableVectorExtension = true };
+    o.MapVectorRecord<Note>();      // reads [VectorStoreKey]/[VectorStoreVector] → MapVectorProperty<Note>
+});
+
+var notes = sp.GetRequiredService<VectorStore>().GetCollection<string, Note>("Note");
+await foreach (var hit in notes.SearchAsync(query, top: 5,
+    new VectorSearchOptions<Note> { Filter = n => n.Tag == "release" })) { }
+```
+
+Every other MEVD connector is single-store; this one runs the same record model over **any** vector-capable
+DocumentDb backend — SQLite for dev and mobile, PostgreSQL/pgvector or SQL Server for production, Cosmos / Atlas /
+Redis — swapped by configuration. MEVD's filter is already an `Expression<Func<T, bool>>`, so it is handed to
+`NearestVectors` untouched and still pushed into the ANN search where the provider supports it.
+
+Vector-capable providers only (SQLite+sqlite-vec, PostgreSQL, CockroachDB, SQL Server, Oracle, DuckDB, CosmosDB,
+MongoDB Atlas, Amazon DocumentDB, Redis); the rest throw `NotSupportedException` at construction. Dynamic
+(`Dictionary<string, object?>`) collections and multi-vector records are not supported. See
+[VectorData Connector](/documentdb/vectordata).
+</RN>
+
+<RN type="enhancement">
+**`MapVectorProperty` on `IDocumentStoreOptions`.** The provider-agnostic options slice gained a
+`MapVectorProperty<T>` overload, so a cross-cutting feature can map an embedding on any backend instead of
+binding to one provider's concrete options class — that is how `MapVectorRecord<T>` works everywhere. Pass
+`null` for the index kind to take the provider's own default (DiskANN on Cosmos, HNSW elsewhere). Providers with
+no vector engine throw. Purely additive; the strongly-typed per-provider overloads are unchanged.
+</RN>
+
+<RN type="feature">
+**Single-row query terminals.** `First`, `FirstOrDefault`, `Single` and `SingleOrDefault` now end a query with
+one document — with predicate overloads (`First(x => x.Age == 40)`) and string-grammar overloads
+(`First("status == 'open'")`) — on every provider, including the raw JSON collection lane.
+
+They are not sugar over `ToList()`: the row limit reaches the provider, so a relational store emits `LIMIT 1`
+(or the dialect's equivalent) and MongoDB/Cosmos page server-side instead of materializing every match to use
+the first. `Single` fetches two rows so "more than one matched" costs no extra round trip. Query filters still
+apply, and the terminal takes the first row of the current `Paginate` window — see
+[Querying](/documentdb/querying/#single-row-terminals).
+</RN>
+
+<RN type="feature">
+**`ExecuteUpdate` can set several properties in one statement.**
+
+```csharp
+await store.Query<Order>()
+    .Where(o => o.Status == "open" && o.CreatedAt < cutoff)
+    .ExecuteUpdate(b => b
+        .Set(o => o.Status, "expired")
+        .Set(o => o.ClosedAt, DateTimeOffset.UtcNow));
+```
+
+The predicate is evaluated once and the write is atomic on its own, where three separate calls were three
+statements with a window between them. Relational providers nest the dialect's JSON-set expression N deep,
+MongoDB combines the assignments into one `$set`, and Cosmos applies them in the same read-modify-write pass.
+The JSON collection lane gets the same thing via `ExecuteUpdate(IReadOnlyDictionary<string, object?>)`.
+</RN>
+
+<RN type="feature">
+**Field-level encryption**, in the core package. Map a property once and it is AES-256-GCM ciphertext
+everywhere it is stored, on every provider, with no change to how documents are read or written:
+
+```csharp
+opts.UseEncryptor(new AesGcmDocumentEncryptor("k1", key));
+opts.MapEncryptedProperty<Patient>(x => x.Ssn);                                 // opaque
+opts.MapEncryptedProperty<Member>(x => x.Email, EncryptionMode.Deterministic);  // still queryable by equality
+```
+
+It is installed as a `JsonTypeInfo` modifier, so every write path — including temporal history and backup
+export — is covered by construction, and no provider needs to know about it. Deterministic mode keeps equality
+filters working by rewriting the predicate's constant into ciphertext (and leaks equality/frequency, which the
+docs say in bold); anything that cannot be answered against ciphertext throws with an explanation instead of
+matching nothing. Key rotation is a key ring plus `RewrapAsync<T>()`, and values written before the property
+was mapped keep reading, so it can be turned on for a populated store. AOT-clean, and no new dependency —
+AES-GCM is in the BCL. See
+[Field-level encryption](/documentdb/encryption/).
+</RN>
+
+<RN type="breaking">
+**`DocumentBulkContext.Assignment` is now `Assignments`.** A set-based update can carry several property
+assignments, so the single nullable tuple became an ordered `IReadOnlyList<(string Property, object? Value)>` —
+one entry for the single-property overload, empty for `Delete`/`Clear`.
+
+```diff
+- var value = ctx.Assignment!.Value.Value;
++ var value = ctx.Assignments[0].Value;
+```
+</RN>
+
+<RN type="breaking">
+**`IDatabaseProvider.BuildJsonSetExpression()` now takes the source expression and parameter names**
+(`BuildJsonSetExpression(string sourceExpression, string pathParameter, string valueParameter)`), so N
+assignments can nest into one statement. Only affects custom `IDatabaseProvider` implementations; every
+in-box provider is updated.
+</RN>
+
+<RN type="breaking">
+**`IDocumentStoreOptions` gained `SerializerOptions` and `EnsureSerializerOptions()`** — the seam
+serialization-level features (field encryption) use to attach a `JsonTypeInfo` modifier. Only affects custom
+options classes implementing the interface; every in-box options class implements it explicitly.
+</RN>
+
 ## 12.5 - August 2, 2026
 
 <RN type="feature">

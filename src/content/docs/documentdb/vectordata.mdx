@@ -1,0 +1,228 @@
+---
+title: Microsoft.Extensions.VectorData Connector
+---
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+`Shiny.DocumentDb.Extensions.VectorData` puts a `Microsoft.Extensions.VectorData` (MEVD) face on a document
+store, so DocumentDb can be used anywhere the .NET AI ecosystem — Microsoft.Extensions.AI, the Microsoft Agent
+Framework, Semantic Kernel — expects an abstract `VectorStore` / `VectorStoreCollection<TKey, TRecord>`.
+
+Every other MEVD connector is single-store: one for Qdrant, one for Azure AI Search, one for pgvector, one for
+Redis. This one is **one connector over many backends** — the same record model and the same calling code run on
+SQLite for dev and mobile, PostgreSQL/pgvector or SQL Server in production, or Cosmos / MongoDB Atlas / Redis,
+swapped by configuration rather than by rewriting against another package.
+
+```bash
+dotnet add package Shiny.DocumentDb.Extensions.VectorData
+```
+
+## Setup
+
+<Steps>
+1. Decorate the record with MEVD's attributes
+
+   ```csharp
+   using Microsoft.Extensions.VectorData;
+
+   public class Note
+   {
+       [VectorStoreKey]
+       public string Id { get; set; } = "";
+
+       [VectorStoreData(IsIndexed = true)]
+       public string Tag { get; set; } = "";
+
+       public string Text { get; set; } = "";
+
+       [VectorStoreVector(1536, DistanceFunction = DistanceFunction.CosineDistance)]
+       public ReadOnlyMemory<float> Embedding { get; set; }
+   }
+   ```
+
+2. Register the store and the `VectorStore` over it
+
+   ```csharp
+   builder.Services.AddDocumentDbVectorStore(o =>
+   {
+       o.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db")
+       {
+           EnableVectorExtension = true
+       };
+       o.MapVectorRecord<Note>();     // reads the attributes → MapVectorProperty<Note>
+   });
+   ```
+
+3. Resolve MEVD's abstraction anywhere in the AI stack
+
+   ```csharp
+   VectorStore vectorStore = sp.GetRequiredService<VectorStore>();
+   var notes = vectorStore.GetCollection<string, Note>("Note");
+
+   await notes.UpsertAsync(new Note { Id = "n1", Tag = "release", Embedding = embedding });
+
+   await foreach (var hit in notes.SearchAsync(queryEmbedding, top: 5,
+       new VectorSearchOptions<Note> { Filter = n => n.Tag == "release" }))
+   {
+       Console.WriteLine($"{hit.Record.Id} — {hit.Score}");
+   }
+   ```
+</Steps>
+
+`AddDocumentDbVectorStore` registers **one** store behind both faces: `IDocumentStore` for the rest of your app
+and `VectorStore` for the AI stack, sharing a single connection pool. If the store is already registered
+elsewhere — or lives on a provider with its own options class (MongoDB, CosmosDB, Redis) — use the no-argument
+overload, which wraps whatever `IDocumentStore` is in the container:
+
+```csharp
+builder.Services.AddDocumentStore<MongoDbDocumentStoreOptions>(o => { /* … */ o.MapVectorRecord<Note>(); });
+builder.Services.AddDocumentDbVectorStore();
+```
+
+Container-free (`new DocumentStore(options)`) works the same way:
+
+```csharp
+var options = new DocumentStoreOptions { DatabaseProvider = provider };
+options.MapVectorRecord<Note>();
+var vectorStore = new DocumentDbVectorStore(new DocumentStore(options));
+```
+
+## `MapVectorRecord<T>`
+
+`MapVectorRecord<T>()` is the whole bridge: it reads the record's `[VectorStoreKey]` and `[VectorStoreVector]`
+decoration and emits the equivalent `MapVectorProperty<T>` against your store's options, so the vector column and
+its ANN index are provisioned at table-init like any other mapped embedding.
+
+| MEVD | DocumentDb |
+| --- | --- |
+| `[VectorStoreVector(dimensions)]` | `MapVectorProperty<T>(…, dimensions)` |
+| `DistanceFunction.CosineDistance` / `CosineSimilarity` | `VectorDistance.Cosine` |
+| `DistanceFunction.EuclideanDistance` | `VectorDistance.Euclidean` |
+| `DistanceFunction.DotProductSimilarity` / `NegativeDotProductSimilarity` | `VectorDistance.DotProduct` |
+| `DistanceFunction.HammingDistance` | `VectorDistance.Hamming` |
+| `IndexKind.Hnsw` / `Flat` / `IvfFlat` / `DiskAnn` / `QuantizedFlat` | the matching `VectorIndexKind` |
+| `IndexKind.Dynamic`, or unset | the provider's own default (DiskANN on Cosmos, HNSW elsewhere) |
+
+`EuclideanSquaredDistance` and `ManhattanDistance` have no DocumentDb equivalent and throw `NotSupportedException`
+at mapping time rather than at query time.
+
+Two rules worth knowing up front:
+
+- **The `[VectorStoreKey]` property must also be the document's id.** Name it `Id` (the convention) or map it with
+  your options' `MapIdProperty<T>` — the by-key reads and writes address the document through the store's id, so
+  the two have to be the same property. Keys may be `string`, `Guid`, `int`, or `long`.
+- **One embedding per record.** DocumentDb maps a single vector property per document type, so a record with two
+  `[VectorStoreVector]` properties is rejected at mapping time, and `VectorSearchOptions.VectorProperty` may only
+  select the mapped one.
+- **`StorageName` is rejected, not ignored.** A property's stored name here *is* whatever the store's
+  `JsonSerializerOptions` produce — naming policy plus `[JsonPropertyName]`. Honouring MEVD's `StorageName` on top
+  of that would give one property two names depending on which API wrote it, and a filter over a renamed property
+  would then match nothing without erroring. Use `[JsonPropertyName("…")]`.
+
+### Record definitions instead of attributes
+
+A `VectorStoreCollectionDefinition` can drive the mapping for a record you don't own or don't want to decorate —
+pass it to `MapVectorRecord`, not to `GetCollection`:
+
+```csharp
+var definition = new VectorStoreCollectionDefinition
+{
+    Properties =
+    [
+        new VectorStoreKeyProperty(nameof(Note.Id), typeof(string)),
+        new VectorStoreDataProperty(nameof(Note.Tag), typeof(string)),
+        new VectorStoreVectorProperty(nameof(Note.Embedding), typeof(ReadOnlyMemory<float>), 1536)
+        {
+            DistanceFunction = DistanceFunction.CosineDistance
+        }
+    ]
+};
+
+options.MapVectorRecord<Note>("notes", definition);
+```
+
+<Aside type="note" title="Why mapping happens at configuration time">
+DocumentDb reads its vector mappings when the store is **constructed** — that is when tables and ANN indexes get
+provisioned. MEVD, by contrast, hands you record types lazily through `GetCollection`. The connector resolves
+this by requiring every record to be mapped while the options are being configured; `GetCollection` then only
+builds a facade over the store you already have. It never opens a second connection pool and never re-provisions
+a table, and a record it has not seen produces a clear error instead of a silently unindexed collection.
+</Aside>
+
+## Filters pass straight through
+
+MEVD's filter is `Expression<Func<TRecord, bool>>` — byte-identical to the `filter` parameter on
+`IDocumentStore.NearestVectors<T>`. The connector hands it over untouched, so there is no translation layer
+between MEVD and the engine, and the predicate is pushed **into** the ANN search wherever the provider supports
+it (Cosmos, pgvector, SQL Server, Atlas, DuckDB pre-filter; SQLite post-filters a widened candidate scan). See
+[Filter semantics](/documentdb/vector/#filter-semantics).
+
+```csharp
+await foreach (var hit in notes.SearchAsync(query, top: 5,
+    new VectorSearchOptions<Note> { Filter = n => n.Tag == "release" && n.Text.Contains("beta") }))
+{
+    // …
+}
+```
+
+## Searching by text
+
+`SearchAsync` takes a `ReadOnlyMemory<float>`, a `float[]`, or an `Embedding<float>` directly. Pass a `string` and
+the connector embeds it first, using — in order — the collection definition's `EmbeddingGenerator`, the one handed
+to the `DocumentDbVectorStore` constructor, or the `IEmbeddingGenerator<string, Embedding<float>>` registered in
+DI. With none of those available, a text query throws.
+
+```csharp
+builder.Services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(generator);
+// …
+await foreach (var hit in notes.SearchAsync("what changed in the last release?", top: 5)) { }
+```
+
+This is search-side embedding only. To embed on **write**, use
+[`AutoEmbedOnInsert`](/documentdb/vector/#auto-embed-on-insert) from `Shiny.DocumentDb.Extensions.AI` — the two
+compose, and neither package depends on the other.
+
+## Provider support
+
+The connector works on the vector-capable tier and refuses the rest at construction rather than at query time, so
+a misconfiguration surfaces at startup.
+
+| Supported | Not supported (`NotSupportedException`) |
+| --- | --- |
+| SQLite (with `Shiny.DocumentDb.Sqlite.VectorSupport`), PostgreSQL/pgvector, CockroachDB, SQL Server, Oracle, DuckDB, CosmosDB, MongoDB Atlas, Amazon DocumentDB, Redis | LiteDB, IndexedDB, MySQL, MariaDB, Azure Table, DynamoDB, Firestore, RavenDB |
+
+```csharp
+// Throws immediately — LiteDB has no ANN engine.
+var vectorStore = new DocumentDbVectorStore(liteDbStore);
+```
+
+### Scores are provider-specific
+
+Results are always ordered **nearest-first**, on every provider. The raw `VectorSearchResult.Score` is the
+backend's own number and is not normalized: the relational providers report a *distance* for Cosine/Euclidean
+(lower = closer) while MongoDB Atlas and Cosmos report a normalized *similarity* (higher = closer). Rank on the
+ordering, not on the value — and treat `VectorSearchOptions.ScoreThreshold`, which MEVD defines as a floor
+(`score >= threshold`), as meaningful only on providers whose score is a similarity. See
+[`VectorResult<T>`](/documentdb/vector/#vectorresultt).
+
+## Behaviour notes
+
+- **Upsert replaces, it does not merge.** MEVD's `UpsertAsync` means "this is the record now", so a field the
+  caller cleared is cleared in storage. Relational providers do it in one round trip; the document-native ones do
+  a read-modify-write, which is the same thing the relational stores run internally.
+- **Vectors are omitted unless asked for.** `RecordRetrievalOptions.IncludeVectors` and
+  `VectorSearchOptions.IncludeVectors` default to `false`, and the connector clears the embedding on returned
+  records to match.
+- **`GetAsync(keys)` returns a subset.** Keys with no document are skipped rather than yielding null.
+- **Deleting a missing key succeeds**, per the MEVD contract.
+- **`EnsureCollectionDeletedAsync` clears the documents** rather than dropping the table — DocumentDb
+  re-provisions a table only at store construction, so dropping it would leave the store pointing at nothing.
+- **Backend failures surface as `VectorStoreException`**, with `CollectionName` and `OperationName` set. Your own
+  mistakes (bad arguments, cancellation, unsupported options) stay as themselves.
+
+## Not supported
+
+- **Dynamic collections.** `GetDynamicCollection` (the `Dictionary<string, object?>` record model) throws. Use
+  `GetCollection<TKey, TRecord>` with a mapped record type.
+- **Multiple vectors per record**, as above.
+- **Hybrid keyword + vector search** (`IKeywordHybridSearchable`). DocumentDb has both
+  [full-text](/documentdb/full-text) and vector search, but no fused ranking between them yet.
