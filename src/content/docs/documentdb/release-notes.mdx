@@ -7,6 +7,85 @@ import RN from '/src/components/ReleaseNote.astro';
 
 ## 13.0 TBD
 
+<RN type="breaking">
+**Per-type configuration is one `ConfigureDocument<T>` block** — the flat per-type mapping methods are removed
+from every options class. The document type is named once, and its whole configuration reads top to bottom:
+
+```csharp
+options.ConfigureDocument<Patient>(cfg =>
+{
+    cfg.Table = "Patients";
+    cfg.MapIdProperty(x => x.Id);
+    cfg.AddSoftDelete(x => x.IsDeleted);
+    cfg.AddQueryFilter(u => !u.IsDeleted);
+    cfg.MapSpatialProperty(r => r.Location);
+    cfg.MapProperty(x => x.Ssn, p => p.Encrypt(EncryptionMode.Deterministic));
+    cfg.MapVectorProperty(d => d.Embedding, dimensions: 1536);
+    cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90));
+});
+```
+
+`MapTypeToTable` / `MapTypeToCollection` / `MapTypeToContainer` / `MapTypeToStore` / `MapTypeToPartition`,
+`MapIdProperty`, `MapVersionProperty`, `AddQueryFilter`, `AddSoftDelete`, `MapSpatialProperty`,
+`MapVectorProperty`, `MapFullTextProperty`, `MapComputedProperty`, `MapBlob`, `MapBlobCollection`,
+`MapTemporal`, `MapIndexedProperty`, `MapEncryptedProperty`, `MapJsonSchema`, `OnBeforeWrite` and
+`OnAfterWrite` all move onto the builder. Store-level configuration is untouched. The builder is written once
+against `IDocumentStoreOptions`, so every provider gets the same surface; provider packages add their own
+vocabulary over it (`cfg.ToContainer` on Cosmos, `cfg.ToCollection` on MongoDB/LiteDB/Firestore, `cfg.ToStore`
+on IndexedDB, `cfg.ToPartition` and `cfg.MapIndexedProperty` on Azure Table/DynamoDB).
+
+See [Migrating v12 → v13](/documentdb/migrating-v12-v13/) for the full old→new table.
+</RN>
+
+<RN type="breaking">
+**A document type carries one spatial / vector / full-text mapping.** Declaring a second one used to silently
+replace the first; it now throws, naming both properties. The old behavior hid real configuration mistakes.
+</RN>
+
+<RN type="feature">
+**Validate-on-build** — one configuration sweep when the store is constructed, reporting **every** problem
+together through a new `DocumentConfigurationException` instead of one per restart. It catches features the
+chosen backend does not have (a vector mapping on LiteDB, `cfg.Table` on RavenDB) and randomized-encrypted
+properties used where the database has to read *through* them — a full-text index, a computed expression, a
+spatial or vector payload, the concurrency version. `DocumentConfigurationValidator.Collect(options)` returns
+the same list without throwing.
+
+The relational providers stay permissive: mapping a vector on plain SQLite is still valid and simply skips the
+ANN index until `Shiny.DocumentDb.Sqlite.VectorSupport` is added.
+</RN>
+
+<RN type="feature">
+**`DocumentContext` model hook** — a source-generated context can declare its whole document model next to its
+`[Document]` list instead of inside `AddDocumentStore`:
+
+```csharp
+[Document(typeof(Patient))]
+public partial class AppContext : DocumentContext
+{
+    static partial void OnConfiguring(DocumentModelBuilder model)
+        => model.Document<Patient>(cfg => cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90)));
+}
+```
+
+It runs after the attribute-derived mapping, so what it sets wins. `options.ConfigureModel(model => …)` exposes
+the same root outside a context.
+</RN>
+
+<RN type="enhancement">
+**`indexKind` now defaults to the provider's own** — leave it unset on `cfg.MapVectorProperty` and each backend
+fills in what it prefers (DiskANN on Cosmos, HNSW elsewhere) when the store is built, rather than each options
+class baking a different default into its signature.
+</RN>
+
+<RN type="enhancement">
+**Shared per-type mapping state, finished.** The relational `DocumentStoreOptions` now delegates to the same
+`DocumentMappingRegistry` as every other provider, and spatial/vector mappings live there too — the four
+duplicated `SpatialMapping` types (core, Cosmos, MongoDB, Redis) collapse into one, behind shared
+`SpatialMappingFactory` / `VectorMappingFactory` helpers. Version, full-text and computed JSON-path resolution
+now all go through the `JsonTypeInfo`-aware resolver on every provider, so source-generated contexts and
+`[JsonPropertyName]` are honored where previously only the relational path consulted them.
+</RN>
+
 <RN type="feature">
 **`Microsoft.Extensions.VectorData` connector** — new `Shiny.DocumentDb.Extensions.VectorData` package. Point the
 .NET AI ecosystem (MEAI, the Microsoft Agent Framework, Semantic Kernel) at a document store through MEVD's

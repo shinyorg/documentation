@@ -570,6 +570,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'documentdb/' },
           { label: 'Why DocumentDb', link: 'documentdb/comparison' },
+          { label: 'Migrating v12 → v13', link: 'documentdb/migrating-v12-v13' },
           { label: 'AOT Setup', link: 'documentdb/aot' },
           { label: 'CRUD Operations', link: 'documentdb/crud' },
           { label: 'JSON Collections', link: 'documentdb/json-collections' },

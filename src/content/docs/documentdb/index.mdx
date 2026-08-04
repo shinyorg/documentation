@@ -52,8 +52,8 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Grouped aggregation** — `Query<Order>().GroupBy(o => o.Status).Having(g => g.Count() > 5).Select(g => new { g.Key, Revenue = g.Sum(o => o.Total) })` with multi-part and derived keys, plus a string form (`GroupBy("customer.tier")`). Pushed down to real SQL `GROUP BY`/`HAVING` on the relational providers and evaluated client-side on MongoDB, Cosmos, LiteDB, and IndexedDB. [Learn more](/documentdb/aggregates/)
 - **Ordering** — `.OrderBy(u => u.Age)` and `.OrderByDescending(u => u.Name)` on the fluent query builder
 - **Pagination** — `.Paginate(offset, take)` translates to SQL `LIMIT`/`OFFSET`
-- **Table-per-type mapping** — `MapTypeToTable<T>()` gives a document type its own dedicated table. Unmapped types share a configurable default table
-- **Custom Id properties** — `MapTypeToTable<T>("table", x => x.MyProp)` to combine with a dedicated table, or `MapIdProperty<T>(x => x.MyProp)` to override the Id while keeping the type in the default shared table
+- **Table-per-type mapping** — `cfg.Table = "orders"` inside a `ConfigureDocument<T>` block gives a document type its own dedicated table. Unmapped types share a configurable default table
+- **Custom Id properties** — `cfg.MapIdProperty(x => x.MyProp)` overrides the Id, on its own or alongside `cfg.Table`
 - **Document diffing** — `GetDiff` compares a modified object against the stored document and returns an RFC 6902 `JsonPatchDocument<T>` with deep nested-object diffing
 - **Surgical field updates** — `SetProperty` updates a single JSON field without deserialization. `RemoveProperty` strips a field. Both support nested paths
 - **JSON Merge Patch (Upsert)** — `Upsert` uses RFC 7396 `json_patch` to deep-merge a partial object into an existing document, preserving unset nullable fields. Inserts if the document doesn't exist
@@ -62,14 +62,14 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Typed Id lookups** — `Get`, `Remove`, `SetProperty`, and `RemoveProperty` accept the Id as `object` so you can pass a `Guid`, `int`, `long`, or `string` directly. Unsupported types throw `ArgumentException`
 - **JSON collections** — read and write documents as raw JSON through one API, addressed either by **name** (schema-free — no CLR type at all) or by **CLR type** (late-bound — a registered type, but no instance): `store.Collection("orders")` / `store.Collection(typeof(Order))`. Both give `Insert`/`Update`/`Upsert`/`Get`/`Remove`/`Clear` plus a fluent string-grammar `Query()` returning `JsonObject`s. A type-keyed collection stores the body AS-IS but rides the full write pipeline (tenancy, temporal, versioning/CAS, spatial + vector sidecars, interceptors, change notifications) and resolves paths through the type's metadata; a name-keyed one has no registrations at all and infers field types from the query (with an explicit `total:number` hint where nothing else pins them). Ideal for generic HTTP intake, message-bus payloads, ETL, gateways, and genuinely schema-free data. Relational providers. [Learn more](/documentdb/json-collections/)
 - **Typed `DocumentContext`** — an optional, EF-Core-style typed front-end over `IDocumentStore`. Declare aggregates on a `partial` context with `[Document(typeof(User), Id = nameof(User.Email), JsonContext = typeof(AppJsonContext))]` and a bundled source generator emits a `DocumentSet<T>` per type plus DI sugar (`AddAppContext(...)` scoped, `AddAppContextFactory(...)` for the MAUI/Blazor/desktop story). Work model-first — `await db.Users.Where(u => u.Age >= 18).ToList()` — with `JsonTypeInfo<T>` threaded automatically. Ships in core, works over all providers. [Learn more](/documentdb/context/)
-- **Computed properties** — map a value *derived* from other fields (`Total = Quantity * UnitPrice`, a normalized `lower(Email)`) that you filter, sort, and project by exactly like a stored property, though it's never written into the JSON. `MapComputedProperty<T>(o => o.Total, o => o.Quantity * o.UnitPrice)` runs in alias mode by default (SQL-inlined, zero schema); pass `indexed: true` on a relational provider to materialize it as a native generated/computed column + index. Recomputed and written back onto the object on read. Fully AOT/trim-safe. [Learn more](/documentdb/computed-columns/)
+- **Computed properties** — map a value *derived* from other fields (`Total = Quantity * UnitPrice`, a normalized `lower(Email)`) that you filter, sort, and project by exactly like a stored property, though it's never written into the JSON. `cfg.MapComputedProperty(o => o.Total, o => o.Quantity * o.UnitPrice)` runs in alias mode by default (SQL-inlined, zero schema); pass `indexed: true` on a relational provider to materialize it as a native generated/computed column + index. Recomputed and written back onto the object on read. Fully AOT/trim-safe. [Learn more](/documentdb/computed-columns/)
 - **Full AOT/trimming support** — all `JsonTypeInfo<T>` parameters are optional and auto-resolve from a configured `JsonSerializerContext`. Set `UseReflectionFallback = false` to catch missing registrations with clear exceptions
-- **Optimistic concurrency** — `MapVersionProperty<T>(x => x.RowVersion)` enables automatic version checking on update/upsert. Version is set to 1 on insert, checked and incremented on update. Throws `ConcurrencyException` on conflict. Works across all providers — stored in the JSON blob with zero schema changes
+- **Optimistic concurrency** — `cfg.MapVersionProperty(x => x.RowVersion)` enables automatic version checking on update/upsert. Version is set to 1 on insert, checked and incremented on update. Throws `ConcurrencyException` on conflict. Works across all providers — stored in the JSON blob with zero schema changes
 - **Unit of work** — `store.OpenSession()` + `SaveChanges()` with automatic commit/rollback
 - **Batch writes** — `BatchInsert` inserts a collection in a single transaction with prepared command reuse, auto-generates IDs, and rolls back atomically on failure. `BatchUpsert`, `BatchUpdate`, and `BatchRemove<T>(ids)` apply many writes as one set operation (a single multi-row `INSERT … ON CONFLICT` deep-merge on SQLite/DuckDB, one `BulkWrite`/`DeleteMany` on MongoDB, parallel request waves on Cosmos, a single `DELETE … IN (…)` on relational). All-or-nothing — the first version conflict rolls the whole batch back
-- **Spatial / geo queries (full OGC geometry)** — beyond point-only `WithinRadius`/`WithinBoundingBox`/`NearestNeighbors`, a full `Geometry` model (`GeoLineString`, `GeoPolygon` with holes, multi-geometries) maps via `MapSpatialProperty<T>(x => x.Area)` and queries with the topological predicate family — `GeoIntersects`, `GeoContains`, `GeoWithin`, `GeoCovers`, `GeoWithinDistance`, and friends — returning `SpatialResult<T>` with `DistanceMeters`. Compose spatial predicates inside ordinary LINQ with `DocumentFunctions.Intersects/Distance/…` (server-side, combinable with other `Where`/`OrderBy`/paging) and in the string-expression surface too. Backed by a real 2-D spatial index on every SQL provider — SQLite R\*Tree, PostgreSQL GiST, MySQL `SPATIAL`, DuckDB R-Tree, SQL Server spatial index, Oracle `SDO_GEOMETRY` + MDSYS — plus native `ST_*` on CosmosDB and `2dsphere` on MongoDB. [Learn more](/documentdb/spatial/)
-- **Vector / ANN search** — register an embedding property with `MapVectorProperty<T>(d => d.Embedding, dimensions: 1536, metric: VectorDistance.Cosine, indexKind: VectorIndexKind.Hnsw)` and query with `Query<T>().Where(...).NearestVectors(query, k)`. Provider-native indexes: pgvector (PostgreSQL), `VECTOR` + DiskANN (SQL Server 2025), native `VECTOR` + HNSW/IVF (Oracle 23ai), embedding policy (CosmosDB), `$vectorSearch` (MongoDB Atlas), `vss` extension (DuckDB), `sqlite-vec` (SQLite). Plus `AutoEmbedOnInsert<T>` to plug in `Microsoft.Extensions.AI.IEmbeddingGenerator` and embed text automatically on every write. [Learn more](/documentdb/vector/)
-- **Full-text search (all providers)** — `MapFullTextProperty<T>(a => a.Body)` (or an array of paths) + `store.FullTextSearch<T>("orleans persistence")` for relevance-ranked search, returning `FullTextResult<T>` (`Document` + normalized `Score`) ordered by relevance, with an optional pre-filter and a fluent `store.Query<T>().Where(...).FullTextMatch("...")` form. The native index is auto-created and engine-maintained: FTS5 (SQLite), `tsvector`+GIN (PostgreSQL), `FULLTEXT` (MySQL), Oracle Text, SQL Server Full-Text, the `fts` extension (DuckDB), full-text policy (CosmosDB), `$text` (MongoDB), and an in-memory TF-IDF fallback on LiteDB / IndexedDB. A type must be mapped before it can be searched. [Learn more](/documentdb/full-text/)
+- **Spatial / geo queries (full OGC geometry)** — beyond point-only `WithinRadius`/`WithinBoundingBox`/`NearestNeighbors`, a full `Geometry` model (`GeoLineString`, `GeoPolygon` with holes, multi-geometries) maps via `cfg.MapSpatialProperty(x => x.Area)` and queries with the topological predicate family — `GeoIntersects`, `GeoContains`, `GeoWithin`, `GeoCovers`, `GeoWithinDistance`, and friends — returning `SpatialResult<T>` with `DistanceMeters`. Compose spatial predicates inside ordinary LINQ with `DocumentFunctions.Intersects/Distance/…` (server-side, combinable with other `Where`/`OrderBy`/paging) and in the string-expression surface too. Backed by a real 2-D spatial index on every SQL provider — SQLite R\*Tree, PostgreSQL GiST, MySQL `SPATIAL`, DuckDB R-Tree, SQL Server spatial index, Oracle `SDO_GEOMETRY` + MDSYS — plus native `ST_*` on CosmosDB and `2dsphere` on MongoDB. [Learn more](/documentdb/spatial/)
+- **Vector / ANN search** — register an embedding property with `cfg.MapVectorProperty(d => d.Embedding, dimensions: 1536, metric: VectorDistance.Cosine)` and query with `Query<T>().Where(...).NearestVectors(query, k)`. Provider-native indexes: pgvector (PostgreSQL), `VECTOR` + DiskANN (SQL Server 2025), native `VECTOR` + HNSW/IVF (Oracle 23ai), embedding policy (CosmosDB), `$vectorSearch` (MongoDB Atlas), `vss` extension (DuckDB), `sqlite-vec` (SQLite). Plus `AutoEmbedOnInsert<T>` to plug in `Microsoft.Extensions.AI.IEmbeddingGenerator` and embed text automatically on every write. [Learn more](/documentdb/vector/)
+- **Full-text search (all providers)** — `cfg.MapFullTextProperty(a => a.Body)` (or an array of paths) + `store.FullTextSearch<T>("orleans persistence")` for relevance-ranked search, returning `FullTextResult<T>` (`Document` + normalized `Score`) ordered by relevance, with an optional pre-filter and a fluent `store.Query<T>().Where(...).FullTextMatch("...")` form. The native index is auto-created and engine-maintained: FTS5 (SQLite), `tsvector`+GIN (PostgreSQL), `FULLTEXT` (MySQL), Oracle Text, SQL Server Full-Text, the `fts` extension (DuckDB), full-text policy (CosmosDB), `$text` (MongoDB), and an in-memory TF-IDF fallback on LiteDB / IndexedDB. A type must be mapped before it can be searched. [Learn more](/documentdb/full-text/)
 - **Composite JSON indexes** — `CreateIndexAsync(ctx.User, u => u.Country, u => u.Age)` builds a single B-tree across multiple JSON paths on SQLite, SQLCipher, PostgreSQL, MySQL, Oracle, DuckDB, and SQL Server. [Learn more](/documentdb/indexes/#composite--multi-column-indexes)
 - **Hot backup** — `Backup` copies the database to a file. Available on `SqliteDocumentStore`, `SqlCipherDocumentStore`, and `LiteDbDocumentStore`
 - **Streaming bulk export / import / restore** — the `IDocumentBackup` store capability moves a whole store's contents in and out as a portable, streamed v1 backup: `ExportAsync(Stream)`, `RestoreAsync(Stream)`, and the lower-level `BulkImportAsync(IAsyncEnumerable<RawDocument>)`. Bodies bound verbatim (no `<T>`, no reflection — AOT-friendly); `BulkWriteMode` picks Insert/Replace/Merge/SkipExisting, with a native bulk-copy fast path (10-100× faster) on PostgreSQL `COPY`, SQL Server `SqlBulkCopy`, and DuckDB appender. Every SQL provider plus MongoDB and Cosmos. [Learn more](/documentdb/backup/)
@@ -79,16 +79,16 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 - **Multi-tenancy** — two isolation strategies: **shared-table** (single database with automatic `TenantId` column filtering) and **tenant-per-database** (separate database per tenant via lazy factory). Both resolve the current tenant via a user-implemented `ITenantResolver`. Consumer code is unchanged — tenant isolation is applied transparently
 - **Change monitoring** — consume an `IAsyncEnumerable<DocumentChange<T>>` of insert/update/remove/clear events with `await foreach (var c in store.NotifyOnChange<User>(ct))`. Filter to a single document with `WhenDocumentChanged<T>(id)` or to the result set of a fluent query with `query.NotifyOnChange()`. Buffered in a session and emitted on commit. [Learn more](/documentdb/change-monitoring/)
 - **Native change feeds** — `IChangeFeedDocumentStore.SubscribeChanges<T>` observes all writers via the database's own mechanism: **PostgreSQL** `LISTEN`/`NOTIFY` triggers, **SQL Server** Change Tracking (optionally with `SqlDependency` query notifications), and **Cosmos DB** native Change Feed. Provisioning is automatic and idempotent
-- **Temporal history (system-time versioning)** — `MapTemporal<T>(o => { o.Retention = ...; o.MaxVersions = ...; o.CaptureActor = ...; })` opts a type into append-only versioning. Every Insert/Update/Upsert/Remove/SetProperty/RemoveProperty/BatchInsert records a snapshot to a per-type history sidecar. Read it back with `History<T>(id)`, `AsOf<T>(id, when)`, `Restore<T>(id, version)`, `GetDiffBetween<T>(id, from, to)`, plus fleet-wide `AsOfAll<T>(when)`, `ChangesByActor<T>(actor)`, and `ChangesBetween<T>(from, to)` — on the `ITemporalDocumentStore` capability interface, not `IDocumentStore`. Opt-in per type, on every provider (relational and document/NoSQL). [Learn more](/documentdb/temporal/)
+- **Temporal history (system-time versioning)** — `cfg.MapTemporal(o => { o.Retention = ...; o.MaxVersions = ...; o.CaptureActor = ...; })` opts a type into append-only versioning. Every Insert/Update/Upsert/Remove/SetProperty/RemoveProperty/BatchInsert records a snapshot to a per-type history sidecar. Read it back with `History<T>(id)`, `AsOf<T>(id, when)`, `Restore<T>(id, version)`, `GetDiffBetween<T>(id, from, to)`, plus fleet-wide `AsOfAll<T>(when)`, `ChangesByActor<T>(actor)`, and `ChangesBetween<T>(from, to)` — on the `ITemporalDocumentStore` capability interface, not `IDocumentStore`. Opt-in per type, on every provider (relational and document/NoSQL). [Learn more](/documentdb/temporal/)
 - **Write interceptors** — observe and mutate writes as they happen, per-document (`IDocumentInterceptor` — `Insert`, `BatchInsert` per item, `Update`, `Upsert`, `Remove`) or set-based (`IDocumentBulkInterceptor` — `ExecuteUpdate`, `ExecuteDelete`, `Clear`). The after-hook runs **inside the same transaction**, after the write succeeds and before commit, so it sees the generated id/version and can do transactional side effects like an outbox. A before-hook can also `ctx.Cancel()` to replace the write entirely. Every provider. [Learn more](/documentdb/interceptors/)
-- **Soft delete** — `opts.AddSoftDelete<Customer>(x => x.IsDeleted)` and `Remove`, `ExecuteDelete`, and `Clear` all set the flag instead of deleting, while every read hides the flagged documents (`IncludeDeleted()` opts back in). Nothing is wired into the stores — it's a global query filter plus a write-cancelling interceptor, the same two public building blocks you'd use to write your own variant. [Learn more](/documentdb/soft-delete/)
+- **Soft delete** — `cfg.AddSoftDelete(x => x.IsDeleted)` and `Remove`, `ExecuteDelete`, and `Clear` all set the flag instead of deleting, while every read hides the flagged documents (`IncludeDeleted()` opts back in). Nothing is wired into the stores — it's a global query filter plus a write-cancelling interceptor, the same two public building blocks you'd use to write your own variant. [Learn more](/documentdb/soft-delete/)
 - **Blobs** — attach binary payloads (a PDF, an image, a signature) to a document via `DocumentBlob` / `DocumentBlobCollection`, stored in a **sidecar table** and **loaded on demand**. The body keeps only metadata (size, content type, file name), so ordinary reads, queries, the change feed, and temporal history never drag the bytes along — unlike a raw `byte[]`, which base64-inflates the `Data` column ~33% and materializes on every read. [Learn more](/documentdb/blobs/)
 - **Reference geo data** — `Shiny.DocumentDb.Geo` ships an embedded dataset of US states, Canadian provinces, and US & Canadian cities that seeds straight into any store: point-in-region lookups, nearest-city queries, and population data without wiring up an external gazetteer. Plain documents through the normal seeding + spatial machinery, so it's provider-agnostic. [Learn more](/documentdb/geo-reference/)
-- **Global query filters** — register an `AddQueryFilter<T>(u => !u.IsDeleted)` predicate that's automatically AND-applied to every query of `T`, plus `Get`/`Update`/`Remove`/`SetProperty`/`RemoveProperty`/`Clear`/`ExecuteUpdate`/`ExecuteDelete` and per-query change monitoring. Mirrors Entity Framework Core's `HasQueryFilter`, including named filters, `IgnoreQueryFilters()`/`IgnoreQueryFilters("name")`, and captured-variable semantics. [Learn more](/documentdb/query-filters/)
+- **Global query filters** — register a `cfg.AddQueryFilter(u => !u.IsDeleted)` predicate that's automatically AND-applied to every query of `T`, plus `Get`/`Update`/`Remove`/`SetProperty`/`RemoveProperty`/`Clear`/`ExecuteUpdate`/`ExecuteDelete` and per-query change monitoring. Mirrors Entity Framework Core's `HasQueryFilter`, including named filters, `IgnoreQueryFilters()`/`IgnoreQueryFilters("name")`, and captured-variable semantics. [Learn more](/documentdb/query-filters/)
 - **AI tool integration** — `Shiny.DocumentDb.Extensions.AI` exposes document types as `Microsoft.Extensions.AI` tool functions for LLM agents. Per-type capability flags (`ReadOnly`, `All`), structured filter expressions, field visibility control, and page size caps. [Learn more](/documentdb/ai-tools/)
-- **Orleans persistence** — `Shiny.DocumentDb.Orleans` provides a full Microsoft Orleans stack — **grain storage**, **reminders**, **cluster membership**, and **grain directory** — on any DocumentDb backend (relational, MongoDB, or Cosmos) through one `IDocumentStore` abstraction. Because grain state is persisted as structured, queryable JSON, you can **query grain state directly without activating grains** (reporting, dashboards, ops tooling) and get a free audit trail of every mutation via `MapTemporal<T>`. [Learn more](/documentdb/orleans/)
+- **Orleans persistence** — `Shiny.DocumentDb.Orleans` provides a full Microsoft Orleans stack — **grain storage**, **reminders**, **cluster membership**, and **grain directory** — on any DocumentDb backend (relational, MongoDB, or Cosmos) through one `IDocumentStore` abstraction. Because grain state is persisted as structured, queryable JSON, you can **query grain state directly without activating grains** (reporting, dashboards, ops tooling) and get a free audit trail of every mutation via `cfg.MapTemporal()`. [Learn more](/documentdb/orleans/)
 - **Telemetry & diagnostics** — embedded and always-on: every store emits OpenTelemetry-native metrics (`db.client.operation.duration` and friends, plus a `db.client.unit_of_work.operations` histogram) and `ActivitySource` trace spans per operation — CRUD, fluent-query terminals, temporal, and a `unit_of_work` parent span per session. Built on `System.Diagnostics`; zero-cost when nobody is listening — subscribe with `.AddSource`/`.AddMeter("Shiny.DocumentDb")`. [Learn more](/documentdb/diagnostics/)
-- **JSON Schema validation** — `Shiny.DocumentDb.JsonSchema` attaches a JSON Schema (draft 2020-12) to a document type and validates the exact JSON about to be persisted just before the write. `options.MapJsonSchema<Customer>(schemaJson)` needs no DI (works with a hand-built `new DocumentStore(options)`); a failure throws `DocumentSchemaValidationException` with field-level errors and rolls the write back. Enforces what the C# type can't — `maxLength`, ranges, `pattern`, `enum`, `format`. [Learn more](/documentdb/validation/)
+- **JSON Schema validation** — `Shiny.DocumentDb.JsonSchema` attaches a JSON Schema (draft 2020-12) to a document type and validates the exact JSON about to be persisted just before the write. `options.ConfigureDocument<Customer>(cfg => cfg.MapJsonSchema(schemaJson))` needs no DI (works with a hand-built `new DocumentStore(options)`); a failure throws `DocumentSchemaValidationException` with field-level errors and rolls the write back. Enforces what the C# type can't — `maxLength`, ranges, `pattern`, `enum`, `format`. [Learn more](/documentdb/validation/)
 - **OData query endpoints** — `Shiny.DocumentDb.OData` + `Shiny.DocumentDb.AspNetCore.OData` expose a document type as an OData v4 entity set: `$filter`/`$orderby`/`$top`/`$skip`/`$count`/`$select` translate onto the fluent query and run against any provider. Global query filters always apply underneath, and per-entity-set `ODataQueryPolicy` governance locks down public endpoints. [Learn more](/documentdb/odata/)
 - **Offline-first sync** — `Shiny.DocumentDb.AppDataSync` makes the store the local cache of an offline-first app that bidirectionally syncs to an HTTP backend via `Shiny.Data.Sync`. `SyncDocumentStore(sync => sync.Sync<TodoItem>())` turns an ordinary document type into a two-way synced one — every local write is auto-enqueued to the outbox and every pulled server change is auto-applied back. Client-tier providers (SQLite, LiteDB, IndexedDB). [Learn more](/documentdb/data-sync/)
 - **.NET Aspire integration** — `Shiny.DocumentDb.Aspire.Hosting` / `.Client` / `.Orleans` make the backend a deployment decision: `builder.AddPostgresDocumentStore("orders").WithSeeder(...)` in the AppHost picks the provider and gates seeding; the consuming service calls `builder.AddDocumentStore("orders")` for the keyed store wired with health checks + OpenTelemetry. `builder.AddDocumentDbAdmin()` brings the admin UI up alongside them, already connected to every referenced store. [Learn more](/documentdb/aspire/)
@@ -377,58 +377,72 @@ A lightweight, database-agnostic document store for .NET that turns your databas
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `DatabaseProvider` | `IDatabaseProvider` (required) | — | The database provider to use (e.g. `SqliteDatabaseProvider`, `SqlCipherDatabaseProvider`, `SqlServerDatabaseProvider`, `MySqlDatabaseProvider`, `PostgreSqlDatabaseProvider`, `DuckDbDatabaseProvider`). LiteDB, CosmosDB, MongoDB, and IndexedDB use their own options classes. |
-| `TableName` | `string` | `"documents"` | Default table name for all document types not mapped via `MapTypeToTable` |
+| `TableName` | `string` | `"documents"` | Default table name for all document types that do not set `cfg.Table` |
 | `TypeNameResolution` | `TypeNameResolution` | `ShortName` | How type names are stored (`ShortName` or `FullName`) |
 | `JsonSerializerOptions` | `JsonSerializerOptions?` | `null` | JSON serialization settings. When a `JsonSerializerContext` is attached as the `TypeInfoResolver`, all methods auto-resolve type info from the context |
 | `UseReflectionFallback` | `bool` | `true` | When `false`, throws `InvalidOperationException` if a type can't be resolved from the configured `TypeInfoResolver` instead of falling back to reflection. Recommended for AOT deployments |
 | `Logging` | `Action<string>?` | `null` | Callback invoked with every SQL statement executed |
 | `TenantIdAccessor` | `Func<string>?` | `null` | When set, enables shared-table multi-tenancy. All queries are filtered by TenantId and all inserts include the TenantId value. A dedicated TenantId column and index are created automatically |
 
-### Table-Per-Type Mapping
+### Per-Type Configuration
 
-By default all document types share a single table. Use `MapTypeToTable` to give a type its own dedicated table. Tables are lazily created on first use. Two types cannot map to the same custom table.
+Everything about a document type is configured in one `ConfigureDocument<T>` block, with the type named once.
+By default all types share a single table; set `cfg.Table` to give one its own. Tables are lazily created on
+first use, and two types cannot map to the same table.
 
 ```csharp
-var store = new DocumentStore(new DocumentStoreOptions
+var options = new DocumentStoreOptions
 {
     DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db"),
     TableName = "docs"                 // change the default table name (optional)
-}
-.MapTypeToTable<Order>("orders")       // explicit table name
-.MapTypeToTable<AuditLog>()            // auto-derived table name "AuditLog"
+};
+
+options.ConfigureDocument<Order>(cfg => cfg.Table = "orders");        // explicit table name
+options.ConfigureDocument<AuditLog>(cfg => cfg.Table = cfg.TypeName); // named after the type
 // User stays in the default "docs" table
-);
+
+var store = new DocumentStore(options);
 ```
 
 #### Custom Id property
 
-By default every document type must have a property named `Id`. Override that with a custom property using either `MapTypeToTable<T>(...)` (combined with a dedicated table) or `MapIdProperty<T>(...)` (the type stays in the default shared table). The two are independent — use either, both, or neither.
+By default every document type must have a property named `Id`. Override it with `cfg.MapIdProperty(...)` —
+on its own, or alongside `cfg.Table`. The two are independent.
 
 ```csharp
-var store = new DocumentStore(new DocumentStoreOptions
+options.ConfigureDocument<Sensor>(cfg =>
 {
-    DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
-}
-// Dedicated table + custom Id
-.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey)      // Guid DeviceKey as Id
-.MapTypeToTable<Tenant>("tenants", t => t.TenantCode)     // string TenantCode as Id
-// Default shared table + custom Id
-.MapIdProperty<BlogPost>(p => p.Slug)                     // string Slug as Id
-);
+    cfg.Table = "sensors";
+    cfg.MapIdProperty(s => s.DeviceKey);      // Guid DeviceKey as Id, in its own table
+});
+
+options.ConfigureDocument<BlogPost>(cfg => cfg.MapIdProperty(p => p.Slug));  // default shared table
 ```
 
-#### MapTypeToTable and MapIdProperty overloads
+#### The builder surface
 
-| Overload | Description |
-|----------|-------------|
-| `MapTypeToTable<T>()` | Auto-derive table name from type name |
-| `MapTypeToTable<T>(string tableName)` | Explicit table name |
-| `MapTypeToTable<T>(Expression<Func<T, object>> idProperty)` | Auto-derive table + custom Id |
-| `MapTypeToTable<T>(string tableName, Expression<Func<T, object>> idProperty)` | Explicit table + custom Id |
-| `MapIdProperty<T>(Expression<Func<T, object>> idProperty)` | Custom Id only — type stays in the default shared table |
-| `MapIdProperty<T>(string propertyName)` | AOT-safe string overload |
+| Member | Description |
+|--------|-------------|
+| `cfg.Table` | The type's storage unit — a table, or a collection / container / object store on the document providers. Leave it unset to share the store's default |
+| `cfg.TypeName` | The resolved type name, per the store's `TypeNameResolution` — assign it to `cfg.Table` to name the table after the type |
+| `cfg.MapIdProperty(x => x.MyProp)` | Custom Id property. A `string` overload is the AOT-safe form |
+| `cfg.MapVersionProperty(x => x.RowVersion)` | Optimistic concurrency |
+| `cfg.AddQueryFilter(...)` | A global query filter, optionally named |
+| `cfg.MapProperty(x => x.Ssn, p => p.Encrypt(...))` | Per-property options — field-level encryption today |
+| `cfg.MapSpatialProperty` / `cfg.MapVectorProperty` / `cfg.MapFullTextProperty` | Search mappings — one of each per type |
+| `cfg.MapComputedProperty<TValue>(...)` | A derived value you can filter, sort and project by |
+| `cfg.MapBlob` / `cfg.MapBlobCollection` | Sidecar blob payloads |
+| `cfg.MapTemporal(...)` | Append-only system-time history |
+| `cfg.OnBeforeWrite` / `cfg.OnAfterWrite` | Write hooks scoped to this type |
+| `cfg.AddSoftDelete(x => x.IsDeleted)` | Soft delete |
 
-All overloads return `DocumentStoreOptions` for fluent chaining. Duplicate table names throw `InvalidOperationException`.
+Provider packages add their own vocabulary and features to the same builder — `cfg.ToContainer(...)` on Cosmos,
+`cfg.ToCollection(...)` on MongoDB / LiteDB / Firestore, `cfg.ToStore(...)` on IndexedDB,
+`cfg.ToPartition(...)` and `cfg.MapIndexedProperty(...)` on Azure Table / DynamoDB, `cfg.MapIndexedProperty(...)`
+on Redis. Calling `ConfigureDocument<T>` more than once for the same type is additive.
+
+Mapping a feature the chosen backend does not have is reported when the store is built —
+`DocumentConfigurationException` lists **every** problem at once rather than one restart at a time.
 
 #### DI Registration with Table Mapping
 
@@ -436,9 +450,13 @@ All overloads return `DocumentStoreOptions` for fluent chaining. Duplicate table
 services.AddDocumentStore(opts =>
 {
     opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db");
-    opts.MapTypeToTable<User>();
-    opts.MapTypeToTable<Order>("orders");
-    opts.MapTypeToTable<Sensor>("sensors", s => s.DeviceKey);
+    opts.ConfigureDocument<User>(cfg => cfg.Table = cfg.TypeName);
+    opts.ConfigureDocument<Order>(cfg => cfg.Table = "orders");
+    opts.ConfigureDocument<Sensor>(cfg =>
+    {
+        cfg.Table = "sensors";
+        cfg.MapIdProperty(s => s.DeviceKey);
+    });
 });
 ```
 

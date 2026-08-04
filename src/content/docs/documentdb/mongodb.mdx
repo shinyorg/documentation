@@ -42,15 +42,19 @@ dotnet add package Shiny.DocumentDb.MongoDb
    MongoDB uses its own options class, so register the store directly:
 
    ```csharp
-   services.AddSingleton(new MongoDbDocumentStoreOptions
+   var options = new MongoDbDocumentStoreOptions
    {
        ConnectionString = "mongodb://localhost:27017",
        DatabaseName = "mydb"
-   }
-   .MapTypeToCollection<User>()
-   .MapTypeToCollection<Order>("orders")
-   .MapVersionProperty<Order>(o => o.RowVersion));
+   };
+   options.ConfigureDocument<User>(cfg => cfg.ToCollection());
+   options.ConfigureDocument<Order>(cfg =>
+   {
+       cfg.ToCollection("orders");
+       cfg.MapVersionProperty(o => o.RowVersion);
+   });
 
+   services.AddSingleton(options);
    services.AddSingleton<IDocumentStore, MongoDbDocumentStore>();
    ```
 
@@ -84,29 +88,38 @@ dotnet add package Shiny.DocumentDb.MongoDb
 
 ## Collection-Per-Type Mapping
 
-By default every document type shares the `"documents"` collection (or whatever `CollectionName` is set to). Use `MapTypeToCollection<T>()` to give a type its own dedicated collection. Two types cannot map to the same collection name — registration throws `ArgumentException`.
+By default every document type shares the `"documents"` collection (or whatever `CollectionName` is set to). Use `cfg.ToCollection()` to give a type its own dedicated collection. Two types cannot map to the same collection name — registration throws `ArgumentException`.
 
 ```csharp
-new MongoDbDocumentStoreOptions
+var options = new MongoDbDocumentStoreOptions
 {
     ConnectionString = "mongodb://localhost:27017",
     DatabaseName = "mydb",
     CollectionName = "docs" // override the default shared collection name
-}
-.MapTypeToCollection<User>()                              // auto-derived ("User")
-.MapTypeToCollection<Order>("orders")                     // explicit name
-.MapTypeToCollection<Sensor>("sensors", s => s.DeviceKey) // explicit name + custom Id
-.MapTypeToCollection<Tenant>(t => t.TenantCode);          // auto-derived + custom Id
+};
+
+options.ConfigureDocument<User>(cfg => cfg.ToCollection());           // auto-derived ("User")
+options.ConfigureDocument<Order>(cfg => cfg.ToCollection("orders"));  // explicit name
+options.ConfigureDocument<Sensor>(cfg =>                              // explicit name + custom Id
+{
+    cfg.ToCollection("sensors");
+    cfg.MapIdProperty(s => s.DeviceKey);
+});
+options.ConfigureDocument<Tenant>(cfg =>                              // auto-derived + custom Id
+{
+    cfg.ToCollection();
+    cfg.MapIdProperty(t => t.TenantCode);
+});
 ```
 
-### MapTypeToCollection overloads
+### Collection mapping
 
-| Overload | Description |
+| Member | Description |
 |---|---|
-| `MapTypeToCollection<T>()` | Auto-derive collection name from type name |
-| `MapTypeToCollection<T>(string collectionName)` | Explicit collection name |
-| `MapTypeToCollection<T>(Expression<Func<T, object>> idProperty)` | Auto-derive name + custom Id |
-| `MapTypeToCollection<T>(string collectionName, Expression<Func<T, object>> idProperty)` | Explicit name + custom Id |
+| `cfg.ToCollection()` | Auto-derive the collection name from the type name |
+| `cfg.ToCollection("orders")` | Explicit collection name |
+| `cfg.Table = "orders"` | The provider-agnostic spelling of the same thing |
+| `cfg.MapIdProperty(x => x.MyKey)` | Custom Id, independent of the collection mapping |
 
 All overloads return `MongoDbDocumentStoreOptions` for fluent chaining.
 
@@ -180,12 +193,12 @@ This matches the CosmosDB provider's behaviour, so the same caveats apply.
 `MapVersionProperty<T>` on `MongoDbDocumentStoreOptions` enables document-level version checks. The version is stored inside the BSON `data` sub-document — no schema changes required.
 
 ```csharp
-new MongoDbDocumentStoreOptions
+var options = new MongoDbDocumentStoreOptions
 {
     ConnectionString = "mongodb://localhost:27017",
     DatabaseName = "mydb"
-}
-.MapVersionProperty<Order>(o => o.RowVersion);
+};
+options.ConfigureDocument<Order>(cfg => cfg.MapVersionProperty(o => o.RowVersion));
 ```
 
 `Insert` sets the version to `1`. `Update` and `Upsert`-as-update check the expected version against the stored value and throw `ConcurrencyException` on mismatch. See [CRUD operations](/documentdb/crud/) for the full semantics.

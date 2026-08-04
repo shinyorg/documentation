@@ -1,0 +1,127 @@
+---
+title: Migrating v12 → v13
+description: The flat per-type mapping methods are gone. Everything about a document type now lives in one ConfigureDocument<T> block.
+tableOfContents: true
+---
+
+v13 replaces the flat per-type mapping methods with a single `ConfigureDocument<T>` block. The old methods are
+**deleted**, not obsoleted — the compiler will point at every call site, and the table below is the whole
+translation.
+
+## Why
+
+Configuring a type meant restating it once per concern, scattered across the whole `AddDocumentStore` block:
+
+```csharp
+// v12
+options.MapTypeToTable<Patient>("Patients");
+options.MapIdProperty<Patient>(x => x.Id);
+options.AddSoftDelete<Patient>(x => x.IsDeleted);
+options.AddQueryFilter<Patient>(u => !u.IsDeleted);
+options.MapSpatialProperty<Patient>(r => r.Location);
+options.MapEncryptedProperty<Patient>(x => x.Ssn, EncryptionMode.Deterministic);
+options.MapTemporal<Patient>(o => o.Retention = TimeSpan.FromDays(90));
+```
+
+```csharp
+// v13
+options.ConfigureDocument<Patient>(cfg =>
+{
+    cfg.Table = "Patients";
+    cfg.MapIdProperty(x => x.Id);
+    cfg.AddSoftDelete(x => x.IsDeleted);
+    cfg.AddQueryFilter(u => !u.IsDeleted);
+    cfg.MapSpatialProperty(r => r.Location);
+    cfg.MapProperty(x => x.Ssn, p => p.Encrypt(EncryptionMode.Deterministic));
+    cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90));
+});
+```
+
+The type is named once, the whole configuration reads top to bottom, and the same builder works on every
+provider — including the ones whose options class never had half these methods.
+
+## What moved
+
+| v12 | v13 |
+|---|---|
+| `options.MapTypeToTable<T>("orders")` | `cfg.Table = "orders"` |
+| `options.MapTypeToTable<T>()` | `cfg.Table = cfg.TypeName` |
+| `options.MapTypeToTable<T>("orders", x => x.Key)` | `cfg.Table = "orders";` + `cfg.MapIdProperty(x => x.Key)` |
+| `options.MapTypeToCollection<T>(…)` | `cfg.ToCollection(…)` *(MongoDB / LiteDB / Firestore)* |
+| `options.MapTypeToContainer<T>(…)` | `cfg.ToContainer(…)` *(Cosmos)* |
+| `options.MapTypeToStore<T>(…)` | `cfg.ToStore(…)` *(IndexedDB)* |
+| `options.MapTypeToPartition<T>(pk)` | `cfg.ToPartition(pk)` *(Azure Table / DynamoDB)* |
+| `options.MapIdProperty<T>(…)` | `cfg.MapIdProperty(…)` |
+| `options.MapVersionProperty<T>(…)` | `cfg.MapVersionProperty(…)` |
+| `options.AddQueryFilter<T>(…)` | `cfg.AddQueryFilter(…)` |
+| `options.AddSoftDelete<T>(…)` | `cfg.AddSoftDelete(…)` |
+| `options.MapSpatialProperty<T>(…)` | `cfg.MapSpatialProperty(…)` |
+| `options.MapVectorProperty<T>(…)` | `cfg.MapVectorProperty(…)` |
+| `options.MapFullTextProperty<T>(…)` | `cfg.MapFullTextProperty(…)` |
+| `options.MapComputedProperty<T, TValue>(…)` | `cfg.MapComputedProperty<TValue>(…)` — one generic argument |
+| `options.MapBlob<T>(…)` / `MapBlobCollection<T>(…)` | `cfg.MapBlob(…)` / `cfg.MapBlobCollection(…)` |
+| `options.MapTemporal<T>(…)` | `cfg.MapTemporal(…)` |
+| `options.MapIndexedProperty<T>(…)` | `cfg.MapIndexedProperty(…)` *(Azure Table / DynamoDB / Redis)* |
+| `options.OnBeforeWrite<T>(…)` / `OnAfterWrite<T>(…)` | `cfg.OnBeforeWrite(…)` / `cfg.OnAfterWrite(…)` |
+| `options.MapEncryptedProperty<T>(x => x.Ssn, mode)` | `cfg.MapProperty(x => x.Ssn, p => p.Encrypt(mode))` |
+| `options.MapJsonSchema<T>(schema)` | `cfg.MapJsonSchema(schema)` |
+
+**Unchanged** — these were always store-level, not per-type: `DatabaseProvider`, `TableName`,
+`TenantIdAccessor`, `TypeNameResolution`, `JsonSerializerOptions`, `UseEncryptor`, `MapIdType<TId>`,
+`MapFunctionTranslation`, `AddInterceptor` / `AddBulkInterceptor`, `AddJsonSchemaValidation`,
+`ConfigureJsonSchemaValidation`, `MapGeoReferenceData`, `AutoEmbedOnInsert`.
+
+## Behavior changes to know about
+
+### One spatial / vector / full-text mapping per type
+
+Declaring a second one used to silently replace the first. It now throws, naming both properties — the old
+behavior hid real mistakes:
+
+```csharp
+cfg.MapSpatialProperty(r => r.Location);
+cfg.MapSpatialProperty(z => z.Area);
+// InvalidOperationException: 'Patient' already has a spatial mapping on 'Location';
+// it cannot also be mapped on 'Area'. A document type carries one spatial mapping.
+```
+
+### Unsupported features are reported when the store is built
+
+The builder is provider-agnostic on purpose, so mapping a feature the backend does not have is caught by a
+validation pass at store construction rather than by a throw at the call site. You get **every** problem in one
+`DocumentConfigurationException` instead of one per restart:
+
+```
+The document store configuration has 2 problems:
+  • 'Note' maps a vector property, which LiteDB does not support. Remove the mapping, or move the type to a
+    vector-capable provider (the relational providers, Cosmos, MongoDB Atlas, Redis).
+  • 'Note' maps a spatial property, which LiteDB does not support. …
+```
+
+The relational providers are deliberately permissive here: mapping a vector on plain SQLite is still valid and
+simply skips the ANN index until `Shiny.DocumentDb.Sqlite.VectorSupport` is added.
+
+Call `DocumentConfigurationValidator.Collect(options)` to get the same list without throwing.
+
+### `ConfigureDocument<T>` is additive
+
+Calling it again for the same type adds to what an earlier block configured, which is what lets a generated
+`[Document]` declaration and hand-written configuration compose. Setting `cfg.Table` twice takes the last value.
+
+## Configuring from a `DocumentContext`
+
+A source-generated context can now declare its whole model next to its `[Document]` list instead of inside
+`AddDocumentStore` — implement the generated `OnConfiguring` partial:
+
+```csharp
+[Document(typeof(Patient))]
+[Document(typeof(Order))]
+public partial class AppContext : DocumentContext
+{
+    static partial void OnConfiguring(DocumentModelBuilder model) => model
+        .Document<Patient>(cfg => cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90)))
+        .Document<Order>(cfg => cfg.Table = "orders");
+}
+```
+
+It runs after the attribute-derived mapping, so what it sets wins.

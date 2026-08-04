@@ -4,7 +4,7 @@ title: Vector / ANN Search
 
 Vector queries let you find documents by **embedding similarity** — the nearest k documents to a query vector under a configurable distance metric. The library exposes a single `NearestVectors` API that runs on top of each provider's native ANN engine: `pgvector` on PostgreSQL, the `VECTOR` type on SQL Server 2025, the native `VECTOR` type on Oracle 23ai, DiskANN on CosmosDB, Atlas `$vectorSearch` on MongoDB, the `vss` extension on DuckDB, and `sqlite-vec` on SQLite. LiteDB, IndexedDB, and MySQL throw `NotSupportedException` because they have no comparable engine.
 
-The shape mirrors the spatial API: register a property with `MapVectorProperty<T>(...)`, then query with `store.Query<T>().NearestVectors(queryEmbedding, k: 10)`.
+The shape mirrors the spatial API: register a property with `cfg.MapVectorProperty(...)`, then query with `store.Query<T>().NearestVectors(queryEmbedding, k: 10)`.
 
 Working against `Microsoft.Extensions.VectorData` instead — because the rest of your AI stack expects MEVD's `VectorStore` abstraction? See the [VectorData Connector](/documentdb/vectordata), which puts that face on any vector-capable provider here.
 
@@ -79,53 +79,59 @@ public class VectorResult<T> where T : class
 Register the embedding property with `MapVectorProperty<T>`. The mapping captures the dimension, metric, index kind, and tuning options.
 
 ```csharp
-var store = new DocumentStore(new DocumentStoreOptions
+var options = new DocumentStoreOptions
 {
     DatabaseProvider = new SqliteDatabaseProvider("Data Source=mydata.db")
     {
         EnableVectorExtension = true     // load sqlite-vec on every connection
     }
-}.MapVectorProperty<Document>(
+};
+options.ConfigureDocument<Document>(cfg => cfg.MapVectorProperty(
     d => d.Embedding,
     dimensions: 1536,
     metric: VectorDistance.Cosine,
     indexKind: VectorIndexKind.Hnsw));
+
+var store = new DocumentStore(options);
 ```
 
 :::tip[AOT-safe overload]
 For full AOT/trimming safety, use the delegate overload which avoids expression compilation:
 
 ```csharp
-opts.MapVectorProperty<Document>(
+opts.ConfigureDocument<Document>(cfg => cfg.MapVectorProperty(
     "Embedding",
     d => d.Embedding,
     (d, v) => d.Embedding = v,
     dimensions: 1536,
-    metric: VectorDistance.Cosine);
+    metric: VectorDistance.Cosine));
 ```
 :::
 
 You can map multiple types — each gets its own sidecar storage and index parameters:
 
 ```csharp
-opts.MapVectorProperty<Memo>(m => m.Embedding, dimensions: 1536)
-    .MapVectorProperty<ProductDescription>(p => p.Embedding,
-        dimensions: 384,
-        metric: VectorDistance.DotProduct);
+opts.ConfigureDocument<Memo>(cfg => cfg.MapVectorProperty(m => m.Embedding, dimensions: 1536));
+opts.ConfigureDocument<ProductDescription>(cfg => cfg.MapVectorProperty(
+    p => p.Embedding,
+    dimensions: 384,
+    metric: VectorDistance.DotProduct));
 ```
 
 ### Provider-specific options (`CosmosDbDocumentStoreOptions`, `MongoDbDocumentStoreOptions`)
 
-Cosmos and Mongo carry their own option classes (no shared base with `DocumentStoreOptions`). Each exposes the same `MapVectorProperty<T>` overloads with the provider-appropriate default for `indexKind`:
+Cosmos and Mongo carry their own option classes, but `ConfigureDocument` is the same builder on every one of
+them. Leave `indexKind` unset and each provider fills in its own default — DiskANN on Cosmos, HNSW elsewhere:
 
 ```csharp
-var cosmos = new CosmosDbDocumentStore(new CosmosDbDocumentStoreOptions
+var options = new CosmosDbDocumentStoreOptions
 {
     ConnectionString = "AccountEndpoint=...;AccountKey=...",
     DatabaseName = "mydb"
-}.MapVectorProperty<Document>(d => d.Embedding,
-    dimensions: 1536,
-    indexKind: VectorIndexKind.DiskAnn));
+};
+options.ConfigureDocument<Document>(cfg => cfg.MapVectorProperty(d => d.Embedding, dimensions: 1536));
+
+var cosmos = new CosmosDbDocumentStore(options);
 ```
 
 ## Checking Provider Support
@@ -214,23 +220,23 @@ services.AddSingleton<IEmbeddingGenerator<string, Embedding<float>>>(/* e.g. Add
 
 services.AddDocumentStore(opts =>
 {
-    opts.MapVectorProperty<Document>(d => d.Embedding, dimensions: 1536)
-        .AutoEmbedOnInsert<Document>(
-            sourceSelector: d => d.Content,
-            targetSetter: (d, vec) => d.Embedding = vec,
-            targetGetter: d => d.Embedding);   // optional — skip when vector already set
+    opts.ConfigureDocument<Document>(cfg => cfg.MapVectorProperty(d => d.Embedding, dimensions: 1536));
+    opts.AutoEmbedOnInsert<Document>(
+        sourceSelector: d => d.Content,
+        targetSetter: (d, vec) => d.Embedding = vec,
+        targetGetter: d => d.Embedding);   // optional — skip when vector already set
 });
 ```
 
 **Explicit-generator overload** — pass a fixed instance for the container-free `new DocumentStore(options)` path (or when you always want one specific model):
 
 ```csharp
-opts.MapVectorProperty<Document>(d => d.Embedding, dimensions: 1536)
-    .AutoEmbedOnInsert<Document>(
-        generator,                              // fixed IEmbeddingGenerator instance
-        sourceSelector: d => d.Content,
-        targetSetter: (d, vec) => d.Embedding = vec,
-        targetGetter: d => d.Embedding);
+opts.ConfigureDocument<Document>(cfg => cfg.MapVectorProperty(d => d.Embedding, dimensions: 1536));
+opts.AutoEmbedOnInsert<Document>(
+    generator,                              // fixed IEmbeddingGenerator instance
+    sourceSelector: d => d.Content,
+    targetSetter: (d, vec) => d.Embedding = vec,
+    targetGetter: d => d.Embedding);
 ```
 
 **Skip rules:**
@@ -244,7 +250,7 @@ With the DI overload, if no `IEmbeddingGenerator` can be resolved from the write
 `VectorIndexOptions` exposes the common ANN knobs plus a `ProviderHints` dictionary for the long tail.
 
 ```csharp
-opts.MapVectorProperty<Document>(
+opts.ConfigureDocument<Document>(cfg => cfg.MapVectorProperty(
     d => d.Embedding,
     dimensions: 1536,
     metric: VectorDistance.Cosine,
@@ -258,7 +264,7 @@ opts.MapVectorProperty<Document>(
         i.ProviderHints["sqlite.postFilterMultiplier"] = 8;
         i.ProviderHints["atlas.indexName"] = "my-vec-index";
         i.ProviderHints["atlas.numCandidates"] = 200;
-    });
+    }));
 ```
 
 Recognized hints:
