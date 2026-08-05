@@ -82,7 +82,7 @@ dotnet add package Shiny.DocumentDb.Firestore.Mobile
 
 ## Documents
 
-Each document type maps to its own collection (the type name by default). The document **id is the Firestore document id**, read from an `Id` property (`MapIdProperty<T>` to override) and matched case-insensitively against the serialized JSON.
+Each document type maps to its own collection (the type name by default). The document **id is the Firestore document id**, read from an `Id` property (`cfg.MapIdProperty(...)` to override) and matched case-insensitively against the serialized JSON.
 
 ```csharp
 class Play
@@ -216,7 +216,7 @@ o.ConfigureDocument<Play>(cfg => cfg.ToCollection($"users/{uid}/plays"));
 | `UseReflectionFallback` | `bool` | `true` | Set `false` for iOS full-AOT |
 | `Logging` | `Action<string>?` | `null` | Diagnostic callback |
 
-Per-type mappings, inside a `ConfigureDocument<T>` block: `cfg.ToCollection(...)`, `cfg.MapIdProperty(...)`, `cfg.AddQueryFilter(...)`. Store-level: `options.MapIdType<TId>(...)`.
+Per-type mappings, inside a `ConfigureDocument<T>` block: `cfg.ToCollection(...)` (or the provider-agnostic `cfg.Table = ...`), `cfg.MapIdProperty(...)`, `cfg.AddQueryFilter(...)`, `cfg.MapVersionProperty(...)`, `cfg.OnBeforeWrite(...)` / `cfg.OnAfterWrite(...)`. Store-level: `options.MapIdType<TId>(...)`, `options.AddInterceptor(...)`, `options.AddBulkInterceptor(...)`.
 
 ## Trimming and AOT
 
@@ -258,10 +258,10 @@ var opts = new MobileFirestoreOptions
 This provider ships in milestones. Today:
 
 - **These throw `NotSupportedException`:** the string `Query`/`QueryStream`/`Count(whereClause)` overloads (use LINQ), `BatchInsert`, `SetProperty`, `RemoveProperty`, `GetDiff`, `ClearAll`, and `Select` projection.
-- **Write interceptors do not run.** `AddInterceptor`, `AddBulkInterceptor`, `OnBeforeWrite<T>` and `OnAfterWrite<T>` are accepted by the options but are never invoked. Keep that logic in your calling code.
+- **Write interceptors do not run.** `AddInterceptor`, `AddBulkInterceptor`, `cfg.OnBeforeWrite(...)` and `cfg.OnAfterWrite(...)` are accepted by the options but are never invoked. Keep that logic in your calling code.
 - **`cfg.MapVersionProperty` does not enforce concurrency.** The mapping is recorded, but writes are a plain `set()` — no version check, and `ConcurrencyException` is never thrown. A stale write silently wins.
 - **No `request.auth.uid` in rules yet** — see [Identity](#identity).
-- **No native full-text, spatial, vector or temporal** support.
+- **No full-text, spatial, vector, temporal, blob or computed-property support.** The shared `ConfigureDocument<T>` builder offers all of them, so mapping one here is a `DocumentConfigurationException` when the store is built — naming every problem at once, rather than failing on first use.
 - **`Count` and the aggregates materialize documents** rather than using native aggregation.
 - **`IgnoreQueryFilters()` restarts the query.** It rebuilds from the collection, so any `Where` applied before it is dropped. Call it first: `store.Query<T>().IgnoreQueryFilters().Where(…)`.
 
@@ -272,6 +272,31 @@ These two are the sharp edges: they are configurable, raise no error, and silent
 ## Release notes
 
 This package ships from the [shinyorg/firebase](https://github.com/shinyorg/firebase) repo and versions independently of DocumentDB itself — its releases are listed here rather than on the [DocumentDB releases](/documentdb/release-notes/) page.
+
+### 3.0.0 - TBD
+
+<RN type="breaking">
+**Requires `Shiny.DocumentDb` 13.0.0, and per-type configuration is one `ConfigureDocument<T>` block.** The flat per-type methods on `MobileFirestoreOptions` are **removed**, matching every other DocumentDB provider — the type is named once and its whole configuration reads top to bottom:
+
+```csharp
+o.ConfigureDocument<Play>(cfg =>
+{
+    cfg.ToCollection("plays");
+    cfg.MapIdProperty(x => x.Id);
+    cfg.AddQueryFilter(p => p.Version >= 1);
+});
+```
+
+`MapTypeToCollection<T>` → `cfg.ToCollection(...)`, `MapIdProperty<T>` → `cfg.MapIdProperty(...)`, `MapVersionProperty<T>` → `cfg.MapVersionProperty(...)`, `AddQueryFilter<T>` → `cfg.AddQueryFilter(...)`, `OnBeforeWrite<T>` / `OnAfterWrite<T>` → `cfg.OnBeforeWrite(...)` / `cfg.OnAfterWrite(...)`. Store-level members are untouched: `MapIdType<TId>`, `AddInterceptor`, `AddBulkInterceptor`, and every plain property. See [Migrating v12 → v13](/documentdb/migrating-v12-v13/).
+</RN>
+
+<RN type="feature">
+**A mapping the native SDK cannot honor is now a startup error.** `MobileFirestoreOptions` implements `IDocumentStoreOptions` and declares its capabilities, so the shared validation pass runs when the store is constructed. The provider-agnostic builder accepts `MapTemporal`, `MapBlob`, `MapSpatialProperty`, `MapVectorProperty`, `MapFullTextProperty` and `MapComputedProperty` on any provider — on device Firestore there is no engine or sidecar behind any of them, and each one is now reported by name in a single `DocumentConfigurationException` rather than doing nothing.
+</RN>
+
+<RN type="fix">
+**The collection name ignored `TypeNameResolution`.** The store resolved a type's collection from `typeof(T).Name` instead of the store's resolved document type name, so a store configured with `TypeNameResolution.FullName` still wrote to the short-name collection — and disagreed with the name every other part of the provider used. It now goes through the same resolver as the rest of the store.
+</RN>
 
 ### 2.0.0 - TBD
 
