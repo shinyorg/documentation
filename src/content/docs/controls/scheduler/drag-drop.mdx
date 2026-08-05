@@ -1,0 +1,194 @@
+---
+title: Scheduler | Drag & Drop Editing
+description: Drag agenda events to a new time, across days, or drag their edges to resize
+---
+
+`SchedulerAgendaView` can let the user **move** an event to a new time (and, in multi-day mode, to
+another day) or **resize** it by dragging its top or bottom edge — the interaction every native
+calendar app has. It works the same way on MAUI and Blazor.
+
+The feature is **off by default and additive**. With `AllowEventDrag` and `AllowEventResize` unset,
+no gesture recognizers are attached on MAUI, no JavaScript module is imported on Blazor, and the
+rendered tree is exactly what it was before. Every new provider member is a default interface
+method, so existing `ISchedulerEventProvider` implementations compile and behave unchanged.
+
+## Turning it on
+
+Two opt-ins are required — one on the view, one on the provider.
+
+```xml
+<scheduler:SchedulerAgendaView
+    Provider="{Binding Provider}"
+    SelectedDate="{Binding SelectedDate}"
+    AllowEventDrag="True"
+    AllowEventResize="True"
+    DragSnapMinutes="15"
+    MinEventDuration="00:15:00"
+    AllowCrossDayDrag="True" />
+```
+
+```razor
+<SchedulerAgendaView Provider="provider"
+                     @bind-SelectedDate="selectedDate"
+                     AllowEventDrag="true"
+                     AllowEventResize="true"
+                     DragSnapMinutes="15"
+                     MinEventDuration="TimeSpan.FromMinutes(15)"
+                     AllowCrossDayDrag="true" />
+```
+
+:::caution
+Setting `AllowEventDrag` alone does nothing. `ISchedulerEventProvider.CanChangeEvent` defaults to
+`false`, so a provider that ignores this feature can never have its events moved.
+:::
+
+## Properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `AllowEventDrag` | `bool` | `false` | Move an event to a new time (and, when `DaysToShow > 1`, another day) |
+| `AllowEventResize` | `bool` | `false` | Drag the top/bottom edge to change duration |
+| `DragSnapMinutes` | `int` | `15` | Snap granularity, clamped to 1–60 |
+| `MinEventDuration` | `TimeSpan` | 15 min | Resize floor. A move never changes duration, so this only gates resize |
+| `DragActivationDelay` | `TimeSpan` | 350 ms | Long-press arming delay for touch. `Zero` arms immediately; mouse input never waits |
+| `AllowCrossDayDrag` | `bool` | `true` | Only meaningful when `DaysToShow > 1` |
+| `DragSnapGuideColor` | `Color?` / `string?` | separator colour | The horizontal guide line drawn at the snapped position |
+| `DragValidationMode` | `AgendaDragValidationMode` | `OnCommit` | **Blazor only** — see [Live validation](#live-validation) |
+
+`SchedulerAgendaView` also raises `EventChangeFailed` (a MAUI `event` /
+Blazor `EventCallback<SchedulerEventChangeFailure>`) when `OnEventChanged` throws.
+
+## Provider members
+
+```csharp
+public interface ISchedulerEventProvider
+{
+    // ... existing members ...
+
+    // Gates whether this event can be dragged/resized at all. Called once, when the gesture arms.
+    bool CanChangeEvent(SchedulerEvent evt) => false;
+
+    // Called as the event is dragged, before the change is committed. Return false to reject this
+    // position. Must be cheap - it runs on every snap boundary crossed.
+    bool CanChangeEventTo(SchedulerEventChange change) => true;
+
+    // Called once when the gesture completes. The change is ALREADY applied optimistically.
+    // Return true to keep it, false to revert. Exceptions are treated as false.
+    Task<bool> OnEventChanged(SchedulerEventChange change) => Task.FromResult(false);
+}
+```
+
+```csharp
+public class SchedulerEventChange
+{
+    public required SchedulerEvent Event { get; init; }
+    public required DateTimeOffset OriginalStart { get; init; }   // before the gesture
+    public required DateTimeOffset OriginalEnd { get; init; }
+    public required DateTimeOffset NewStart { get; init; }        // already snapped
+    public required DateTimeOffset NewEnd { get; init; }          // never closer than MinEventDuration
+    public required SchedulerEventChangeKind Kind { get; init; }
+}
+
+public enum SchedulerEventChangeKind { Move, ResizeStart, ResizeEnd }
+```
+
+A worked provider:
+
+```csharp
+public class MyEventProvider : ISchedulerEventProvider
+{
+    // ... GetEvents, OnEventSelected, etc ...
+
+    public bool CanChangeEvent(SchedulerEvent evt)
+        => !evt.IsAllDay && evt.Start > DateTimeOffset.Now;   // don't edit the past
+
+    public bool CanChangeEventTo(SchedulerEventChange change)
+        => change.NewStart.LocalDateTime.TimeOfDay >= TimeSpan.FromHours(8);   // office hours only
+
+    public async Task<bool> OnEventChanged(SchedulerEventChange change)
+    {
+        try
+        {
+            await this.api.Reschedule(change.Event.Identifier, change.NewStart, change.NewEnd);
+            return true;   // keep the optimistic change
+        }
+        catch (HttpRequestException)
+        {
+            return false;  // the view reverts to OriginalStart / OriginalEnd
+        }
+    }
+}
+```
+
+## The gesture
+
+The timeline is 24 × `TimeSlotHeight` tall inside a vertically scrolling container, so a vertical
+drag on an event is pixel-identical to a scroll at the moment it starts. That is resolved the way
+native calendars do it:
+
+- **Touch** — hold without moving for `DragActivationDelay` (350 ms) and the event then follows the
+  finger. Moving before it elapses abandons the gesture and leaves it to the scroller, so the
+  timeline still scrolls normally.
+- **Mouse** — starts immediately; a desktop calendar drag is expected to be instantaneous.
+- **Resize** — the top and bottom grips are separate hit targets, so which edge you grabbed is never
+  ambiguous. Events too short to hold two grips are move-only.
+- **Auto-scroll** — dragging near the top or bottom edge scrolls the timeline, so you can drag an
+  event from 09:00 to 18:00 on a phone.
+
+While dragging, a guide line marks the snapped position, and a position the provider rejects is
+shown dimmed rather than silently refused at the end.
+
+## Optimistic commit
+
+When the gesture ends, the event moves **immediately** and `OnEventChanged` is awaited afterwards.
+Returning `false` (or throwing) puts it back. This is deliberate: awaiting first would leave the
+event visibly pinned under the finger for the whole round trip of a provider that hits the network.
+
+A throw is never swallowed — it reverts *and* raises `EventChangeFailed`, because a revert with no
+explanation is the worst possible failure mode here.
+
+## Daylight saving time
+
+The timeline lays out **local wall-clock** time — 24 rows, always — but a DST-transition day is not
+24 hours long. Moves and resizes are therefore computed in wall-clock space and the offset is rebuilt
+at the destination, so dragging an event four rows down moves it four rows on the clock rather than
+landing an hour off. The spring-forward gap (a local time that does not exist) pushes to the first
+valid time; the fall-back ambiguous hour resolves to the pre-transition offset, which is what
+dragging downward through the repeated hour means.
+
+## Live validation
+
+`CanChangeEventTo` is called continuously on MAUI. On Blazor it would mean a JavaScript↔.NET round
+trip per pointer frame, so it is opt-in:
+
+| `DragValidationMode` | Behaviour |
+|---|---|
+| `OnCommit` (default) | No interop while the pointer moves; the provider is asked once, when the gesture completes |
+| `PerPosition` | The provider is asked every time the drag crosses a snap boundary, so a rejected position is shown live. One interop round trip per boundary — expect visible lag on WASM |
+
+.NET re-checks authoritatively on commit in both modes.
+
+## Blazor notes
+
+- The drag uses **Pointer Events** (`pointerdown`/`pointermove`/`pointerup` + `setPointerCapture`),
+  not HTML5 drag-and-drop: an agenda drag is a continuous positional gesture, and HTML5 DnD gives no
+  reliable coordinates during `dragover`, never fires for touch on mobile Safari or Chrome Android,
+  and renders a browser ghost that cannot be snapped to a grid.
+- Draggable events get `touch-action: none`, which is what stops the browser claiming the gesture as
+  a scroll. The consequence: a touch drag that *starts on an event* no longer scrolls the timeline —
+  drag from the empty background instead.
+- Events are matched across the JS boundary by `SchedulerEvent.Identifier`. It defaults to a `Guid`,
+  so this is safe by default, but **identifiers must be unique** — a duplicate makes the drag a
+  no-op (traced to `Debug`) rather than moving the wrong event. MAUI matches by object reference and
+  is unaffected.
+
+## Not supported
+
+These are deliberate omissions, not oversights:
+
+- **All-day events** are not draggable, and dragging a timed event into or out of the all-day strip
+  is not supported — it changes `IsAllDay` semantics and interacts with `GetEvents` range filtering.
+- **`SchedulerCalendarView`** (month grid) and **`SchedulerCalendarListView`** have no drag editing.
+  The month grid's drop targets are discrete cells, which is a different gesture model.
+- **Multi-select drag** and **drag-on-empty-space to create** an event. Tap-to-create is already
+  covered by `OnAgendaTimeSelected`.

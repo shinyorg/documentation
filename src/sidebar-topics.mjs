@@ -502,6 +502,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'controls/scheduler/' },
           { label: 'Calendar View', link: 'controls/scheduler/calendar' },
           { label: 'Agenda View', link: 'controls/scheduler/agenda' },
+          { label: 'Drag & Drop Editing', link: 'controls/scheduler/drag-drop' },
           { label: 'Event List', link: 'controls/scheduler/event-list' },
           { label: 'Custom Templates', link: 'controls/scheduler/templates' },
           { label: 'Blazor Usage', link: 'controls/scheduler/blazor' },
