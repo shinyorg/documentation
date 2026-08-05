@@ -756,7 +756,8 @@ export const Data = {
     },
 
     usesActivity(compos: ShinyComponent[]): boolean {
-        return compos.filter(x => x.androidIntent !== undefined).length > 0;
+        // health needs the Health Connect permissions-rationale intent filter on MainActivity
+        return compos.some(x => x.androidIntent !== undefined || x.id === 'health' || x.id === 'health-ai');
     },
 
     usesWindows(compos: ShinyComponent[]): boolean {

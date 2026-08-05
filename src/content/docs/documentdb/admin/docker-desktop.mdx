@@ -1,0 +1,109 @@
+---
+title: Docker Desktop extension
+description: A Docker Desktop tab that runs the admin UI and hands it every database container already running on your machine, connected.
+---
+
+The admin UI as a **Docker Desktop extension**: a tab that starts the container, renders the app right
+there, and wires up the databases already running on your machine — credentials and all — so you go from
+"there is a Postgres container somewhere" to browsing its documents without typing a connection string.
+
+```bash
+docker extension install aritchie/shiny-docdb-myadmin-extension
+```
+
+:::caution[Docker Desktop blocks it until you allow it]
+New submissions to the Docker Extensions Marketplace are paused while Docker reviews Marketplace
+security, so this extension is not listed there yet — and Docker Desktop refuses unlisted extensions by
+default.
+
+Turn it off in **Settings → Extensions → "Allow only extensions distributed through the Docker
+Marketplace"**, then run the install again.
+:::
+
+## What the tab does
+
+**Container.** Pick a host port, an image tag and a data volume, then **Start**. It pulls
+`ghcr.io/shinyorg/shiny-docdb-myadmin` if it is not already there (~1 GB the first time), waits for the
+app to report it is listening, and then **the app itself fills the tab**. Reload, open in a real browser,
+stop and remove sit in the header bar alongside the status.
+
+The settings go read-only once the container exists, because they are baked into `docker run` and cannot
+be changed on a container that is already there. **Remove** and start again to change them — your data
+volume is untouched, so saved connections and queries survive.
+
+**Databases on this machine.** Every running container whose image is a backend this tool can administer:
+
+| Discovered | Images it matches |
+|---|---|
+| PostgreSQL | `postgres`, `postgis/postgis`, `pgvector/pgvector`, `timescaledb` |
+| MySQL | `mysql`, `mysql/mysql-server` |
+| MariaDB | `mariadb` |
+| SQL Server | `mcr.microsoft.com/mssql/server`, Azure SQL Edge |
+| Oracle | `gvenzl/oracle-free`, `gvenzl/oracle-xe`, `container-registry.oracle.com/database/free` |
+| CockroachDB | `cockroachdb/cockroach` |
+
+SQLite, SQLCipher and DuckDB are absent by design — they are files, so there is no container to find.
+Point the UI at those the [ordinary way](/documentdb/admin/connections/) once it is open.
+
+Whatever is ticked when you press **Start** is handed over already connected. The credentials come out of
+each database container's own environment (`POSTGRES_PASSWORD`, `MYSQL_ROOT_PASSWORD`,
+`MSSQL_SA_PASSWORD`, `ORACLE_PASSWORD`, …), and the connection string is the one that provider's
+descriptor would build. Passwords are masked in the list.
+
+## How the connections get there
+
+The extension passes the same pair `Shiny.DocumentDb.Aspire.Hosting` emits — nothing extension-specific:
+
+```bash
+-e "ConnectionStrings__orders=Host=orders-db;Port=5432;Database=orders;Username=postgres;Password=…"
+-e "Shiny__DocumentDb__orders__Provider=PostgreSql"
+```
+
+So a connection seeded from this tab is indistinguishable from one an
+[AppHost referenced in](/documentdb/admin/aspire/): it appears under the **from host** badge and cannot be
+edited or deleted in the UI. It is declared where the container runs, so that is where it changes — press
+**Remove** and start again with a different selection.
+
+Addressing goes over the Docker network rather than a published port, so a database that never published
+one still works. The admin container joins each selected container's network after it starts and refers to
+it by container name. The default `bridge` network is the exception: there is no DNS there, so those are
+addressed by IP.
+
+## How the app ends up in the tab
+
+The tab frames `http://localhost:{port}`. That is an ordinary same-machine request from the webview, so
+the SignalR circuit Blazor Server runs on is an ordinary WebSocket — none of it goes through the
+extension's socket proxy, which carries `fetch` calls only.
+
+The container is deliberately **not** the extension's `vm` service. That would put it in a Compose
+project whose lifecycle Docker Desktop owns and tears down on uninstall — taking the data volume with it
+— and leave no published port to frame. As an ordinary container it shows up in your Containers list, it
+is byte-for-byte the `docker run` the [configuration notes](/documentdb/admin/configuration/) document,
+and uninstalling the extension leaves it and everything you saved in it alone.
+
+:::note[Framing is opt-in, and the extension is the only thing that opts in]
+Blazor's interactive server render mode sends `Content-Security-Policy: frame-ancestors 'self'` and
+`X-Frame-Options: SAMEORIGIN`, so by default the app refuses to be embedded — correct for a tool that
+can read and write your databases.
+
+`ShinyDocDbMyAdmin__FrameAncestors` drops both. The extension sets it to `*` on the container it
+creates; nothing else sets it, and you should not set it on anything reachable beyond your own machine.
+
+A container started **without** it — one you ran by hand, or one from before this existed — cannot be
+framed. The tab reads the container's environment to know that up front, rather than trying to detect
+the block (a refused embed renders blank, and the parent page is not allowed to see why), and says so
+with **Open in browser** still there.
+:::
+
+## Removing it
+
+```bash
+docker extension rm aritchie/shiny-docdb-myadmin-extension
+```
+
+The admin container and its volume stay. Remove those yourself if you want them gone:
+
+```bash
+docker rm -f shiny-docdb-myadmin
+docker volume rm shiny-docdb-myadmin
+```
