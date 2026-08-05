@@ -1,0 +1,196 @@
+---
+title: MCP Server
+---
+
+Point Claude Code, Claude Desktop, Copilot or any other MCP client at a Shiny.DocumentDb store and let it
+explore and query the data — safely.
+
+```jsonc
+// .mcp.json
+{
+  "mcpServers": {
+    "documentdb": {
+      "command": "shiny-documentdb-mcp",
+      "args": ["--provider", "sqlite", "--connection", "Data Source=app.db"]
+    }
+  }
+}
+```
+
+```
+> which orders over $5k are still unfulfilled?
+  → documentdb__order_query { filter: { and: [ … ] }, limit: 20 }
+```
+
+Two packages ship:
+
+| | Use it when |
+|---|---|
+| **`ShinyDocDbMcp`** (dotnet tool, stdio) | A local desktop client on your own machine |
+| **`Shiny.DocumentDb.Mcp`** (library, Streamable HTTP) | A server your team shares, behind your own auth |
+
+The tools an MCP client calls are the **same** [`Shiny.DocumentDb.Extensions.AI`](/documentdb/ai-tools) tools
+an `IChatClient` calls — one implementation, one security model, one set of tests. A fix to the filter
+translator fixes both lanes. This package is the transport, the resources, the prompts and the safety
+defaults that make sense when the caller is an arbitrary agent rather than your own chat client.
+
+## Sample
+
+`samples/Sample.McpServer` is a runnable server over the same seeded data as the OData and REST samples —
+read-only tools, a hidden property, a per-caller scope driven by a request header, plus the resources and
+prompts. Browse `http://localhost:5097/` for client configuration and things to ask it.
+
+## The tool
+
+```bash
+dotnet tool install -g ShinyDocDbMcp
+```
+
+```bash
+shiny-documentdb-mcp --profile prod-readonly                        # a saved ShinyDocDbMyAdmin connection
+shiny-documentdb-mcp --provider sqlite --connection "Data Source=app.db"
+shiny-documentdb-mcp --config ./documentdb-mcp.json                 # collections, scopes, capabilities
+```
+
+Saved profiles are the ones the [admin tools](/documentdb/admin/) already hold, decrypted by the same key.
+The MCP package stores no credentials of its own and never accepts them as tool arguments. A profile marked
+read-only in the admin tool stays read-only here.
+
+| Option | Meaning |
+|---|---|
+| `--table <name>` | The documents table. Default `documents` |
+| `--types A,B` | Expose only these `TypeName` discriminators. Default: discover them all |
+| `--max-page-size <n>` | Cap on rows per query. Default 100 |
+| `--allow-writes` | Unlock insert/update/delete — see [the two locks](#the-safety-model) |
+
+The tool has no compiled document classes, so what it exposes comes from the data: it reads the distinct
+`TypeName` discriminators out of the table and publishes each as a schema-free
+[JSON collection](/documentdb/json-collections) in open-field mode. That is enough for exploration; declare
+the fields in a config file for anything you would rather the model did not go looking through.
+
+### Config file
+
+```jsonc
+{
+  "table": "documents",
+  "maxPageSize": 50,
+  "collections": [
+    {
+      "name": "Order",
+      "idProperty": "id",
+      "description": "Customer orders",
+      "where": "tenantId == 'acme'",          // non-removable, invisible to the model
+      "fields": [
+        { "path": "status", "type": "string" },
+        { "path": "total",  "type": "number" },
+        { "path": "placed", "type": "date"   }
+      ]
+    }
+  ]
+}
+```
+
+A config file cannot express a lambda, so the tool supports **static** scope clauses only. Request-resolved
+scopes need the library.
+
+## The library
+
+For a shared server, host it in an ASP.NET app that already has a store:
+
+```csharp
+builder.Services
+    .AddDocumentDbMcpServer(mcp =>
+    {
+        mcp.AddType<Order>(AppJsonContext.Default.Order, capabilities: DocumentAICapabilities.ReadOnly, t => t
+            .Where(o => o.TenantId == "acme")                                     // static, invisible
+            .Where<ITenantContext>((tenant, _) => o => o.TenantId == tenant.TenantId)  // resolved per call
+            .IgnoreProperties(o => o.InternalNotes)
+            .MaxPageSize(50));
+
+        mcp.AddCollection("intake-forms", capabilities: DocumentAICapabilities.ReadOnly, c => c.AllowAnyField());
+        mcp.ExposeResources();
+        mcp.ExposePrompts();
+    })
+    .WithHttpTransport();
+
+app.MapDocumentDbMcp("/mcp").RequireAuthorization("mcp");
+```
+
+`AddDocumentDbMcpServer` **is** the SDK's `AddMcpServer()` call — don't call both — and it returns the SDK's
+`IMcpServerBuilder`, so the transport is your choice (`.WithHttpTransport()` here, `.WithStdioServerTransport()`
+for a console host). Its builder **is** `IDocumentAIToolBuilder` plus the MCP-only knobs, so everything on the
+[AI tools page](/documentdb/ai-tools) applies verbatim.
+
+## The safety model
+
+1. **Allowlist only.** A type or collection you don't register is invisible.
+2. **Read-only by default.** Writes need **two** locks: the per-type capability flag *and* the server-wide
+   `AllowWrites()` (or `--allow-writes`). A registration that asks for a write capability without the second
+   lock is a startup error, not a silently-downgraded server.
+3. **Non-removable scope.** `.Where(...)` per type is pushed into the query for query/count/aggregate and
+   enforced in memory for get/delete/insert/update. The model cannot see it, remove it, or override it — and
+   an out-of-scope id is "not found", never "forbidden", so existence is not leaked.
+4. **Page caps** (`MaxPageSize`, default 100) so a model cannot pull a table into its context.
+5. **Property hiding** (`IgnoreProperties`) for secrets and blobs;
+   [encrypted properties](/documentdb/encryption) are excluded automatically.
+6. **Audit.** Every tool call is logged with the tool name, the caller, a SHA-256 digest of the arguments, the
+   outcome and the duration — plus the store's own [spans and metrics](/documentdb/diagnostics). Arguments are
+   digested rather than written out: a filter can carry customer data, and an audit log that quietly becomes a
+   second copy of the database is its own incident.
+7. **No raw SQL tool.** Not even read-only, not even opt-in.
+8. **No schema mutation.** No create/drop table, no index management — the admin tools own that, interactively.
+
+## Per-caller scope
+
+The static `.Where(o => o.TenantId == "acme")` is fixed at registration: enough for a single-tenant server,
+useless for a shared one, because "which rows may *this* caller see" lives in a service that only exists per
+request. So the scope has a resolved form — see
+[request-resolved filters](/documentdb/ai-tools#request-resolved-filters) for the full surface. It fails
+**closed**: a filter that throws, a service that will not resolve, or a call with no services attached fails
+the tool call. It never degrades into running the query unscoped.
+
+Per transport:
+
+- **HTTP (library):** a real per-caller scope. The authenticated principal is reachable via
+  `IHttpContextAccessor` off `ctx.Services`. This is the multi-tenant story and the reason the feature exists.
+- **stdio (the tool):** one process, one OS user, no HTTP identity. A resolved filter there can read
+  configuration, but it is **not** per-caller authorization — don't treat it as one.
+
+## Resources
+
+`ExposeResources()` publishes four, so a model can orient itself in one round trip instead of guessing tool
+arguments:
+
+| URI | Content |
+|---|---|
+| `documentdb://types` | Every exposed type/collection, its capabilities, its fields, and its tool names |
+| `documentdb://types/{name}/schema` | JSON Schema for one type |
+| `documentdb://types/{name}/sample` | A few real documents — the fastest way to learn the shape |
+| `documentdb://stats` | Provider, capability flags (vector/full-text/spatial/transactions), per-type counts |
+
+The two that touch data (`sample`, and the counts in `stats`) go **through the registered tools**, so the
+scope, the page caps and the hidden properties apply to a resource read exactly as they do to a tool call. A
+resource that read the store directly would be a hole in the scope. `documentdb://types` tells the model that
+a scope *exists* (so "no results" is not a mystery) but never what it is.
+
+Without `ExposeResources()` the capability is not advertised at all — `resources/list` is not a method the
+server answers.
+
+## Prompts
+
+`ExposePrompts()` publishes two:
+
+- **`explain-collection`** — "describe what lives in `{name}` and how to filter it"
+- **`build-filter`** — turns a natural-language ask into a `{name}_query` call, with the filter grammar inlined
+
+Both are built from what the server already exposes and read no data, so they need no scope — and neither one
+mentions the scope's contents.
+
+## What the model can and cannot see
+
+| | |
+|---|---|
+| Sees | Registered types, their allowed fields, JSON schemas, sample documents, the tools its capabilities allow |
+| Never sees | Unregistered types, ignored properties, encrypted values, the scope predicate — not in the schema, not in a tool description, not in an error message |
+| Can do | Query, count, aggregate, get-by-id (within the scope) — plus writes only when both locks are open |
+| Cannot do | Raw SQL, schema changes, removing the scope, exceeding the page cap |

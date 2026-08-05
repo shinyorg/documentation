@@ -589,6 +589,8 @@ export const sidebarTopics = [
           { label: 'Field-Level Encryption', link: 'documentdb/encryption' },
           { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
           { label: 'AI Tools', link: 'documentdb/ai-tools' },
+          { label: 'MCP Server', link: 'documentdb/mcp' },
+          { label: 'REST & Live Queries', link: 'documentdb/rest-endpoints' },
           { label: 'Blazor Playground', link: 'https://docdbmyadmin.acrhome.ca/', attrs: { target: '_blank' } },
           {
             label: 'Spatial, Vector & Temporal',
@@ -645,6 +647,7 @@ export const sidebarTopics = [
               { label: 'Full Text', link: 'documentdb/admin/full-text' },
               { label: 'Vectors', link: 'documentdb/admin/vectors' },
               { label: 'Blobs', link: 'documentdb/admin/blobs' },
+              { label: 'Encrypted Fields', link: 'documentdb/admin/encrypted-fields' },
               { label: 'Outbox', link: 'documentdb/admin/outbox' },
               { label: 'Generate Test Data', link: 'documentdb/admin/generate' },
               { label: 'Import & Export', link: 'documentdb/admin/import-export' },

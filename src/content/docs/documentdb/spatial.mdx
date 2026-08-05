@@ -112,6 +112,30 @@ One spatial property is mapped per type. The index sidecar (SQLite/relational) o
 (Cosmos/Mongo) is created automatically the first time the table/collection is initialized, and CRUD keeps it
 in sync — no manual maintenance.
 
+### Only the mapped property is queryable
+
+Every spatial query — `store.Geo*`, `DocumentFunctions` in a `Where`/`OrderBy`, and the string grammar — must
+name the mapped property. A second geometry property on the same type is stored and round-trips fine, but it
+is not spatially queryable, and asking for it throws rather than returning a wrong answer:
+
+```csharp
+options.ConfigureDocument<Delivery>(cfg => cfg.MapSpatialProperty(d => d.Route));
+
+store.Query<Delivery>().Where(d => DocumentFunctions.Intersects(d.Destination!, zone));
+// NotSupportedException: 'destination' is not a mapped spatial property … Mapped: 'route'.
+```
+
+This is not merely a bookkeeping rule. Most relational providers answer these predicates from the sidecar's
+geometry column, which holds only the mapped property — so an unmapped path could not be answered honestly.
+
+If a document genuinely has several shapes, decide which case you are in:
+
+- **One semantic slot, several pieces** (a service area made of three disjoint polygons) → put them in one
+  property as a `GeoMultiPolygon` or `GeoGeometryCollection`. The index envelope is their union, which is
+  exactly right here.
+- **Distinct slots** (a delivery's origin *and* destination) → the union envelope would span both and destroy
+  index selectivity, so pick the one you actually search by and map that. Model the other as plain data.
+
 ### Optional (nullable) locations
 
 The mapped property may be nullable (`GeoPoint?` or `Geometry?`). A document whose spatial value is `null` is

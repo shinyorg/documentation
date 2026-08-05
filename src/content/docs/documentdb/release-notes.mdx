@@ -5,7 +5,105 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
-## 13.0 TBD
+## 13.0 - August 4, 2026
+
+<RN type="feature">
+**The Admin UIs speak field-level encryption.** [Encrypted fields](/documentdb/encryption) shipped in this
+release; the admin tools knew nothing about them. Now they read the envelope, describe it, and refuse to
+quietly destroy it — all **without any key**.
+
+- **Recognised everywhere.** A `enc:1:k1:…` value renders as `🔒 encrypted · key k1` in the browse grid and
+  the JSON tree (with a *show ciphertext* toggle, because pasting a deterministic ciphertext into the filter
+  console is the only predicate that can match one). The Structure tab reports the path's type as
+  `encrypted`, not `string`.
+- **Key coverage across a whole type.** A new Encryption card counts, on demand, how many values sit under
+  each key id, how many are still plaintext, and how many are under a key the sample never saw — answering
+  the one question `RewrapAsync<T>()` cannot: *did it finish?* Retiring a key early makes documents
+  unreadable, and nothing else tells you. Mode is reported as `deterministic (observed)` only when a
+  repeated ciphertext proves it, and never as "randomized", which is unprovable.
+- **A downgrade guard on every write.** `SaveDocument` now diffs the submitted body against the stored one
+  and **throws** when a path that held an envelope would be saved in clear text, unless the caller passes
+  `allowEncryptionDowngrade: true`. Both front ends turn that into a named confirmation. The failure this
+  prevents is not an exception — the library reads a non-envelope as pre-encryption plaintext — so it was
+  previously a silent loss of protection. Imports count and report the same thing rather than failing the
+  file; exports say plainly that they carry ciphertext.
+- **Query surfaces that cannot work are withdrawn or explained.** Quick search and the default grid columns
+  skip encrypted paths (still selectable); the filter console warns per mode; index creation warns without
+  blocking.
+- **Optionally, reading the values.** A connection can carry a read-only key ring — masked until revealed,
+  never in a grid, never in an export, never in [demo mode](/documentdb/admin/demo-mode), and **never** in
+  the AI assistant, which reads only what is stored.
+
+New public API in the core package: `DocumentEncryptionFormat` / `EncryptedValueInfo` — the envelope as a
+read-only contract, for any tooling that inspects stored documents without the key ring. Additive; the
+internal `EncryptionEnvelope` now forwards to it so there is one implementation of the shape test.
+See [Encrypted fields](/documentdb/admin/encrypted-fields).
+</RN>
+
+<RN type="feature">
+**REST + live-query endpoints (`Shiny.DocumentDb.AspNetCore`).** A document type becomes a complete HTTP
+resource in one line — list, by-id, count, create, replace, RFC 7396 merge-patch, delete, and a live
+Server-Sent-Events tail. Plain JSON, framework reference only, AOT-clean.
+
+```csharp
+app.MapDocuments<Order>("/orders", o =>
+{
+    o.Operations = DocumentEndpoints.All;
+    o.AllowFilterOn(x => x.Status, x => x.Total);
+    o.TypeInfo = AppJsonContext.Default.Order;
+    o.Scope<ITenantContext>((tenant, _) => x => x.TenantId == tenant.TenantId);
+})
+.RequireAuthorization("orders");
+```
+
+Filtering uses the store's own string grammar behind a per-endpoint field allowlist (an unlisted field is a
+`400`, not a table scan); `take` is clamped to `MaxPageSize`; cursor paging, sparse fieldsets, `ETag`/`If-Match`
+concurrency and `ProblemDetails` errors are all in. `Scope(...)` is the HTTP twin of the AI tools' non-removable
+`Where` — resolved per request from the request's DI scope, AND-ed, and out-of-scope documents are `404` rather
+than `403`. `MapDocumentCollection` does the same for a schema-free
+[JSON collection](/documentdb/json-collections). New sample: `samples/Sample.RestApi`, over the same data as the
+OData sample. See [REST & Live Queries](/documentdb/rest-endpoints).
+</RN>
+
+<RN type="feature">
+**MCP server (`Shiny.DocumentDb.Mcp` + the `ShinyDocDbMcp` dotnet tool).** Point Claude Code, Claude Desktop,
+Copilot or any MCP client at a store and let it explore and query the data. The tools are the *same*
+`Extensions.AI` tools — one implementation, one security model — plus resources (`documentdb://types`,
+`.../schema`, `.../sample`, `documentdb://stats`), two prompts, and an audit line per call.
+
+```bash
+shiny-documentdb-mcp --provider sqlite --connection "Data Source=app.db"
+```
+
+```csharp
+builder.Services.AddDocumentDbMcpServer(mcp => { … }).WithHttpTransport();
+app.MapDocumentDbMcp("/mcp").RequireAuthorization("mcp");
+```
+
+Read-only by default and writes need **two** locks (the per-type capability *and* `AllowWrites()`), page caps,
+property hiding, no raw-SQL tool and no schema mutation. The stdio tool discovers what to expose from the
+stored `TypeName` discriminators, so it needs no compiled document classes, and takes its connections from the
+admin tool's existing profile store. New sample: `samples/Sample.McpServer`, over the same data as the OData
+and REST samples. See [MCP Server](/documentdb/mcp).
+</RN>
+
+<RN type="feature">
+**Request-resolved AI tool filters.** The non-removable per-type `Where` scope now has a form resolved on every
+tool call from the call's own services — the answer to "which rows may *this* caller see" usually lives in a
+request-scoped service, not in a value fixed at registration.
+
+```csharp
+t.Where(o => o.TenantId == "acme")                                        // static, as before
+ .Where<ITenantContext>((tenant, _) => o => o.TenantId == tenant.TenantId) // resolved per call
+ .Where<IPermissionService>(async (perms, ctx) => …);                      // async form
+```
+
+It fails **closed**: a filter that throws, a service that will not resolve, or a call with no
+`AIFunctionArguments.Services` fails the tool call rather than running the query unscoped, and
+`AddDocumentStoreAITools` asserts at startup that each `Where<TService>` service is registered. Static-only
+registrations pay nothing. The MCP server supplies the per-request provider automatically; the `IChatClient`
+lane sets `Services` on the arguments. Collections get the same overloads with the string grammar.
+</RN>
 
 <RN type="feature">
 **Tenant-per-database routing, hardened.** `AddMultiTenantDocumentStore` now survives a real deployment: a
@@ -341,6 +439,28 @@ matching nothing. Key rotation is a key ring plus `RewrapAsync<T>()`, and values
 was mapped keep reading, so it can be turned on for a populated store. AOT-clean, and no new dependency —
 AES-GCM is in the BCL. See
 [Field-level encryption](/documentdb/encryption/).
+</RN>
+
+<RN type="fix">
+**A spatial predicate over an unmapped geometry property answered about the mapped one.** On PostgreSQL,
+SQL Server, MySQL/MariaDB, Oracle and DuckDB, `DocumentFunctions` spatial predicates are served from the
+spatial sidecar's geometry column — which only ever holds the property named by `MapSpatialProperty`. A
+`Where` naming a *different* geometry property was translated against that column anyway, so it silently
+returned the answer for the mapped property instead. SQLite, Cosmos and MongoDB address the JSON path
+directly and answered correctly, but unindexed.
+
+Both are now rejected, on every provider, with a message naming the mapped properties:
+
+```csharp
+// Delivery maps Route as its spatial property
+store.Query<Delivery>().Where(d => DocumentFunctions.Intersects(d.Destination!, zone));
+// NotSupportedException: 'destination' is not a mapped spatial property … Mapped: 'route'.
+```
+
+This covers the LINQ surface, the string grammar (`Where("intersects(destination, …)")`), and
+`OrderBy(d => DocumentFunctions.Distance(…))`. A document type still carries one spatial mapping; to query a
+second geometry, map it — or model both shapes as a single `GeoGeometryCollection` when they are one
+semantic slot. See [Spatial](/documentdb/spatial/).
 </RN>
 
 <RN type="breaking">

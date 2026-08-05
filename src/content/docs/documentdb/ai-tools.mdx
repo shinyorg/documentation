@@ -7,6 +7,12 @@ Expose your document store operations as `Microsoft.Extensions.AI` tool function
 
 The AI layer sits on top of `IDocumentStore` and does not modify its behavior. It wraps your registered types with `AIFunction` instances that translate LLM requests into store operations.
 
+
+:::tip[Same tools, different envelope]
+An [MCP server](/documentdb/mcp) exposes these same tools to Claude Code, Claude Desktop, Copilot and any
+other MCP client — one implementation, one security model, one set of tests.
+:::
+
 ## Setup
 
 <Steps>
@@ -163,7 +169,7 @@ The filter is enforced on **every** tool for the type, not just queries:
 | `insert` | A document that would fall outside the filter is rejected and never written. |
 | `update` | The incoming document must satisfy the filter (the model cannot move a record out of scope) **and** the stored record being replaced must already be in scope (the model cannot overwrite a document it isn't allowed to see). Returns `{ updated: false }` when the stored record is out of scope. |
 
-Because AI tools are typically registered once as singletons, `Where` is designed for **stable** scopes — capture a constant (or a value fixed for the lifetime of the registration) rather than per-request state. For request-scoped isolation (per-user, per-tenant HTTP context) prefer the store-level [multi-tenancy and global query filters](/documentdb/query-filters/), which resolve their captured values per query.
+This overload of `Where` is **static** — fixed at registration, because AI tools are typically singletons. For a scope that differs per caller, see [request-resolved filters](#request-resolved-filters) below.
 
 The predicate is evaluated with the same compile-free, AOT-safe machinery the store uses — keep it to the LINQ constructs the store can translate (the same set supported by a normal `Query<T>().Where(...)`).
 
@@ -175,6 +181,63 @@ a mapped property is handed to the LLM as its decrypted value, exactly as `Get<T
 :::
 
 > **Scoped `update` requires an `Id` property.** The update path re-fetches the stored record by its `Id` to verify scope. Types whose identifier is mapped to a differently-named property (via `cfg.MapIdProperty`) can't be re-fetched this way, so a scoped `update` on such a type throws. `Get`/`Delete`/`Insert`/`Query` are unaffected.
+
+## Request-resolved filters
+
+A static scope is enough for a single-tenant server and useless for a shared one: the answer to "which rows
+may *this* caller see" lives in an `ITenantContext`, a permission cache or a current-user accessor that only
+exists per request. So `Where` also takes a callback, resolved on **every tool call** from the call's own
+service provider:
+
+```csharp
+tools.AddType(jsonContext.Order, configure: b => b
+    .Where(o => o.TenantId == "acme")                                          // static — unchanged
+    .Where(ctx => o => o.Region == ctx.GetRequiredService<ICurrentUser>().Region)  // resolved per call
+    .Where<ITenantContext>((tenant, _) => o => o.TenantId == tenant.TenantId)      // resolve-a-service form
+    .Where<IPermissionService>(async (perms, ctx) =>                               // async form
+    {
+        var ids = await perms.GetVisibleCustomerIdsAsync(ctx.CancellationToken);
+        return o => ids.Contains(o.CustomerId);
+    }));
+```
+
+Everything about the static form still holds: AND-combined with every other filter, enforced on every tool
+(query push-down *and* the in-memory checks the write paths make), and completely invisible to the model —
+absent from the JSON schema, absent from the tool description, and never echoed in an error message.
+
+### Where the services come from
+
+The provider is `AIFunctionArguments.Services`. The [MCP server](/documentdb/mcp) sets it from the per-request
+scope for you. On the plain `IChatClient` lane you set it yourself:
+
+```csharp
+using var scope = serviceProvider.CreateScope();
+var result = await tool.InvokeAsync(new AIFunctionArguments(args) { Services = scope.ServiceProvider });
+```
+
+### It fails closed
+
+This is the whole point of the feature, so there is no soft edge:
+
+| Situation | Result |
+|---|---|
+| The filter throws | The tool call fails. No query runs |
+| `GetRequiredService<T>` finds nothing | The tool call fails |
+| The call carries no `Services` | The tool call fails, naming the missing plumbing |
+| The filter returns `null` | The tool call fails — return `o => false` to deny everything |
+
+It never degrades into "run without that predicate": an unscoped query is the exact outcome this exists to
+prevent. `AddDocumentStoreAITools` also asserts at **startup** that every `Where<TService>` service is
+registered, so a missing registration is a boot error rather than a failed tool call in production.
+
+Registrations that use only the static form pay nothing — the interpreted predicates are still built once, in
+the tool's constructor, and `Services` is never touched.
+
+:::caution[Capture values, not services]
+The resolved expression is rebuilt per call, so keep the callback cheap. On a long-running call the request
+scope is held for its duration — capture the values you need out of a resolved service rather than the service
+itself.
+:::
 
 ## Structured Filters
 

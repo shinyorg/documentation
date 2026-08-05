@@ -342,10 +342,10 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'docdb-v122',
-              content: 'Document DB v12 - Improved Interceptors with Soft Delete Integration, AI protections, & Admin UI with Aspire Integration!',
+              id: 'docdb-v13',
+              content: 'Document DB 13 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & More!',
               variant: 'tip',
-              link: { text: 'How!?', href: '/documentdb/' },
+              link: { text: 'SHOW ME!!', href: '/documentdb/' },
               dismissable: false
             },  
             {

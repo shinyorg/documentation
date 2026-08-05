@@ -103,6 +103,34 @@ Retiring a key before the rewrap makes every document still holding an old envel
 
 `RewrapAsync<T>` reads a page at a time and writes back with `BatchUpdate`; reading decrypts under whichever key the envelope names and writing re-encrypts under the current one, so a plain round trip *is* the rewrap. It touches every document of the type — run it from a job, not a request.
 
+## Inspecting encrypted data
+
+Nothing tells you from the application side whether a `RewrapAsync<T>` finished — and retiring a key while
+documents are still under it makes those documents unreadable. The
+**[Admin UI](/documentdb/admin/encrypted-fields/)** answers exactly that: it reads the envelope, reports how
+many values sit under each key id, counts the ones that are still plaintext, and refuses to let an editor
+overwrite an envelope with clear text without saying so first.
+
+It does all of that **without any key**. The envelope is self-describing, which is the point of it being a
+JSON string. Reading the values back is a separate, per-connection opt-in.
+
+Tooling of your own can recognise an envelope the same way, through the public read-only contract:
+
+```csharp
+if (DocumentEncryptionFormat.TryParse(value, out var info))
+    Console.WriteLine($"encrypted under {info.KeyId}");
+```
+
+`DocumentEncryptionFormat` never decrypts — it describes the shape, so a backup checker, a migration script
+or a repair job can tell an envelope from plaintext without holding key material.
+
+:::caution[The AI assistant never decrypts]
+The Admin UI's [assistant](/documentdb/admin/assistant/) reads what is *stored*, so encrypted fields reach
+the model as ciphertext, whatever keys a connection carries. There is no decrypting tool for it to call, and
+that is not configurable — a document body goes to a third-party model endpoint, and ciphertext arriving
+there is harmless where a decrypted SSN is a breach.
+:::
+
 ## Turning it on for an existing store
 
 A value that is not an envelope is read back as-is, so mapping a property on a populated store does not break its existing documents: they read as plaintext, and any document you write is encrypted. Convert the backlog with the same `RewrapAsync<T>` used for rotation.

@@ -1,0 +1,261 @@
+---
+title: REST & Live-Query Endpoints
+---
+
+`Shiny.DocumentDb.AspNetCore` turns a document type into a complete HTTP resource in one line — list, by-id,
+count, create, replace, merge-patch, delete, and a live Server-Sent-Events tail. Plain JSON, no third-party
+dependency, AOT-clean.
+
+```csharp
+app.MapDocuments<Order>("/orders", o =>
+{
+    o.Operations = DocumentEndpoints.All;
+    o.MaxPageSize = 100;
+    o.AllowFilterOn(x => x.Status, x => x.CustomerId, x => x.Total);
+    o.TypeInfo = AppJsonContext.Default.Order;                          // AOT
+    o.Scope<ITenantContext>((tenant, _) => x => x.TenantId == tenant.TenantId);
+})
+.RequireAuthorization("orders");
+```
+
+```
+GET    /orders?filter=status eq 'open'&orderby=total desc&take=20&fields=id,total
+GET    /orders/{id}
+GET    /orders/count?filter=…
+GET    /orders/stream                       # text/event-stream, live
+POST   /orders
+PUT    /orders/{id}                         # full replace, If-Match honored
+PATCH  /orders/{id}                         # JSON Merge Patch (RFC 7396)
+DELETE /orders/{id}                         # If-Match honored
+```
+
+The store already has every primitive this needs — the [string-expression grammar](/documentdb/querying),
+`Project(...)` for sparse fieldsets, cursor pagination, optimistic concurrency, and
+[change monitoring](/documentdb/change-monitoring) for the stream. This package is the HTTP shell over them.
+
+## Sample
+
+`samples/Sample.RestApi` is a runnable API over the same seeded data as the OData sample, so the two can be
+compared request for request — allowlists, cursor paging, sparse fieldsets, the SSE tail behind a rate limiter,
+and an OpenAPI document. Browse `http://localhost:5098/`.
+
+## REST or OData?
+
+Both packages exist and both stay. They must **never** be mapped on the same route prefix.
+
+| | `Shiny.DocumentDb.AspNetCore` (this page) | `Shiny.DocumentDb.AspNetCore.OData` |
+|---|---|---|
+| Query syntax | The store's own grammar (`filter=total > 500`) | OData v4 (`$filter=Total gt 500`) |
+| Client | SPAs, MAUI, internal service APIs, `curl` | An existing OData toolchain, `$metadata`-driven clients |
+| Live updates | **Yes** — SSE at `/{resource}/stream` | No |
+| Writes | Yes — POST/PUT/PATCH/DELETE | No — query only |
+| Dependencies | None (framework reference only) | `Microsoft.AspNetCore.OData` |
+| AOT | Clean | JIT only (EDM is reflection-heavy) |
+
+Reach for OData when the client already speaks it. Reach for this when you own both ends.
+
+## Which operations get mapped
+
+`DocumentEndpoints` is a flags enum, and the default is the safe half — `Read | Count`. An operation you
+don't map is not a route.
+
+| Flag | Routes |
+|---|---|
+| `Read` | `GET /`, `GET /{id}` |
+| `Count` | `GET /count` |
+| `Write` | `POST /`, `PUT /{id}`, `PATCH /{id}` |
+| `Delete` | `DELETE /{id}` |
+| `Stream` | `GET /stream` |
+| `All` | all of the above |
+
+## Query string
+
+| Parameter | Meaning |
+|---|---|
+| `filter` | A [string-grammar](/documentdb/querying#string-filters) clause — `status == 'open' and total > 500` |
+| `orderby` | `total desc`, or several keys: `country, total desc` |
+| `skip` / `take` | Offset paging. `take` is **clamped** to `MaxPageSize`, not refused |
+| `cursor` | Cursor paging. Pass `cursor=` (empty) for the first page; the response is `{ items, nextCursor }` |
+| `fields` | Sparse fieldset — `fields=id,total` returns only those keys. Pages with `skip`/`take`; cannot be combined with `cursor` |
+
+### The field allowlist
+
+`AllowFilterOn(...)` names the fields a client may filter, sort or project on. An unlisted field is a `400`
+naming the field — not a table scan:
+
+```csharp
+o.AllowFilterOn(x => x.Status, x => x.CustomerId, x => x.Total);
+```
+
+Leaving it empty means "everything", which is fine for an internal API and wrong for a public one. The check
+is lexical and runs *before* the grammar parses anything: string literals are skipped (so a value that looks
+like a field name is not mistaken for one), and identifiers followed by `(` are function calls, so the whole
+[scalar-function library](/documentdb/querying#scalar-functions) keeps working without being enumerated here.
+
+`id` is **always** available whatever the allowlist says — it is in the route, it is in every response body,
+and refusing `fields=id` would protect nothing while making a sparse fieldset useless. A type whose identifier
+is mapped to a differently-named property still needs that name listed.
+
+## The server-side scope
+
+`Scope(...)` is the security-critical member. It runs **per request, inside the request's DI scope**, and its
+predicate is AND-ed into every read and enforced on every write. There is no way for a request to remove it —
+the same contract as the [AI tools' non-removable `Where`](/documentdb/ai-tools#restricting-what-the-model-can-see).
+
+```csharp
+app.MapDocuments<Order>("/orders", o =>
+{
+    // resolve-a-service form — TService comes from the REQUEST scope
+    o.Scope<ITenantContext>((tenant, _) => x => x.TenantId == tenant.TenantId);
+
+    // async form — the service has to go and look
+    o.Scope<IPermissionService>(async (perms, ctx) =>
+    {
+        var regions = await perms.GetVisibleRegionsAsync(ctx.User, ctx.CancellationToken);
+        return x => regions.Contains(x.Region);
+    });
+
+    // raw form — anything else, with the whole request in hand
+    o.Scope(ctx => x => x.CustomerId == ctx.User.FindFirstValue("customer_id"));
+})
+.RequireAuthorization();
+```
+
+Rules:
+
+- **Additive and AND-ed.** Several `Scope` calls compose. There is no "replace the scope".
+- **Out of scope is `404`, never `403`** — on GET, PUT, PATCH and DELETE. A `403` would confirm the record
+  exists.
+- **A write that would land outside the scope is `400`**, and nothing is stored.
+- **Deny-all is explicit.** Return `DocumentScope.DenyAll<T>()` for "no access"; the endpoints never read "no
+  scope" as "everything".
+- **A missing service is a startup error.** `Scope<TService>` records the type, and `MapDocuments` asserts it
+  is registered when the route is mapped — not at 3am on the first request that needs it.
+- **Don't do I/O in a scope callback if you can avoid it.** It is on every request's critical path for that
+  resource. Push the answer into a scoped service your auth middleware already populates and use the sync
+  `Scope<TService>` form; treat the async overload as the exception.
+
+:::caution[Scoped services, not captured ones]
+The callback runs on `HttpContext.RequestServices`, so `AddScoped` services are the caller's own instances.
+It is a predicate *factory*, run once per request per endpoint — don't mutate state in it, and on a
+long-lived `/stream` connection capture the values you need, never the service they came from.
+:::
+
+## Concurrency
+
+When the document type has a [mapped version property](/documentdb/indexes#optimistic-concurrency), reads
+carry an `ETag` and writes honour `If-Match`:
+
+```
+GET /orders/o1            → 200, ETag: "3"
+PUT /orders/o1  If-Match: "3"   → 204   (ETag: "4")
+PUT /orders/o1  If-Match: "3"   → 412   (someone else got there first)
+```
+
+`If-Match` is optional by default — a client that doesn't send it gets last-writer-wins. Set
+`RequireIfMatch = true` and a write or delete without the header is `428 Precondition Required`.
+
+ETags need the relational store (the version mapping is read from its options); without a mapped version
+property no ETag is emitted and `If-Match` is ignored.
+
+## PATCH is RFC 7396
+
+A `PATCH` body is a [JSON Merge Patch](https://www.rfc-editor.org/rfc/rfc7396): unspecified members are
+preserved, and an **explicit `null` removes the member**.
+
+```http
+PATCH /orders/o1
+{"status":"closed","notes":null}
+```
+
+The merge is applied by the endpoint against the document it already read for the scope check, then written
+as a full replace through the type-keyed [JSON collection](/documentdb/json-collections) — so it still rides
+the whole write pipeline (tenancy, temporal history, versioning/CAS, sidecars, interceptors). The store's own
+merge deliberately treats a null as "leave alone" (it has to — a serialized CLR document carries a null for
+every unset member); over HTTP, every member in the body was written by the caller, so a null means remove.
+
+## Errors
+
+Everything is `ProblemDetails`:
+
+| Status | When |
+|---|---|
+| `400` | Malformed filter, a field not on the allowlist, a body that would land outside the scope |
+| `404` | No such document — including one hidden by the scope |
+| `409` | Duplicate id on create |
+| `412` | Stale `If-Match` |
+| `428` | `RequireIfMatch` and no `If-Match` header |
+| `501` | The operation is not supported by the configured provider |
+
+A malformed `filter=` is always a `400`, never a `500`.
+
+## The live tail
+
+`GET /{resource}/stream` is a Server-Sent-Events feed of `insert` / `update` / `delete` events. No SignalR, no
+hub, no client library — `EventSource` in a browser, a plain `HttpClient` in MAUI, `curl -N` in a terminal.
+
+```
+event: insert
+data: {"id":"o9","document":{ … }}
+```
+
+- `?filter=` applies, evaluated in memory against each change.
+- The **scope is evaluated once, when the connection opens**. A stream can outlive any sane notion of "current
+  permissions", so close the connection yourself (auth expiry, your own timeout) when re-authorization matters.
+- A keep-alive comment is emitted every `StreamHeartbeat` (30s by default). Proxies kill idle connections; the
+  heartbeat is not optional.
+- Delete and clear events carry no document, so neither the scope nor the filter can be checked against them —
+  they are **dropped** rather than leaked past a scope that cannot be evaluated.
+
+:::caution[Not a durable subscription]
+The stream is a live tail. Events missed during a disconnect are **not** replayed. A client that needs
+durability polls `?filter=updatedAt > …` or uses the [change feed](/documentdb/change-monitoring) directly.
+:::
+
+`/stream` needs a provider that implements `IObservableDocumentStore`. Mapping it on one that doesn't is a
+**startup** error, not a per-request `501`. And because one connection is one long-lived request per client,
+put it behind rate limiting:
+
+```csharp
+app.MapDocuments<Order>("/orders", o => o.Operations = DocumentEndpoints.All)
+   .RequireRateLimiting("stream");
+```
+
+## Schema-free collections
+
+`MapDocumentCollection` exposes a [JSON collection](/documentdb/json-collections) — no CLR type, no mappings,
+documents in and out as raw JSON. Relational providers only.
+
+```csharp
+app.MapDocumentCollection("/intake", "intake_forms", o =>
+{
+    o.Operations = DocumentEndpoints.Read | DocumentEndpoints.Count;
+    o.IdProperty = "id";
+    o.AllowFilterOn("score", "submittedAt");
+    o.Scope<ITenantContext>((tenant, _) => $"tenantId == '{tenant.TenantId}'");
+});
+```
+
+The scope is a string-grammar clause instead of an expression, and it is enforced in SQL on every path —
+including by-id and delete, which resolve their target through the scoped query first. **A scoped collection
+refuses writes** (`501`): a raw JSON body has no evaluator, so the boundary could not be checked on the way
+in, and the combination is refused rather than silently weakened. Use `MapDocuments<T>()` when you need scoped
+writes.
+
+## AOT
+
+Every route is mapped as a `RequestDelegate` rather than a typed minimal-API handler — the `Delegate`
+overloads of `MapGet` reflect over the handler's parameters, which would cost the package its AOT-clean
+promise. Set `TypeInfo` to your source-generated `JsonTypeInfo<T>` and no reflection is left on the path.
+
+## Reads and the raw-JSON lane
+
+The list endpoint streams stored document bodies straight to the socket through the
+[raw-JSON terminals](/documentdb/querying#raw-json-results) — never buffered, never re-serialized. It probes
+`SupportsRawJson` rather than assuming: a type with [encrypted properties](/documentdb/encryption) can only be
+read through the typed path (which is what decrypts), so the endpoint falls back rather than turning into a
+`501`, and the typed fallback serializes through the plaintext view so a client never receives an
+`enc:1:…` envelope.
+
+By-id deliberately materializes: the scope is evaluated in memory there, so there is nothing to save — and
+the version for the `ETag` comes off the same instance.
