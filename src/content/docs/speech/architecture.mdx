@@ -238,6 +238,39 @@ It's not as precise as a dedicated wake-word engine (Porcupine, Snowboy) and int
 
 Apps that genuinely need streaming TTS (long-form narration, real-time voice agents on tens-of-seconds responses) reach for the provider's native SDK and skip this abstraction for that path.
 
+## Why is emotion a `SpeechTone` object rather than pass-through annotations?
+
+Expressive TTS arrived with four incompatible APIs: ElevenLabs reads bracketed audio tags out of the
+text, Typecast takes an `emotion_preset` field, Azure takes an SSML attribute, OpenAI takes a
+free-text `instructions` string, and no on-device engine takes anything at all.
+
+The obvious cheap move — pass the text through and strip tags where they aren't supported — was
+rejected because it makes expressiveness **ElevenLabs-only**, silently degrading to nothing
+everywhere else. `SpeechTone` is portable: it projects *down* into whichever mechanism a provider
+actually has, so the same call is expressive on four providers instead of one.
+
+Annotation parsing is still there, for two reasons neither of which is optional:
+
+1. **Only `eleven_v3` performs tags.** Every other engine — including older ElevenLabs models — reads
+   them aloud. Stripping is not a nicety; without it a model switch turns "[excited] Hello" into
+   audio that says "bracket excited bracket hello". Making capabilities *derived* (ElevenLabs
+   computes them from `TextToSpeechModel`) rather than hardcoded is what keeps that correct.
+2. **LLM-authored speech.** Pair this with [Shiny.AiConversation](/aiconversation/) and the model can
+   be prompted to write tags directly; promoting them to a `SpeechTone` means whatever provider
+   happens to be registered does the right thing.
+
+The mapping is deliberately lossy and the enum deliberately small. A union of every provider's
+vocabulary would be un-portable by construction — Typecast has seven presets, Azure has thirty-odd
+styles, ElevenLabs accepts open-ended natural language. Twelve provider-neutral emotions is the
+largest set that maps *somewhere* on most engines; `SpeechTone.Instructions` is the escape hatch for
+direction that doesn't fit, and `SpeechAnnotationHandling.Preserve` is the escape hatch for callers
+who are targeting one provider and want full control.
+
+Tags are recognized by **shape** — up to three alphabetic words in brackets — not by a fixed
+vocabulary, because ElevenLabs accepts arbitrary natural-language direction and a closed list would
+silently pass unknown tags through to be spoken. The trade-off is that short bracketed prose can be
+mistaken for a tag, which is what `Preserve` exists for.
+
 ## Why a separate `Shiny.Speech.MicrosoftAI` package?
 
 `Microsoft.Extensions.AI` defines `ISpeechToTextClient` and `ITextToSpeechClient` — the same shape, expressed as `IAsyncEnumerable<SpeechToTextResponseUpdate>` instead of `Start` + events. The two contracts are *similar* but not equivalent: `ISpeechToTextClient` assumes the caller already has an audio `Stream`; `ISpeechToTextService` owns the mic lifecycle.

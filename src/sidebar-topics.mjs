@@ -236,6 +236,7 @@ export const sidebarTopics = [
           { label: 'Architecture', link: 'speech/architecture' },
           { label: 'Audio (Monitor & Devices)', link: 'speech/audio' },
           { label: 'Effects & Recording', link: 'speech/audio-effects' },
+          { label: 'Emotion & Tone', link: 'speech/emotion' },
           { label: 'Azure AI Speech', link: 'speech/azure' },
           { label: 'ElevenLabs', link: 'speech/elevenlabs' },
           { label: 'OpenAI', link: 'speech/openai' },

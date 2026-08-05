@@ -1,0 +1,194 @@
+---
+title: Emotion & Tone
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+<PlatformSupport frameworks={["dotnet", "maui", "blazor"]} os={["android", "ios", "windows", "macos", "linux"]} />
+
+## Overview
+
+Expressive text-to-speech engines have all converged on the same capability and none of them on the
+same API:
+
+| Provider | Mechanism |
+|----------|-----------|
+| ElevenLabs | Bracketed **audio tags** inside the text — `[excited]`, `[whispers]`, `[laughs]` |
+| Typecast | An **API field** — `emotion_preset` plus `emotion_intensity` |
+| Azure | An **SSML attribute** — `<mstts:express-as style="cheerful" styledegree="1.5">` |
+| OpenAI | A **free-text field** — `instructions` |
+| iOS / Android / Windows / Browser | Nothing at all |
+
+`SpeechTone` is the portable form. You express the intent once and each provider projects it into
+whatever it actually supports; providers with no expressive control ignore it.
+
+```csharp
+await tts.SpeakAsync("We just shipped it.", new TextToSpeechOptions
+{
+    Tone = new SpeechTone
+    {
+        Emotion = SpeechEmotion.Excited,
+        Intensity = 1.5f,
+        Instructions = "Sound like you're sharing good news."
+    }
+});
+```
+
+## SpeechTone
+
+```csharp
+public record SpeechTone
+{
+    public SpeechEmotion Emotion { get; init; } = SpeechEmotion.Neutral;
+    public float Intensity { get; init; } = 1.0f;
+    public string? Instructions { get; init; }
+}
+
+public enum SpeechEmotion
+{
+    Neutral, Happy, Excited, Sad, Angry, Fearful,
+    Calm, Whispering, Shouting, Friendly, Serious, Sarcastic
+}
+```
+
+| Property | Description |
+|----------|-------------|
+| `Emotion` | The delivery. `Neutral` means "no direction" and is treated the same as leaving `Tone` null |
+| `Intensity` | `0.0`–`2.0`, `1.0` = the provider's default. Maps to Typecast `emotion_intensity` and Azure `styledegree`; ignored where there is no intensity concept |
+| `Instructions` | Free-text direction, passed verbatim to providers that accept natural language (OpenAI). Ignored elsewhere |
+
+The enum is deliberately small and provider-neutral. Mapping down to a specific engine is lossy by
+design — Typecast has seven presets total, so `Excited` and `Friendly` both land on `happy`, and
+`Fearful` and `Sarcastic` have no honest analogue at all and fall through to whatever
+`TypecastConfig.Emotion` is set to.
+
+## Inline annotations
+
+Bracketed tags in the text are handled too, and this is the part that needs care: **only ElevenLabs'
+`eleven_v3` performs them.** Every other engine — including older ElevenLabs models — reads them
+aloud, so a `[excited]` that leaks through gets spoken as "bracket excited bracket".
+
+By default (`SpeechAnnotationHandling.Auto`) the first emotion-bearing tag is promoted to a
+`SpeechTone`, and tags are then kept for providers that understand them and stripped for everyone
+else:
+
+```csharp
+await tts.SpeakAsync("[excited] We just shipped it. [laughs] Everything is live.");
+```
+
+| Provider | Result |
+|----------|--------|
+| ElevenLabs `eleven_v3` | Text passes through verbatim; both tags perform |
+| ElevenLabs v2 / turbo / flash | `"We just shipped it. Everything is live."` — tags stripped, no tone available |
+| Typecast | Same text, `emotion_preset: "happy"` |
+| Azure | Same text, `style="excited"` |
+| OpenAI | Same text, `instructions: "Speak in an excited, energetic tone."` |
+| On-device | Same text, tone discarded |
+
+`[laughs]` is a performance beat with no portable equivalent, so it's dropped rather than promoted —
+only emotion words map to a `SpeechEmotion`.
+
+This makes **LLM-authored speech portable**: prompt the model to write tags and whatever provider is
+registered does the right thing, instead of the tags leaking into the audio.
+
+### Controlling the behavior
+
+```csharp
+public enum SpeechAnnotationHandling { Auto, Preserve, Strip }
+```
+
+| Value | Behavior |
+|-------|----------|
+| `Auto` *(default)* | Promote the first emotion tag to a tone, then keep or strip tags based on the provider |
+| `Preserve` | Pass the text through untouched — no promotion, no stripping |
+| `Strip` | Always remove tags, even on `eleven_v3`, and never promote them |
+
+Use `Preserve` when the text legitimately contains square brackets:
+
+```csharp
+await tts.SpeakAsync("See footnote [a] below.", new TextToSpeechOptions
+{
+    AnnotationHandling = SpeechAnnotationHandling.Preserve
+});
+```
+
+An explicit `Tone` always wins over a tag found in the text.
+
+### What counts as an annotation
+
+Tags are recognized by **shape**, not by a fixed vocabulary — up to three alphabetic words in square
+brackets — because ElevenLabs accepts open-ended natural-language direction. Anything with digits or
+punctuation, or longer than three words, is treated as prose and left alone:
+
+```csharp
+SpeechAnnotations.Strip("[excited] We shipped it.");        // "We shipped it."
+SpeechAnnotations.Strip("See footnote [1] for details.");   // unchanged
+SpeechAnnotations.Strip("The array [a, b] is sorted.");     // unchanged
+```
+
+## Helpers
+
+`SpeechAnnotations` is public if you need the pieces directly:
+
+```csharp
+SpeechAnnotations.Strip(text);                 // remove tags and the whitespace they leave behind
+SpeechAnnotations.Extract(text);               // tag contents, in order, without brackets
+SpeechAnnotations.ToEmotion("whispers");       // SpeechEmotion.Whispering (null for beats like "laughs")
+SpeechAnnotations.ToAnnotation(emotion);       // "whispers" (null for Neutral)
+SpeechAnnotations.Resolve(text, options, caps) // ResolvedSpeech(Text, Tone)
+```
+
+## Custom providers
+
+A custom `ITextToSpeechProvider` declares what it supports and calls `Resolve` to get back the text
+and tone to actually use:
+
+```csharp
+public class MyProvider : ITextToSpeechProvider
+{
+    public SpeechToneCapabilities ToneCapabilities
+        => SpeechToneCapabilities.Emotion | SpeechToneCapabilities.Intensity;
+
+    public async Task<Stream> SynthesizeAsync(
+        string text,
+        TextToSpeechOptions? options = null,
+        CancellationToken cancellationToken = default)
+    {
+        var resolved = SpeechAnnotations.Resolve(text, options, this.ToneCapabilities);
+        // resolved.Text — annotations already stripped for you
+        // resolved.Tone — null when there's no direction to apply
+    }
+}
+```
+
+```csharp
+[Flags]
+public enum SpeechToneCapabilities
+{
+    None = 0,
+    InlineAnnotations = 1,  // bracketed tags survive in the text
+    Emotion = 2,            // Emotion maps to a native field
+    Intensity = 4,          // Intensity maps to a native field
+    Instructions = 8        // Instructions delivered as natural language
+}
+```
+
+`ToneCapabilities` is a default interface member returning `None`, so existing custom providers keep
+compiling and get annotation stripping for free.
+
+Capabilities can be **dynamic**. ElevenLabs derives them from the configured model rather than
+hardcoding them, which is what makes switching models automatically switch between performing tags
+and stripping them:
+
+```csharp
+public SpeechToneCapabilities ToneCapabilities
+    => config.TextToSpeechModel.StartsWith("eleven_v3", StringComparison.OrdinalIgnoreCase)
+        ? SpeechToneCapabilities.InlineAnnotations
+        : SpeechToneCapabilities.None;
+```
+
+## Related
+* [ElevenLabs](/speech/elevenlabs)
+* [Typecast](/speech/typecast)
+* [Azure AI Speech](/speech/azure)
+* [OpenAI](/speech/openai)
+* [Custom Provider](/speech/custom-provider)
