@@ -208,6 +208,7 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'obd/' },
           { label: 'Commands', link: 'obd/commands' },
+          { label: 'VIN Decoding', link: 'obd/vin' },
           { label: 'Connection & Adapters', link: 'obd/connection' },
           { label: 'BLE Transport', link: 'obd/ble' },
           { label: 'Custom Transports', link: 'obd/transports' },
