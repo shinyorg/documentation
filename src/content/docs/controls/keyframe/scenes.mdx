@@ -1,0 +1,186 @@
+---
+title: Drawn Scenes
+description: KeyframeScene and KeyframeView — a keyframed layer tree drawn onto a canvas, with scrubbing, path morphing, and the layer animation extensions
+---
+
+`Animate` drives real MAUI views through their properties. `KeyframeScene` takes the *same* timing model and runs it against a **layer tree drawn onto a canvas** — the Lottie-shaped lane. Because both are `IAnimationNode`s on the same clock, one storyboard can sequence views and scene layers together.
+
+Reach for a scene when you want something a view tree is a bad fit for: loaders and spinners, illustrated micro-animations, progress indicators, shape morphs, or anything you also want to [export as a GIF](/controls/keyframe/export/).
+
+```csharp
+using Shiny.Controls.Keyframe;
+using Shiny.Controls.Keyframe.Graphics;
+
+var scene = new KeyframeScene(400, 200) { Background = Colors.Transparent };
+var dot = scene.Add(new EllipseLayer { Size = new SizeF(28, 28), Fill = Colors.Blue });
+
+scene.Animation = TimelineBuilder
+    .Create(TimeSpan.FromSeconds(1.4))
+    .AnimatePosition(dot, k => k.From(new PointF(0, 86)).To(new PointF(300, 86)))
+    .AnimateFill(dot, k => k.From(Colors.Blue).To(Colors.HotPink))
+    .Build();
+```
+
+```xml
+<kf:KeyframeView Scene="{Binding Scene}"
+                 HeightRequest="200"
+                 Progress="{Binding Source={x:Reference Scrubber}, Path=Value, Mode=TwoWay}" />
+
+<Slider x:Name="Scrubber" Minimum="0" Maximum="1" />
+```
+
+## `KeyframeView`
+
+A `GraphicsView` that hosts a scene and redraws it each frame while its animation runs.
+
+| Property | Type | Notes |
+|---|---|---|
+| `Scene` | `KeyframeScene?` | The scene to draw. |
+| `IsPlaying` | `bool` (default `true`) | Whether the animation advances. |
+| `Speed` | `double` (default `1`) | Rate multiplier. **Negative runs backwards.** |
+| `Progress` | `double` | Normalised 0..1, **two-way**: reports position while playing, seeks when written. This is the scrubber hook. |
+| `Player` | `Player?` (read-only) | `null` until the view has loaded. |
+
+Binding a `Slider` two-way to `Progress` gives you a scrubber for free — the view suppresses its own feedback writes so the slider and the clock don't fight over control. On an **infinitely repeating** scene there is no end to measure progress against, so writes to `Progress` are quietly ignored rather than throwing from inside a property-changed callback. Give the scene a finite iteration count if you want a scrubber.
+
+```csharp
+void OnReverse(object? sender, EventArgs e)
+{
+    // Reverse is just a negative rate. It works from any position, mid-flight,
+    // because evaluation is a pure function of time.
+    SceneView.Speed = -Math.Abs(SceneView.Speed);
+    SceneView.IsPlaying = true;
+}
+```
+
+## `KeyframeScene`
+
+| Member | Notes |
+|---|---|
+| `KeyframeScene(width, height)` | Design size — the coordinate space layers are authored in. |
+| `DesignSize` | The authored size, read-only. |
+| `Root` | The root `GroupLayer`. |
+| `Animation` | The `IAnimationNode` driving the layers. `null` renders a static scene. |
+| `Stretch` | How the design size maps onto the canvas — see below. Defaults to `Uniform`. |
+| `Background` | Painted behind the layers. `null` leaves the canvas untouched. |
+| `ClipToBounds` | Whether content outside the design bounds is clipped. Default `true`. |
+| `Add<T>(layer)` | Adds to `Root` and returns the layer, so it can be captured inline. |
+| `FindById(id)` | Finds a layer anywhere in the tree. |
+| `Seek(TimeSpan)` / `SeekProgress(double)` | Evaluates the animation at a position. |
+
+`KeyframeScene` implements `IDrawable`, so it can be handed to any `GraphicsView` — `KeyframeView` just adds the clock, the player, and the `Progress` plumbing.
+
+### `SceneStretch`
+
+| Value | Behaviour |
+|---|---|
+| `None` | Draw at scene units, ignoring the canvas size. Content may overflow. |
+| `Uniform` | Scale uniformly so the whole scene fits, letterboxing as needed. **Default.** |
+| `UniformToFill` | Scale uniformly so the scene covers the canvas, cropping the overflow. |
+| `Fill` | Scale each axis independently to fill exactly. Distorts. |
+
+## Layers
+
+Every layer derives from `SceneLayer`:
+
+| Property | Type | Notes |
+|---|---|---|
+| `Id` | `string?` | Optional identifier for `FindById`. |
+| `IsVisible` | `bool` | Whether the layer and its children draw at all. |
+| `Opacity` | `float` | 0..1. **Multiplies with every ancestor's opacity.** |
+| `Position` | `PointF` | Offset from the parent's origin, in scene units. |
+| `Anchor` | `PointF` | Transform origin as a fraction of `Size`. Defaults to the centre, `(0.5, 0.5)`. |
+| `Rotation` | `float` | Degrees, clockwise, about `Anchor`. |
+| `Scale` | `SizeF` | About `Anchor`. |
+| `Skew` | `SizeF` | Degrees, about `Anchor`. |
+| `Size` | `SizeF` | The untransformed extent, used to resolve `Anchor`. |
+
+### Layer types
+
+| Layer | Adds |
+|---|---|
+| `GroupLayer` | `Children`, `Add<T>`, `Remove`, `Clear`, `FindById`, `Descendants()`. Groups children under a shared transform and opacity. |
+| `RectangleLayer` | `CornerRadius`. |
+| `EllipseLayer` | Inscribed in the layer's `Size`. |
+| `PathLayer` | `Data` (`PathF`), `WindingMode`. |
+| `TextLayer` | `Text`, `Color`, `FontSize`, `Font`, `HorizontalAlignment`, `VerticalAlignment`. |
+| `ImageLayer` | `Image` (`IImage`). Not owned — disposal stays with whoever loaded it. Falls back to the image's intrinsic size when `Size` is zero. |
+
+The shape layers (`RectangleLayer`, `EllipseLayer`, `PathLayer`) share `ShapeLayer`: `Fill`, `Stroke`, `StrokeWidth`, `StrokeDashPattern`, `StrokeDashOffset`, `StrokeLineCap`, `StrokeLineJoin`. A `null` `Fill` or `Stroke` means the shape isn't filled or stroked at all.
+
+## Animating layers
+
+`LayerAnimationExtensions` puts shorthand on `TimelineBuilder`, so authoring a scene doesn't mean writing a setter lambda per track. Each one names its track `<layer id>.<property>` for diagnostics.
+
+| Extension | Applies to | Value type |
+|---|---|---|
+| `AnimateOpacity` | any layer | `float` |
+| `AnimateRotation` | any layer | `double` degrees, **shortest arc** |
+| `AnimateSpin` | any layer | `double` degrees, no wrapping — 0 → 720 spins twice |
+| `AnimatePosition` | any layer | `PointF` |
+| `AnimateScale` | any layer | `SizeF` |
+| `AnimateSize` | any layer | `SizeF` |
+| `AnimateVisibility` | any layer | `bool`, stepped (no meaningful midpoint) |
+| `AnimateFill` | `ShapeLayer` | `Color`, Oklab by default |
+| `AnimateStroke` | `ShapeLayer` | `Color`, Oklab by default |
+| `AnimateStrokeWidth` | `ShapeLayer` | `float` |
+| `AnimateStrokeDashOffset` | `ShapeLayer` | `float` |
+| `AnimateCornerRadius` | `RectangleLayer` | `float` |
+| `AnimatePath` | `PathLayer` | `PathF` |
+| `AnimateTextColor` | `TextLayer` | `Color` |
+
+`AnimateFill`, `AnimateStroke`, `AnimateTextColor`, and `AnimatePath` take an optional interpolator if you want `ColorInterpolator.Srgb` or `PathFInterpolator.Strict` instead of the defaults.
+
+### Stroke reveal and marching ants
+
+Pair `StrokeDashPattern` with an animated `StrokeDashOffset`: a dash as long as the path itself, offset from fully-hidden to zero, gives you a "draw on" reveal; a short repeating pattern gives you marching ants.
+
+### Path morphing
+
+`AnimatePath` blends `PathF` geometry point by point. `PathFInterpolator.Instance` falls back gracefully when two paths don't share a structure; `PathFInterpolator.Strict` throws instead, which is what you want while authoring so a silent snap doesn't get shipped.
+
+## A worked example — staggered dots
+
+```csharp
+static KeyframeScene BuildScene()
+{
+    var scene = new KeyframeScene(400, 200) { Background = Colors.Transparent };
+
+    var dots = new List<EllipseLayer>();
+    for (var i = 0; i < 5; i++)
+    {
+        dots.Add(scene.Add(new EllipseLayer
+        {
+            Id = $"dot{i}",
+            Size = new SizeF(28, 28),
+            Position = new PointF(40 + i * 76, 86),
+            Fill = Color.FromArgb("#2563EB")
+        }));
+    }
+
+    // Each dot gets its own timeline; the storyboard staggers their starts. Composing at the
+    // storyboard level rather than baking offsets into the keyframes means the same per-dot
+    // animation can be reused with a different rhythm.
+    var storyboard = new Storyboard();
+
+    storyboard.Stagger(
+        dots.Select(dot => (IAnimationNode)TimelineBuilder
+            .Create(TimeSpan.FromSeconds(1.4))
+            .Fill(FillMode.Both)
+            .AnimatePosition(dot, k => k
+                .From(new PointF(dot.Position.X, 86))
+                .Key(0.5, new PointF(dot.Position.X, 30), Easings.CubicOut)
+                .To(new PointF(dot.Position.X, 86)))
+            .AnimateScale(dot, k => k
+                .From(new SizeF(1f, 1f))
+                .Key(0.5, new SizeF(1.4f, 1.4f), Easings.CubicInOut)
+                .To(new SizeF(1f, 1f)))
+            .Build()),
+        interval: TimeSpan.FromMilliseconds(120));
+
+    scene.Animation = storyboard;
+    return scene;
+}
+```
+
+This is the demo in `samples/Sample/Features/Keyframe/`, wired to a scrubber and Play/Pause/Reverse buttons.

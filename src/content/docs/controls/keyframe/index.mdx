@@ -1,0 +1,136 @@
+---
+title: Keyframe Animation
+description: Declarative keyframe animation for .NET MAUI — the CSS @keyframes model in XAML, a fluent C# timeline API, storyboards, a drawn scene graph, and deterministic offscreen export
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import { LinkCard, CardGrid } from '@astrojs/starlight/components';
+
+Declarative keyframe animation for .NET MAUI — the CSS `@keyframes` model expressed in XAML, plus a fluent C# timeline API, storyboards, a drawable scene graph, and an optional headless frame exporter.
+
+The thing MAUI's own `Animation` class cannot do is **seek**. Everything here is built around one design constraint: evaluating an animation is a **pure function of time**. Nothing reads the previous frame. That single property is what makes scrubbing, mid-flight reversal, byte-identical export, and non-flaky timing tests possible rather than merely approximable.
+
+:::note[MAUI only]
+There is no Blazor counterpart, and there won't be — the web already has `@keyframes` natively. The timing engine itself (`Shiny.Controls.Keyframe.Shared`) is host-neutral and depends only on `Microsoft.Maui.Graphics`, so it will run anywhere .NET does; it is the XAML surface and the view bindings that are MAUI-specific.
+:::
+
+- <NugetDownloads name="Shiny.Maui.Controls.Keyframe" />
+- <NugetDownloads name="Shiny.Maui.Controls.Keyframe.Export" />
+
+<PlatformSupport frameworks={["maui"]} os={["ios", "android", "windows", "macos"]} />
+
+{/* TODO: capture screenshots for keyframe */}
+
+## Packages
+
+| Package | What it is | Depends on |
+|---|---|---|
+| `Shiny.Controls.Keyframe.Shared` | The host-neutral timing engine and scene graph — `Timing`, `Timeline`, `Storyboard`, `Track<T>`, `IInterpolator<T>`, `Player`, the easing curves, `KeyframeScene` and its layers. | `Microsoft.Maui.Graphics` |
+| `Shiny.Maui.Controls.Keyframe` | The XAML surface (`Animate.Keyframes`, `Keyframes` / `Track` / `Key`), `KeyframeView`, `MauiClock`, and the animatable-property registry. | the above + `Microsoft.Maui.Controls` |
+| `Shiny.Maui.Controls.Keyframe.Export` | Headless frame export and a pure-managed GIF encoder. **Optional** — and the only thing in Keyframe that pulls in SkiaSharp. | the shared package + `Microsoft.Maui.Graphics.Skia` |
+
+Install only what you need. Animating views never requires the export package.
+
+## Features
+
+- **CSS `@keyframes` semantics in XAML** — `Duration`, `Delay`, `Iterations`, `Direction`, `Fill`, and per-key easing behave the way the web spec says they do, including `Fill="Both"` and `Direction="Alternate"`.
+- **Seekable, reversible playback** — `SeekProgress(0.35)` scrubs, `Rate = -1` reverses from wherever the animation currently sits. No rebuilding, no restart.
+- **CSS easing function syntax** — `cubic-bezier(0.34, 1.56, 0.64, 1)`, `steps(8)`, and `spring(0.35, 14)` parse from a plain string, so a curve copied out of a design tool or browser devtools pastes in verbatim. 38 named curves too.
+- **Implicit keyframes** — omit `Value` on a key and it resolves to the target's live value when playback starts, so a re-triggered animation continues from where it is instead of snapping.
+- **Oklab colour blending by default** — sRGB interpolation dips through grey at the midpoint; Oklab doesn't. `ColorInterpolator.Srgb` and `.LinearRgb` remain available.
+- **Shortest-arc angles** — `Rotation` from 350° to 10° turns forward 20°, not back 340°. `Spin` is there for when multiple turns are the point.
+- **Fluent C# timelines and storyboards** — `TimelineBuilder` composes tracks; `Storyboard` sequences, overlaps and staggers whole timelines on a shared clock, and nests.
+- **A drawn scene graph** — `KeyframeScene` + `KeyframeView` run the same timing model against layers on a canvas (the Lottie-shaped lane) rather than views in the visual tree.
+- **Deterministic offscreen export** — sample a scene at exact frame times, lazily, and encode to GIF with no external dependency.
+- **AOT and trim safe** — the property registry is hand-registered delegates, not reflection and not compiled `Expression` trees, both of which work in the emulator and break on device under Native AOT.
+- **Weak targets** — an infinite animation on a popped page goes inert and is collected, rather than pinning the visual tree.
+
+## AI Skill
+
+<AiSkill skillName="shiny-controls" />
+
+## Installation
+
+```bash
+dotnet add package Shiny.Maui.Controls.Keyframe
+```
+
+```xml
+xmlns:kf="http://shiny.net/maui/keyframe"
+```
+
+No `builder.Use…()` call is needed — there is nothing to register. That one XAML namespace covers the shared timing types as well.
+
+## Quick Start
+
+An attached property on any `VisualElement`:
+
+```xml
+<Border>
+    <kf:Animate.Keyframes>
+        <kf:Keyframes Duration="0:0:1.2" Iterations="Infinite" Direction="Alternate" Fill="Both">
+
+            <kf:Track Property="Scale">
+                <kf:Key Offset="0"   Value="1" />
+                <kf:Key Offset="0.5" Value="1.15" Easing="CubicOut" />
+                <kf:Key Offset="1"   Value="1" />
+            </kf:Track>
+
+            <kf:Track Property="BackgroundColor">
+                <kf:Key Offset="0" Value="#2563EB" />
+                <kf:Key Offset="1" Value="#EC4899" />
+            </kf:Track>
+
+        </kf:Keyframes>
+    </kf:Animate.Keyframes>
+</Border>
+```
+
+The same animation in C#:
+
+```csharp
+using Shiny.Controls.Keyframe;
+using Shiny.Maui.Controls.Keyframe;
+
+var timeline = TimelineBuilder
+    .Create(TimeSpan.FromSeconds(1.2))
+    .PingPong()
+    .RepeatForever()
+    .Fill(FillMode.Both)
+    .Animate(box, (v, x) => v.Scale = x, k => k
+        .From(1)
+        .Key(0.5, 1.15, Easings.CubicOut)
+        .To(1))
+    .Build();
+
+var player = box.Play(timeline);
+```
+
+## Why evaluation is a pure function of time
+
+`IAnimationNode.Evaluate(t)` computes the state at `t` from the keyframes alone. It never looks at the previous frame, and it never accumulates. Write code that leans on this rather than working around it:
+
+| You want to… | Do this | Not this |
+|---|---|---|
+| Scrub from a `Slider` or gesture | `player.SeekProgress(x)`, or bind `KeyframeView.Progress` two-way | Rebuild a timeline at the new position |
+| Reverse mid-flight | `player.Rate = -1` (or a negative `Speed`) | Build a second, reversed timeline |
+| Export frames | Sample at exact frame times — identical bytes every run | Render off a real-time clock and hope |
+| Test timing | Step a `ManualClock` | `Task.Delay` and a tolerance |
+
+## Where to go next
+
+<CardGrid>
+    <LinkCard title="XAML Animations" href="/controls/keyframe/xaml/" description="Animate.Keyframes, the Keyframes/Track/Key model, animatable properties, and registering your own." />
+    <LinkCard title="Easing Curves" href="/controls/keyframe/easing/" description="38 named curves, CSS function syntax, and custom curves." />
+    <LinkCard title="Timelines & Playback" href="/controls/keyframe/timelines/" description="TimelineBuilder, Player, seeking, reversing, and storyboards." />
+    <LinkCard title="Drawn Scenes" href="/controls/keyframe/scenes/" description="KeyframeScene, KeyframeView, and the layer tree." />
+    <LinkCard title="Offscreen Export" href="/controls/keyframe/export/" description="Deterministic frame export and the GIF encoder." />
+</CardGrid>
+
+## Limits worth knowing up front
+
+- **Everything ticks in managed code on the UI thread.** Transform and opacity tracks map 1:1 onto `CAKeyframeAnimation` / `ObjectAnimator` / `ScalarKeyFrameAnimation`, so native compositor offload is the design's biggest remaining performance win — but it isn't implemented yet.
+- **Layout-affecting properties cost a measure/arrange every frame.** `WidthRequest`, `HeightRequest`, `Margin`, and `Padding` all work and are flagged by `AnimatableProperty.InvalidatesLayout`, but prefer transform and opacity where you have the choice.
+- **There is no Lottie parser.** `KeyframeScene` is the scene graph one would need, but nothing reads a Lottie JSON file today.
+- **MP4/video export is out of scope** — that needs a real codec. Pipe `FrameExporter.Frames()` to ffmpeg's stdin instead. APNG and WebP aren't implemented either.

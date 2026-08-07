@@ -156,6 +156,38 @@ builder.Services.AddPush(new WebPushOptions { VapidPublicKey = "..." });
 await builder.Build().RunAsync();
 ```
 
+## Third-party DI containers (Prism, DryIoc, Autofac)
+
+Shiny registers everything through the standard `IServiceCollection`, so any container with a
+Microsoft.Extensions.DependencyInjection adapter works — including Prism's DryIoc container. There is
+one caveat worth knowing about.
+
+Shiny's key/value stores are registered as **keyed** services (`StoreKeys.Default`, `StoreKeys.Secure`)
+and Shiny's own types inject them with `[FromKeyedServices(StoreKeys.Default)]`. Keyed services arrived
+in .NET 8, and several container adapters still ship a pre-keyed-services core — `Prism.Container.DryIoc`,
+for example, is built on DryIoc 5.x. Those adapters **silently ignore** the `[FromKeyedServices]`
+attribute and try to resolve the plain service type instead.
+
+`AddShinyStores()` handles this by also registering the default store unkeyed, pointing at the same
+instance as `StoreKeys.Default`, so Shiny's platform types resolve correctly on those containers.
+
+There is no equivalent fallback for `StoreKeys.Secure` — two stores can't share one unkeyed service
+type. In *your* code, avoid `[FromKeyedServices]` for the secure or custom stores when the app uses a
+non-Microsoft container, and use the static accessor instead:
+
+```csharp
+// works on every container
+var token = Shiny.Stores.Secure.Get<string>("token");
+var custom = Shiny.Stores.Keyed("my-store");
+```
+
+:::caution
+If you see a DryIoc `Error.UnableToFindCtorWithAllResolvableArgs` naming a Shiny type, the constructor
+selection message is usually a red herring — DryIoc's `ConstructorWithResolvableArguments` rule reports
+the *outermost* type when any dependency deeper in the graph is unresolvable. Resolve the dependency it
+actually needs (most often a keyed `IKeyValueStore`) rather than the type named in the error.
+:::
+
 ## When to use a different hosting model
 
 | Scenario | Hosting Model |

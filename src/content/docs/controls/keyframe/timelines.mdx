@@ -1,0 +1,176 @@
+---
+title: Timelines & Playback
+description: TimelineBuilder, tracks and interpolators, the Player (seek, scrub, reverse, PlayAsync), storyboards, and clocks
+---
+
+The C# API is the same model the XAML surface builds onto: a `Timing` configuration, a set of `Track<T>`s, and a `Player` that drives the whole thing from a clock.
+
+```csharp
+using Shiny.Controls.Keyframe;
+using Shiny.Maui.Controls.Keyframe;
+
+var timeline = TimelineBuilder
+    .Create(TimeSpan.FromSeconds(1))
+    .PingPong()                 // Direction(PlaybackDirection.Alternate)
+    .RepeatForever()
+    .Fill(FillMode.Both)
+    .Animate(view, (v, x) => v.Scale = x, k => k
+        .From(1)
+        .Key(0.5, 1.2, Easings.CubicOut)
+        .To(1))
+    .Build();
+
+var player = view.Play(timeline);   // extension on VisualElement
+```
+
+## `TimelineBuilder`
+
+| Method | Purpose |
+|---|---|
+| `Create(TimeSpan)` / `Create(double ms)` | Starts a builder with an iteration length. |
+| `Named(string)` | Labels the timeline for diagnostics. |
+| `Duration(TimeSpan)` | Length of one iteration. Must be positive. |
+| `Delay(TimeSpan)` | Before the first iteration. Negative values start it partway through. |
+| `EndDelay(TimeSpan)` | Pads the end, delaying when the timeline reports finished. |
+| `Repeat(double)` | Iteration count. Fractional counts truncate the final pass. |
+| `RepeatForever()` | Infinite iterations. |
+| `Direction(PlaybackDirection)` / `PingPong()` | Which way each pass runs. |
+| `Fill(FillMode)` / `HoldEnd()` | Behaviour outside the active window. `HoldEnd()` is `Fill(FillMode.Forwards)`. |
+| `Easing(EasingFunction)` | Applied across each whole iteration. |
+| `StartAtIteration(double)` | Offset into the first iteration, measured in iterations. `0.5` starts halfway — and under `Alternate` also shifts which passes run backwards. |
+| `Animate(...)` | Adds a track. |
+| `AnimateAngle(...)` | Adds a degrees track that takes the shortest arc. |
+| `Add(ITrack)` | Adds an already-constructed track. |
+| `Build()` | Produces the `Timeline`. |
+
+### Adding tracks
+
+Property access is expressed as explicit setter/getter lambdas rather than an `Expression<Func<>>`. Compiling an expression tree at runtime is exactly the sort of thing that breaks under Native AOT; the cost here is one extra lambda at the call site.
+
+```csharp
+// double properties — the common case
+.Animate(view, (v, x) => v.Opacity = x, k => k.From(0).To(1))
+
+// with a getter, so FromCurrent() can resolve
+.Animate(view, (v, x) => v.Opacity = x, k => k.FromCurrent().To(1),
+         getter: v => v.Opacity)
+
+// any type, given an interpolator
+.Animate(layer, (l, c) => l.Fill = c, ColorInterpolator.Oklab,
+         k => k.From(Colors.Blue).To(Colors.HotPink))
+
+// angles — shortest arc, so 350° to 10° turns forward 20°
+.AnimateAngle(view, (v, x) => v.Rotation = x, k => k.From(350).To(10))
+```
+
+The target is held **weakly** by the resulting track, so a timeline can't keep a popped page alive. `Timeline.PruneDeadTracks()` drops tracks whose targets have been collected, and `ITrack.IsAlive` reports one.
+
+### `TrackBuilder<T>`
+
+| Method | Purpose |
+|---|---|
+| `Key(offset, value, easing?)` | A keyframe at a normalised offset. |
+| `From(value, easing?)` | A keyframe at offset 0. |
+| `FromCurrent(easing?)` | An **implicit** keyframe at offset 0 — resolves to the target's value when playback begins. |
+| `To(value)` | A keyframe at offset 1. |
+| `Evenly(params T[])` | Spreads values evenly from 0 to 1. |
+| `Ease(easing)` | Replaces the easing on the most recently added keyframe. |
+
+## Interpolators
+
+`IInterpolator<T>` is a single `Interpolate(from, to, progress)` method. The built-ins:
+
+| Interpolator | Type | Notes |
+|---|---|---|
+| `DoubleInterpolator.Instance` | `double` | |
+| `SingleInterpolator.Instance` | `float` | |
+| `Int32Interpolator.Instance` | `int` | |
+| `NumericInterpolator<T>.Instance` | any `INumber<T>` | Generic-math based. |
+| `AngleInterpolator.Degrees` / `.Radians` | `double` | Shortest arc. |
+| `ColorInterpolator.Oklab` / `.Srgb` / `.LinearRgb` | `Color` | **Oklab is the default** — sRGB dips through grey at the midpoint. |
+| `PointFInterpolator` / `SizeFInterpolator` / `RectFInterpolator` | geometry | |
+| `PathFInterpolator.Instance` / `.Strict` | `PathF` | Shape morphing. `.Strict` throws on a structure mismatch instead of falling back. |
+| `StepInterpolator<T>.Instance` | any | Holds `from` until progress reaches 1 — discrete values. |
+| `DelegateInterpolator<T>` | any | Wraps a lambda. |
+
+## `Player`
+
+`Player` owns everything stateful about playback — position, rate, pause, seek. Keeping that here rather than on `Timeline` is what lets the same timeline be played by several players at once: the model stays a pure description.
+
+| Member | Notes |
+|---|---|
+| `State` | `Idle`, `Running`, `Paused`, `Finished`. |
+| `Position` | Current offset within the node. |
+| `Rate` | 1 is real time, 2 is double speed, **negative runs backwards** from the current position. |
+| `RestoreOnStop` | When true, `Stop()` puts every target back to the value it had when playback began. |
+| `Finished` | Raised when playback reaches the end — or, at a negative rate, the beginning. |
+| `Play()` | Starts from the beginning, capturing baselines so implicit keyframes resolve against current values. |
+| `Resume()` | Continues from the current position without recapturing baselines. |
+| `Pause()` | Holds position and detaches from the clock. |
+| `Stop()` | Resets to the beginning. |
+| `Finish()` | Jumps to the end and applies the final state. Throws on an infinite animation. |
+| `Seek(TimeSpan)` | Absolute position; applies that state immediately. |
+| `SeekProgress(double)` | Normalised 0..1 — the gesture-driven scrubbing entry point. Throws on an infinite animation, which has no end to measure against. |
+| `PlayAsync(CancellationToken)` | Plays from the start; the task returns `true` if it ran to completion, `false` if stopped or cancelled. |
+
+```csharp
+player.Rate = -1;              // reverse, mid-flight, from wherever it is
+player.SeekProgress(0.35);     // scrub
+player.Pause();
+await player.PlayAsync();      // completes when the animation finishes
+```
+
+Two details that follow from the pure-function design:
+
+- **Reversal doesn't restart anything.** `Rate` scales the per-frame delta rather than the position, so changing it mid-flight carries on from where the animation is instead of jumping to a rescaled position.
+- **`Pause()` detaches from the clock** rather than merely ignoring ticks. On a shared frame source that lets the platform stop producing frames entirely once every animation on the window is paused, instead of running the display link to deliver ticks nobody acts on.
+
+For a XAML-declared animation, reach its player with `Animate.GetPlayer(view)`.
+
+## Storyboards
+
+A `Storyboard` composes animation nodes on a shared clock, each pinned at its own offset. Storyboards are themselves `IAnimationNode`s, so they **nest** — a staggered list entrance can be one item in a larger sequence.
+
+```csharp
+var storyboard = new Storyboard()
+    .Add(introTimeline)
+    .Then(mainTimeline, gap: TimeSpan.FromMilliseconds(200))
+    .Stagger(cardTimelines, interval: TimeSpan.FromMilliseconds(120));
+
+var player = new Player(storyboard, MauiClock.For(page));
+player.Play();
+```
+
+| Method | Purpose |
+|---|---|
+| `Add(node, offset)` | Pins a node at an explicit offset from the storyboard's start. |
+| `Then(node, gap)` | Appends so it begins once everything already added has finished. |
+| `With(node)` | Adds at offset zero — runs in parallel. |
+| `Stagger(nodes, interval, startAt)` | Spaces nodes evenly apart. The standard staggered list/grid entrance. |
+
+`Then()` throws after an infinitely repeating node — it never finishes, so the appended node would never start. Add it at an explicit offset instead.
+
+A child that hasn't started yet still gets evaluated with a negative offset, which is what lets its `Backwards` fill hold the opening pose while the rest of the storyboard runs.
+
+## Clocks
+
+`IClock` is the frame source: a `Tick` event carrying the elapsed delta, plus `Start`/`Stop`/`IsRunning`.
+
+- **`MauiClock`** — the platform ticker. `MauiClock.For(element)` returns the clock **shared by every animation on that element's dispatcher**, so one frame source serves the whole window and idles by itself once nothing is listening. `view.Play(timeline)` picks it up automatically.
+- **`ManualClock`** — driven by explicit `Advance(delta)` / `AdvanceBy(total, step)` calls. Every frame is exact, which is what makes offscreen export reproducible and timing tests free of wall-clock flake.
+
+```csharp
+var clock = new ManualClock();
+var player = new Player(timeline, clock);
+
+player.Play();
+clock.AdvanceBy(TimeSpan.FromSeconds(1), TimeSpan.FromMilliseconds(16));
+
+Assert.Equal(PlaybackState.Finished, player.State);
+```
+
+`ManualClock.Advance` refuses a negative delta — a clock cannot run backwards. Seek the player instead.
+
+## `Timing`
+
+If you need the arithmetic without the tracks, `Timing` is separable and directly testable. `Sample(time)` returns a `TimelineSample` of `(ShouldApply, Progress, Iteration, IsFinished)` — direction-adjusted and eased. `ActiveDuration` covers the iterations; `TotalDuration` adds `Delay` and `EndDelay`, and is `TimeSpan.MaxValue` for an infinite timeline (which is the sentinel `SeekProgress` and `Finish` check for).

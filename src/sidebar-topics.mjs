@@ -24,6 +24,7 @@ export const sidebarTopics = [
       },
       { label: 'AI Skills', link: 'foundation/ai-skills' },
       { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps' },
+      { label: 'Release Notes', link: 'foundation/release-notes' },
     ],
   },
   {
@@ -485,6 +486,19 @@ export const sidebarTopics = [
           { label: 'CountryPicker', link: 'controls/countrypicker/', jumpTo: true },
           { label: 'AddressEntry', link: 'controls/addressentry/', jumpTo: true },
           { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
+        ]
+      },
+      {
+        label: 'Keyframe Animation',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/keyframe/' },
+          { label: 'XAML Animations', link: 'controls/keyframe/xaml' },
+          { label: 'Easing Curves', link: 'controls/keyframe/easing' },
+          { label: 'Timelines & Playback', link: 'controls/keyframe/timelines' },
+          { label: 'Drawn Scenes', link: 'controls/keyframe/scenes' },
+          { label: 'Offscreen Export', link: 'controls/keyframe/export' },
         ]
       },
       {

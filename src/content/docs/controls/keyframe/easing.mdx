@@ -1,0 +1,108 @@
+---
+title: Easing Curves
+description: Named easing curves, CSS function syntax (cubic-bezier, steps, spring), curve combinators, and registering your own
+---
+
+An easing curve is just a delegate:
+
+```csharp
+public delegate double EasingFunction(double t);
+```
+
+Input is linear progress, normally 0..1. Output is eased progress, which **may exceed 0..1** — springs and overshoot curves do so by design, which is exactly what produces the overshoot. Anywhere a curve is accepted you can pass your own lambda instead.
+
+## Where easing applies
+
+There are two levels, and they compose:
+
+- **Per keyframe** — `Key.Easing` shapes the segment that *starts* at that key (CSS semantics), so the curve on the final key is never used.
+- **Per iteration** — `Keyframes.Easing` / `TimelineBuilder.Easing(...)` is applied across the whole iteration, on top of the per-segment curves. It defaults to linear so per-segment curves are the only thing shaping motion unless you ask otherwise.
+
+Iteration easing is applied **after** playback direction, so an ease-out curve decelerates into whichever end the iteration is actually travelling toward.
+
+## Named curves
+
+In XAML, `Easing="CubicOut"`. In C#, `Easings.CubicOut`. Names are case-insensitive.
+
+| Family | Names |
+|---|---|
+| Linear | `Linear` |
+| CSS keywords | `Ease`, `EaseIn`, `EaseOut`, `EaseInOut` |
+| Material | `Emphasized` |
+| Steps | `StepStart`, `StepEnd` |
+| Polynomial | `QuadIn/Out/InOut`, `CubicIn/Out/InOut`, `QuartIn/Out/InOut`, `QuintIn/Out/InOut` |
+| Trigonometric | `SinIn/Out/InOut` |
+| Exponential | `ExpoIn/Out/InOut` |
+| Circular | `CircIn/Out/InOut` |
+| Overshoot | `BackIn/Out/InOut` |
+| Oscillating | `ElasticIn/Out/InOut` |
+| Bouncing | `BounceIn/Out/InOut` |
+
+The CSS keyword curves are the exact béziers from the spec — `Ease` is `cubic-bezier(0.25, 0.1, 0.25, 1)`, `EaseIn` is `(0.42, 0, 1, 1)`, `EaseOut` is `(0, 0, 0.58, 1)`, `EaseInOut` is `(0.42, 0, 0.58, 1)`. `Emphasized` is Material 3's `(0.2, 0, 0, 1)`.
+
+## CSS function syntax
+
+The string form also accepts CSS-style functions — because copying a curve straight out of a design tool or a browser devtools panel is by far the most common way anyone arrives at one.
+
+```xml
+<kf:Key Offset="0" Value="-200" Easing="cubic-bezier(0.34, 1.56, 0.64, 1)" />
+<kf:Keyframes Easing="steps(8)" ... />
+<kf:Keyframes Easing="spring(0.35, 14)" ... />
+```
+
+| Function | Arguments | Notes |
+|---|---|---|
+| `cubic-bezier(x1, y1, x2, y2)` | 4, required | Also accepts `cubicbezier(...)`. Control points may go outside 0..1 for overshoot. |
+| `steps(n)` / `steps(n, jumpAtStart)` | 1 or 2 | `n` jumps. Second argument non-zero means CSS `jump-start`; default is `jump-end`. |
+| `spring()` / `spring(damping)` / `spring(damping, frequency)` | 0, 1, or 2 | Defaults to `spring(0.5, 10)`. |
+
+An unrecognised string throws a `FormatException` that lists every registered name and the available functions — the failure is at parse time, not silently linear at runtime.
+
+### Springs
+
+`Easings.Spring(damping, frequency)` is a **closed-form solution** of the spring ODE, not a numeric integration. That matters for two reasons: it's cheap enough to evaluate per frame, and it stays a pure function of `t`, so a spring animation seeks and reverses like every other curve here.
+
+| `damping` | Behaviour |
+|---|---|
+| `< 1` | Underdamped — oscillates around the target before settling. This is the bouncy one. |
+| `= 1` | Critically damped — fastest approach with no overshoot. |
+| `> 1` | Overdamped — sluggish, no oscillation. |
+
+`frequency` is the undamped angular frequency: how fast it wants to move.
+
+## Curve combinators
+
+```csharp
+Easings.CubicBezier(0.34, 1.56, 0.64, 1);   // custom bézier
+Easings.Spring(damping: 0.35, frequency: 14);
+Easings.Steps(8, jumpAtStart: false);
+
+Easings.Reverse(Easings.BounceOut);   // 1 - f(1 - t)
+Easings.Mirror(Easings.CubicIn);      // turns any "in" curve into the matching "in-out"
+```
+
+## Custom curves
+
+In C#, pass any lambda:
+
+```csharp
+.Animate(view, (v, x) => v.TranslationY = x, k => k
+    .From(0, t => t * t * (3 - 2 * t))   // smoothstep
+    .To(100))
+```
+
+To use one from XAML, register it by name at startup:
+
+```csharp
+EasingCatalog.Register("Smoothstep", t => t * t * (3d - 2d * t));
+```
+
+```xml
+<kf:Key Offset="0" Value="0" Easing="Smoothstep" />
+```
+
+Registering an existing name replaces it. `EasingCatalog.Names` enumerates everything registered; `Find(text)` returns `null` for an unrecognised string and `Get(text)` throws the descriptive message instead.
+
+:::caution[Curves must be pure]
+Timings clone their easing delegate by reference rather than copying it, and export samples the same curve out of order. A curve that remembers anything between calls will produce different results when scrubbed, reversed, or exported.
+:::

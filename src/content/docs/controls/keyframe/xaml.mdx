@@ -1,0 +1,181 @@
+---
+title: XAML Animations
+description: Animate.Keyframes — the attached-property surface, the Keyframes/Track/Key model, the animatable-property registry, and how to register your own properties
+---
+
+`Animate.Keyframes` is an attached property that hangs a keyframe animation off any `VisualElement`. It is the direct analogue of a CSS `@keyframes` rule together with the `animation-*` properties that drive it.
+
+```xml
+xmlns:kf="http://shiny.net/maui/keyframe"
+
+<Border>
+    <kf:Animate.Keyframes>
+        <kf:Keyframes Duration="0:0:1.2" Iterations="Infinite" Direction="Alternate" Fill="Both">
+
+            <kf:Track Property="Scale">
+                <kf:Key Offset="0"   Value="1" />
+                <kf:Key Offset="0.5" Value="1.15" Easing="CubicOut" />
+                <kf:Key Offset="1"   Value="1" />
+            </kf:Track>
+
+            <kf:Track Property="BackgroundColor">
+                <kf:Key Offset="0" Value="#2563EB" />
+                <kf:Key Offset="1" Value="#EC4899" />
+            </kf:Track>
+
+        </kf:Keyframes>
+    </kf:Animate.Keyframes>
+</Border>
+```
+
+Building and playback are deferred until the element **loads**, because a track needs a live element to read its starting value from. Reassigning the property tears the previous animation down first, so nothing is left writing to the view every frame.
+
+## `Keyframes`
+
+`Tracks` is the content property, so child `<kf:Track>` elements go straight in.
+
+| Property | Type | Default | Notes |
+|---|---|---|---|
+| `Duration` | `TimeSpan` | `0:0:0.3` | Length of a single iteration. Must be positive. |
+| `Delay` | `TimeSpan` | `0` | Before the first iteration. **Negative values seek into the timeline**, starting it partway through — the same trick CSS uses for staggered entrances. |
+| `Iterations` | `double` | `1` | A number, or the literal `Infinite` (`Forever` also parses). Fractional counts truncate the final pass. |
+| `Direction` | `PlaybackDirection` | `Normal` | `Normal`, `Reverse`, `Alternate`, `AlternateReverse`. |
+| `Fill` | `FillMode` | `None` | `None`, `Forwards`, `Backwards`, `Both` — matches CSS `animation-fill-mode`. |
+| `Easing` | `EasingFunction` | linear | Applied across each **whole iteration**, on top of the per-segment curves. See [Easing Curves](/controls/keyframe/easing/). |
+| `AutoPlay` | `bool` | `true` | Set false to drive playback from code. |
+| `Speed` | `double` | `1` | Rate multiplier. Negative runs backwards. |
+| `Tracks` | `IList<Track>` | — | Content property. |
+
+### Direction and Fill
+
+`Direction` decides which way each pass runs:
+
+| Value | Behaviour |
+|---|---|
+| `Normal` | Every iteration runs forwards. |
+| `Reverse` | Every iteration runs backwards. |
+| `Alternate` | Even iterations forwards, odd ones backwards — ping-pong. |
+| `AlternateReverse` | Even iterations backwards, odd ones forwards. |
+
+`Fill` decides what happens **outside** the active window:
+
+| Value | Behaviour |
+|---|---|
+| `None` | Targets are left alone before and after. |
+| `Forwards` | The final value is held once the timeline finishes. |
+| `Backwards` | The initial value is applied during the start delay, before playback begins. |
+| `Both` | Both of the above. |
+
+Without a `Fill`, a finished animation leaves the view at whatever value it happened to have before playback — which usually reads as a snap back at the end. `Fill="Forwards"` (or `Both`) is what you want for an entrance animation.
+
+## `Track`
+
+One animated property. `Keys` is the content property.
+
+| Property | Type | Notes |
+|---|---|---|
+| `Property` | `string` | The animated property name, resolved through the registry below. |
+| `TargetName` | `string` | Optional `x:Name` of a **different** element to animate. Unset means the element carrying the attached property. |
+| `Keys` | `IList<Key>` | Content property. At least one is required. |
+
+`TargetName` walks outward from the animated element until something in the tree knows the name, so a name declared on the page is in scope from anywhere beneath it.
+
+```xml
+<VerticalStackLayout>
+    <kf:Animate.Keyframes>
+        <kf:Keyframes Duration="0:0:0.4" Fill="Forwards">
+            <kf:Track Property="Opacity" TargetName="Caption">
+                <kf:Key Offset="0" Value="0" />
+                <kf:Key Offset="1" Value="1" />
+            </kf:Track>
+        </kf:Keyframes>
+    </kf:Animate.Keyframes>
+
+    <Label x:Name="Caption" Text="Fades in" />
+</VerticalStackLayout>
+```
+
+## `Key`
+
+| Property | Type | Notes |
+|---|---|---|
+| `Offset` | `double` | Position within the iteration, 0 to 1. |
+| `Value` | `object` | The value at that position. **Omit it** to resolve against the target's live value when playback starts. |
+| `Easing` | `EasingFunction` | Shapes the segment that *starts* at this key. |
+
+Two behaviours to internalise:
+
+**Easing belongs to the segment that starts at the key.** This is CSS semantics, and it means the curve on the *last* key is never used.
+
+**Omitting `Value` gives you an implicit keyframe.** The key resolves to whatever the target's value is at the moment playback begins, so a re-triggered animation continues from where it is instead of snapping back to a hardcoded start:
+
+```xml
+<kf:Track Property="Rotation">
+    <!-- No Value: resolves to the view's live rotation when playback starts -->
+    <kf:Key Offset="0" />
+    <kf:Key Offset="1" Value="90" />
+</kf:Track>
+```
+
+## Animatable properties
+
+`Property="…"` is resolved through `AnimatableProperties`, a dictionary of **hand-registered delegates**.
+
+:::note[Why a registry and not reflection]
+Getting from the string `"Opacity"` to a real setter could be done with reflection or a compiled `Expression`. Both work at runtime, and both break under Native AOT and aggressive trimming — the property gets trimmed out of existence and the animation fails on device but not in the emulator. Explicit delegates mean the linker sees ordinary static method calls, so nothing needs a preservation attribute and nothing goes missing.
+:::
+
+Registered out of the box:
+
+| Group | Properties | Cost |
+|---|---|---|
+| Opacity | `Opacity` | Cheap |
+| Scale | `Scale`, `ScaleX`, `ScaleY` | Cheap |
+| Translation | `TranslationX`, `TranslationY` | Cheap |
+| Rotation | `Rotation`, `Spin`, `RotationX`, `RotationY` | Cheap |
+| Anchor | `AnchorX`, `AnchorY` | Cheap |
+| Colour | `BackgroundColor` | Cheap |
+| Layout | `WidthRequest`, `HeightRequest`, `Margin`, `Padding` | **Measure + arrange every frame** |
+
+Three details worth knowing:
+
+- **`Rotation` takes the shortest arc.** 350° → 10° turns forward 20°, not back 340°. Use **`Spin`** — same underlying property, plain linear interpolation — when multiple turns are the point.
+- **`BackgroundColor` blends in Oklab**, so midpoints stay saturated instead of dipping through grey.
+- **`Padding` is set through the concrete types that declare it** (`Layout`, `Border`, `Page`). Animating `Padding` on anything else is a no-op, because `IPaddingElement` exposes it read-only and reflecting for the bindable property would not survive trimming.
+
+### Registering your own
+
+Register at startup — in `MauiProgram`, or a static constructor — to animate a property on a custom control. Registering an existing name replaces it.
+
+```csharp
+using Shiny.Controls.Keyframe;
+using Shiny.Maui.Controls.Keyframe;
+
+AnimatableProperties.Register(new AnimatableProperty<double>(
+    "Elevation",
+    v => ((MyCard)v).Elevation,           // getter — also used for implicit keyframes
+    (v, x) => ((MyCard)v).Elevation = x,  // setter
+    DoubleInterpolator.Instance,          // how to blend
+    o => Convert.ToDouble(o)));           // parse the raw XAML value
+```
+
+The constructor takes an optional final `invalidatesLayout` flag — set it true if writing the property forces a new measure and arrange pass.
+
+`AnimatableProperties.Names` enumerates everything currently registered, and `Find(name)` / `Get(name)` resolve one (the latter throwing a message that lists the alternatives).
+
+## Reaching the player
+
+`Animate.GetPlayer(view)` returns the [`Player`](/controls/keyframe/timelines/#player) driving an attached animation — for pausing, seeking, or scrubbing. It returns `null` until the element has loaded and the animation has been built.
+
+```csharp
+var player = Animate.GetPlayer(PulseBox);
+player?.Pause();
+```
+
+Set `AutoPlay="False"` when you intend to own playback yourself; the timeline still captures its baselines, so implicit keyframes are correct when you do start it.
+
+## Lifecycle
+
+- Animations build on `Loaded` and stop on `Unloaded`.
+- The **clock is shared** across every animation on the window. Unloading stops the player, not the clock — MAUI raises `Unloaded` during ordinary layout churn, and stopping the clock there would freeze every other animation on the page. The clock idles by itself once nothing at all is listening.
+- **Targets are held weakly.** An `Iterations="Infinite"` animation on a popped page goes inert and is collected rather than pinning the visual tree, so you can use infinite loops freely.

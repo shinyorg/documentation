@@ -1,0 +1,95 @@
+---
+title: Offscreen Export
+description: Deterministic frame export for keyframe scenes — FrameExporter, the pure-managed GIF encoder, the frame-rate caveat, and swapping the rasterizer
+---
+
+`Shiny.Maui.Controls.Keyframe.Export` renders a [`KeyframeScene`](/controls/keyframe/scenes/) to discrete frames, offscreen and deterministically, and encodes them to an animated GIF with no external dependency.
+
+```bash
+dotnet add package Shiny.Maui.Controls.Keyframe.Export
+```
+
+:::note[Optional, and the only Skia dependency]
+This is a separate package because it is the one part of Keyframe that needs a **rasterizer**. `Microsoft.Maui.Graphics` is a drawing abstraction with no rasterizer of its own, so the pixels have to come from somewhere — SkiaSharp, by default. Nothing that animates a view ever touches this package.
+
+It also targets plain .NET rather than the platform TFMs: no MAUI host, no display link. That is what makes it usable from a console app, a build step, or CI.
+:::
+
+```csharp
+using Shiny.Maui.Controls.Keyframe.Export;
+
+var exporter = new FrameExporter(scene);
+var options = new ExportOptions { Fps = 25, Scale = 2.0 };
+
+GifEncoder.EncodeToFile("out.gif", exporter.Frames(options), options.Fps);
+```
+
+## Why the output is reproducible
+
+Nothing here touches a display link or a UI thread. The animation is sampled at exact frame times through `IAnimationNode.Evaluate` — possible only because evaluation is a **pure function of time**. The same property that makes scrubbing exact makes export byte-identical across runs.
+
+Frame times are computed as `index / fps` in **ticks**, never accumulated, so a long export cannot drift. They deliberately avoid `TimeSpan.FromSeconds`, which rounds to whole milliseconds — coarser than a frame at 60fps, and enough to quantise every frame time.
+
+## `ExportOptions`
+
+| Property | Default | Notes |
+|---|---|---|
+| `Fps` | `30` | Frames per second. Must be positive. See the caveat below before trusting 30. |
+| `Duration` | scene's own | Overrides how much of the animation is exported. Required for an infinite animation, which has no natural end. |
+| `Size` | scene's `DesignSize` | Output size in pixels. |
+| `Scale` | `1.0` | Multiplies the output size — render at 2× or 3×. |
+| `Background` | scene's `Background` | Painted behind every frame. `null` leaves the frame transparent. |
+
+## `FrameExporter`
+
+| Member | Notes |
+|---|---|
+| `FrameExporter(scene, renderer?)` | The renderer defaults to `SkiaFrameRenderer`. |
+| `Frames(options?, cancellationToken)` | Renders each frame in turn, **lazily** — a long export never holds more than one frame's pixels in memory. |
+| `FrameAt(progress, options?)` | Renders a single frame at a normalised position. Handy for a poster image. |
+
+An `ExportedFrame` carries `Index`, `Time`, `Progress`, `Pixels` (premultiplied RGBA, row major, four bytes per pixel), `Width`, and `Height`.
+
+The exporter includes the **closing** frame: a one-second export at 30fps renders 31 frames, ending exactly on the final pose rather than one frame short of it.
+
+```csharp
+// A poster frame at the animation's midpoint
+var frame = exporter.FrameAt(0.5, new ExportOptions { Scale = 3.0 });
+```
+
+## GIF encoding
+
+| Member | Notes |
+|---|---|
+| `GifEncoder.Encode(stream, frames, fps, options?, ct)` | Writes to a stream, which is left open. |
+| `GifEncoder.EncodeToFile(path, frames, fps, options?, ct)` | Convenience wrapper. |
+| `GifOptions.MaxColors` | Palette size per frame, 2–256. |
+| `GifOptions.LoopCount` | How many times to repeat. Zero — the default — loops forever. |
+
+Frames are enumerated lazily all the way through, so encoding a long animation streams rather than buffering.
+
+:::caution[The frame-rate caveat — use 25 or 50fps]
+GIF stores frame delays in **hundredths of a second**, so the only frame rates it can represent exactly are divisors of 100: 50, 25, 20, 10fps and so on.
+
+Ask for 30fps and every frame is written as 3cs, which actually plays at 33.3fps. The encoder rounds and reports nothing, because there is no way to do better within the format.
+
+Worse, most browsers silently promote a delay of 0 or 1cs to 10cs — so anything **above 50fps plays far slower** than requested, no matter what is written to the file.
+
+Export at 25 or 50fps when timing matters. If you need genuinely exact timing, export an image sequence and encode to a real video format.
+:::
+
+## Swapping the rasterizer
+
+`IFrameRenderer` is a single method:
+
+```csharp
+byte[] Render(int width, int height, Color? background, Action<ICanvas> draw);
+```
+
+`SkiaFrameRenderer` is only the default — it's there because Skia runs headless on Windows, macOS, and Linux, which is what makes export usable from CI. Implement the interface yourself if you'd rather not take the Skia dependency, and pass it to the `FrameExporter` constructor.
+
+## What isn't here
+
+- **MP4 / video export** — out of scope; it needs a real codec. Pipe `FrameExporter.Frames()` to ffmpeg's stdin instead.
+- **APNG and WebP** — not implemented.
+- **A Lottie parser** — nothing reads Lottie JSON today, though `KeyframeScene` is the scene graph one would need.
