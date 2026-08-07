@@ -184,7 +184,7 @@ var status = await connection.Execute(StandardCommands.MonitorStatus);
 Console.WriteLine($"MIL: {status.MilOn}, {status.DtcCount} stored code(s)");
 Console.WriteLine($"Ignition: {status.Ignition}");   // Spark or Compression
 
-if (!status.IsReadyForInspection)
+if (status.IsReadyForInspection == false)
     Console.WriteLine($"Still running: {String.Join(", ", status.Incomplete.Select(x => x.Monitor))}");
 ```
 
