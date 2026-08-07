@@ -38,7 +38,7 @@ Two pluggable pipelines are what set it apart from other camera controls, and th
 - **Zoom** (clamped to the device's reported `MinZoom`..`MaxZoom`), optionally driven by **pinch-to-zoom**.
 - **Torch / flashlight** (`IsTorchOn`, continuous) and **still-capture flash** (`FlashMode` — Off / On / Auto).
 - **Photo capture** → JPEG bytes with the effects chain baked in, plus `CaptureAndStopAsync()` for a "scan then freeze" flow.
-- **Video recording** with optional audio, and session-level **quality, bitrate and frame-rate** control (`VideoQuality` `Lowest`…`Highest`, with fallback to the nearest rung the device supports).
+- **Video recording** with optional audio, and session-level **quality, bitrate and frame-rate** control (`VideoQuality` `Lowest`…`Highest`, with fallback to the nearest rung the device supports). Recording audio **shares the audio session** on Apple platforms, so it neither stops the user's music nor gets stopped by it.
 - **Burn-in video overlays** — composite a watermark, timestamp or telemetry into every *encoded* frame via `VideoRecordingOptions.Overlay`, drawn with `Microsoft.Maui.Graphics` so one implementation covers every platform.
 - **Recording and analyzing at the same time** on every platform — a dash-cam app can read signs off its own live feed while it records.
 
@@ -210,6 +210,31 @@ await this.Camera.StartVideoRecordingAsync(new VideoRecordingOptions { IncludeAu
 var video = await this.Camera.StopVideoRecordingAsync();   // CameraVideo { FilePath, Duration }
 ```
 
+### Sharing audio with other apps
+
+On Apple platforms an `AVCaptureSession` configures and activates the app's shared `AVAudioSession` for you,
+and the configuration it picks is **exclusive**. That costs both directions at once, silently:
+
+- starting a recording interrupts whatever else was playing — music over CarPlay or Bluetooth, a podcast, a
+  navigation app;
+- anything starting playback afterwards interrupts the **capture session**, which stops *video* as well as
+  audio.
+
+The handler takes that configuration over instead: `PlayAndRecord` with `MixWithOthers`, applied only when
+`IncludeAudio` is set. A recording without audio never touches the audio session at all, so it cannot disturb
+anything.
+
+```csharp
+// default true — neither side evicts the other
+this.Camera.MixWithOtherAudio = false;   // exclusive: interrupt other audio, and be interruptible
+```
+
+:::caution[When to turn it off]
+Set `MixWithOtherAudio = false` only when the recording's own audio track is the point. Mixing means the
+microphone hears whatever the speakers are playing, and nothing removes that afterwards. Leave it on for
+anything recording continuously — a dash cam, a body cam, a long take — and for anything a driver is using.
+:::
+
 ### Quality, bitrate and frame rate
 
 Recording quality is set on the **control**, not on `VideoRecordingOptions`:
@@ -333,6 +358,7 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `VideoQuality` | `VideoQuality` | `High` | Target capture resolution for recording — see [Quality, bitrate and frame rate](#quality-bitrate-and-frame-rate) |
 | `VideoBitrate` | `int?` | `null` | Target video encoding bitrate in bits/sec; `null` lets the platform choose for the resolution |
 | `VideoFrameRate` | `int?` | `null` | Target capture frame rate; `null` lets the platform choose. Clamped to what the device's active format supports |
+| `MixWithOtherAudio` | `bool` | `true` | **Apple only.** Recorded audio shares the audio session with other apps rather than interrupting them — and stops their playback from interrupting the capture. See [Sharing audio with other apps](#sharing-audio-with-other-apps) |
 | `IsRecording` | `bool` (read-only) | `false` | Whether a recording is in progress |
 | `Overlays` | `IReadOnlyList<OverlayBox>` | empty | Latest aggregated overlay boxes (read-only) |
 
