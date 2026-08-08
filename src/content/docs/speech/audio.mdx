@@ -3,8 +3,8 @@ title: Audio (Monitor & Devices)
 ---
 
 `Shiny.Audio` is the standalone audio backbone under `Shiny.Speech` — usable on its own for
-recording and playback without the speech stack. Alongside capture (`IAudioSource`) and playback
-(`IAudioPlayer`) — both with normalized **VU metering** — it provides a **live microphone monitor**
+recording and playback without the speech stack. Alongside capture (`IAudioSource`) and **concurrent**
+playback (`IAudioPlayer`) — both with normalized **VU metering** — it provides a **live microphone monitor**
 (`IAudioMonitor`) and **audio route enumeration/selection** (`IAudioDevices`), all discoverable
 through a single `IAudio` facade.
 
@@ -266,6 +266,57 @@ Input *is* selectable on iOS (`AVAudioSession.SetPreferredInput`). **Android** e
 both input and output fully. So: use `CurrentInput`/`CurrentOutput` as a **display property**
 everywhere; use the selectors on Android.
 :::
+
+## Concurrent playback (`IAudioPlayer` / `IAudioPlayback`)
+
+Clips play **concurrently**. Starting one does not stop the others, so background music, a sound
+effect and a voice line can overlap — and each one is still cancellable on its own.
+
+`StartAsync` returns an `IAudioPlayback` handle as soon as the clip is playing; `PlayAsync` is the
+same thing plus a wait on that handle's `Completion`, so it waits for *its* clip without touching
+anything else.
+
+```csharp
+using Shiny.Audio;
+
+public class SoundboardViewModel(IAudioPlayer player)
+{
+    IAudioPlayback? music;
+
+    public async Task StartMusic(CancellationToken ct)
+        => this.music = await player.StartAsync("https://example.com/theme.mp3", ct);
+
+    // Overlaps the music rather than interrupting it
+    public Task Ping(CancellationToken ct)
+        => player.PlayAsync(Path.Combine(FileSystem.AppDataDirectory, "ping.mp3"), ct);
+
+    public Task StopMusic()      => this.music?.StopAsync() ?? Task.CompletedTask;  // effects play on
+    public Task StopEverything() => player.StopAsync();
+}
+```
+
+| Member | Meaning |
+| --- | --- |
+| `IAudioPlayer.StartAsync(stream \| source, ct)` | Start a clip, return its `IAudioPlayback` |
+| `IAudioPlayer.PlayAsync(stream \| source, ct)` | `StartAsync` + `await Completion` — waits for **this** clip only |
+| `IAudioPlayer.Active` | Everything currently playing, oldest first |
+| `IAudioPlayer.StopAsync()` | Stops **every** clip this player started |
+| `IAudioPlayback.StopAsync()` | Stops **one** clip; the rest keep playing |
+| `IAudioPlayback.Completion` | Completes when that clip ends, stops, or is cancelled |
+| `IAudioPlayback.Id` / `Source` / `IsPlaying` | Identity, the URL/path (`null` for a stream), live state |
+
+A `CancellationToken` passed to `StartAsync`/`PlayAsync` stops **that clip only**, and completes it
+normally — `Completion` does not throw `OperationCanceledException`. `IAudioPlayback` is
+`IAsyncDisposable`, so disposing a handle stops its clip.
+
+:::note[Want one clip at a time?]
+`await player.StopAsync()` before playing. That's exactly what `ITextToSpeechService` does for cloud
+TTS — one utterance at a time — except it now stops only its own utterance, leaving the rest of your
+app's audio alone.
+:::
+
+`AudioLevelChanged` stays a single stream per player: while clips overlap it reports the **loudest**
+of them, which is what a VU meter should show.
 
 ## Volume (`IAudioPlayer`)
 

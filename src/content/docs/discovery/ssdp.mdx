@@ -1,0 +1,205 @@
+---
+title: SSDP & UPnP
+description: Discover UPnP devices — routers, media servers, Sonos, Roku, smart TVs — and advertise your own
+---
+
+SSDP is how UPnP devices announce themselves: routers, DLNA media servers, Sonos speakers, Roku
+boxes, smart TVs, and most consumer network hardware. Register `AddSsdp()` and inject
+`ISsdpManager`.
+
+```csharp
+builder.Services.AddSsdp();
+```
+
+:::caution[This is not mDNS — the platform rules are different]
+No operating system exposes an SSDP API to an app. Neither Android's `NsdManager` nor Apple's
+Bonjour stack can speak it, so this is raw UDP multicast on every platform — which means **iOS
+requires the `com.apple.developer.networking.multicast` entitlement**, and Apple grants that per
+developer team on request. See [Platform Setup](/discovery/platform) before you build anything
+that has to ship.
+:::
+
+## One-shot scan
+
+The quickest way to see what is on the network:
+
+```csharp
+var devices = await ssdp.SearchAll(TimeSpan.FromSeconds(5), ct);
+
+foreach (var device in devices)
+    Console.WriteLine($"{device.Udn}  {device.Server}  {device.Location}");
+```
+
+`SearchAll` sends `ssdp:all`, which every device answers **once per advertisement** — a root
+device with two embedded devices and three services replies eight times. They are folded into one
+`SsdpDevice` per UDN for you, but it is a lot of traffic. To list devices without their internals:
+
+```csharp
+var roots = await ssdp.Search(SsdpConstants.RootDevice, TimeSpan.FromSeconds(5), ct);
+```
+
+You can also search for a specific device or service type:
+
+```csharp
+var servers = await ssdp.Search("urn:schemas-upnp-org:device:MediaServer:1", ct: ct);
+```
+
+Version matching follows the UPnP rule — a device implementing version 2 answers a search for
+version 1.
+
+## Live browsing
+
+`Browse` never completes on its own. It repeats the search periodically, listens for unsolicited
+`ssdp:alive` and `ssdp:byebye` announcements in between, and expires devices whose advertisements
+age out.
+
+```csharp
+var devices = new Dictionary<string, SsdpDevice>();
+
+await foreach (var result in ssdp.Browse(SsdpConstants.RootDevice, ct))
+{
+    switch (result.Status)
+    {
+        case SsdpBrowseStatus.Found:
+            // upsert - a device re-announcing itself emits Found again
+            devices[result.Device.Udn] = result.Device;
+            break;
+
+        case SsdpBrowseStatus.Lost:
+            // only Udn is populated on a Lost result
+            devices.Remove(result.Device.Udn);
+            break;
+    }
+}
+```
+
+Always key on `Udn`. A dual-homed or dual-stack device advertises several locations and answers
+from several source addresses for one physical box; the UDN is the only stable identity.
+
+### Options
+
+```csharp
+new SsdpBrowseConfig("urn:schemas-upnp-org:device:MediaServer:1")
+{
+    MaxWait = TimeSpan.FromSeconds(3),          // the MX header, clamped to 1-5s
+    SearchInterval = TimeSpan.FromSeconds(60),  // how often the search repeats
+    ListenForNotifications = true,              // also track alive/byebye between searches
+    FriendlyName = "My App"                     // sent as CPFN.UPNP.ORG
+}
+```
+
+Do not drop `MaxWait` below 2 seconds to make a scan feel snappier. It does not speed anything up —
+it just tells slow embedded devices to answer within a window they cannot meet.
+
+## Device descriptions
+
+An SSDP advertisement carries almost no information — a UDN, a `SERVER` string, and a URL. Anything
+human-readable lives in the description document:
+
+```csharp
+var description = await ssdp.GetDescription(device, ct: ct);
+
+Console.WriteLine(description.FriendlyName);     // "Living Room"
+Console.WriteLine(description.Manufacturer);
+Console.WriteLine(description.ModelName);
+
+foreach (var service in description.Services)
+    Console.WriteLine(service.ServiceType);
+
+foreach (var icon in description.Icons)
+    Console.WriteLine($"{icon.Width}x{icon.Height} {icon.Url}");
+```
+
+Embedded devices share the parent's document and each carry their own UDN:
+
+```csharp
+foreach (var d in description.Flatten())
+    Console.WriteLine($"{d.Udn} {d.FriendlyName}");
+```
+
+Fetch once and cache it. Re-announcements are frequent, and the document only changes when
+`SsdpDevice.ConfigId` changes.
+
+:::note[Why a fetch can be refused]
+`LOCATION` is an unauthenticated URL, from an unauthenticated datagram, that this library will then
+make an HTTP request to. The default policy therefore requires the URL to be `http`/`https`, carry
+no credentials, and have a **literal IP host equal to the address that sent the advertisement**.
+Anything else throws `SsdpException`.
+
+Override it only when a device on your network legitimately advertises a different host — you are
+taking that check on yourself:
+
+```csharp
+await ssdp.GetDescription(device, (url, source) => url.Host == "10.0.0.5", ct);
+```
+:::
+
+Descriptions are also capped at 512KB, time out after 10 seconds, do not follow redirects, and are
+parsed with DTD processing disabled.
+
+## Publishing
+
+Advertise your own device. You are responsible for actually serving the description document at
+the location you advertise — this only announces that it exists.
+
+```csharp
+await using var publication = await ssdp.Publish(
+    new SsdpDeviceRegistration("uuid:" + Guid.NewGuid(), new Uri("http://192.168.1.20:8080/desc.xml"))
+    {
+        DeviceType = "urn:schemas-upnp-org:device:MediaServer:1",
+        ServiceTypes = ["urn:schemas-upnp-org:service:ContentDirectory:1"],
+        MaxAge = TimeSpan.FromMinutes(30)
+    },
+    ct
+);
+```
+
+This advertises four things — `upnp:rootdevice`, the UDN, the device type, and the service type —
+sends each announcement three times as UDP requires, re-announces before `MaxAge` expires,
+increments its boot id and re-announces when the host's addresses change, and answers matching
+`M-SEARCH` requests. Disposing sends `ssdp:byebye` for every advertised type.
+
+Keep the UDN stable across restarts. Control points treat it as the device's identity.
+
+:::caution[The responder is deliberately conservative]
+SSDP reflection is an actively exploited amplification vector — a ~100-byte request can produce
+several KB of response. The responder only answers sources on a network this host belongs to, rate
+limits per source, and spreads an `ssdp:all` burst across the requester's own MX window. Publishing
+is opt-in precisely because it exposes a responder.
+:::
+
+## Model reference
+
+### SsdpDevice
+
+| Member | Notes |
+|--------|-------|
+| `Udn` | The device identity — key your collections on this |
+| `Location` | Description URL; null when only a goodbye has been seen |
+| `Server` | The raw `SERVER` header, often the only clue before fetching the description |
+| `NotificationTypes` | Every advertisement seen from this device |
+| `IsRootDevice`, `DeviceType`, `ServiceTypes` | Computed from `NotificationTypes` |
+| `SourceAddress`, `InterfaceIndex` | Where it was seen |
+| `BootId`, `ConfigId` | UPnP 1.1 only. A `ConfigId` change means re-fetch the description |
+| `SearchPort` | Set when the device does not listen for unicast searches on 1900 |
+| `Headers` | Every raw header, case-insensitive — vendors put useful things here |
+
+### UpnpDeviceDescription
+
+`Udn`, `DeviceType`, `FriendlyName`, `Manufacturer`, `ManufacturerUrl`, `ModelName`, `ModelNumber`,
+`ModelDescription`, `ModelUrl`, `SerialNumber`, `Upc`, `PresentationUrl`, `Icons`, `Services`,
+`Devices`, and `Flatten()`. All URLs are resolved to absolute against the document's base.
+
+### UpnpService
+
+`ServiceType`, `ServiceId`, `ScpdUrl`, `ControlUrl`, `EventSubscriptionUrl`.
+
+## What this does not do
+
+- **No SOAP action invocation.** `ControlUrl` is surfaced so you can drive your own SOAP client,
+  but there is no `Invoke`, no argument marshalling, and no SCPD action metadata.
+- **No GENA eventing.** `EventSubscriptionUrl` is surfaced; there is no subscription, no callback
+  listener, and no state-variable notification handling.
+
+Both are substantially larger projects than discovery, and eventing in particular requires an
+embedded HTTP server on every platform.

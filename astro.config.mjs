@@ -66,7 +66,6 @@ export default defineConfig({
       '/maui/controls/': '/controls/',
       '/maui/controls/release-notes/': '/controls/release-notes/',
       '/release-notes/tableview/': '/controls/tableview/release-notes/',
-      '/release-notes/templates/': '/templates/release-notes/',
       '/release-notes/extensions/': '/di/release-notes/',
       '/extensions/release-notes/': '/di/release-notes/',
       '/release-notes/aspire/': '/aspire/orleans/release-notes/',
@@ -167,10 +166,6 @@ export default defineConfig({
       '/maui/contactstore/permissions': '/contactstore/permissions',
       '/maui/contactstore/querying': '/contactstore/querying',
       '/maui/contactstore/release-notes': '/contactstore/release-notes',
-      '/maui/templates/': '/templates/',
-      '/maui/templates/shiny-libraries': '/templates/shiny-libraries',
-      '/maui/templates/third-party': '/templates/third-party',
-      '/maui/templates/release-notes': '/templates/release-notes',
 
       // Extensions → flat redirects
       '/extensions/reflector/': '/reflector/',

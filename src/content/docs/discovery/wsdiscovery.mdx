@@ -1,0 +1,173 @@
+---
+title: WS-Discovery & ONVIF
+description: Discover ONVIF IP cameras, WSD printers and scanners, and Windows machines
+---
+
+WS-Discovery is SOAP-over-UDP, and it is what ONVIF IP cameras, WSD network printers and scanners,
+and Windows machines use to announce themselves. Register `AddWsDiscovery()` and inject
+`IWsDiscoveryManager`.
+
+```csharp
+builder.Services.AddWsDiscovery();
+```
+
+:::caution[Raw multicast, same as SSDP]
+There is no OS-level WS-Discovery API on any platform, so this is raw UDP multicast on port 3702 —
+**iOS requires the `com.apple.developer.networking.multicast` entitlement**, and Android needs
+`CHANGE_WIFI_MULTICAST_STATE` plus `ACCESS_LOCAL_NETWORK`. See
+[Platform Setup](/discovery/platform).
+:::
+
+## Finding ONVIF cameras
+
+```csharp
+var cameras = await wsd.ProbeOnvifCameras(TimeSpan.FromSeconds(5), ct);
+
+foreach (var camera in cameras)
+{
+    Console.WriteLine(camera.GetScopeValue("name"));       // "Front Door"
+    Console.WriteLine(camera.GetScopeValue("hardware"));   // "ACME-1"
+    Console.WriteLine(camera.GetScopeValue("location"));
+    Console.WriteLine(camera.PreferredAddress);            // http://192.168.1.9/onvif/device_service
+}
+```
+
+`PreferredAddress` is the one to connect to. Cameras routinely advertise several addresses,
+including ones that are stale after a DHCP change, `0.0.0.0`, or link-local IPv6 without a zone
+id; the address that matches where the reply actually came from wins, then one on the same
+network, then whatever is left.
+
+:::tip[Why the ONVIF helper sends an untyped probe]
+The ONVIF specification says to probe for `dn:NetworkVideoTransmitter`. In practice a typed probe
+finds fewer cameras: some only answer the older `NetworkVideoTransmitter` type, some only the newer
+`tds:Device`, and some ignore both but answer an untyped probe. `ProbeOnvifCameras` therefore probes
+for everything and filters locally on either ONVIF type.
+:::
+
+## Probing for a type
+
+```csharp
+// Windows machines and WSD printers/scanners
+await foreach (var result in wsd.Browse([WsDiscoveryConstants.WsdpDevice], ct))
+    Console.WriteLine(result.Target);
+```
+
+Built-in types:
+
+| Constant | Finds |
+|----------|-------|
+| `WsDiscoveryConstants.OnvifNetworkVideoTransmitter` | ONVIF cameras (2005-era type, most widely supported) |
+| `WsDiscoveryConstants.OnvifDevice` | ONVIF devices (newer type) |
+| `WsDiscoveryConstants.WsdpDevice` | Windows machines, WSD printers and scanners |
+
+Types are `System.Xml.XmlQualifiedName`, so namespace *and* local name are compared. Two types with
+the same local name in different namespaces are different types — which is exactly why the wire
+format's namespace-prefixed QNames have to be resolved properly rather than string-matched.
+
+## Live browsing
+
+```csharp
+var targets = new Dictionary<string, WsdTarget>();
+
+await foreach (var result in wsd.Browse(ct))
+{
+    if (result.Status == WsDiscoveryStatus.Found)
+        targets[result.Target.EndpointReference] = result.Target;
+    else
+        targets.Remove(result.Target.EndpointReference);
+}
+```
+
+Key on `EndpointReference`. Unlike SSDP there is no expiry in WS-Discovery — a target stays until
+it sends `Bye`, so a device unplugged without warning lingers.
+
+### Options
+
+```csharp
+new WsdProbeConfig
+{
+    Types = [WsDiscoveryConstants.OnvifNetworkVideoTransmitter],
+    Scopes = ["onvif://www.onvif.org/type"],
+    ScopeMatchBy = null,                              // null = the default RFC 3986 rule
+    Profiles = WsDiscoveryProfile.All,                // both 2005 and 2009
+    ProbeInterval = TimeSpan.FromSeconds(60),
+    ListenForAnnouncements = true,                    // track Hello and Bye between probes
+    ResolveMissingAddresses = true                    // Resolve targets that answer without XAddrs
+}
+```
+
+### Scope matching
+
+The default rule compares scheme and authority case-insensitively and the path **segment by
+segment**, case-sensitively, with the probe's path a prefix of the target's:
+
+| Probe scope | Target scope | Match |
+|-------------|--------------|-------|
+| `onvif://www.onvif.org/type` | `onvif://www.onvif.org/type/video_encoder` | ✅ |
+| `onvif://www.onvif.org/ty` | `onvif://www.onvif.org/type/video_encoder` | ❌ partial segment |
+| `onvif://www.onvif.org/type/video_encoder` | `onvif://www.onvif.org/type` | ❌ probe is deeper |
+
+`strcmp0` (exact) and `uuid` are also supported. `ldap` is recognised and deliberately never
+matches — nothing in the wild uses it, and implementing it wrong is worse than declining.
+
+## The two specification versions
+
+WS-Discovery exists in two wire-incompatible versions, differing in the discovery namespace, the
+WS-Addressing namespace, the multicast `To` URI, and the anonymous reply URI:
+
+| | 2005/04 | 2009/01 (OASIS 1.1) |
+|-|---------|---------------------|
+| Spoken by | ONVIF cameras, Windows | Newer OASIS-conformant devices |
+
+Both are sent by default, as two separate datagrams — never as one hybrid envelope. **Leave it that
+way** unless you know every device on your network; a great many ONVIF cameras ignore 2009
+entirely. `WsdTarget.Profile` reports which version a device answered in, and the responder always
+replies in the version a request arrived in.
+
+## Publishing
+
+```csharp
+await using var publication = await wsd.Publish(
+    new WsDiscoveryRegistration("urn:uuid:" + Guid.NewGuid())
+    {
+        Types = [WsDiscoveryConstants.WsdpDevice],
+        Scopes = ["onvif://www.onvif.org/name/My%20Service"],
+        Addresses = [new Uri("http://192.168.1.20:8080/service")]
+    },
+    ct
+);
+```
+
+Sends `Hello` on start, answers matching `Probe` and `Resolve` requests unicast after the
+specification's random delay, bumps `MetadataVersion` and re-announces when the host's addresses
+change, and sends `Bye` on dispose. Like SSDP, the responder only answers sources on a local
+network and rate limits per source.
+
+## Model reference
+
+### WsdTarget
+
+| Member | Notes |
+|--------|-------|
+| `EndpointReference` | The identity — key your collections on this |
+| `Types` | `IReadOnlyList<XmlQualifiedName>` |
+| `Scopes` | Raw scope URIs |
+| `Addresses` | Everything the device advertised, including unreachable entries |
+| `PreferredAddress` | The one most likely to work |
+| `MetadataVersion` | Increments when types, scopes or addresses change |
+| `Profile` | Which specification version the device answered in |
+| `IsOnvifCamera` | True when the ONVIF NVT type is declared |
+| `GetScopeValue("name")` | Reads and URL-decodes an ONVIF-style scope segment |
+
+## What this does not do
+
+Discovery only. There is no WS-MetadataExchange, and no ONVIF operations — `GetCapabilities`,
+`GetProfiles`, stream URIs. `PreferredAddress`, `Types` and `Scopes` give a SOAP client everything
+it needs to take over from there.
+
+:::note[Camera compatibility is empirical]
+ONVIF cameras are notoriously particular about SOAP envelope formatting, and behaviours vary by
+vendor and firmware. Envelopes here are built to match what Windows and ONVIF reference tooling
+send — compact, `mustUnderstand="1"` rather than `"true"`, namespaces declared on the envelope. If
+a specific camera does not answer, a packet capture on UDP 3702 is the fastest way to find out why.
+:::

@@ -9,6 +9,8 @@ so you can do it at a desk.
 It runs both roles at once:
 
 - **Client** — the Scan tab finds a real adapter and reads it, the way any app using this library would.
+  From the dashboard it opens onto, **All commands** issues every command in the library against that
+  adapter and shows what each one parsed back to.
 - **Adapter** — the Adapter, Drive, Values and Faults tabs turn the device into an ELM327-compatible
   OBD-II adapter, reachable over BLE *and* over TCP, answering with whatever values you set — or with a
   scenario driving them for you.
@@ -112,6 +114,33 @@ Each one has:
 That last one is worth dwelling on. The readback runs the emulator's own bytes back through the real
 command object, so the app tells you what your client is about to see. An encoder that disagrees with
 the library's parser shows up there rather than as a wrong number somewhere else.
+
+## Reading everything back
+
+The Values tab is the adapter half — what the emulator will answer. **All commands**, reached from the
+dashboard after picking an adapter on the Scan tab, is the client half: it issues every command the
+library has against whatever it is connected to and shows what each one parsed back to.
+
+It asks in the order a client should:
+
+1. **Walk the support masks.** `SupportedPidsCommand` over `0100`/`0120`/`0140`… stopping at the first
+   block the vehicle does not answer, then `OnBoardTestSupportedMidsCommand` over the mode 06 blocks.
+2. **Ask only for what came back.** A PID the mask did not claim is marked *not supported* rather than
+   asked — which is the whole point of the masks, since probing blind spends a round trip per PID to be
+   told `NO DATA`. A switch turns the gate off when you want to catch an ECU whose mask under-reports
+   what it will actually answer.
+3. **Check the freeze frame before reading it.** `FreezeFrameCommands.CausalDtc()` runs first; when it
+   answers null the rest of mode 02 is skipped, because an unstored frame reads back zero-filled and
+   0% engine load at -40 °C looks like a measurement rather than an absent one.
+4. **Add the monitors it discovered.** Each supported MID becomes its own `OnBoardTestCommand` row.
+
+Every mode 01 reading is paired with its mode 02 counterpart via `AsFreezeFrame()`, so the sweep covers
+both. `ClearDtcCommand` is deliberately left out of it and sits on its own button behind a confirm tap —
+it is the one command here that changes the vehicle rather than reading it, and a sweep that ran
+everything would wipe fault memory as a side effect of looking at it.
+
+Pointed at the emulator, the two halves check each other: the Values tab says what should come back,
+and this says what a client actually got.
 
 ## Driving scenarios
 

@@ -81,6 +81,8 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'discovery/' },
           { label: 'Browsing & Resolving', link: 'discovery/browsing' },
           { label: 'Publishing', link: 'discovery/publishing' },
+          { label: 'SSDP & UPnP', link: 'discovery/ssdp' },
+          { label: 'WS-Discovery & ONVIF', link: 'discovery/wsdiscovery' },
           { label: 'Platform Setup', link: 'discovery/platform' },
           { label: 'Release Notes', link: 'discovery/release-notes' }
         ]
@@ -170,16 +172,6 @@ export const sidebarTopics = [
           { label: 'Platform Behavior', link: 'datasync/platform-behavior' },
           { label: 'Custom Transports', link: 'datasync/custom-transports' },
           { label: 'Release Notes', link: 'datasync/release-notes' }
-        ]
-      },
-      {
-        label: 'Templates',
-        jumpTo: true,
-        items:[
-          { label: 'Getting Started', link: 'templates/' },
-          { label: 'Shiny Libraries', link: 'templates/shiny-libraries' },
-          { label: '3rd Party Libraries', link: 'templates/third-party' },
-          { label: 'Release Notes', link: 'templates/release-notes' }
         ]
       }
     ],

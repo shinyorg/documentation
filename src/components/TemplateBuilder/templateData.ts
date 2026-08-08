@@ -9,62 +9,56 @@ export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.8.0',
     shinyShell: '6.3.2',
-    shinyControls: '1.0.1-beta-0148',
+    shinyControls: '1.0.1-beta-0175',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '5.4.0-beta-0074',
-    shinyConfiguration: '5.4.0-beta-0074',
+    shinyClient: '5.4.0',
+    shinyConfiguration: '5.4.0',
     shinyLocalization: '2.0.1',
-    shinyStores: '5.1.4',
-    shinyReflector: '5.1.4',
-    shinyDI: '5.1.4',
+    shinyStores: '5.1.5',
+    shinyReflector: '5.1.5',
+    shinyDI: '5.1.5',
     shinySpatial: '2.0.0',
-    shinyContactStore: '5.4.0-beta-0074',
-    shinyCalendar: '5.4.0-beta-0074',
-    shinySpeech: '3.0.0-beta-0018',
-    shinyAiConversation: '3.0.0-beta-0018',
-    shinyMusic: '4.1.0-beta-0005',
-    shinyHealth: '2.0.0',
-    shinyDocumentDb: '12.2.1',
-    shinyMauiHosting: '5.1.4',
-    shinyWebHosting: '5.1.4',
-    shinyBlazorHosting: '5.1.4',
+    shinyContactStore: '5.4.0',
+    shinyCalendar: '5.4.0',
+    shinySpeech: '3.0.0-beta-0028',
+    shinyAiConversation: '3.0.0-beta-0028',
+    shinyMusic: '4.1.0',
+    shinyHealth: '2.0.1',
+    shinyDocumentDb: '13.1.2',
+    shinyMauiHosting: '5.1.5',
+    shinyWebHosting: '5.1.5',
+    shinyBlazorHosting: '5.1.5',
 
     // MAUI tooling
     devflow: '0.1.0-preview.12.26368.2',
 
     // Microsoft + third-party
     ctMvvm: '8.4.2',
-    ctMauiMarkup: '8.0.0',
     ctMediaElement: '10.0.0',
     sentry: '6.8.0',
-    barcodes: '3.0.6',
     biometric: '2.5.1',
     screenrecord: '1.0.0-preview5',
-    ocr: '1.1.1',
-    uraniumUi: '3.0.0',
-    alohakit: '1.1.0',
     liveCharts: '2.0.5',
-    skia: '4.150.1',
+    skia: '4.151.1',
     skiaExtended: '3.0.0',
-    ffImageLoading: '1.3.2',
     userDialogs: '9.2.2',
     debugRainbows: '1.2.2',
-    mudblazor: '9.7.0',
-    radzen: '11.1.8',
-    fluentUI: '4.14.3',
+    mudblazor: '9.8.0',
+    radzen: '11.2.2',
+    fluentUI: '4.14.4',
     sqliteNetPcl: '1.11.285',
     roomsharp: '0.5.5',
-    msExtAi: '10.8.1',
+    msExtAi: '10.8.3',
     androidAuto: '1.7.0.4',
     systemReactive: '7.0.0',
     humanizer: '3.0.10',
     unitsNet: '5.75.1',
     sysLinqAsync: '7.0.1',
-    refit: '14.0.1',
+    refit: '15.0.0',
     orleans: '10.2.2',
-    scalar: '2.16.16',
+    scalar: '2.16.18',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';
@@ -118,8 +112,7 @@ export interface TemplateConfig {
 
 const MAUI_CATEGORIES: readonly TemplateCategory[] = [
     { id: 'project', title: 'Project', span: 12 },
-    { id: 'framework', title: 'Framework', span: 6 },
-    { id: 'markup', title: 'Markup', span: 6 },
+    { id: 'framework', title: 'Framework', span: 12 },
     { id: 'configuration', title: 'Configuration', span: 6 },
     { id: 'logging', title: 'Logging', span: 6 },
     { id: 'services', title: 'Services', span: 12 },
@@ -206,13 +199,6 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyMediator,
         description: 'Event-driven messaging, middleware, and request/response pipeline https://shinylib.net/mediator/' },
 
-    // Markup
-    { id: 'blazor', label: 'Blazor Hybrid', type: 'bool', defaultValue: false, category: 'markup',
-        description: 'Add Blazor Hybrid support' },
-    { id: 'usecsharpmarkup', label: 'C# Markup (CT)', type: 'bool', defaultValue: false, category: 'markup',
-        version: VERSIONS.ctMauiMarkup,
-        description: 'Build MAUI UI in C# with fluent syntax https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/markup/markup' },
-
     // Configuration
     { id: 'configuration', label: 'AppSettings.json', type: 'bool', defaultValue: true, category: 'configuration',
         version: VERSIONS.shinyConfiguration,
@@ -266,10 +252,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'aiconversation', label: 'AI Conversation', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyAiConversation,
         description: 'AI Conversation with speech recognition and text-to-speech https://shinylib.net/aiconversation/' },
-    { id: 'barcodes', label: 'Barcode Scanning', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.barcodes,
-        description: 'Native barcode scanning using MLKit & Vision by afriscic https://github.com/afriscic/BarcodeScanning.Native.Maui',
-        visibleWhen: noDesktop },
     { id: 'fingerprint', label: 'Biometric Auth', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.biometric,
         description: 'Fingerprint & face recognition by Oscore (Oscore.Maui.Biometric) https://github.com/oscoreio/Maui.Biometric',
@@ -277,10 +259,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'screenrecord', label: 'Screen Recording', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.screenrecord,
         description: 'Record the device screen by Gerald Versluis https://github.com/jfversluis/Plugin.Maui.ScreenRecording',
-        visibleWhen: noDesktop },
-    { id: 'ocr', label: 'OCR', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.ocr,
-        description: 'Optical character recognition by Kori Francis https://github.com/kfrancis/ocr',
         visibleWhen: noDesktop },
     { id: 'music', label: 'Music Library', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyMusic,
@@ -311,12 +289,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'mediaelement', label: 'CT Media Element', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.ctMediaElement,
         description: 'Cross-platform media playback control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/mediaelement' },
-    { id: 'uraniumui', label: 'Uranium UI', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.uraniumUi,
-        description: 'Material Design component library by Enis Necipoglu https://enisn-projects.io/docs/en/uranium/latest' },
-    { id: 'alohakitanimations', label: 'AlohaKit Animations', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.alohakit,
-        description: 'Declarative animations library by Javier Suarez https://github.com/jsuarezruiz/AlohaKit.Animations/' },
     { id: 'livecharts', label: 'Live Charts', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.liveCharts,
         description: 'Animated, flexible charts by Alberto Rodriguez https://livecharts.dev/' },
@@ -326,9 +298,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'skiaextended', label: 'SkiaSharp Extended (Lottie)', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.skiaExtended,
         description: 'Lottie animations & SVG support for SkiaSharp by Mono https://github.com/mono/SkiaSharp.Extended' },
-    { id: 'ffimageloading', label: 'FFImageLoading', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.ffImageLoading,
-        description: 'Fast image loading with caching & transformations by microspaze https://github.com/microspaze/FFImageLoading.Maui' },
     { id: 'userdialogs', label: 'ACR User Dialogs', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.userDialogs,
         description: 'Alerts, confirmations, loading indicators & toasts by Allan Ritchie https://github.com/aritchie/userdialogs' },
@@ -356,6 +325,11 @@ const MAUI_PARAMS: TemplateParam[] = [
         visibleWhen: (s) => s.mvvmframework === 'Shiny MAUI Shell' },
 
     // Blazor components
+    { id: 'blazor', label: 'Blazor Hybrid', type: 'bool', defaultValue: false, category: 'blazor',
+        description: 'Add Blazor Hybrid support (BlazorWebView)' },
+    { id: 'shinyblazorcontrols', label: 'Shiny Blazor Controls', type: 'bool', defaultValue: false, category: 'blazor',
+        version: VERSIONS.shinyControls,
+        description: 'Shiny.Blazor.Controls \u2014 the Blazor control set, usable from Blazor Hybrid https://shinylib.net/controls/' },
     { id: 'mudblazor', label: 'MudBlazor', type: 'bool', defaultValue: false, category: 'blazor',
         version: VERSIONS.mudblazor,
         description: 'Material Design Blazor component library https://mudblazor.com/' },
@@ -457,7 +431,7 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.useconfig = !!(s.configuration || s.push !== 'None' || s.authtype !== 'None');
     s.usedeeplinks = s.deeplinks !== '';
     s.usehttp = !!(s.authservice && s.refit);
-    s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui);
+    s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui || s.shinyblazorcontrols);
     s.usemauicontrols = !!s.shinycontrols;
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
@@ -468,7 +442,7 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     // Telemetry only emitted when a store is actually present.
     s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
     s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation || s.aicontacts || s.ainotifications || s.ailocations);
-    s.communitytoolkit = !!(s.mediaelement || s.usecsharpmarkup);
+    s.communitytoolkit = !!s.mediaelement;
     return s;
 }
 

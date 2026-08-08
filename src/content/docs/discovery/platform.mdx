@@ -1,9 +1,17 @@
 ---
 title: Platform Setup
-description: Info.plist, manifest, and firewall requirements, plus what backs mDNS on each platform
+description: Info.plist, entitlement, manifest, and firewall requirements for mDNS, SSDP, and WS-Discovery
 ---
 
+:::danger[The requirements differ by protocol — this is the single most important page]
+mDNS needs no entitlement anywhere. SSDP and WS-Discovery need a **manually approved Apple
+entitlement on iOS** and a runtime permission on modern Android, because no operating system
+exposes an API for those two protocols and they must therefore use raw multicast.
+:::
+
 ## What backs each platform
+
+**mDNS/DNS-SD** delegates to the OS wherever an API exists:
 
 | Platform | Backing | Consequence |
 |----------|---------|-------------|
@@ -17,6 +25,25 @@ The managed responder implements RFC 6762/6763 directly: name compression, probi
 conflict-driven renaming, announcements, goodbye packets, TTL expiry, and query answering across
 every multicast-capable interface. It rejoins the multicast group automatically when the network
 changes.
+
+**SSDP (UDP 1900) and WS-Discovery (UDP 3702)** are managed on *every* platform, including iOS and
+Android. That is not a design preference — neither `NsdManager` nor Apple's Bonjour stack can speak
+these protocols, and no platform offers another route. Raw multicast is the only option, and the
+permission requirements below follow directly from that.
+
+## Requirements at a glance
+
+| Platform | mDNS | SSDP / WS-Discovery |
+|----------|------|---------------------|
+| iOS | `NSBonjourServices` + usage description | **`com.apple.developer.networking.multicast`** (Apple approval required) + usage description |
+| Mac Catalyst / macOS | sandbox network entitlements | same sandbox entitlements; **not** the multicast entitlement. macOS 15+ prompts for Local Network |
+| Android | `INTERNET`, `ACCESS_NETWORK_STATE` | those plus `CHANGE_WIFI_MULTICAST_STATE`, and `ACCESS_LOCAL_NETWORK` at runtime from Android 17 |
+| Windows | firewall UDP 5353; MSIX capability | firewall UDP 1900/3702; same capability |
+| Linux | firewall UDP 5353 | firewall UDP 1900/3702; Docker bridge networking does not work |
+
+A missing requirement throws `DiscoveryPermissionException`, whose message names the specific
+entitlement, manifest entry, or capability to add. That exists because every one of these failures
+otherwise looks identical to an empty network.
 
 ## iOS, Mac Catalyst, and macOS
 
@@ -38,13 +65,39 @@ Every service type you browse for **and** every type you publish must appear in 
 error — you will just see an empty list.
 :::
 
-### The multicast entitlement
+### The multicast entitlement — mDNS
 
-You **do not** need `com.apple.developer.networking.multicast`.
+For mDNS you **do not** need `com.apple.developer.networking.multicast`.
 
-That entitlement — which requires a manual approval request to Apple — applies to apps that open
-raw multicast sockets. This library deliberately uses Bonjour (`NSNetService`) on Apple platforms
-instead, so the system daemon does the multicast and your app does not need special permission.
+That entitlement applies to apps that open raw multicast sockets. The mDNS implementation
+deliberately uses Bonjour (`NSNetService`) on Apple platforms instead, so the system daemon does
+the multicast and your app does not need special permission.
+
+### The multicast entitlement — SSDP and WS-Discovery
+
+For these two, you **do** need it on iOS, and there is no way around it.
+
+```xml
+<!-- Entitlements.plist -->
+<key>com.apple.developer.networking.multicast</key>
+<true/>
+```
+
+:::danger[Apple must approve this before you can ship]
+The entitlement is granted per **developer team**, on request, via Apple's
+[Multicast Networking Entitlement Request](https://developer.apple.com/contact/request/networking-multicast)
+form. Budget days to weeks. Without it, multicast sends fail and nothing is ever received.
+
+**It cannot be validated in the Simulator.** Local network privacy is not enforced there, so the
+Simulator neither reproduces the failure nor proves the fix — you must test on a device.
+:::
+
+`NSLocalNetworkUsageDescription` is still required. `NSBonjourServices` is **not** relevant to
+SSDP or WS-Discovery; it only gates mDNS.
+
+macOS and Mac Catalyst do not use this entitlement at all — it is iOS-only. They need the sandbox
+entitlements below, and on macOS 15+ the user sees a Local Network prompt
+(System Settings › Privacy & Security › Local Network).
 
 ### Mac Catalyst and macOS — App Sandbox entitlements
 
@@ -77,6 +130,8 @@ Mac itself publishes. Confirm behaviour on a real device.
 
 ## Android
 
+### mDNS
+
 No runtime permission is required. Declare these in `AndroidManifest.xml`:
 
 ```xml
@@ -89,6 +144,27 @@ resolves. Below API 34 the deprecated `resolveService` is used and calls are ser
 because that API only tolerates one resolve at a time — a large scan resolves a little more slowly
 on older devices as a result.
 
+### SSDP and WS-Discovery
+
+Two further permissions apply:
+
+```xml
+<!-- without this, sends succeed and nothing is EVER received over Wi-Fi -->
+<uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
+<!-- runtime permission, mandatory when targeting SDK 37 (Android 17) or later -->
+<uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
+```
+
+`CHANGE_WIFI_MULTICAST_STATE` backs the `WifiManager.MulticastLock`, which the Wi-Fi driver
+requires before it will deliver packets not addressed to this device. **You do not need to manage
+the lock** — it is acquired for the lifetime of a browse or publication and released afterwards, so
+it does not drain the battery when idle.
+
+`ACCESS_LOCAL_NETWORK` is part of Android's Local Network Protections. It is opt-in on Android 16
+and mandatory for apps targeting SDK 37+. It is a runtime (dangerous) permission in the
+`NEARBY_DEVICES` group, so request it before discovering. Apps targeting an older SDK receive an
+implicit grant, which disappears the moment you bump `targetSdk`.
+
 ## Windows and Linux
 
 The managed responder binds UDP 5353 with `SO_REUSEADDR` (plus `SO_REUSEPORT` on Unix) so it
@@ -97,6 +173,22 @@ Windows DNS client. Avahi does **not** need to be installed on Linux.
 
 Make sure your firewall allows inbound and outbound UDP 5353. On Windows, a first run typically
 raises the Windows Defender Firewall prompt.
+
+### SSDP and WS-Discovery ports
+
+SSDP uses UDP **1900** and WS-Discovery UDP **3702**, both on group `239.255.255.250` (and
+`ff02::c`). Windows already runs services on both — `SSDPSRV` (SSDP Discovery) and `FDResPub`
+(Function Discovery Resource Publication) — and `SO_REUSEADDR` is set so this coexists with them.
+Because unicast delivery on a shared port is not deterministic, searches are additionally sent from
+an ephemeral socket, which also catches devices that reply to the source port rather than the well
+known one.
+
+### Containers
+
+Docker **bridge** networking does not work for SSDP or WS-Discovery. Multicast does not reach the
+container, and NAT does not rewrite the addresses embedded in the payloads (`LOCATION` for SSDP,
+`XAddrs` for WS-Discovery), so even one-way discovery yields unreachable addresses. Use
+`--network host` (Linux only) or macvlan to put the container directly on the LAN.
 
 ### Packaged Windows apps (MSIX / WinUI)
 
@@ -126,5 +218,11 @@ out of each other's way.
 | Empty results on iOS, prompt was declined | Local network permission — the user must re-enable it in Settings › Privacy › Local Network |
 | Empty results on Windows | Firewall is blocking UDP 5353 |
 | Services found but never resolve | The publisher is answering PTR but not SRV/A — check `IsResolved` before connecting, and consider raising `ResolveTimeout` |
-| Nothing found across subnets | Expected — mDNS is link-local by design and does not cross routers |
+| Nothing found across subnets | Expected — all three protocols are link-local by design and do not cross routers |
 | `MdnsException` on startup | The service type is malformed; the message names the exact problem |
+| `DiscoveryPermissionException` | Read the message — it names the exact entitlement, permission, or capability that is missing |
+| SSDP/WS-Discovery empty on iOS | The multicast entitlement is missing or not yet approved by Apple. The Simulator cannot confirm either way |
+| SSDP/WS-Discovery empty on Android, sends appear to work | `CHANGE_WIFI_MULTICAST_STATE` is missing from the manifest, or `ACCESS_LOCAL_NETWORK` was not granted at runtime |
+| SSDP/WS-Discovery empty in Docker | Bridge networking — use `--network host` or macvlan |
+| `SsdpException` refusing a description URL | The device advertised a `LOCATION` on a different host than it answered from. Override the filter on `GetDescription` if that device is legitimate |
+| ONVIF camera never answers a probe | Many cameras only speak the 2005 profile — leave `WsdProbeConfig.Profiles` at `All`, and give the scan at least 5 seconds |

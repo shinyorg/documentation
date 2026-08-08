@@ -43,6 +43,8 @@ export type ShinyCategoryId =
     | 'core'
     | 'essentials'
     | 'devices'
+    | 'platformdata'
+    | 'intelligence'
     | 'controls'
     | 'storage';
 
@@ -63,7 +65,8 @@ export type ShinyCategory = {
  *  Row 1: core (12)
  *  Row 2: essentials (8) + storage (4)
  *  Row 3: devices (8) + platformdata (4)
- *  Row 4: controls (12)
+ *  Row 4: intelligence (12)
+ *  Row 5: controls (12)
  */
 export const ShinyCategories: ShinyCategory[] = [
     { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
@@ -71,12 +74,13 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'storage',       title: 'Data & Storage',              span: 4,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
     { id: 'devices',       title: 'Device & Sensors',            span: 8,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
     { id: 'platformdata',  title: 'Platform Data',               span: 4,  color: '#8B5CF6', tint: '#EDE9FE', tintDark: '#2E1F5E' },
+    { id: 'intelligence',  title: 'On-Device Intelligence',      span: 12, color: '#14B8A6', tint: '#CCFBF1', tintDark: '#0C3B36' },
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'controls-kiosk', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'aiconversation', 'docking', 'osk'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'controls-kiosk', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
-export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost'];
+export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlcipher', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost'];
 export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost'];
 
@@ -420,6 +424,23 @@ export const ShinyComponents: ShinyComponent[] = [
         "hideFromAppBuilder": true
     },
     {
+        "id": "camera-documents",
+        "nuget": "Shiny.Maui.Controls.Camera.Documents",
+        "description": "CameraView Document Analyzers (invoice, receipt, licence, passport, cards)",
+        "category": "controls",
+        "version": "1.0.1-beta-0175",
+        "hideFromAppBuilder": true
+    },
+    {
+        "id": "camera-ai",
+        "nuget": "Shiny.Maui.Controls.Camera.Ai",
+        "blazorNuget": "Shiny.Blazor.Controls.Camera.Ai",
+        "description": "CameraView AI Document Scanner & Photo Stylizer",
+        "category": "controls",
+        "version": "1.0.1-beta-0175",
+        "hideFromAppBuilder": true
+    },
+    {
         "id": "camera-ocr",
         "nuget": "Shiny.Maui.Controls.Camera.Ocr",
         "description": "CameraView OCR Analyzer",
@@ -667,7 +688,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "faceintelligence",
         "nuget": "Shiny.FaceIntelligence.Onnx",
         "description": "Face Recognition",
-        "category": "devices",
+        "category": "intelligence",
         "version": RECOGNITION_VERSION,
         "additionalNugets": [
             { "nuget": "Shiny.FaceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
@@ -678,7 +699,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "voiceintelligence",
         "nuget": "Shiny.VoiceIntelligence.Onnx",
         "description": "Voice / Speaker Recognition",
-        "category": "devices",
+        "category": "intelligence",
         "version": RECOGNITION_VERSION,
         "additionalNugets": [
             { "nuget": "Shiny.VoiceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
@@ -689,7 +710,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentintelligence",
         "nuget": "Shiny.DocumentIntelligence",
         "description": "Document Scanning & Extraction",
-        "category": "devices",
+        "category": "intelligence",
         "macOsSupported": true,
         "version": RECOGNITION_VERSION
     },
