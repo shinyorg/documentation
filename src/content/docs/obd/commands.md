@@ -40,6 +40,30 @@ All standard commands are available as singletons via `StandardCommands`:
 | `TimeRunWithMilOn` | 01 | 4D | `TimeSpan` | minutes |
 | `TimeSinceCodesCleared` | 01 | 4E | `TimeSpan` | minutes |
 | `CalibrationId` | 09 | 04 | `IReadOnlyList<string>` | — |
+| `CommandedAirFuelRatio` | 01 | 44 | `double` | lambda |
+| `CommandedEgr` | 01 | 2C | `double` | % |
+| `EgrError` | 01 | 2D | `double` | % |
+| `CommandedEvaporativePurge` | 01 | 2E | `double` | % |
+| `EvapVaporPressure` | 01 | 32 | `double` | Pa (signed) |
+| `AbsoluteEvapVaporPressure` | 01 | 53 | `double` | kPa |
+| `EvapVaporPressureWideRange` | 01 | 54 | `double` | Pa (signed) |
+| `DriverDemandTorque` | 01 | 61 | `int` | % |
+| `ActualEngineTorque` | 01 | 62 | `int` | % |
+| `ReferenceTorque` | 01 | 63 | `int` | N·m |
+| `EnginePercentTorqueData` | 01 | 64 | `EnginePercentTorqueData` | % |
+| `FuelPressure` | 01 | 0A | `int` | kPa |
+| `FuelRailPressure` | 01 | 22 | `double` | kPa |
+| `FuelRailGaugePressure` | 01 | 23 | `int` | kPa |
+| `FuelRailAbsolutePressure` | 01 | 59 | `int` | kPa |
+| `EthanolFuelPercent` | 01 | 52 | `double` | % |
+| `AbsoluteLoadValue` | 01 | 43 | `double` | % |
+| `WarmUpsSinceCodesCleared` | 01 | 30 | `int` | count |
+| `RelativeThrottlePosition` | 01 | 45 | `double` | % |
+| `FuelInjectionTiming` | 01 | 5D | `double` | ° |
+| `EngineRunTime` | 01 | 7F | `EngineRunTime` | — |
+| `ObdStandards` | 01 | 1C | `byte` | J1979 code |
+| `CalibrationVerificationNumber` | 09 | 06 | `IReadOnlyList<string>` | hex |
+| `EcuName` | 09 | 0A | `string` | — |
 
 :::caution[Two pairs that are easy to mix up]
 PIDs `4D` and `4E` are **minutes**; `RuntimeSinceStart` (`1F`) is **seconds**.
@@ -117,6 +141,28 @@ being driven from PID 0x11 has to discover that floor for itself first.
 
 `RelativeAcceleratorPedalPosition` (PID 0x5A) is the same signal with the ECU's learned rest
 position already subtracted, so a released pedal reads 0. Prefer it where it is supported.
+
+### Oxygen sensors
+
+`OxygenSensorVoltageCommand.Sensor(1..8)` for narrowband, `OxygenSensorLambdaCommand.WithVoltage(1..8)`
+or `.WithCurrent(1..8)` for wideband. **Read the layout first** — see
+[Oxygen Sensors](#oxygen-sensors) below.
+
+### Throttle sensors B and C
+
+`AbsoluteThrottlePositionCommand.B()` (PID 0x47) and `.C()` (0x48) are the redundant drive-by-wire
+position sensors. A disagreement between them is what sets the throttle-correlation codes and puts a
+car into limp mode.
+
+### Mode 06 monitors
+
+`new OnBoardTestCommand(mid)` and `new OnBoardTestSupportedMidsCommand(block)` — see
+[Mode 06](/client/obd/mode06).
+
+### In-use performance tracking
+
+`InUsePerformanceTrackingCommand.Spark()` (mode 09 PID 0x08) or `.Compression()` (0x0B), chosen by
+engine type. The wrong one returns NO DATA rather than mislabelled figures.
 
 ### Supported PIDs
 
@@ -237,6 +283,195 @@ The request carries a frame number and the response echoes it, which makes the m
 bytes rather than two. Vehicles almost always store only frame 0. `AsFreezeFrame` throws
 `ObdException` on a command that is not a mode 01 PID — a mode 09 identifier is not sampled at a
 moment, so it has no frame.
+
+## Oxygen Sensors
+
+Fuel trim reports the ECU's correction; the oxygen sensor reports the measurement causing it. The pair
+is what separates a real mixture problem from a failing sensor.
+
+:::danger[Read the layout before any sensor PID]
+A vehicle answers **either** PID `0x13` (two banks of four sensors) **or** PID `0x1D` (four banks of
+two), never both — and which one it answers changes what every sensor PID means.
+
+| PID `0x16` under… | is |
+|---|---|
+| `0x13` (two banks of four) | bank 1, sensor 3 |
+| `0x1D` (four banks of two) | bank 2, sensor 1 |
+
+Label a reading from the wrong layout and you send someone to replace the downstream sensor on the
+wrong bank. `layout.Position(index)` does the mapping so calling code never has to.
+:::
+
+```csharp
+var layout = await connection.Execute(OxygenSensorsPresentCommand.TwoBanks());   // or .FourBanks()
+
+foreach (var sensor in layout.Sensors)
+{
+    var reading = await connection.Execute(OxygenSensorVoltageCommand.Sensor(sensor.SensorIndex));
+    Console.WriteLine($"{sensor} — {reading.Volts:F3} V, trim {reading.ShortTermFuelTrim:F1}%");
+}
+```
+
+`OxygenSensorPosition.ToString()` renders the conventional `B1S2` shorthand a repair manual uses.
+
+### Narrowband and wideband are different measurements
+
+| Sensor | Command | PIDs | Reports |
+|--------|---------|------|---------|
+| Narrowband | `OxygenSensorVoltageCommand` | 0x14–0x1B | voltage + that sensor's short-term trim |
+| Wideband | `OxygenSensorLambdaCommand.WithVoltage` | 0x24–0x2B | lambda + voltage |
+| Wideband | `OxygenSensorLambdaCommand.WithCurrent` | 0x34–0x3B | lambda + pump current |
+
+Probe with `SupportedPidsCommand` — a vehicle answers one family, and **the voltages are not
+comparable between them**.
+
+```csharp
+var wide = await connection.Execute(OxygenSensorLambdaCommand.WithCurrent(1));
+Console.WriteLine($"Lambda {wide.Lambda:F3} ({wide.PetrolAirFuelRatio:F1}:1), {wide.Milliamps:F1} mA");
+
+var commanded = await connection.Execute(StandardCommands.CommandedAirFuelRatio);  // the target
+```
+
+Lambda is the reading that matters: 1.0 is stoichiometric, below is rich, above is lean, and unlike a
+narrowband voltage it stays meaningful across the whole range. `PetrolAirFuelRatio` multiplies by 14.7
+— correct for petrol only, so check `EthanolFuelPercent` on a flex-fuel vehicle, where E85 is
+stoichiometric near 9.8:1.
+
+### Interpreting a narrowband reading
+
+A healthy **upstream** sensor oscillates roughly 0.1–0.9 V several times a second once hot. A reading
+parked mid-range is the signature of a lazy or cold sensor, **not** a perfect mixture. A **downstream**
+sensor should sit fairly steady around 0.6–0.7 V; when it starts mirroring the upstream swing, the
+catalyst has stopped storing oxygen.
+
+One sample is worth very little. Read the shape over several seconds.
+
+`ShortTermFuelTrim` is **null** when the vehicle marks the sensor as not used in the trim calculation.
+That marker (`0xFF`) scales to +99.2%, which would otherwise land on a graph looking like a wildly
+rich correction.
+
+## EGR and EVAP
+
+The two most common causes of a check engine light.
+
+```csharp
+var commanded = await connection.Execute(StandardCommands.CommandedEgr);
+var error = await connection.Execute(StandardCommands.EgrError);
+```
+
+Read them together. Commanded alone says only what was asked for; the error says whether it happened.
+A P0401 with 0% commanded is a different fault from the same code with 40% commanded and a large
+negative error — the latter is the classic carbon-clogged passage, visible here long before the code
+sets.
+
+:::caution[Three PIDs share the name "evap system vapour pressure"]
+They are not interchangeable and must never be converted between.
+
+| PID | Command | Unit | Measured against |
+|-----|---------|------|------------------|
+| 0x32 | `EvapVaporPressure` | signed Pa, ±8 kPa, fine | atmosphere |
+| 0x54 | `EvapVaporPressureWideRange` | signed Pa, ±32 kPa, coarse | atmosphere |
+| 0x53 | `AbsoluteEvapVaporPressure` | unsigned kPa | vacuum — ~101 kPa is atmospheric |
+
+Probe with `SupportedPidsCommand` and use whichever the vehicle answers.
+:::
+
+Purge command plus tank pressure is what distinguishes a real leak from a valve that will not seal.
+P0455 and P0442 ("large" and "small" leak detected) are usually a loose or perished filler cap.
+
+## Torque and Power
+
+Mode 01 reports torque as a **percentage of a reference figure**, so neither PID means anything alone.
+`ReferenceTorque` is a constant for the engine — read it once and reuse it rather than paying for it
+on every sample of a live gauge.
+
+```csharp
+var reference = await connection.Execute(StandardCommands.ReferenceTorque);     // N·m, read once
+
+// then per sample
+var percent = await connection.Execute(StandardCommands.ActualEngineTorque);
+var rpm = await connection.Execute(StandardCommands.EngineRpm);
+
+var nm = EnginePower.TorqueNm(percent, reference);
+var kw = EnginePower.Kilowatts(percent, reference, rpm);
+var ps = EnginePower.MetricHorsepower(percent, reference, rpm);
+var hp = EnginePower.MechanicalHorsepower(percent, reference, rpm);
+```
+
+`MetricHorsepower` (PS, 735.5 W) and `MechanicalHorsepower` (hp, 745.7 W) are both offered rather than
+one being called "horsepower". They differ by about 1.4% — small enough to look like measurement
+noise, large enough to make two apps disagree about the same car.
+
+Negative torque is normal and means the engine is being driven rather than driving (overrun, engine
+braking). `DriverDemandTorque` against `ActualEngineTorque` is the gap between what the pedal asked for
+and what the engine delivered — a limp-mode or boost-leak signature no single reading shows.
+
+:::note
+This is the **engine's** output, at the flywheel and before the drivetrain. It is not a substitute for
+a chassis dyno and will read higher than one.
+:::
+
+`EnginePercentTorqueData` (PID 0x64) returns the engine's torque map at idle and four calibration
+points. Its chief use is as a fingerprint: the points are fixed by the calibration, so a set that
+differs from what the same vehicle reported before means the ECU has been reflashed.
+
+## ECU Identity
+
+`CalibrationId` (mode 09 PID 0x04) and `CalibrationVerificationNumber` (0x06) are a **pair**. The CVN
+is a checksum computed over the calibration itself, so a reflash that keeps the same calibration ID
+still changes it — together they are how an inspection determines whether a vehicle is running the
+software it should be.
+
+```csharp
+var ids = await connection.Execute(StandardCommands.CalibrationId);
+var cvns = await connection.Execute(StandardCommands.CalibrationVerificationNumber);
+var ecu = await connection.Execute(StandardCommands.EcuName);
+```
+
+CVNs are returned as uppercase hex strings, not numbers. They have no arithmetic meaning and leading
+zeroes are significant, so rendering one as an integer would both lose data and invite someone to sort
+or subtract it.
+
+## In-Use Performance Tracking
+
+Not whether a monitor passed, but whether it ever gets the chance to run — the question an in-use
+compliance programme audits.
+
+```csharp
+var ipt = await connection.Execute(InUsePerformanceTrackingCommand.Spark());   // or .Compression()
+
+Console.WriteLine($"{ipt.IgnitionCycles} ignition cycles");
+foreach (var monitor in ipt.Monitors)
+    Console.WriteLine($"{monitor.Monitor}: {monitor.Completions}/{monitor.Conditions} = {monitor.Ratio:P1}");
+```
+
+Pick by engine type — `MonitorStatus.Ignition` or `ObdStandards.IsHeavyDuty` tells you which. The wrong
+one returns NO DATA rather than mislabelled figures.
+
+A ratio persistently near zero on a car with no fault means the monitor's enabling conditions are never
+met by how that vehicle is driven, usually short trips. That is the real explanation behind a car that
+will not reach emissions readiness no matter how long it is driven, which `MonitorStatus` can only
+report as "still incomplete".
+
+`Ratio` is **null** when the denominator is zero. "Never had the opportunity" and "had the opportunity
+and never ran" are different findings, and only the second is a problem with the vehicle.
+
+## OBD Standards
+
+`ObdStandards` (PID 0x1C) returns a raw code; `ObdStandards.Describe` names it and answers `null` for
+reserved or unassigned values rather than "Unknown".
+
+```csharp
+var code = await connection.Execute(StandardCommands.ObdStandards);
+Console.WriteLine(ObdStandards.Describe(code));       // "EOBD (Europe)"
+
+if (ObdStandards.IsHeavyDuty(code))
+    // expect the compression-ignition monitor layout
+```
+
+Read once per vehicle. It tells you which regulatory world a car is from, and that changes what the
+rest of the data means — a EOBD vehicle answers a different PID set from a CARB OBD-II one, and a
+"not OBD compliant" answer explains a vehicle that connects but reports almost nothing.
 
 ## Creating Custom Commands
 

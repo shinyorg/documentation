@@ -1,0 +1,103 @@
+---
+title: Publishing
+description: Advertise your app as a discoverable service on the local network
+---
+
+Publishing advertises a service so other devices can find it. It does **not** open a socket — you
+are responsible for having a listener bound to the port you advertise.
+
+```csharp
+// your listener first
+var listener = new TcpListener(IPAddress.Any, 8080);
+listener.Start();
+
+// then advertise it
+await using var publication = await mdns.Publish("Allan's Laptop", "_myapp._tcp", 8080, ct);
+```
+
+## With TXT metadata
+
+```csharp
+var registration = new MdnsServiceRegistration("Allan's Laptop", "_myapp._tcp", 8080)
+{
+    TxtRecords = new Dictionary<string, string>
+    {
+        ["version"] = "2",
+        ["path"] = "/api",
+        ["deviceId"] = deviceId
+    }
+};
+
+await using var publication = await mdns.Publish(registration, ct);
+```
+
+Keep TXT records small. RFC 6763 recommends the whole record stay under 1300 bytes so it fits in a
+single packet, and a single `key=value` entry may not exceed 255 bytes — one that does throws
+`MdnsException`. A key containing `=` is also rejected.
+
+## Name conflicts and renaming
+
+If another device on the link already advertises your instance name, the responder resolves the
+conflict by appending a counter — `"Allan's Laptop"` becomes `"Allan's Laptop (2)"`. This is the
+same behaviour on all platforms.
+
+:::caution[Always read the name back]
+```csharp
+await using var publication = await mdns.Publish(registration, ct);
+
+// this may NOT be the name you asked for
+logger.LogInformation("advertising as {Name}", publication.InstanceName);
+```
+Never show the requested name in your UI — show `publication.InstanceName`.
+:::
+
+`IMdnsPublication` exposes `InstanceName`, `ServiceType`, `Domain`, and `Port`.
+
+## Lifetime
+
+The publication stays live until disposed. Disposing sends a **goodbye** packet — records with a
+zero TTL — so peers drop it immediately rather than waiting for the TTL to expire.
+
+```csharp
+var publication = await mdns.Publish(registration, ct);
+try
+{
+    await RunServer(ct);
+}
+finally
+{
+    await publication.DisposeAsync();   // sends the goodbye
+}
+```
+
+`await using` does the same thing:
+
+```csharp
+await using var publication = await mdns.Publish(registration, ct);
+```
+
+If the process is killed without disposing, peers will drop the service when the records expire
+instead — 120 seconds for the address and SRV records.
+
+## Instance name rules
+
+An instance name is a **single** DNS-SD label. Spaces, dots, and UTF8 are all fine:
+
+```csharp
+await mdns.Publish("Allan's 2.4Ghz Printer ⚡", "_myapp._tcp", 8080, ct);   // ✔
+```
+
+The only limit is that it must encode to 63 bytes or fewer in UTF8 — a name of 32 accented
+characters is 64 bytes and throws `MdnsException`.
+
+## Publishing multiple services
+
+Each call returns its own handle; dispose them independently.
+
+```csharp
+await using var api  = await mdns.Publish("My App API", "_myapp._tcp", 8080, ct);
+await using var sync = await mdns.Publish("My App Sync", "_myappsync._tcp", 8081, ct);
+```
+
+On Apple platforms, **every** type you publish must also be listed in `NSBonjourServices` — see
+[Platform Setup](/discovery/platform/).

@@ -2,9 +2,9 @@
 title: Custom Transports
 ---
 
-The `IObdTransport` interface abstracts the communication channel between your app and the OBD adapter. The library ships with BLE, but you can implement WiFi, USB, or any other transport.
+The `IObdTransport` interface abstracts the communication channel between your app and the OBD adapter. The library ships with [BLE](/client/obd/ble), [WiFi](/client/obd/wifi) and [serial (USB/UART)](/client/obd/serial) — between them they cover every adapter on the market, so reach for a custom transport only for a channel none of them handles: the Android USB Host API, a J2534 pass-thru box, or a replay harness over a recorded session.
 
-For transports that support discovery (BLE, WiFi), implement `IObdDeviceScanner` as well:
+For transports that support discovery, implement `IObdDeviceScanner` as well:
 
 ```csharp
 public interface IObdDeviceScanner
@@ -33,87 +33,43 @@ The `Send` method must:
 2. Read the response until the ELM327 `>` prompt character
 3. Return the response text **without** the `>` prompt
 
-## WiFi Transport Example
+## Reference implementations
 
-Many ELM327 adapters expose a TCP socket (typically `192.168.0.10:35000`):
+Rather than writing one from scratch, read the shipped transports — they solve the problems a first
+implementation usually misses:
 
-```csharp
-using System.Net.Sockets;
-using System.Text;
+| Transport | Package | Worth reading for |
+|-----------|---------|-------------------|
+| [WiFi](/client/obd/wifi) | `Shiny.Obd.Wifi` | The clearest of the three — a socket, a read pump, prompt framing |
+| [Serial](/client/obd/serial) | `Shiny.Obd.Serial` | Device enumeration and connect-time probing |
+| [BLE](/client/obd/ble) | `Shiny.Obd.Ble` | Chunked writes and notification reassembly |
 
-public class WifiObdTransport : IObdTransport
-{
-    readonly string host;
-    readonly int port;
-    TcpClient? client;
-    NetworkStream? stream;
+## Things a transport has to get right
 
-    public WifiObdTransport(string host = "192.168.0.10", int port = 35000)
-    {
-        this.host = host;
-        this.port = port;
-    }
+These are not theoretical — each one is a bug that shipped in an early transport here.
 
-    public bool IsConnected => this.client?.Connected ?? false;
+**Read continuously, don't read once per command.** An ELM327 does not answer in a single write. A
+multi-frame CAN reply arrives in several chunks, and the adapter emits unsolicited text of its own
+(the reset banner, `SEARCHING...`). Run a read pump that appends to a buffer and completes the
+pending exchange when it sees `>`.
 
-    public async Task Connect(CancellationToken ct = default)
-    {
-        this.client = new TcpClient();
-        await this.client.ConnectAsync(this.host, this.port, ct);
-        this.stream = this.client.GetStream();
-    }
+**Clear the pending exchange when a command ends, however it ends.** If a timed-out command's reply
+arrives later and is allowed to complete the *next* command's wait, every response after it is off by
+one and the session never recovers on its own. Clear it in a `finally`, before releasing the send
+lock.
 
-    public Task Disconnect()
-    {
-        this.stream?.Dispose();
-        this.client?.Dispose();
-        this.stream = null;
-        this.client = null;
-        return Task.CompletedTask;
-    }
+**Fail the waiter when the link dies.** If the channel drops mid-command, complete the pending
+exchange with an exception rather than letting the caller sit out the full command timeout for a
+reply that can never arrive.
 
-    public async Task<string> Send(string command, CancellationToken ct = default)
-    {
-        if (this.stream == null)
-            throw new ObdException("Not connected");
+**Serialise commands.** One exchange at a time, behind a `SemaphoreSlim`. Do not dispose that
+semaphore on teardown — a pending `Send` would get an `ObjectDisposedException` in the caller's face.
 
-        var bytes = Encoding.ASCII.GetBytes(command);
-        await this.stream.WriteAsync(bytes, ct);
+**Report a timeout as `ObdTimeoutException`, never `OperationCanceledException`.** A polling caller
+cannot otherwise tell one slow reply from its own shutdown, and will tear the loop down.
 
-        var buffer = new StringBuilder();
-        var readBuffer = new byte[1024];
-
-        while (true)
-        {
-            var count = await this.stream.ReadAsync(readBuffer, ct);
-            var text = Encoding.ASCII.GetString(readBuffer, 0, count);
-            buffer.Append(text);
-
-            if (text.Contains('>'))
-            {
-                return buffer.ToString().Replace(">", "").Trim();
-            }
-        }
-    }
-
-    public ValueTask DisposeAsync()
-    {
-        this.stream?.Dispose();
-        this.client?.Dispose();
-        return default;
-    }
-}
-```
-
-### Usage
-
-```csharp
-var transport = new WifiObdTransport("192.168.0.10", 35000);
-var connection = new ObdConnection(transport);
-await connection.Connect();
-
-var speed = await connection.Execute(StandardCommands.VehicleSpeed);
-```
+**Implement `IDisposable` as well as `IAsyncDisposable`.** A DI container checks the concrete type for
+`IDisposable` on its synchronous teardown path and throws if it finds none.
 
 ## Testing with a Fake Transport
 

@@ -356,12 +356,19 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'mobilev5-3',
-              content: 'Client v5.3.0: Calendar Store with AI integration!',
+              id: 'mobilev5-4',
+              content: 'Client v5.4.0: Improve Contact & Calendar LINQ Async Querying, mDNS Publish & Scanning + more!',
               variant: 'tip',
-              link: { text: 'Power up!', href: '/ble' },
+              link: { text: 'Show Me!', href: '/client' },
               dismissable: false
-            }
+            },
+            {
+              id: 'obd-10',
+              content: 'OBD v1.0.0: Initial Release - BLE, WIFI, & USB Support for most OBD Commands!',
+              variant: 'tip',
+              link: { text: 'Drive Me There', href: '/obd' },
+              dismissable: false
+            }            
           ]
         }),
         starlightDocSearch({

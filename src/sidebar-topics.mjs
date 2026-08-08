@@ -75,6 +75,17 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Network Discovery',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'discovery/' },
+          { label: 'Browsing & Resolving', link: 'discovery/browsing' },
+          { label: 'Publishing', link: 'discovery/publishing' },
+          { label: 'Platform Setup', link: 'discovery/platform' },
+          { label: 'Release Notes', link: 'discovery/release-notes' }
+        ]
+      },
+      {
         label: 'HTTP Transfers',
         jumpTo: true,
         items: [
@@ -209,9 +220,12 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'obd/' },
           { label: 'Commands', link: 'obd/commands' },
+          { label: 'Mode 06 Test Results', link: 'obd/mode06' },
           { label: 'VIN Decoding', link: 'obd/vin' },
           { label: 'Connection & Adapters', link: 'obd/connection' },
           { label: 'BLE Transport', link: 'obd/ble' },
+          { label: 'WiFi Transport', link: 'obd/wifi' },
+          { label: 'Serial Transport', link: 'obd/serial' },
           { label: 'Custom Transports', link: 'obd/transports' },
           { label: 'Release Notes', link: 'obd/release-notes' }
         ]

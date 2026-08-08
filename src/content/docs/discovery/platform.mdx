@@ -1,0 +1,100 @@
+---
+title: Platform Setup
+description: Info.plist, manifest, and firewall requirements, plus what backs mDNS on each platform
+---
+
+## What backs each platform
+
+| Platform | Backing | Consequence |
+|----------|---------|-------------|
+| iOS / Mac Catalyst / macOS | `NSNetService` (Bonjour) | Goes through the system `mDNSResponder` daemon — **no multicast entitlement required** |
+| Android | `NsdManager` | No `CHANGE_WIFI_MULTICAST_STATE` permission and no `WifiManager.MulticastLock` |
+| Windows | Managed responder, UDP 5353 | Dependency-free, coexists with the Windows DNS client |
+| Linux | Managed responder, UDP 5353 | Coexists with `avahi-daemon`; Avahi is not required |
+| macOS console / server .NET | Managed responder, UDP 5353 | Coexists with `mDNSResponder` |
+
+The managed responder implements RFC 6762/6763 directly: name compression, probing and
+conflict-driven renaming, announcements, goodbye packets, TTL expiry, and query answering across
+every multicast-capable interface. It rejoins the multicast group automatically when the network
+changes.
+
+## iOS, Mac Catalyst, and macOS
+
+### Info.plist (required)
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>This app discovers nearby devices on your local network.</string>
+<key>NSBonjourServices</key>
+<array>
+    <string>_myapp._tcp</string>
+    <string>_http._tcp</string>
+</array>
+```
+
+:::danger[Browsing silently fails without NSBonjourServices]
+Every service type you browse for **and** every type you publish must appear in the
+`NSBonjourServices` array. If a type is missing, the system returns no results and reports no
+error — you will just see an empty list.
+:::
+
+### The multicast entitlement
+
+You **do not** need `com.apple.developer.networking.multicast`.
+
+That entitlement — which requires a manual approval request to Apple — applies to apps that open
+raw multicast sockets. This library deliberately uses Bonjour (`NSNetService`) on Apple platforms
+instead, so the system daemon does the multicast and your app does not need special permission.
+
+### Local network permission
+
+iOS 14+ prompts the user the first time your app touches the local network, using your
+`NSLocalNetworkUsageDescription` string. There is no public API to query or pre-request this state,
+so `IMdnsManager` deliberately has no `CurrentAccess`/`RequestAccess` pair. If the user declines,
+browsing simply returns nothing.
+
+### Simulator
+
+Bonjour works in the iOS Simulator, but it sees the *host Mac's* network — including services the
+Mac itself publishes. Confirm behaviour on a real device.
+
+## Android
+
+No runtime permission is required. Declare these in `AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.INTERNET" />
+<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+```
+
+On API 34+ resolution uses `NsdManager.registerServiceInfoCallback`, which supports concurrent
+resolves. Below API 34 the deprecated `resolveService` is used and calls are serialised internally,
+because that API only tolerates one resolve at a time — a large scan resolves a little more slowly
+on older devices as a result.
+
+## Windows and Linux
+
+The managed responder binds UDP 5353 with `SO_REUSEADDR` (plus `SO_REUSEPORT` on Unix) so it
+coexists with whatever responder the OS already runs — `avahi-daemon`, `mDNSResponder`, or the
+Windows DNS client. Avahi does **not** need to be installed on Linux.
+
+Make sure your firewall allows inbound and outbound UDP 5353. On Windows, a first run typically
+raises the Windows Defender Firewall prompt.
+
+### Host names
+
+The managed responder advertises its SRV target as `<machine>-shiny.local` rather than
+`<machine>.local`. The plain host name is owned by the OS responder, and two responders claiming
+the same name with different address sets causes cache flapping on peers. The suffix keeps the two
+out of each other's way.
+
+## Troubleshooting
+
+| Symptom | Likely cause |
+|---------|--------------|
+| Empty results on iOS/macOS, no error | The service type is missing from `NSBonjourServices` |
+| Empty results on iOS, prompt was declined | Local network permission — the user must re-enable it in Settings › Privacy › Local Network |
+| Empty results on Windows | Firewall is blocking UDP 5353 |
+| Services found but never resolve | The publisher is answering PTR but not SRV/A — check `IsResolved` before connecting, and consider raising `ResolveTimeout` |
+| Nothing found across subnets | Expected — mDNS is link-local by design and does not cross routers |
+| `MdnsException` on startup | The service type is malformed; the message names the exact problem |

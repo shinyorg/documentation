@@ -104,9 +104,18 @@ var connection = new ObdConnection(transport);
 await connection.Connect(); // connects to known peripheral, initializes
 ```
 
-## MAUI Setup
+## Registration
 
-Register BLE and the scanner in your `MauiProgram.cs`:
+`AddShinyObdBluetoothLE()` works on **every platform Shiny.BluetoothLE supports** — iOS, Android,
+Mac Catalyst, macOS, Windows, Linux (BlueZ) and Blazor WebAssembly (Web Bluetooth).
+
+It registers `BleObdConfiguration`, `IObdDeviceScanner`, `IObdTransport` and `IObdConnection` as
+singletons — an OBD adapter is a single physical resource, and a scoped registration would leave two
+consumers fighting over one link. Everything uses `TryAdd`.
+
+### iOS and Android
+
+The BLE manager is registered for you:
 
 ```csharp
 using Shiny;
@@ -114,17 +123,50 @@ using Shiny;
 var builder = MauiApp.CreateBuilder();
 builder.UseMauiApp<App>();
 
-builder.Services.AddBluetoothLE();
 builder.Services.AddShinyObdBluetoothLE(new BleObdConfiguration
 {
     DeviceNameFilter = "OBD"
 });
 ```
 
-`AddShinyObdBluetoothLE` registers `BleObdConfiguration` and `IObdDeviceScanner` (`BleObdDeviceScanner`).
+### Linux, Blazor WebAssembly, Windows and Apple desktop
 
-:::note
-In Shiny.BluetoothLE v4, use `services.AddBluetoothLE()` (namespace `Shiny`). There is no `UseShiny()` or `AddBle()` call needed.
+Add your platform package's `AddBluetoothLE()` call as well. **Order does not matter** — DI resolves
+lazily, so either call may come first.
+
+```csharp
+// Linux (Shiny.BluetoothLE.Linux) — BlueZ over D-Bus
+services.AddBluetoothLE();
+services.AddShinyObdBluetoothLE(new BleObdConfiguration { DeviceNameFilter = "OBDCheck" });
+```
+
+```csharp
+// Blazor WebAssembly (Shiny.BluetoothLE.Blazor) — Web Bluetooth
+builder.Services.AddBluetoothLE();
+builder.Services.AddShinyObdBluetoothLE();
+```
+
+:::note[Why you have to make that second call]
+`Shiny.BluetoothLE.Linux` and `Shiny.BluetoothLE.Blazor` both ship a `net10.0` assembly declaring
+`Shiny.AddBluetoothLE(IServiceCollection)`. A package referencing both would make **every** call to it
+ambiguous (CS0121), so `Shiny.Obd.Ble` references neither — only your app knows which platform it is
+running on.
+
+Forget the call and resolving `IObdTransport` throws an `ObdException` naming the exact package to
+install, rather than a bare "unable to resolve service for type IBleManager".
+:::
+
+:::caution[Blazor WebAssembly]
+Web Bluetooth needs a **user gesture** (a click) to start scanning, is **Chrome/Edge only**, and
+requires **HTTPS**. Shiny's Blazor implementation uses `navigator.bluetooth.requestLEScan`, which
+additionally needs `chrome://flags/#enable-experimental-web-platform-features` enabled. Drive
+`IObdDeviceScanner.Scan` from a button handler, never from `OnInitializedAsync`.
+:::
+
+:::caution[Don't register two transports for a fallback]
+Because registration uses `TryAdd`, calling both `AddShinyObdBluetoothLE()` and `AddShinyObdSerial()`
+leaves whichever ran first in place and silently ignores the second. If you want to try serial and
+fall back to BLE, construct the transports yourself and attempt them in order.
 :::
 
 ## Full Example

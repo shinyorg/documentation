@@ -1,0 +1,145 @@
+---
+title: Browsing & Resolving
+description: Discover services on the local network and resolve them to endpoints and TXT metadata
+---
+
+## Two ways to browse
+
+### One-shot scan
+
+`BrowseOnce` collects for a fixed window and returns everything still present when it closes.
+
+```csharp
+var services = await mdns.BrowseOnce("_http._tcp", TimeSpan.FromSeconds(5), ct);
+```
+
+Use it for a "scan" button, a picker dialog, or anywhere a snapshot is enough. The default window
+is 5 seconds.
+
+### Live stream
+
+`Browse` returns an `IAsyncEnumerable<MdnsBrowseResult>` that **never completes on its own**. It
+runs until the token is cancelled, emitting changes as they happen.
+
+```csharp
+await foreach (var result in mdns.Browse("_http._tcp", ct))
+{
+    switch (result.Status)
+    {
+        case MdnsBrowseStatus.Found:
+            this.services[result.Service.FullName] = result.Service;
+            break;
+
+        case MdnsBrowseStatus.Lost:
+            this.services.Remove(result.Service.FullName);
+            break;
+    }
+}
+```
+
+:::tip[Key on FullName, and treat Found as an upsert]
+`FullName` (`"Kitchen Printer._ipp._tcp.local"`) is the stable identity. A service that re-announces
+itself — after the publisher restarts, or when its records refresh — is emitted as `Found` **again**,
+so always upsert rather than add.
+
+On a `Lost` result only `InstanceName`, `ServiceType`, and `Domain` are guaranteed to be populated.
+:::
+
+## Browse options
+
+```csharp
+var config = new MdnsBrowseConfig("_http._tcp")
+{
+    Domain = "local",                            // mDNS only supports "local"
+    ResolveServices = true,                      // resolve before emitting (default)
+    ResolveTimeout = TimeSpan.FromSeconds(5)     // per instance
+};
+
+await foreach (var result in mdns.Browse(config, ct)) { /* ... */ }
+```
+
+| Option | Default | Notes |
+|--------|---------|-------|
+| `ResolveServices` | `true` | When `false`, instances are emitted immediately with just a name — no host, port, addresses, or TXT records. Fastest way to enumerate what exists. |
+| `ResolveTimeout` | 5s | How long to wait for one instance's SRV/TXT/A records. When it elapses the instance is **still emitted** as `Found`, just unresolved. |
+
+Because an instance can be emitted unresolved, always check before connecting:
+
+```csharp
+if (result.Service.IsResolved)
+    await socket.ConnectAsync(result.Service.GetEndPoint()!);
+```
+
+`IsResolved` is simply `Port > 0 && Addresses.Count > 0`.
+
+## The MdnsService model
+
+| Member | Notes |
+|--------|-------|
+| `InstanceName` | Human readable and unescaped — may contain spaces, dots, and UTF8 |
+| `ServiceType` | eg `_http._tcp` |
+| `Domain` | Almost always `local` |
+| `HostName` | The SRV target, eg `printer.local`. Null when unresolved |
+| `Port` | 0 when unresolved |
+| `Addresses` | `IReadOnlyList<IPAddress>` — commonly both IPv4 and IPv6 |
+| `TxtRecords` | Case-insensitive key/value map |
+| `FullName` | `"Instance._type._tcp.local"` |
+| `IsResolved` | Has a connectable endpoint |
+| `GetEndPoint(family?)` | First matching `IPEndPoint`, or null |
+
+### Picking an address family
+
+A service usually resolves to several addresses. `GetEndPoint()` takes the first of any family;
+pass a family to be specific:
+
+```csharp
+var v4 = service.GetEndPoint(AddressFamily.InterNetwork);
+var v6 = service.GetEndPoint(AddressFamily.InterNetworkV6);
+```
+
+### TXT records
+
+TXT records carry small key/value metadata — a path, a version, a device id. Keys are compared
+case-insensitively (RFC 6763).
+
+```csharp
+string? path = service.GetTxt("path");                 // null when absent
+int version  = service.GetTxt<int>("version", 1);      // falls back to 1
+bool secure  = service.GetTxt<bool>("secure");         // any IParsable<T>
+```
+
+`GetTxt<T>` returns the fallback when the key is missing **or** the value cannot be parsed.
+
+## Resolving a known instance
+
+If you already know the instance name — you cached it from a previous scan, for example — skip
+browsing:
+
+```csharp
+var service = await mdns.Resolve("Kitchen Printer", "_ipp._tcp", TimeSpan.FromSeconds(5), ct);
+if (service == null)
+    logger.LogWarning("the printer did not answer");
+```
+
+Returns `null` when nothing answers within the timeout.
+
+## Service type rules
+
+Service types follow RFC 6763 §7 — `_<application>._tcp` or `_<application>._udp`:
+
+- The application label is **1–15 characters**, letters/digits/hyphens only, must contain at least
+  one letter, and may not start or end with a hyphen.
+- A trailing `.local` or `.` is optional on input and is stripped.
+- Anything invalid throws `MdnsException` explaining exactly what is wrong.
+
+```csharp
+mdns.Browse("_http._tcp");         // ✔
+mdns.Browse("_http._tcp.local.");  // ✔ same thing
+mdns.Browse("_http._sctp");        // ✘ MdnsException - transport must be _tcp or _udp
+mdns.Browse("http._tcp");          // ✘ MdnsException - missing leading underscore
+```
+
+:::note[Subtypes are not supported]
+Service subtypes (`_printer._sub._http._tcp`) are rejected. They are unevenly supported across the
+platform APIs this library sits on, so v1 does not pretend otherwise.
+:::

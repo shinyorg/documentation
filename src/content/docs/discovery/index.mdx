@@ -1,0 +1,118 @@
+---
+title: Network Discovery | Getting Started
+description: Cross-platform mDNS/DNS-SD (Bonjour/Zeroconf) service browsing, resolution, and publishing for .NET
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Find services on the local network and advertise your own, using mDNS/DNS-SD — the protocol behind
+Bonjour and Zeroconf. Discover printers, casting targets, IoT devices, and other instances of your
+own app, then resolve them to a host, port, IP addresses, and TXT metadata. Built on `Shiny.Core`,
+so it runs in any Shiny host — MAUI, console, service, or server.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Net.Discovery" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["android", "ios", "windows", "linux", "macos"]} />
+
+## Features
+
+- **Browse** — a live `IAsyncEnumerable<MdnsBrowseResult>` stream of services appearing and disappearing, or a one-shot `BrowseOnce` scan.
+- **Resolve** — turn an instance name into a host name, port, IPv4/IPv6 addresses, and TXT records.
+- **Publish** — advertise your own service with TXT metadata, including conflict-driven renaming.
+- **No iOS multicast entitlement** — Apple platforms go through Bonjour (`NSNetService`), not raw multicast sockets.
+- **No Android multicast lock** — Android goes through `NsdManager`.
+- **Dependency-free managed responder** for Windows, Linux, macOS console, and server .NET.
+- **AOT & trimmer compatible**.
+
+<AiSkill skillName="shiny-discovery" />
+
+## Setup
+
+Install the package:
+
+```bash
+dotnet add package Shiny.Net.Discovery
+```
+
+Register the manager:
+
+```csharp
+using Shiny;
+
+builder.Services.AddMdns();
+```
+
+Then inject `IMdnsManager` wherever you need it.
+
+:::caution[Apple platforms need Info.plist entries]
+Browsing silently returns nothing unless every service type you use is listed in
+`NSBonjourServices`. See [Platform Setup](/discovery/platform/).
+:::
+
+## Find services on the network
+
+```csharp
+public class PrinterFinder(IMdnsManager mdns)
+{
+    public async Task<IReadOnlyList<MdnsService>> FindPrinters(CancellationToken ct)
+        => await mdns.BrowseOnce("_ipp._tcp", TimeSpan.FromSeconds(5), ct);
+}
+```
+
+`BrowseOnce` collects for a fixed window and returns everything still present when it closes — ideal
+for a "scan" button. For a list that updates as devices come and go, use the streaming API:
+
+```csharp
+await foreach (var result in mdns.Browse("_ipp._tcp", ct))
+{
+    if (result.Status == MdnsBrowseStatus.Found)
+        this.printers[result.Service.FullName] = result.Service;
+    else
+        this.printers.Remove(result.Service.FullName);
+}
+```
+
+`Browse` never completes on its own — it runs until the `CancellationToken` is cancelled.
+
+## Use what you found
+
+```csharp
+var service = found.First();
+
+Console.WriteLine(service.InstanceName);          // "Kitchen Printer"
+Console.WriteLine(service.HostName);              // "kitchen-printer.local"
+Console.WriteLine(service.Port);                  // 631
+Console.WriteLine(service.GetTxt("rp"));          // TXT record lookup
+
+if (service.IsResolved)
+    await socket.ConnectAsync(service.GetEndPoint()!);
+```
+
+## Advertise your own service
+
+```csharp
+await using var publication = await mdns.Publish(
+    new MdnsServiceRegistration("Allan's Laptop", "_myapp._tcp", 8080)
+    {
+        TxtRecords = new Dictionary<string, string> { ["version"] = "2" }
+    },
+    ct
+);
+
+// the responder renames on conflict, so read the live name back
+logger.LogInformation("advertising as {Name}", publication.InstanceName);
+```
+
+Publishing only *advertises* the port — you are still responsible for having a listener bound to it.
+Disposing the publication sends a goodbye packet and stops advertising.
+
+## Next steps
+
+- [Browsing & Resolving](/discovery/browsing/) — streaming vs one-shot, TXT records, resolve timeouts
+- [Publishing](/discovery/publishing/) — TXT metadata, conflict renaming, lifetime
+- [Platform Setup](/discovery/platform/) — Info.plist, manifest, firewall, and what backs each platform
