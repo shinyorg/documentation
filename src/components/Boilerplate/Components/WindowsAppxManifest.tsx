@@ -36,6 +36,18 @@ const WindowsAppxManifest = (props: Props) => {
   if (has('httptransfers')) {
     capabilities.push('      <Capability Name="internetClientServer" />');
   }
+  // The managed mDNS responder sends & receives on the local link (UDP 5353)
+  if (has('discovery')) {
+    capabilities.push('      <Capability Name="privateNetworkClientServer" />');
+    notes.push(
+      <p key="discovery">
+        <strong>Shiny.Net.Discovery on Windows uses a managed mDNS responder on UDP 5353.</strong>{' '}
+        A packaged app needs the <code>privateNetworkClientServer</code> capability, and the first
+        run typically raises the Windows Defender Firewall prompt — allow it on private networks or
+        discovery silently returns nothing.
+      </p>
+    );
+  }
 
   if (has('push')) {
     notes.push(

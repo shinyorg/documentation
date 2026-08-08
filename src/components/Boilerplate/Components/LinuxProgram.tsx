@@ -45,6 +45,12 @@ public static class MauiProgram
     src += `
         builder.Services.AddNotifications();`;
   }
+  if (has('discovery')) {
+    src += `
+        // Managed mDNS responder on UDP 5353 - coexists with avahi-daemon, which is not required.
+        // Make sure your firewall allows inbound & outbound UDP 5353.
+        builder.Services.AddMdns();`;
+  }
   if (has('mediator')) {
     src += `
         builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;

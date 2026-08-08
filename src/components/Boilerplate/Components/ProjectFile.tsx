@@ -83,6 +83,20 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasDiscovery = nugets.find(x => x.nuget === "Shiny.Net.Discovery") !== undefined;
+    if (isMaui && hasDiscovery) {
+        pr += "\r\n<!--\r\n";
+        pr += "\t// mDNS on Apple goes through Bonjour (NSNetService), NOT raw multicast sockets, so you do NOT\r\n";
+        pr += "\t// need com.apple.developer.networking.multicast (the entitlement Apple must manually approve).\r\n";
+        pr += "\t// Mac Catalyst runs under the App Sandbox though - without these two, browsing/publishing is blocked.\r\n";
+        pr += "-->\r\n";
+        pr += "<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.security.network.client\" Type=\"Boolean\" Value=\"true\" />\r\n";
+        pr += "\t<!-- Only needed if you publish (advertise) a service -->\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.security.network.server\" Type=\"Boolean\" Value=\"true\" />\r\n";
+        pr += "</ItemGroup>\r\n";
+    }
+
     if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {

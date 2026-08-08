@@ -227,6 +227,7 @@ export const sidebarTopics = [
           { label: 'WiFi Transport', link: 'obd/wifi' },
           { label: 'Serial Transport', link: 'obd/serial' },
           { label: 'Custom Transports', link: 'obd/transports' },
+          { label: 'Adapter Emulator', link: 'obd/emulator', badge: { text: 'New', variant: 'success' } },
           { label: 'Release Notes', link: 'obd/release-notes' }
         ]
       },

@@ -3,7 +3,7 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-export const DEFAULT_VERSION: string = "5.4.0-beta-0078";
+export const DEFAULT_VERSION: string = "5.4.0";
 /** Recognition IQ (shinyorg/recogintelligence) — Face / Voice / Document Intelligence ship together. */
 export const RECOGNITION_VERSION: string = "1.0.0-beta-0006";
 
@@ -75,7 +75,7 @@ export const ShinyCategories: ShinyCategory[] = [
 ];
 
 export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'controls-kiosk', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'aiconversation', 'docking', 'osk'];
-export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
+export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost'];
 export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost'];
@@ -144,11 +144,11 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
         "category": "devices",
-        "version": "1.0.0-beta-0018",
+        "version": "1.0.0",
         "additionalNugets": [
-            { "nuget": "Shiny.Obd", "version": "1.0.0-beta-0018" },
-            { "nuget": "Shiny.Obd.Wifi", "version": "1.0.0-beta-0018" },
-            { "nuget": "Shiny.Obd.Serial", "version": "1.0.0-beta-0018" }
+            { "nuget": "Shiny.Obd", "version": "1.0.0" },
+            { "nuget": "Shiny.Obd.Wifi", "version": "1.0.0" },
+            { "nuget": "Shiny.Obd.Serial", "version": "1.0.0" }
         ]
     },
     {
@@ -180,6 +180,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "HTTP file uploads and downloads",
         "category": "essentials",
         "foregroundService": true,
+        "version": DEFAULT_VERSION
+    },
+    {
+        "id": "discovery",
+        "nuget": "Shiny.Net.Discovery",
+        "linuxNuget": "Shiny.Net.Discovery",
+        "macOsSupported": true,
+        "description": "Network Discovery (mDNS/Bonjour)",
+        "category": "essentials",
         "version": DEFAULT_VERSION
     },
     {
@@ -629,7 +638,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Contacts",
         "description": "Contact Store",
         "category": "platformdata",
-        "version": "5.4.0-beta-0078"
+        "version": "5.4.0"
     },
     {
         "id": "calendarstore",
@@ -637,7 +646,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Calendar Store",
         "category": "platformdata",
         "macOsSupported": true,
-        "version": "5.4.0-beta-0078"
+        "version": "5.4.0"
     },
     {
         "id": "calendarstore-ai",
@@ -645,7 +654,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Calendar Store - AI Tools",
         "category": "platformdata",
         "macOsSupported": true,
-        "version": "5.4.0-beta-0078"
+        "version": "5.4.0"
     },
     {
         "id": "aiconversation",
@@ -718,7 +727,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Data.Sync.Blazor",
         "description": "Data Sync",
         "category": "essentials",
-        "version": "5.4.0-beta-0078"
+        "version": "5.4.0"
     },
     {
         "id": "mauihost",
@@ -763,7 +772,7 @@ export const Data = {
     },
 
     usesWindows(compos: ShinyComponent[]): boolean {
-        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'push', 'speech', 'speechazure', 'speechelevenlabs', 'speechtypecast', 'aiconversation', 'calendarstore', 'calendarstore-ai'];
+        const windowsIds = ['ble', 'blehosting', 'obd', 'gps', 'geofencing', 'httptransfers', 'notifications', 'discovery', 'push', 'speech', 'speechazure', 'speechelevenlabs', 'speechtypecast', 'aiconversation', 'calendarstore', 'calendarstore-ai'];
         return compos.some(x => windowsIds.includes(x.id));
     },
 
@@ -781,7 +790,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'discovery', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence'];
         return compos.some(x => ids.includes(x.id));
     }
 };

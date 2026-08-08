@@ -87,6 +87,19 @@ const AppleInfoPlist = (props: Props) => {
   if (has('blehosting') || has('ble') || has('obd')) {
     addKey('NSBluetoothPeripheralUsageDescription');
   }
+  if (has('discovery')) {
+    // Browsing silently returns NOTHING if the service type is missing from NSBonjourServices - there
+    // is no error.  List every type you browse for AND every type you publish.
+    addKey('NSLocalNetworkUsageDescription');
+    src += `
+        <key>NSBonjourServices</key>
+        <array>
+            <!-- Replace these with every service type your app browses for or publishes -->
+            <string>_myapp._tcp</string>
+            <string>_http._tcp</string>
+        </array>
+        `;
+  }
   if (has('speech') || has('aiconversation')) {
     addKey('NSSpeechRecognitionUsageDescription');
     addKey('NSMicrophoneUsageDescription');

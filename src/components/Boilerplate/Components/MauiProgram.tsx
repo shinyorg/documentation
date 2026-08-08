@@ -96,6 +96,13 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddNotifications();`;
   }
+  if (has('discovery')) {
+    src += `
+      // Registers IMdnsManager - browse, resolve & publish mDNS/DNS-SD (Bonjour) services.
+      // Apple platforms go through NSNetService, so every service type you browse or publish
+      // MUST be listed in NSBonjourServices (see the Info.plist tab).
+      builder.Services.AddMdns();`;
+  }
   if (has('push')) {
     src += `
       builder.Services.AddPush<ShinyApp.Delegates.MyPushDelegate>();`;

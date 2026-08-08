@@ -166,6 +166,12 @@ const AndroidManifest = (props: Props) => {
         </activity-alias>`;
   }
 
+  if (has('discovery')) {
+    src += `
+      <!-- mDNS/DNS-SD runs through NsdManager, so INTERNET & ACCESS_NETWORK_STATE (declared above) are all
+           that is required.  No CHANGE_WIFI_MULTICAST_STATE and no WifiManager.MulticastLock needed. -->`;
+  }
+
   if (has('speech') || has('aiconversation')) {
     src += addP('RECORD_AUDIO');
     src += addP('MODIFY_AUDIO_SETTINGS');
