@@ -1,0 +1,187 @@
+---
+title: ChatView | The Composer
+description: ChatEntryView / ChatEntry — the rounded, auto-growing multiline message composer
+---
+
+The message composer is its own public control — `ChatEntryView` on MAUI, `ChatEntry` on Blazor —
+laid out as a single rounded card in the AI-chat idiom. The formatting toolbar runs along the top,
+the auto-growing **multiline** entry spans the full width beneath it, and every other control sits
+on a row below that, so buttons never compete with the text for horizontal space:
+
+```
+┌────────────────────────────────────────────┐
+│  B  I  U  S  </>  🔗                       │   ← formatting (only if permitted)
+│  How can I help you today?                 │
+│  +  [Chat]                Opus 5  🎤   ↑   │   ← LeftToolbar … RightToolbar + send
+└────────────────────────────────────────────┘
+```
+
+`ChatView` builds and hosts one automatically. **For the common case you write nothing**:
+
+```xml
+<shiny:ChatView Provider="{Binding Provider}" SessionId="{Binding SessionId}" />
+```
+
+## It does not know about your provider
+
+The composer has **no reference to `IChatSessionProvider` or `IChatSession`**. `ChatView` remains the
+only thing that talks to the session: it pushes state into the composer
+(`SetBodyPermissions`, `ShowAttachButton`, `SetInputEnabled`) and subscribes to the events coming
+back out. Nothing about your provider implementation changes.
+
+That separation is the point — it means the composer also works on its own, with no chat session
+anywhere in sight:
+
+```xml
+<shiny:ChatEntryView x:Name="Prompt"
+                     PlaceholderText="Ask anything…"
+                     SendButtonText="↑"
+                     MaxLines="8"
+                     SendRequested="OnPromptSubmitted" />
+```
+
+```csharp
+async void OnPromptSubmitted(object? sender, string text)
+{
+    this.Prompt.ClearText();
+    await this.chatClient.GetResponseAsync(text);
+}
+```
+
+## Replacing the one ChatView hosts
+
+Assign your own instance to reshape it. `ChatView` re-wires the events and replays the session state
+onto the replacement; anything you set on your composer wins over the `ChatView` pass-through
+defaults.
+
+```xml
+<shiny:ChatView Provider="{Binding Provider}" SessionId="{Binding SessionId}">
+    <shiny:ChatView.InputBar>
+        <shiny:ChatEntryView PlaceholderText="How can I help you today?"
+                             SendButtonText="↑"
+                             MaxLines="5"
+                             CornerRadius="24" />
+    </shiny:ChatView.InputBar>
+</shiny:ChatView>
+```
+
+`InputBar` also **reads back** whichever composer is in use, so a one-off tweak needs no instance at
+all:
+
+```csharp
+this.chatView.InputBar.MaxLines = 3;
+```
+
+On Blazor the equivalent hook is `InputTemplate`:
+
+```razor
+<ChatView Provider="Provider" SessionId="@SessionId">
+    <InputTemplate>
+        <ChatEntry @bind-Text="prompt"
+                   Placeholder="Ask anything…"
+                   MaxRows="8"
+                   OnSend="OnPromptSubmitted" />
+    </InputTemplate>
+</ChatView>
+```
+
+## Toolbar slots
+
+`LeftToolbar` and `RightToolbar` are the two slots on the control row. The left slot follows the
+built-in attach / overflow buttons; the right slot sits immediately before send. Put a mode picker
+or a model label there and the composer reads like any modern AI prompt box.
+
+```xml
+<shiny:ChatEntryView PlaceholderText="How can I help you today?" SendButtonText="↑">
+    <shiny:ChatEntryView.LeftToolbar>
+        <Border StrokeThickness="0" StrokeShape="RoundRectangle 14" Padding="10,4">
+            <Label Text="Chat" FontSize="13" />
+        </Border>
+    </shiny:ChatEntryView.LeftToolbar>
+    <shiny:ChatEntryView.RightToolbar>
+        <Label Text="Opus 5" FontSize="13" FontAttributes="Bold" VerticalOptions="Center" />
+        <Label Text="🎤" FontSize="16" VerticalOptions="Center" />
+    </shiny:ChatEntryView.RightToolbar>
+</shiny:ChatEntryView>
+```
+
+On Blazor they are `RenderFragment`s, and `ChatView` surfaces both directly — reach for these before
+`InputTemplate`, which replaces the whole composer:
+
+```razor
+<ChatView Provider="Provider" SessionId="@SessionId">
+    <InputRightToolbar>
+        <span style="font-size:13px;font-weight:600;">Opus 5</span>
+        <span style="font-size:16px;" title="Dictate">🎤</span>
+    </InputRightToolbar>
+</ChatView>
+```
+
+The formatting buttons get their own row **above the entry** rather than sharing the control row —
+six of them plus attach, overflow and whatever you add does not fit beside send on a phone, and
+keeping them at the top of the card means they hold still as the entry grows instead of sliding down
+the screen line by line. The left group of the control row scrolls sideways if it still overflows, so
+send is never pushed off the edge.
+
+## The Enter key
+
+MAUI uses a multiline `Editor`, so **Enter inserts a newline** and sending is the send button's job —
+the convention every AI composer follows. Blazor sends on **Enter** and inserts a newline on
+**Shift+Enter**; set `SendOnEnter="false"` to match MAUI's behaviour.
+
+## Shape and colour
+
+There is **no hairline rule** between the message list and the composer — the rounded outline is the
+edge. `InputBarBorderColor` on `ChatView` (and `BorderColor` on the composer) colours that outline.
+
+| `ChatEntryView` property | Type | Default | Notes |
+|---|---|---|---|
+| `Text` | `string` | `""` | Two-way by default |
+| `PlaceholderText` | `string` | `"Type a message..."` | |
+| `MaxLines` | `int` | `6` | Grows to this many lines, then scrolls internally |
+| `FontSize` | `double` | `15` | `MaxLines` is recomputed from the font metrics |
+| `FontFamily` | `string?` | `null` | |
+| `SendButtonText` | `string` | `"Send"` | |
+| `SendButtonBackgroundColor` | `Color?` | theme | |
+| `SendButtonTextColor` | `Color?` | theme | |
+| `BarBackgroundColor` | `Color?` | theme | The area behind the composer |
+| `ComposerBackgroundColor` | `Color?` | theme | The fill inside the rounded outline |
+| `BorderColor` | `Color?` | theme | The rounded outline |
+| `BorderThickness` | `double` | `1` | |
+| `CornerRadius` | `double` | `24` | Half the collapsed height gives a pill |
+| `ShowAttachButton` | `bool` | `false` | `ChatView` drives this from `CanSendImages` |
+| `ShowActionsButton` | `bool` | `false` | `ChatView` drives this from `InputActions` |
+| `LeftToolbar` | `IList<IView>` | `[]` | Views on the left of the control row, after the built-in buttons |
+| `RightToolbar` | `IList<IView>` | `[]` | Views on the right of the control row, before send |
+
+**Events:** `SendRequested` (`EventHandler<string>`), `AttachRequested`, `ActionsRequested`,
+`LinkRequested`, `EditCancelled`, `TextChanged`.
+
+**Methods:** `Submit()`, `ClearText()`, `FocusInput()`, `SetInputEnabled(bool)`,
+`EnterEditMode(string)` / `ExitEditMode()`, `SetBodyPermissions(MessageBodyPermissions)`,
+`ApplyWrap(prefix, suffix, placeholder)`, `InsertLink(displayText, url)`.
+
+## Blazor parameters
+
+| `ChatEntry` parameter | Type | Default |
+|---|---|---|
+| `Text` / `TextChanged` | `string?` | `null` — use `@bind-Text` |
+| `Placeholder` | `string` | `"Type a message..."` |
+| `SendButtonText` | `string` | `"Send"` |
+| `IsEnabled` | `bool` | `true` |
+| `ShowAttach` | `bool` | `false` |
+| `BodyPermissions` | `MessageBodyPermissions` | `None` |
+| `MaxRows` | `int` | `6` |
+| `SendOnEnter` | `bool` | `true` |
+| `LeftToolbar` / `RightToolbar` | `RenderFragment?` | `null` |
+| `OnSend` | `EventCallback<string>` | |
+| `OnAttach` | `EventCallback<InputFileChangeEventArgs>` | |
+| `OnTyping` | `EventCallback` | |
+
+`ChatEntry` also exposes `SubmitAsync()` and `FocusAsync()`.
+
+## Next Steps
+
+- **[Markdown & Input Bar](./markdown-input)** — the composition toolbar and the markdown subset
+- **[Custom Actions](./custom-actions)** — add input-bar actions like speech-to-text
+- **[Images & Attachments](./images-attachments)** — the attach affordance

@@ -414,6 +414,7 @@ export const sidebarTopics = [
           { label: 'Messages & Paging', link: 'controls/chatview/messages-paging' },
           { label: 'Permissions', link: 'controls/chatview/permissions' },
           { label: 'Reactions & Read Receipts', link: 'controls/chatview/reactions-receipts' },
+          { label: 'The Composer', link: 'controls/chatview/composer' },
           { label: 'Markdown & Input Bar', link: 'controls/chatview/markdown-input' },
           { label: 'Images & Attachments', link: 'controls/chatview/images-attachments' },
           { label: 'Typing & Connection', link: 'controls/chatview/typing-connection' },
@@ -477,6 +478,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'controls/imageeditor/' },
+          { label: 'Zoom & Pan', link: 'controls/imageeditor/zoom', badge: { text: 'New', variant: 'success' } },
           { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
           { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
         ]
@@ -492,7 +494,14 @@ export const sidebarTopics = [
           { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', jumpTo: true },
           { label: 'CountryPicker', link: 'controls/countrypicker/', jumpTo: true },
           { label: 'AddressEntry', link: 'controls/addressentry/', jumpTo: true },
-          { label: 'TextEntry', link: 'controls/textentry/', jumpTo: true },
+          {
+            label: 'TextEntry',
+            jumpTo: true,
+            items: [
+              { label: 'Getting Started', link: 'controls/textentry/' },
+              { label: 'Keyboard Accessory', link: 'controls/textentry/keyboard-accessory', badge: { text: 'New', variant: 'success' } },
+            ]
+          },
         ]
       },
       {

@@ -1,0 +1,141 @@
+---
+title: Keyboard Accessory
+description: A bar docked to the top edge of the soft keyboard while a TextEntry has focus - Done, prev/next field navigation, or your own content. iOS and Android.
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+A bar docked to the **top edge of the soft keyboard** while a `TextEntry` has focus. It belongs to the
+keyboard, not to the entry: it appears when the keyboard comes up, moves with it, and goes away with it.
+Nothing is rendered inside the text field.
+
+<PlatformSupport frameworks={["maui"]} />
+
+The reason it exists: **the iOS numeric keypad has no return key.** Give a user a numeric field and no
+Done button and there is genuinely no way for them to put the keyboard away.
+
+:::note[Not the On-Screen Keyboard]
+This is not [On-Screen Keyboard](/controls/onscreen-keyboard/). That control *draws keys* — a
+replacement keyboard for kiosks and touch panels. This one never draws a key; it decorates the keyboard
+the OS already put on screen. Opposite problems, similar names.
+:::
+
+## Presets
+
+The quickest version — no bar markup at all:
+
+```xml
+<shiny:TextEntry Placeholder="Amount"
+                 Keyboard="Numeric"
+                 Text="{Binding Amount, Mode=TwoWay}"
+                 AccessoryPreset="NavigationAndDone" />
+```
+
+| Preset | Bar |
+|---|---|
+| `None` | No bar. The default |
+| `Done` | A trailing "Done" that dismisses the keyboard |
+| `Navigation` | Leading previous/next field arrows |
+| `NavigationAndDone` | Arrows on the left, "Done" on the right |
+
+## Your own bar
+
+`Accessory` takes a `KeyboardAccessoryView`. `Items` is its content property, so items can be listed
+directly inside it:
+
+```xml
+<shiny:TextEntry Placeholder="Notes" Text="{Binding Notes, Mode=TwoWay}">
+    <shiny:TextEntry.Accessory>
+        <shiny:KeyboardAccessoryView>
+            <shiny:KeyboardNavigationItem Direction="Previous" />
+            <shiny:KeyboardNavigationItem Direction="Next" />
+            <shiny:KeyboardAccessorySpacer />
+            <shiny:KeyboardAccessoryItem Text="#tag" Command="{Binding InsertTagCommand}" />
+            <shiny:KeyboardDismissItem />
+        </shiny:KeyboardAccessoryView>
+    </shiny:TextEntry.Accessory>
+</shiny:TextEntry>
+```
+
+A `KeyboardAccessorySpacer` takes whatever width is left over, which is how items are pushed apart —
+everything before it stays left, everything after it goes right.
+
+For something that is not a row of buttons at all, set `BarContent` to any `View` and it replaces the
+item row wholesale.
+
+### Types
+
+| Type | Purpose |
+|---|---|
+| `KeyboardAccessoryView` | The bar itself |
+| `KeyboardAccessoryItem` | Icon/label button — `Icon`, `Text`, `ToolColor`, `FontSize`, `IconSize`, `Command`, `CommandParameter`, `Clicked` |
+| `KeyboardNavigationItem` | `Direction="Previous"` / `"Next"`. Moves focus and disables itself at the ends of the run |
+| `KeyboardDismissItem` | "Done" — dismisses the keyboard |
+| `KeyboardAccessorySpacer` | Flexible gap |
+
+### KeyboardAccessoryView properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `Items` | IList&lt;View&gt; | empty | Bar contents, left to right (content property) |
+| `BarContent` | View? | null | Replaces the item row with your own layout |
+| `BarHeight` | double | `44` | Bar height |
+| `BarBackgroundColor` | Color? | surface-container-high token | Bar fill |
+| `BarBorderColor` | Color? | outline-variant token | The hairline along the top edge |
+| `ItemSpacing` | double | `4` | Gap between items |
+| `CurrentOwner` | TextEntry? | — | Read-only. The field the bar is serving right now |
+
+## Field navigation
+
+`KeyboardNavigationItem` walks the fields on the page through `KeyboardFieldNavigator`, which collects
+every enabled, visible, non-read-only `TextEntry` / `InputView` under the field's page in **depth-first
+visual-tree order** — for a form laid out top to bottom, the order it reads in. MAUI has no `TabIndex`
+to honour (that was a Xamarin.Forms concept), so declaration order *is* the order.
+
+Set `FieldGroup` on the entries to navigate within a subset rather than the whole page:
+
+```xml
+<shiny:TextEntry Placeholder="Card number" FieldGroup="payment" AccessoryPreset="NavigationAndDone" />
+<shiny:TextEntry Placeholder="Expiry"      FieldGroup="payment" AccessoryPreset="NavigationAndDone" />
+<shiny:TextEntry Placeholder="CVV"         FieldGroup="payment" AccessoryPreset="NavigationAndDone" />
+```
+
+`KeyboardFieldNavigator` is public and platform-free, so it can be driven from your own items:
+
+```csharp
+KeyboardFieldNavigator.CanMove(entry, KeyboardNavigationDirection.Next);
+KeyboardFieldNavigator.Move(entry, KeyboardNavigationDirection.Next);
+KeyboardFieldNavigator.Collect(entry);   // the ordered run
+```
+
+**Limitation:** virtualized containers (`CollectionView`, `TableView`, `DataGrid`) only realize the rows
+currently on screen, so navigation cannot reach a field that has not been realized yet.
+
+## Platform behaviour
+
+This is a deliberately platform-only feature, in the same category as Desktop being MAUI-only.
+
+| Platform | Behaviour |
+|---|---|
+| **iOS / Mac Catalyst** | The real `UIResponder.InputAccessoryView`. The OS owns the bar, so it rides the keyboard's own animation exactly. On Catalyst proper, where there is no soft keyboard, it generally will not appear at all |
+| **Android** | Android has **no accessory API** — the IME runs in a different process and only an IME app can draw inside it. The same bar is rendered in the activity's content view and pushed up by however much the IME actually overlaps it, measured rather than assumed so `adjustResize`, `adjustPan` and forced edge-to-edge (API 35+) are all correct. On API 30+ it is frame-synced to the IME animation via `WindowInsetsAnimation`; below that it snaps into place when the insets land |
+| **Windows / macOS / Linux** | No soft keyboard. `Accessory` compiles and does nothing |
+| **Blazor** | No equivalent, on purpose — see below |
+
+Because the Android bar tracks the **IME insets** rather than focus, a device with a hardware keyboard
+attached (which raises no IME) correctly shows no bar.
+
+### Why there is no Blazor version
+
+iOS Safari already draws its own bar above the keyboard and will not let a page remove it, so ours
+would stack on top of it and the user would see two. Chrome on Android draws none, so the behaviour
+would diverge across the only two browsers where it matters. Building one would be parity theatre.
+
+## Notes
+
+- One bar instance serves one field. `AccessoryPreset` materializes a bar per entry automatically; if
+  you share a single `KeyboardAccessoryView` across fields, remember that on iOS a `UIView` can only
+  have one superview.
+- The bar lives outside the control's visual tree, so it is torn down explicitly when the field is
+  unloaded — navigating away does not leave a bar behind.
+- Swapping the bar while the field is already focused reloads the responder's input views, so the
+  change is visible immediately.

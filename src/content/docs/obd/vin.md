@@ -96,10 +96,39 @@ nothing came back.
   that alphabet precisely because they are confusable with 1 and 0, so seeing one means the read is
   wrong rather than that the vehicle is unusual.
 
-:::note[The check digit is deliberately not validated]
+:::note[`IsPlausible` deliberately does not validate the check digit]
 It is only mandatory in North America, so rejecting a legitimate non-NA VIN would cost more than one
-wasted request.
+wasted request. The check digit is available separately — see below.
 :::
+
+## The check digit
+
+Position 9 of a VIN is an ISO 3779 check digit computed from the other sixteen characters.
+`VinNumber` exposes it as an opt-in pair:
+
+```csharp
+VinNumber.CalculateCheckDigit("2HGFC2F51JH542108");   // '1'
+VinNumber.IsCheckDigitValid("2HGFC2F51JH542108");     // true
+```
+
+`CalculateCheckDigit` returns `'0'`–`'9'` or `'X'` (which stands in for a remainder of ten), or
+`null` when the input is not plausible to begin with. Whatever character currently sits in position 9
+is ignored — its weight in the formula is zero — so a VIN carrying the wrong check digit still
+computes the right one.
+
+:::caution[Do not use `IsCheckDigitValid` to reject a VIN read off a vehicle]
+The check digit is mandatory in North America and merely conventional elsewhere, so plenty of
+legitimate European and Asian VINs fail it. That is why `IsPlausible` — the gate `Decode` applies —
+leaves it out.
+:::
+
+Its two honest uses run the other way:
+
+- **Catching a typo** in a VIN a *user* entered by hand. Transposing two characters is exactly the
+  error the check digit exists to detect.
+- **Generating VINs that a decoder will accept.** Take a real WMI and descriptor, compute position 9,
+  and you have a VIN that decodes to a real make, model and year without belonging to anyone's car —
+  which is how the [sample emulator](/obd/emulator#picking-a-vehicle) builds its vehicles.
 
 ## The bus outranks the registry for fuel type
 
