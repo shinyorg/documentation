@@ -662,9 +662,9 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'shinycameraview', label: 'Shiny CameraView', type: 'bool', defaultValue: false, category: 'components',
         version: VERSIONS.shinyControls,
         description: 'getUserMedia camera preview, capture & in-browser barcode scanning https://shinylib.net/controls/cameraview/' },
-    { id: 'shinykiosk', label: 'Shiny Blazor Kiosk Controls', type: 'bool', defaultValue: false, category: 'components',
+    { id: 'shinydocking', label: 'Shiny Blazor Docking', type: 'bool', defaultValue: false, category: 'components',
         version: VERSIONS.shinyControls,
-        description: 'Shiny.Blazor.Controls.Kiosk — Touch / Kiosk On-Screen Keyboard and Docking for Blazor WebAssembly. https://shinylib.net/controls/' },
+        description: 'Visual-Studio-style window docking for Blazor WebAssembly - ships inside Shiny.Blazor.Controls (requires Shiny Blazor Controls). https://shinylib.net/controls/docking/' },
 ];
 
 function computeBlazorSymbols(state: TemplateState): Record<string, boolean | string> {

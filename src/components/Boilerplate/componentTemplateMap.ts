@@ -85,7 +85,12 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyblazor', paramId: 'shinycontrols' },
     ],
     'controls-desktop': [{ kind: 'shinyapp', paramId: 'shinydesktopcontrols' }],
-    'controls-kiosk': [{ kind: 'shinyblazor', paramId: 'shinykiosk' }],
+    // Docking ships in Shiny.Maui.Controls.Desktop on MAUI, and inside the main
+    // Shiny.Blazor.Controls package on Blazor (there is no Blazor add-on).
+    docking: [
+        { kind: 'shinyapp', paramId: 'shinydesktopcontrols' },
+        { kind: 'shinyblazor', paramId: 'shinydocking' },
+    ],
     markdown: [
         { kind: 'shinyapp', paramId: 'markdown' },
         { kind: 'shinyblazor', paramId: 'markdown' },

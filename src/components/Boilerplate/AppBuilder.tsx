@@ -31,7 +31,7 @@ const AppBuilder = () => {
 
   const visible = ShinyComponents.filter(c => !c.hideFromAppBuilder);
   const availableComponents = isMaui
-    ? visible.filter(c => !ASPNET_ONLY_IDS.includes(c.id) && !BLAZOR_ONLY_IDS.includes(c.id) && c.id !== 'controls-kiosk')
+    ? visible.filter(c => !ASPNET_ONLY_IDS.includes(c.id) && !BLAZOR_ONLY_IDS.includes(c.id))
     : mode === 'blazor'
       ? visible.filter(c => BLAZOR_COMPATIBLE_IDS.includes(c.id) && c.id !== 'controls-desktop')
       : visible.filter(c => ASPNET_COMPATIBLE_IDS.includes(c.id));
