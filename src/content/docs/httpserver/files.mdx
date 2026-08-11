@@ -1,0 +1,119 @@
+---
+title: Uploads & Downloads
+description: Streaming multipart uploads, buffered forms, and downloads with byte ranges and conditional GETs
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Uploads
+
+### Streaming multipart
+
+This is the one to use for real uploads. Each part's body is a stream that ends at the boundary, so a
+2 GB file goes straight to disk and nothing large is ever held in memory.
+
+```csharp
+app.OnPost("/upload", async ctx =>
+{
+    await foreach (var part in ctx.Request.ReadMultipartAsync(ctx.RequestAborted))
+    {
+        if (!part.IsFile)
+            continue;
+
+        var name = part.SafeFileName() ?? "upload.bin";
+        await part.SaveToAsync(Path.Combine(uploadDirectory, name), ctx.RequestAborted);
+    }
+
+    return Results.NoContent();
+});
+```
+
+A `MultipartSection` gives you `Headers`, `ContentType`, `Name`, `FileName`, `IsFile`, the raw `Body`
+stream, and `ReadAsStringAsync` / `CopyToAsync` / `SaveToAsync`.
+
+<Aside type="danger" title="Use SafeFileName()">
+`part.FileName` is whatever the client sent. `part.SafeFileName()` strips any directory component —
+a client-supplied filename joined onto an upload directory is the classic traversal hole. The
+`Content-Disposition` parser also understands the RFC 5987 `filename*` form, so a non-ASCII name
+survives.
+</Aside>
+
+`MultipartReader` bounds itself: `HeadersLengthLimit` (16 KB) and `PartCountLimit` (256) per body.
+
+### Buffered forms
+
+For a handful of small fields — a login form, a settings post — buffering is simpler:
+
+```csharp
+app.OnPost("/settings", async ctx =>
+{
+    if (!ctx.Request.HasFormContentType())
+        return Results.BadRequest();
+
+    var form = await ctx.Request.ReadFormAsync();
+
+    var name = form.GetFirst("name");
+    var avatar = form.GetFile("avatar");     // FormFile: Content, Length, OpenReadStream, SaveToAsync
+
+    return Results.NoContent();
+});
+```
+
+`ReadFormAsync` handles both `application/x-www-form-urlencoded` and `multipart/form-data`, and is
+**bounded on purpose**: `maxValueLength` defaults to 64 KB and `maxFileSize` to 8 MB per file, and
+exceeding either is a 413. Buffering an upload of unknown size is how a server runs out of memory.
+
+### Raw bodies
+
+For a `PUT`-style upload with no multipart wrapper:
+
+```csharp
+var written = await ctx.Request.SaveBodyToAsync(path, ctx.RequestAborted);
+```
+
+Never buffers. `ctx.Request.Body` is the stream itself, and `ctx.Request.BodyReader` is the
+`PipeReader` for zero-copy parsing.
+
+<Aside type="note">
+Whatever you use, the server-wide `Limits.MaxRequestBodySize` (30 MB by default) still applies. Raise
+it in [configuration](/httpserver/configuration/) for an upload endpoint.
+</Aside>
+
+## Downloads
+
+`Results.File(path)` and `Results.Stream(...)` cover the simple case. `FileDownloadResult` is what
+they and the [static file middleware](/httpserver/static-files/) are built on, and it is what you
+want when the response should support resuming:
+
+```csharp
+app.OnGet("/recordings/{id}", ctx =>
+    FileDownloadResult.FromFile(PathFor(id), downloadName: "recording.mp4"));
+```
+
+| Factory | For |
+| --- | --- |
+| `FromFile(path, …)` | A file on disk — length, ETag and modification time filled in |
+| `FromBytes(content, …)` | Bytes already in memory |
+| `FromStream(stream, length, …)` | A seekable stream of known length; disposed after writing |
+| `FromOpener(open, length, …)` | A factory opened only if the response is actually written |
+
+`FromOpener` exists because a resolver that tries several candidates — the static file handler
+looking for default documents — would otherwise open and discard a stream per miss, and a conditional
+request ending in a 304 opens nothing at all.
+
+Properties: `ContentType`, `FileDownloadName`, `Inline`, `ETag`, `LastModified`. Setting a download
+name sends `Content-Disposition: attachment` unless `Inline` is set.
+
+### What you get for free
+
+- **Byte ranges**, including suffix ranges (`Range: bytes=-500`), answered with 206 and
+  `Content-Range`.
+- **416** for a range past the end, rather than a silently truncated body.
+- **`ETag` / `Last-Modified` conditional GETs** — `If-None-Match` and `If-Modified-Since` produce a
+  304 with no body.
+- **`If-Range`**, so a stale resume restarts the download instead of splicing two different files
+  together.
+- **A content-type table** that falls back to `application/octet-stream` rather than guessing
+  `text/html`.
+
+`ContentTypes.ForFileName(name)` is that table, if you want the same answer somewhere else.

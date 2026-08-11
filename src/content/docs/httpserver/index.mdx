@@ -1,0 +1,178 @@
+---
+title: Getting Started
+description: A dependency-light, AOT/trim-clean HTTP/1.1, HTTP/2 & HTTP/3 server for .NET that runs anywhere .NET runs, including .NET MAUI
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+ASP.NET Core is heavyweight and does not run on .NET MAUI or in several embedded server scenarios.
+This is a dependency-light, AOT- and trim-clean HTTP/1.1, HTTP/2 and HTTP/3 server that runs anywhere
+.NET runs — plus tunnelling, so a server embedded in a phone app is reachable from the public
+internet.
+
+Only `Microsoft.Extensions.*` abstractions are taken as dependencies. Everything else — JSON, crypto,
+JWT, OpenAPI, HPACK, QPACK — is built on what is in the box.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="httpserver" /> |
+| Downloads | <NugetDownloads name="Shiny.Net.HttpServer" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+## Packages
+
+| Package | Description |
+| --- | --- |
+| <NugetBadge name="Shiny.Net.HttpServer" showLabel={true} /> | The server: HTTP/1.1, HTTP/2 & HTTP/3, routing, middleware, DI scopes, static files, WebSockets, SSE, sessions, OpenAPI, CORS, rate limiting, tunnelling |
+| <NugetBadge name="Shiny.Net.HttpServer.SourceGenerators" showLabel={true} /> | Compile-time typed endpoints — route registration, parameter binding, OpenAPI. Zero reflection |
+| <NugetBadge name="Shiny.Net.HttpServer.Jwt" showLabel={true} /> | JWT authentication on in-box crypto — no `Microsoft.IdentityModel` dependency |
+| <NugetBadge name="Shiny.Net.HttpServer.AzureRelay" showLabel={true} /> | Azure Relay tunnel provider |
+| <NugetBadge name="Shiny.Net.HttpServer.Ssh" showLabel={true} /> | SSH remote-forwarding tunnel provider, including zero-account quick tunnels |
+| <NugetBadge name="Shiny.Net.HttpServer.Mcp" showLabel={true} /> | Model Context Protocol transport — host an MCP server without ASP.NET Core |
+
+Everything shipping targets `net10.0` and has the trim, AOT and single-file analyzers turned on, so
+"AOT-clean" is enforced by the build rather than claimed in a readme.
+
+## Install
+
+```bash
+dotnet add package Shiny.Net.HttpServer
+
+# optional, and what tier 3 below needs
+dotnet add package Shiny.Net.HttpServer.SourceGenerators
+```
+
+The generator package is an analyzer — it runs inside the compiler and never lands in your output.
+
+## A server in three lines
+
+```csharp
+using Shiny.Net.HttpServer;
+
+var server = new HttpServer(new HttpServerOptions { Port = 8080 });
+server.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+await server.RunAsync();
+```
+
+That is the whole ceremony. No container, no host builder, no configuration file. The server binds
+loopback by default — a server embedded in a mobile app should not be reachable from the local
+network unless its author says so.
+
+## The four tiers
+
+The point of the API is a gentle ramp: trivial to start, strongly typed when you want it. Each tier
+is built on the one below and **they compose in the same app**.
+
+<Steps>
+
+1. **Tier 0 — one delegate, no routing.**
+
+   ```csharp
+   server.OnRequest(ctx => ctx.Response.WriteAsync("hello"));
+   ```
+
+2. **Tier 1 — raw routing.** `OnGet`/`OnPost`/… (or `MapGet`/`MapPost`/…, the ASP.NET spelling).
+
+   ```csharp
+   server.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+   server.OnGet("/users/{id:int}", ctx => ctx.Response.WriteAsync(ctx.Request.RouteValues["id"]!));
+   ```
+
+   See [Routing](/httpserver/routing/).
+
+3. **Tier 2 — middleware.** The same shape as ASP.NET Core middleware, as a lambda or as a class.
+
+   ```csharp
+   server.Use(async (ctx, next) =>
+   {
+       var sw = Stopwatch.StartNew();
+       await next(ctx);
+       logger.LogInformation("{Path} took {Elapsed}ms", ctx.Request.Path, sw.ElapsedMilliseconds);
+   });
+   ```
+
+   See [Middleware](/httpserver/middleware/).
+
+4. **Tier 3 — source-generated typed endpoints.** Route registration, parameter binding and OpenAPI
+   metadata are emitted at compile time — no reflection, which is what keeps the whole thing trim-
+   and AOT-clean.
+
+   ```csharp
+   [Route("/api/users")]
+   public class UserEndpoints(IUserService users, ILogger<UserEndpoints> logger)
+   {
+       [Get("/{id:int}")]
+       public async Task<IActionResult> GetUser(int id, CancellationToken ct)
+           => await users.FindAsync(id, ct) is { } u ? new OkObjectResult(u) : new NotFoundResult();
+   }
+
+   app.MapMyAppEndpoints();   // emitted for every [Route] class in the assembly
+   ```
+
+   See [Typed Endpoints](/httpserver/endpoints/).
+
+</Steps>
+
+## Dependency injection is available, never mandatory
+
+```csharp
+// No container. RequestServices resolves nothing; everything else works.
+var server = new HttpServer(new HttpServerOptions { Port = 8080 });
+
+// With a container. Scoped services behave exactly as in ASP.NET Core.
+var builder = HttpServer.CreateBuilder();
+builder.Services.AddSingleton<IClock, SystemClock>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+var app = builder.Build();
+```
+
+A real `IServiceScope` is created per request/response exchange and disposed when the request ends,
+including `IAsyncDisposable`. Endpoint classes are resolved from that scope, so a `Scoped` dependency
+is one instance shared by everything handling the request — the same contract as ASP.NET Core.
+`ctx.RequestServices` is the accessor at every tier.
+
+If the app already has a container — a MAUI app, a generic host — use `AddHttpServer()` instead. See
+[Hosting & Lifecycle](/httpserver/hosting/).
+
+## Where to go next
+
+| If you want to… | Read |
+| --- | --- |
+| Start, stop and restart the server at runtime | [Hosting & Lifecycle](/httpserver/hosting/) |
+| Bind several ports, set limits, turn on forwarded headers | [Configuration](/httpserver/configuration/) |
+| Understand templates, constraints and match precedence | [Routing](/httpserver/routing/) |
+| Return JSON without reflection | [Results & JSON](/httpserver/results/) |
+| Serve a web app out of the assembly | [Static Files](/httpserver/static-files/) or [Blazor WebAssembly](/httpserver/blazor/) |
+| Authenticate callers | [Authentication](/httpserver/authentication/), [JWT](/httpserver/jwt/) |
+| Reach the device from the internet | [Tunnelling](/httpserver/tunneling/) |
+| Run this inside a .NET MAUI app | [.NET MAUI](/httpserver/maui/) |
+| Host an MCP server | [Model Context Protocol](/httpserver/mcp/) |
+
+## AOT and trimming
+
+This is the constraint the whole design answers to, so it is worth stating plainly: **nothing in the
+server discovers anything by reflection.** Routes are registered by generated code, parameters are
+bound by generated code, and JSON goes through `JsonTypeInfo` from a `JsonSerializerContext` rather
+than through `Type.GetProperties()`.
+
+The one thing you have to bring is that context:
+
+```csharp
+[JsonSerializable(typeof(Widget))]
+[JsonSerializable(typeof(IReadOnlyList<Widget>))]
+public partial class AppJson : JsonSerializerContext;
+```
+
+The endpoint generator emits a module initializer that registers it for you, and warns at build time
+(SWS006) about any type crossing an endpoint boundary that the context does not cover — turning a
+runtime failure into a build warning. See [Results & JSON](/httpserver/results/).
+
+The reflection-based JSON overloads still exist for apps that are not published trimmed, but they are
+annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]`, so an AOT build has to opt into them
+deliberately.

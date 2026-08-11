@@ -1,0 +1,246 @@
+---
+title: Typed Endpoints
+description: Compile-time route registration, parameter binding and OpenAPI metadata from [Route] classes — zero reflection
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+Tier 3 is attributes on plain classes. The source generator turns them into route registrations and
+parameter binders at compile time — explicit constructor calls, explicit `TryParse`, explicit JSON
+metadata. Every decision a reflection-based framework would make at startup is made during the build
+instead, which is what lets the whole thing survive `PublishAot`, and means a route that cannot bind
+fails your build rather than your deployment.
+
+<NugetBadge name="Shiny.Net.HttpServer.SourceGenerators" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.SourceGenerators
+```
+
+It is an analyzer package: it runs inside the compiler and never lands in your output.
+
+## An endpoint class
+
+```csharp
+[Route("/api/widgets")]
+public class WidgetEndpoints(IWidgetStore store, ILogger<WidgetEndpoints> logger)
+{
+    /// <summary>Fetches a single widget by id.</summary>
+    [Get("/{id:int}")]
+    public async Task<IActionResult> GetWidget(int id, CancellationToken cancellationToken)
+        => await store.FindAsync(id, cancellationToken) is { } widget
+            ? new OkObjectResult(widget)
+            : new NotFoundResult();
+
+    /// <summary>Lists widgets, optionally filtered by name.</summary>
+    [Get]
+    public async Task<IReadOnlyList<Widget>> ListWidgets(
+        int take = 10,
+        string? search = null,
+        CancellationToken cancellationToken = default
+    ) => await store.ListAsync(take, search, cancellationToken);
+
+    /// <summary>Creates a widget.</summary>
+    [Post]
+    public async Task<IActionResult> CreateWidget(CreateWidget request, CancellationToken ct)
+    {
+        var created = await store.AddAsync(request.Name, ct);
+        return new CreatedResult($"/api/widgets/{created.Id}", created);
+    }
+}
+```
+
+The class does not need to be `partial` and does not derive from anything. Constructor parameters are
+resolved from the request scope, so a `Scoped` dependency is the same instance the rest of the request
+sees. Every method is an ordinary method — callable from a unit test with no HTTP involved at all.
+
+`[Route]` takes an optional prefix that is prepended to every method template on the class.
+`[Get]`/`[Post]`/`[Put]`/`[Delete]`/`[Patch]` take a template relative to it; empty means the prefix
+itself. `[HttpMethod("REPORT", "/x")]` covers any other verb, and `[NonEndpoint]` excludes a public
+method from discovery.
+
+## Registering them
+
+The generator emits one extension method per class and one for the assembly:
+
+```csharp
+app.MapWidgetEndpoints();       // just this class
+app.MapMyAppEndpoints();        // every [Route] class in the assembly
+```
+
+The assembly-wide name comes from the assembly name — `Sample.Api` produces
+`MapSampleApiEndpoints()`.
+
+## Parameter binding
+
+Binding is by convention, with attributes as the escape hatch. For each parameter, in order:
+
+1. `HttpContext`, `HttpRequest`, `HttpResponse` and `CancellationToken` are **handed over directly**.
+2. A name matching a route token, where the type can be parsed from a string, binds **from the
+   route**.
+3. Anything else a string can become — `IParsable<T>`, an enum, a nullable of either, or an array of
+   them — binds **from the query string**.
+4. A complex type on a verb that carries a body binds **from the JSON body** (at most one per
+   method).
+5. Everything else is resolved **from the container**.
+
+The attributes override that: `[FromRoute]`, `[FromQuery]`, `[FromHeader]`, `[FromBody]`,
+`[FromServices]`. Each of the first three takes an optional `Name` when the wire name differs from
+the parameter name.
+
+```csharp
+[Get("/search/{*query}")]
+public string Search(
+    string query,                                          // route (catch-all token)
+    [FromHeader(Name = "User-Agent")] string? userAgent,   // header, renamed
+    int take = 20                                          // query, optional by its default
+) => …;
+```
+
+A parameter with a default value is optional; a nullable one binds to `null` when absent. "Absent"
+and "present but unparseable" are different answers, and only the second is a 400.
+
+### Bind failures
+
+A parameter that cannot be bound produces a 400 before the method is ever called, with a message
+naming the parameter and the type it could not become:
+
+```
+The query parameter 'take' is missing or is not a valid int.
+The request body could not be read as CreateWidget.
+```
+
+Malformed JSON is the client's mistake, so it is a 400 rather than an exception that would become a
+500 about a server fault that did not happen.
+
+## Return types
+
+| Return | Response |
+| --- | --- |
+| `void`, `Task`, `ValueTask` | Nothing — the handler wrote the response itself |
+| `IResult` / `IActionResult` | Executed |
+| `string` | `text/plain` |
+| Any other type | JSON, from compile-time metadata |
+
+All of them may be wrapped in `Task<T>` or `ValueTask<T>`. Anything else is **SWS003** at build time.
+
+Returning the value directly is the shortest thing that works and stays AOT-safe, because the
+generator registers the type's metadata for you:
+
+```csharp
+[Get("/{id:int}")]
+public async Task<Widget?> GetWidget(int id) => await store.FindAsync(id);
+```
+
+Returning `IActionResult` is what you want when the status code varies. Both styles mix freely — see
+[Results & JSON](/httpserver/results/).
+
+## JSON metadata
+
+Declare one `JsonSerializerContext` listing everything that crosses an endpoint boundary:
+
+```csharp
+[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]
+[JsonSerializable(typeof(Widget))]
+[JsonSerializable(typeof(IReadOnlyList<Widget>))]
+[JsonSerializable(typeof(CreateWidget))]
+public partial class AppJson : JsonSerializerContext;
+```
+
+The generator emits a module initializer that registers it with
+[`JsonTypeInfoRegistry`](/httpserver/results/), so `new OkObjectResult(widget)` serializes from
+compile-time metadata, and warns (**SWS006**) about any endpoint type the context does not cover.
+
+<Aside type="note" title="Why you declare the context and not the generator">
+Source generators never see each other's output, so a context emitted by this generator would be
+invisible to `System.Text.Json`'s generator and produce nothing. Declaring it in your app is the only
+arrangement that works — and the SWS006 warning turns the thing you would otherwise forget into a
+build message.
+</Aside>
+
+## One endpoint per class
+
+Where a `[Route]` class groups endpoints, `IHttpEndpoint` is the opposite: the verb and route go on
+the class, and the class has exactly one handler — so the file you open to change an endpoint
+contains that endpoint and nothing else.
+
+```csharp
+[Get("/health/{component}")]
+public class HealthEndpoint(IHealthChecks checks) : IHttpEndpoint
+{
+    public async Task<IActionResult> HandleAsync(string component, CancellationToken ct)
+        => await checks.RunAsync(component, ct) ? new OkResult() : new StatusCodeResult(503);
+}
+```
+
+The handler is the single public method named `Handle` or `HandleAsync`. Everything above — binding,
+DI, return conventions, `[Authorize]`, `[Produces]` — applies unchanged, and the same
+`MapMyAppEndpoints()` call picks these up alongside the controllers.
+
+## Policies as attributes
+
+Everything a raw route expresses with `Require…` is an attribute here, emitted as endpoint metadata
+at compile time rather than discovered at runtime:
+
+```csharp
+[Route("/api/admin")]
+[Authorize("admin")]
+public class AdminEndpoints
+{
+    [Get("/stats")]
+    public Stats GetStats() => …;
+
+    [Get("/ping")]
+    [AllowAnonymous]
+    public string Ping() => "pong";
+
+    [Post("/import")]
+    [EnableRateLimiting("uploads")]
+    [RequireIpFilter("internal")]
+    public Task<IActionResult> Import(ImportRequest request) => …;
+}
+```
+
+The rules are worth knowing:
+
+- A method's `[Authorize]` **adds to** its class's rather than replacing it, so narrowing is additive
+  and cannot accidentally widen.
+- `[AllowAnonymous]` always wins, including over a fallback policy.
+- For CORS, rate limiting and IP filtering — where "two policies" is not a thing a request can have —
+  a method's attribute **replaces** the class's, and a `Disable…` anywhere wins over an `Enable…`.
+
+See [Authorization](/httpserver/authorization/), [CORS](/httpserver/cors/),
+[Rate Limiting](/httpserver/rate-limiting/) and [IP Filtering](/httpserver/ip-filtering/).
+
+## OpenAPI
+
+The generator emits the parameter names and sources, the body type, the return type and the
+`<summary>` from the method's doc comment. `[Produces]` declares responses a method returning
+`IActionResult` has deliberately hidden, `[ApiTags]` groups operations and `[ApiExclude]` hides one:
+
+```csharp
+/// <summary>Fetches a single widget by id.</summary>
+[Get("/{id:int}")]
+[Produces(200, typeof(Widget))]
+[Produces(404, Description = "No widget has that id")]
+public Task<IActionResult> GetWidget(int id) => …;
+```
+
+See [OpenAPI](/httpserver/openapi/).
+
+## Build diagnostics
+
+| Code | Severity | Meaning |
+| --- | --- | --- |
+| `SWS001` | Error | Invalid route template |
+| `SWS002` | Error | Parameter cannot be bound |
+| `SWS003` | Error | Unsupported return type |
+| `SWS004` | Error | Endpoint class or method is not reachable from generated code — it must be public or internal, and not static, abstract or generic |
+| `SWS005` | Error | Duplicate route in this assembly |
+| `SWS006` | Warning | A type crosses an endpoint boundary as JSON but no `JsonSerializerContext` declares it |
+| `SWS007` | Error | More than one body parameter — a request has only one body |
+| `SWS008` | Error | `[FromRoute]` names a token the template does not have |
+| `SWS009` | Warning | The template captures a token no parameter receives |
+| `SWS010` | Error | An `IHttpEndpoint` has no single `Handle`/`HandleAsync` method |
+| `SWS011` | Error | An `IHttpEndpoint` carries no verb attribute on the class |

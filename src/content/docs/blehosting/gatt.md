@@ -117,7 +117,10 @@ var services = hostingManager.Services;
 
 ## Composing Services in a Class
 
-The attribute-based managed characteristic pattern (`BleGattCharacteristic` base + `[BleGattCharacteristic]` attribute + `AttachRegisteredServices`) was removed for AOT compliance. Compose your GATT services in code by registering a hosting service class that calls `AddService(...)` on startup:
+The reflection-based managed characteristic pattern (`BleGattCharacteristic` base + `[BleGattCharacteristic]` attribute + `AttachRegisteredServices`) was removed for AOT compliance. You have two replacements:
+
+- Declare the service with `[BleService]` on a `partial class` and let the [source generator](./source-generator) emit these calls for you — attribute ergonomics with no reflection. This is the shorter path for anything beyond a characteristic or two.
+- Or compose the service in code by registering a hosting class that calls `AddService(...)` on startup:
 
 ```csharp
 public class MyGattHostingService(IBleHostingManager manager, ILogger<MyGattHostingService> logger) : IShinyStartupTask
@@ -166,4 +169,8 @@ services.AddBluetoothLeHosting();
 services.AddSingleton<IShinyStartupTask, MyGattHostingService>();
 ```
 
-This keeps everything testable (the class can be exercised against a mocked `IBleHostingManager`), preserves AOT-cleanliness, and avoids the runtime attribute scanning the old pattern relied on.
+This keeps everything testable (the class can be exercised against a mocked `IBleHostingManager`), preserves AOT-cleanliness, and avoids the runtime attribute scanning the old pattern relied on. The [source generator](./source-generator) produces the same shape from attributes, and additionally hands you a per-connected-central context, generated notify helpers, and compile-time checks on your UUIDs and handler signatures.
+
+:::caution
+Write the **full 128-bit UUID** when calling `AddService` / `AddCharacteristic` directly. Short forms like `"180D"` are accepted by Apple's `CBUUID.FromString` but throw on Android, which goes through `java.util.UUID.fromString`. The source generator normalizes them for you; the imperative API does not.
+:::

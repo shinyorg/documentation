@@ -1,0 +1,98 @@
+---
+title: WebSockets
+description: RFC 6455 WebSockets over the same connection abstraction — handshake, framing, ping/pong and the close handshake
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.OnGet("/ws", async ctx =>
+{
+    if (!ctx.Request.IsWebSocketRequest())
+    {
+        ctx.Response.StatusCode = StatusCodes.Status400BadRequest;
+        return;
+    }
+
+    await using var socket = await ctx.AcceptWebSocketAsync();
+
+    while (await socket.ReceiveAsync(ctx.RequestAborted) is { } message)
+        await socket.SendAsync(message.Text, ctx.RequestAborted);
+});
+```
+
+<Aside type="caution">
+The handler owns the socket for as long as it uses it: the connection is torn down when the handler
+returns. A receive loop belongs **inside** the handler, not on a background task it kicks off and
+walks away from.
+</Aside>
+
+## Receiving and sending
+
+`ReceiveAsync` returns the next complete message — fragments are reassembled for you — or `null` once
+the peer has closed.
+
+| Member | Notes |
+| --- | --- |
+| `WebSocketMessage.Type` | `Text` or `Binary` |
+| `WebSocketMessage.Payload` | The raw bytes |
+| `WebSocketMessage.Text` | The payload decoded as UTF-8 |
+| `SendAsync(string)` | A text message |
+| `SendAsync(ReadOnlyMemory<byte>)` | A binary message |
+| `PingAsync()` | Sends a ping; nothing here waits for the pong |
+| `CloseAsync(status, description)` | The close handshake |
+| `IsOpen` | True until a close frame has been both sent and received |
+| `CloseResult` | How the peer closed, once it has |
+
+Ping/pong is handled automatically — an incoming ping is answered without the handler seeing it.
+
+## Accept options
+
+```csharp
+await using var socket = await ctx.AcceptWebSocketAsync(new WebSocketAcceptOptions
+{
+    MaxMessageLength = 1024 * 1024,
+    SupportedSubProtocols = { "v2.myapp", "v1.myapp" }
+});
+```
+
+`MaxMessageLength` (4 MB by default) bounds the message assembled from fragments — a peer that keeps
+sending continuation frames is otherwise an unbounded allocation.
+
+Sub-protocol negotiation picks by the **server's** preference order, which is the side that actually
+knows what it can do, and echoes the choice back. `socket.SubProtocol` is what was agreed.
+
+## The handshake
+
+`IsWebSocketRequest()` checks the method, the `Connection: Upgrade` token, `Upgrade: websocket` and
+the presence of `Sec-WebSocket-Key`. It reads `Connection` as the comma-separated list it is, because
+browsers send `keep-alive, Upgrade` and a plain equality check misses the upgrade on most real
+requests.
+
+Version 13 is the only one RFC 6455 defines. Anything else is answered with 426 and a
+`Sec-WebSocket-Version: 13` header telling the client which one to use.
+
+## Authorization
+
+The upgrade is an ordinary `GET` on an ordinary route, so everything that applies to a route applies
+here:
+
+```csharp
+app.OnGet("/ws", Handler).RequireAuthorization();
+```
+
+A browser's `WebSocket` constructor cannot set headers, so a token normally travels in the query
+string or in a cookie — [cookie authentication](/httpserver/authentication/) is the usual answer for
+a browser client, and a [JWT](/httpserver/jwt/) in the query string for anything else.
+
+## Limits
+
+- **No `permessage-deflate`**, and no extensions are negotiated at all.
+- WebSockets need a real connection to take over, so they work over HTTP/1.1 and over a
+  [tunnel](/httpserver/tunneling/) that forwards raw connections — but **not** through Azure Relay's
+  `Http` mode, which buffers responses. See [Azure Relay](/httpserver/azure-relay/).
+
+## Server-Sent Events
+
+If the traffic only goes server → client, [Server-Sent Events](/httpserver/sse/) are simpler, survive
+proxies better, and reconnect on their own.

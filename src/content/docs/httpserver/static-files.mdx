@@ -1,0 +1,143 @@
+---
+title: Static Files
+description: Serving web assets from disk, from embedded resources, or from both — with ranges, ETags, SPA fallback and precompressed sidecars
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseStaticFiles("./wwwroot");
+```
+
+The middleware resolves a path and hands over to the same file-serving code downloads use, so byte
+ranges, `ETag`, `If-None-Match` and 304 come free. When no file matches it calls `next` and the
+request carries on to routing — which is what lets an app serve a SPA and an API from one pipeline.
+
+## Where files come from
+
+`IStaticFileSource` rather than a directory path, because the interesting case on a phone is not a
+directory.
+
+### From disk
+
+```csharp
+app.UseStaticFiles("./wwwroot", o => o.CacheFor(TimeSpan.FromHours(1)));
+```
+
+### From the assembly
+
+A MAUI or single-file build has no content directory to point at, so the web assets travel inside the
+assembly:
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="wwwroot\**" />
+</ItemGroup>
+```
+
+```csharp
+app.UseEmbeddedFiles(typeof(App).Assembly, "MyApp.wwwroot", o => o.FallbackFile = "index.html");
+```
+
+Resource names are flattened at build time (`wwwroot/css/site.css` becomes
+`MyApp.wwwroot.css.site.css`), so the map is built once by reversing that. Because only the
+separators are ambiguous — `site.min.css` is indistinguishable from a `site` directory containing
+`min.css` — both readings are registered and either request resolves.
+
+`EmbeddedFileSource.Paths` lists what it can serve, which is the first thing to check when a file
+404s.
+
+### Both, in order
+
+The useful arrangement during development: a physical directory in front so an edited file is picked
+up without a rebuild, embedded resources behind it so the packaged app still works.
+
+```csharp
+app.UseStaticFiles(new CompositeFileSource(
+    new PhysicalFileSource("./wwwroot"),
+    new EmbeddedFileSource(typeof(App).Assembly, "MyApp.wwwroot")
+));
+```
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `RequestPath` | `""` | URL prefix — `/assets` serves `/assets/app.js` from `app.js` |
+| `DefaultDocuments` | `index.html`, `index.htm` | Tried when a directory is requested |
+| `FallbackFile` | `null` | The SPA index; see below |
+| `ServeUnknownFileTypes` | `false` | See below |
+| `DefaultContentType` | `application/octet-stream` | Used only when the above is on |
+| `CacheControl` | `null` | Or use `CacheFor(maxAge, immutable)` |
+| `ServePrecompressedFiles` | `false` | Serve a `.br`/`.gz` sidecar in place of the original |
+| `ContentTypeOverrides` | — | Extension → content type, on top of the built-in map |
+| `OnPrepareResponse` | `null` | A last look before the response is written |
+
+### Single-page apps
+
+```csharp
+app.UseStaticFiles("./wwwroot", o => o.FallbackFile = "index.html");
+```
+
+`/orders/42` reaches the client-side router instead of a 404. The fallback is only applied to GET and
+HEAD requests that **look like navigations** (they accept HTML) and **do not look like assets** (no
+file extension) — so a missing script still 404s honestly rather than returning HTML the browser will
+fail to parse.
+
+### Caching
+
+```csharp
+o.CacheFor(TimeSpan.FromDays(365), immutable: true);
+```
+
+Leaving `CacheControl` null sends none, which browsers treat as "revalidate" — and the ETag makes
+that cheap. Only mark content `immutable` when its URL changes with its content (a hashed bundle
+name); otherwise a browser keeps a stale copy for the whole age and no deploy will dislodge it.
+
+`OnPrepareResponse` is the hook for a per-file policy:
+
+```csharp
+o.OnPrepareResponse = ctx =>
+{
+    if (ctx.File.Name.EndsWith(".html"))
+        ctx.HttpContext.Response.Headers["Cache-Control"] = "no-cache";
+};
+```
+
+### Precompressed sidecars
+
+```csharp
+o.ServePrecompressedFiles = true;      // serves app.wasm.br for app.wasm
+```
+
+Off by default, because a directory containing an unrelated `.gz` would otherwise start serving it as
+an encoding of a file it is not. On for a build that publishes precompressed assets it is strictly
+better: those were compressed once at maximum effort, and
+[recompressing them per request](/httpserver/compression/) spends CPU to produce a larger result.
+The content type still describes the file underneath.
+
+## Security
+
+This is the part that has to be right, so it is worth stating what the middleware actually does.
+
+- **Paths arrive already percent-decoded**, so `%2e%2e%2f` is a plain `../` by the time anything sees
+  it. That is exactly why the segment check happens on the decoded path: `..`, null bytes, `\`, `:`
+  and invalid filename characters are all refused.
+- **Containment is checked after normalization *and* after resolving links.** A symlink is the one
+  way a path that looks contained can leave.
+- **Path comparison follows the platform.** Treating a case-insensitive file system as
+  case-sensitive is how a containment check passes while the open succeeds on a different file.
+- **Dotfiles are refused** by default. `.env` and `.git` live in content directories.
+- **Unknown extensions are refused** by default. Guessing a type for an unknown extension is how a
+  user-writable directory turns into a way to serve HTML — and therefore script — from your origin.
+
+<Aside type="tip">
+If a file is not being served and you expected it to be, the usual cause is the last of those. Add
+the extension to `ContentTypeOverrides` rather than turning `ServeUnknownFileTypes` on globally.
+</Aside>
+
+## Blazor WebAssembly
+
+A published Blazor app needs the SPA fallback, precompressed sidecars and a cache policy that treats
+fingerprinted `_framework` assets as immutable. `UseBlazorWebAssembly` arranges all three — see
+[Blazor WebAssembly](/httpserver/blazor/).

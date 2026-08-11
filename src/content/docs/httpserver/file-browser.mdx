@@ -1,0 +1,93 @@
+---
+title: File Browser
+description: A directory served over HTTP — list, download, upload and delete, with authorization per operation
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A directory served over plain HTTP: `GET` it for a JSON listing, `GET` a file for its bytes, `PUT` to
+write, `DELETE` to remove. On a phone the root is `FileSystem.AppDataDirectory`, which is the case it
+was built for — pulling logs, a database file or a capture off a device without a cable.
+
+```csharp
+app.MapFileBrowser("/files", o =>
+{
+    o.RootPath = FileSystem.AppDataDirectory;
+    o.AllowWrite = true;
+})
+.RequireAuthorization();
+```
+
+The API is deliberately plain HTTP, so anything that already speaks it — `curl`, a browser, a script
+— can drive it with no client library.
+
+## Endpoints
+
+| Request | Result |
+| --- | --- |
+| `GET /files` | JSON `DirectoryListing` of the root |
+| `GET /files/{path}` | A listing for a directory, or the file's bytes |
+| `PUT /files/{path}` | Writes a file (requires `AllowWrite`) |
+| `PUT /files/{path}/` | Creates a directory (requires `AllowWrite` and `AllowCreateDirectories`) |
+| `DELETE /files/{path}` | Removes a file, or an **empty** directory (requires `AllowDelete`) |
+
+A listing entry carries `name`, `path`, `isDirectory`, `size`, `lastModifiedUtc` and `contentType`,
+with directories first and then files, each alphabetically. Downloads go through the same code as
+every other [download](/httpserver/files/), so byte ranges and conditional GETs work — a resumable
+pull of a large capture over a flaky link is free.
+
+The browser declares its own `JsonSerializerContext`, so it needs nothing registered in your app.
+
+## Authorization
+
+`MapFileBrowser` returns the endpoints it registered, which is the whole reason it is **routes rather
+than middleware** — authorization is endpoint metadata, and middleware could not express "reads are
+open, writes are not".
+
+```csharp
+// everything behind a policy
+app.MapFileBrowser("/files", …).RequireAuthorization("admin");
+
+// reads open, anything that changes something behind a policy
+app.MapFileBrowser("/files", …).RequireAuthorizationForChanges("editors");
+```
+
+`ReadEndpoints`, `WriteEndpoints`, `DeleteEndpoints` and `All` are there if you want to attach
+something else — a rate limit, an IP filter — to one group.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `RootPath` | required | Everything is resolved inside it; nothing outside it is reachable |
+| `AllowWrite` | `false` | |
+| `AllowDelete` | `false` | |
+| `AllowCreateDirectories` | `true` | Only relevant when `AllowWrite` is on |
+| `MaxUploadBytes` | 64 MB | Counted as the body streams, not taken from `Content-Length` |
+| `ServeHiddenFiles` | `false` | A content directory routinely holds a `.env` or a database journal |
+| `Filter` | `null` | Return false to hide an entry from listings **and** refuse every operation on it |
+| `DefaultContentType` | `application/octet-stream` | Downloads only |
+
+## The defaults, and why
+
+**Read-only until told otherwise.** `AllowWrite` and `AllowDelete` are both off, because the version
+of this that cannot fill a device's storage or replace a file something depends on is the one worth
+defaulting to.
+
+**Uploads are bounded and atomic.** `MaxUploadBytes` is counted as the body streams rather than
+trusting `Content-Length`, and the bytes go to a staging file that is moved into place — so a refused
+or interrupted upload leaves the previous file intact.
+
+**A directory is only deleted when empty.** Recursive delete behind a URL is one mistyped path away
+from taking everything, and a phone has no undo.
+
+**Containment reuses the static file handler's path normalization**, checked after decoding and again
+after resolving links, with dotfiles hidden.
+
+<Aside type="danger">
+This exposes a device's storage over the network. Put it behind [authentication](/httpserver/authentication/)
+— Basic is enough and every client already speaks it — and consider an
+[IP filter](/httpserver/ip-filtering/) restricting it to the local network. `Filter` is the way to
+narrow it further: an app that only means to expose its logs should return false for everything else
+rather than trusting the root path to be tidy.
+</Aside>

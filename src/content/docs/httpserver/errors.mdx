@@ -1,0 +1,176 @@
+---
+title: Errors & Problem Details
+description: The exception-handler chain, RFC 9457 problem responses, and giving every failure the same shape
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## What happens when a handler throws
+
+Without any configuration, an unhandled exception is a 500 with no detail (`HideExceptionDetails`
+controls whether the message is included). That is the floor. Above it sits a chain of
+`IExceptionHandler`s, tried in registration order until one claims the exception — the connection's
+own 500 is the last resort rather than the first response.
+
+```csharp
+public sealed class TimeoutHandler : IExceptionHandler
+{
+    public ValueTask<bool> TryHandleAsync(HttpContext ctx, Exception ex, CancellationToken ct)
+    {
+        if (ex is not TimeoutException)
+            return new ValueTask<bool>(false);       // decline; the next handler gets it
+
+        ctx.Response.StatusCode = StatusCodes.Status504GatewayTimeout;
+        return new ValueTask<bool>(true);
+    }
+}
+
+builder.Services.AddExceptionHandler<TimeoutHandler>();
+```
+
+There is a factory overload for handlers with dependencies, and an inline overload for the cases that
+do not earn a type:
+
+```csharp
+builder.Services.AddExceptionHandler((ctx, ex, ct) =>
+{
+    if (ex is not DeviceBusyException)
+        return new ValueTask<bool>(false);
+
+    ctx.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+    return new ValueTask<bool>(true);
+});
+```
+
+Two behaviours worth knowing:
+
+- **A handler that throws is treated as a decline**, and the failure is logged. Replacing the
+  original exception would hide the thing worth seeing.
+- **A response that has already started cannot be handled.** Someone wrote a body and then threw;
+  there is no status code left to change, so the honest outcome is a broken response rather than a
+  plausible-looking one.
+
+## Problem details
+
+`AddProblemDetails()` registers the catch-all at the end of the chain. It maps the exception to a
+status code and writes an RFC 9457 `application/problem+json` body.
+
+```csharp
+builder.Services.AddProblemDetails(o =>
+{
+    o.IncludeExceptionDetails = isDevelopment;
+    o.MapException<EntityNotFoundException>(StatusCodes.Status404NotFound);
+});
+
+var app = builder.Build();
+app.UseProblemDetails();     // for bodiless 4xx/5xx; the exception handler itself needs no wiring
+```
+
+<Aside type="caution">
+Register `AddProblemDetails` **after** any specific `AddExceptionHandler` calls. Handlers are tried in
+registration order, and a catch-all registered first would never let a specific one run.
+</Aside>
+
+A response looks like this:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.5",
+  "title": "Not Found",
+  "status": 404,
+  "instance": "/api/widgets/42",
+  "traceId": "00-8f3c…-01"
+}
+```
+
+`type` is a stable identifier for the *kind* of failure — the thing a client can branch on, which the
+status code alone rarely is. Left unset it points at the RFC section defining the status, which is
+what ASP.NET Core emits, so a client that already recognises those URIs keeps working.
+
+### The default exception mapping
+
+Conservative on purpose: only exceptions that unambiguously describe a **client** mistake become a
+4xx. Reporting a server bug as a client error sends the caller off to fix something that is not
+theirs.
+
+| Exception | Status |
+| --- | --- |
+| `BadHttpRequestException` | Its own `StatusCode` |
+| `ArgumentException`, `FormatException`, `JsonException` | 400 |
+| `UnauthorizedAccessException` | 403 |
+| `KeyNotFoundException` | 404 |
+| `NotImplementedException`, `NotSupportedException` | 501 |
+| `TimeoutException` | 504 |
+| Anything else | 500 |
+
+`MapException<T>(status)` overrides or extends this. Lookup goes exact type first, then base types, so
+mapping a base covers everything under it.
+
+### What is and is not disclosed
+
+- A **4xx** carries the exception message in `detail` — it describes the caller's own mistake.
+- A **5xx** never does.
+- `IncludeExceptionDetails` adds the type, message, stack trace and inner exception under an
+  `exception` extension. Off by default, and it must stay off anywhere untrusted: an exception message
+  routinely carries a file path, a connection string, or the shape of a query.
+- `IncludeTraceId` (on by default) adds the current `Activity` id as `traceId`, so a user-visible
+  error can be matched to a log line.
+- `Customize` is the last chance to change a problem before it is written — add a support id, strip a
+  detail, rewrite a `type` URI to your own documentation.
+
+5xx problems are logged as errors by the handler itself, because a 500 nobody recorded is a 500
+nobody can fix. A cancelled request whose client has already gone is deliberately **not** claimed —
+writing a body to a socket nobody is reading achieves nothing, and claiming it would hide a genuine
+cancellation bug.
+
+## Errors that never threw
+
+Routing's 404 and authentication's 401 are not exceptions, so the handler chain never sees them —
+and a client that gets JSON for one failure and an empty body for the next has to handle both.
+`UseProblemDetails()` adds a middleware that gives *bodiless* error responses the same shape.
+
+It only touches a response that produced nothing: a handler that wrote its own body — even a 404 with
+a message — has said what it meant, and second-guessing it would overwrite a deliberate response. Put
+it early in the pipeline, since it has to wrap whatever produced the status code.
+
+<Aside type="note">
+This is also why the terminal 404 does not flush its own headers. Starting the response there would
+make a 404 the one status no middleware could act on.
+</Aside>
+
+## Returning a problem deliberately
+
+```csharp
+return Results.Problem(
+    StatusCodes.Status409Conflict,
+    detail: "The device is already paired to another account.",
+    type: "https://example.com/problems/already-paired"
+);
+```
+
+For per-field failures, `ValidationProblemDetails` uses the `errors` shape ASP.NET Core produces, so a
+client that already parses that keeps working:
+
+```csharp
+return Results.ValidationProblem(new Dictionary<string, string[]>
+{
+    ["name"] = ["Name is required."],
+    ["port"] = ["Port must be between 1 and 65535."]
+});
+```
+
+`Results.Problem(ProblemDetails)` takes one you built yourself, extensions and all.
+
+## Extensions and AOT
+
+`ProblemDetails.Extensions` is an `object?` bag, and reflecting over it is exactly what this server
+does not do. The writer is hand-rolled on `Utf8JsonWriter`, and the supported value shapes are a
+closed set:
+
+- `string`, `bool` and the numeric types
+- `DateTime`, `DateTimeOffset`, `TimeSpan`, `Guid`, `Uri`
+- a `JsonElement`
+- a sequence of any of those, or a nested dictionary
+
+Anything else is written as its string form. An error body can never be the thing that breaks an AOT
+build, or that throws while reporting a failure.

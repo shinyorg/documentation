@@ -1,0 +1,130 @@
+---
+title: Protocols
+description: HTTP/1.1, HTTP/2 and HTTP/3 — how each is selected, what is implemented, and what deliberately is not
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Everything above the transport is shared. The same routes, binders, middleware, authorization and
+handlers serve every protocol version, because each request mapper turns what arrived into the
+`HttpRequest` the rest of the server already understands.
+
+## Selection is never guessed
+
+| Situation | Protocol |
+| --- | --- |
+| TLS, ALPN agreed `h2` | HTTP/2 |
+| TLS, anything else | HTTP/1.1 |
+| Cleartext, opens with the HTTP/2 connection preface | HTTP/2 |
+| Cleartext, anything else | HTTP/1.1 |
+| QUIC listener | HTTP/3 |
+
+Over TLS the negotiation already happened, and overriding it would break the client's expectations.
+Over cleartext the only legitimate signal is the client opening with the connection preface ("prior
+knowledge", RFC 9113 §3.3), so the first bytes are peeked — not consumed — and compared against it.
+
+<Aside type="note">
+The cleartext sniff decides the moment the bytes diverge from the preface, not once 24 bytes could
+have arrived. Waiting for the full preface would hang every HTTP/1.1 request shorter than it.
+</Aside>
+
+## HTTP/1.1
+
+The default, and what a browser on a phone will use against a local server. Keep-alive, pipelining,
+chunked request and response bodies, and the 101 handover that
+[WebSockets](/httpserver/websockets/) need.
+
+Limits — request line size, header count and total size, body size, keep-alive and header timeouts,
+requests per connection — are on `Options.Limits`. See [Configuration](/httpserver/configuration/).
+
+## HTTP/2
+
+On by default and negotiated per connection, so turning it on cannot break an HTTP/1.1 client.
+
+```csharp
+builder.Configure(o =>
+{
+    o.Http2.Enabled = true;                 // default
+    o.Http2.AllowCleartext = true;          // default — prior-knowledge h2c
+    o.Http2.MaxConcurrentStreams = 100;
+    o.Http2.InitialStreamWindowSize = 96 * 1024;
+    o.Http2.InitialConnectionWindowSize = 1024 * 1024;
+    o.Http2.MaxFrameSize = 16 * 1024;
+    o.Http2.MaxHeaderListSize = 32 * 1024;
+});
+```
+
+A full server-side stack written on the same primitives as everything else:
+
+- **HPACK** with static and dynamic tables and the RFC 7541 Huffman code. The decoder keeps a dynamic
+  table because the peer's indices depend on it; the encoder deliberately keeps none, since an
+  encoder table that drifts from the peer's produces headers that decode to something else entirely.
+- **Frames and streams** — DATA, HEADERS, CONTINUATION, SETTINGS, PING, WINDOW_UPDATE, RST_STREAM,
+  GOAWAY, PRIORITY. One read loop owns the socket and fans frames out; each stream runs the pipeline
+  concurrently, and all writes funnel through a serializing frame writer.
+- **Flow control** per stream and per connection, in both directions, with windows topped up in
+  chunks rather than per frame.
+
+The connection window is larger than one stream's, so several concurrent uploads do not have to take
+turns.
+
+**Not implemented:** server push (deprecated and gone from browsers), trailers, and the `h2c`
+`Upgrade:` handshake — prior knowledge only, which is what every real h2c client actually uses. The
+HPACK encoder also does not Huffman-code its output: emitting raw literals is always legal and costs
+a few bytes per response, while the decoder handles Huffman because every real client sends it.
+
+## HTTP/3
+
+QUIC over UDP, on its own listener — HTTP/3 does not run on TCP at all.
+
+```csharp
+var app = builder.Build();
+
+// Before StartAsync: advertising Alt-Svc adds middleware, and the pipeline is
+// composed once the server starts serving.
+await using var h3 = await app.ListenHttp3Async(o =>
+{
+    o.Port = 5001;
+    o.Certificate = certificate;
+});
+
+await app.StartAsync();
+```
+
+`ListenHttp3Async` binds the QUIC endpoint and adds the `Alt-Svc` header to the TCP listener's
+responses. A client will not use HTTP/3 without being told it exists, and there is no other discovery
+mechanism.
+
+| Option | Default |
+| --- | --- |
+| `Address` / `Port` | Loopback / 5001 |
+| `Certificate` / `CertificateSelector` | **required** — QUIC has no plaintext mode |
+| `MaxBidirectionalStreams` | 100 (each is one in-flight request) |
+| `MaxUnidirectionalStreams` | 10 |
+| `MaxFieldSectionSize` | 32 KB |
+| `IdleTimeout` | 130 seconds |
+| `AltSvc` | Built from `Port` — `h3=":5001"; ma=86400` |
+
+The implementation covers varints (RFC 9000 §16), frames (RFC 9114) and QPACK (RFC 9204) with the
+full 99-entry static table. **The QPACK dynamic table is deliberately refused** — the server
+announces a capacity of zero, which is spec-legal and removes the entire class of head-of-line bugs
+that come with encoder streams, insert-count tracking and blocked request streams. Responses use
+static references where they exist and literals otherwise, so the encoder stream stays empty and
+nothing can ever block waiting for a table to catch up.
+
+<Aside type="caution" title="Platform support, and what has actually been verified">
+QUIC needs msquic, which .NET ships on Windows and Linux and **not** on macOS. Check
+`Http3Listener.IsSupported` before binding — the failure without it is a type initializer exception
+from somewhere unhelpful.
+
+The codecs are tested exhaustively (RFC 9000's own worked examples, the QPACK static table against
+the RFC, round trips, and every malformed-input path), but the wire protocol has not been run against
+a real HTTP/3 client. Server push and Extended CONNECT are not implemented.
+</Aside>
+
+## Which one you actually get
+
+On a device, almost always HTTP/1.1: a browser will not speak HTTP/2 without TLS, and a
+device-local server usually serves cleartext on loopback. HTTP/2 shows up when the app's own
+`HttpClient` asks for it, when a gRPC-style client connects, or once you put a certificate on the
+network-facing endpoint. See [TLS & Certificates](/httpserver/tls/).

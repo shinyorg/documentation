@@ -1,0 +1,130 @@
+---
+title: Sessions
+description: Per-visitor state that outlives a request, injected as a scoped service, with an encrypted session cookie
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+builder.Services.AddSessions(o =>
+{
+    o.Protector = new TicketProtector(keyBytes);
+    o.IdleTimeout = TimeSpan.FromMinutes(30);
+});
+
+var app = builder.Build();
+app.UseSessions();
+```
+
+`ISession` is registered as **scoped**, so a handler or endpoint class takes one in its constructor
+and never reaches for `HttpContext`:
+
+```csharp
+[Route("/cart")]
+public class CartEndpoints(ISession session)
+{
+    [Post("/{sku}")]
+    public async Task<IActionResult> Add(string sku, CancellationToken ct)
+    {
+        var count = session.GetInt32("items") ?? 0;
+        session.SetInt32("items", count + 1);
+
+        await session.CommitAsync(ct);
+        return new NoContentResult();
+    }
+}
+```
+
+`ctx.Session` is there too, for middleware — which has a context and no container scope of its own.
+
+## Reading and writing
+
+`ISession` stores `byte[]`, and the extensions cover the usual types without hand-rolling the
+conversion: `GetString`/`SetString`, `GetInt32`, `GetInt64`, `GetBoolean`, `GetGuid`,
+`GetDateTimeOffset`, `GetDouble` (invariant-culture, so a session written on one machine reads the
+same on another).
+
+| Member | Notes |
+| --- | --- |
+| `Id` | Stable across requests; never sent to the client in the clear |
+| `IsAvailable` | True once loaded — reading or writing anything loads it |
+| `Keys` | Loads the session |
+| `LoadAsync` / `CommitAsync` | Explicit control |
+| `TryGetValue` / `Set` / `Remove` / `Clear` | `Clear` empties without ending it — the id and cookie stay |
+
+Committing also happens automatically when the response completes. Call `CommitAsync` explicitly when
+the handler is about to do something that depends on the write having landed — redirecting to a page
+that reads it back, for instance.
+
+## Options
+
+| Property | Default |
+| --- | --- |
+| `Protector` | **required** |
+| `IdleTimeout` | 20 minutes — every request that loads the session restarts the clock |
+| `CookieName` | `.shiny.session` |
+| `CookiePath` / `CookieDomain` | `/` / none |
+| `HttpOnly` | `true` |
+| `SecurePolicy` | `SameAsRequest` |
+| `SameSite` | `Lax` |
+
+The cookie deliberately has no `Expires`: a session cookie dies with the browser session, and the
+store's idle timeout is what actually bounds its life. `SameSite=Lax` means the cookie rides top-level
+navigations but not cross-site posts, which is most of CSRF gone without an anti-forgery token.
+
+### The protector
+
+The session id travels in a cookie protected by the same `TicketProtector`
+[cookie authentication](/httpserver/authentication/) uses — **encrypted**, not merely signed, because
+an id read from a log or a proxy can be replayed. Session fixation is the oldest trick there is.
+
+```csharp
+var key = TicketProtector.CreateKey();       // 32 random bytes — store these
+o.Protector = new TicketProtector(key);
+
+// during a key rotation, old cookies keep working:
+o.Protector = new TicketProtector(newKey, oldKey);
+```
+
+`TicketProtector.FromSecret("…")` derives one from a passphrase. It is a convenience, not a
+substitute: the strength of everything here is the strength of that string.
+
+The id itself is 256 bits from a cryptographic source. A guessable session id is the same failure as a
+guessable password, with none of the warning signs.
+
+## Everything is lazy
+
+The store is not touched until something is read or written, and **no cookie is issued for a visitor
+whose session stayed empty** — otherwise every request for a static file would mint a session nobody
+asked for.
+
+## Storage
+
+`ISessionStore` is pluggable, with an in-memory default:
+
+```csharp
+builder.Services.AddSessions(
+    sp => new RedisSessionStore(sp.GetRequiredService<IConnectionMultiplexer>()),
+    o => o.Protector = new TicketProtector(key)
+);
+```
+
+Sessions are lost on a restart, which is the honest trade for having no dependency — anything that
+must survive one belongs in a database. `InMemorySessionStore` has a `Capacity` (10,000 by default)
+and a `Prune()` for expired entries.
+
+## Two details worth knowing
+
+**The commit runs in a `finally`.** State written before a handler threw is still saved — it is state
+the user already caused.
+
+<Aside type="caution">
+**A brand-new session's cookie does not survive an unhandled exception.** The connection resets the
+response to write its 500, which discards every header middleware staged. The data is saved but
+orphaned; an established session is unaffected.
+</Aside>
+
+## Ordering
+
+Put `UseSessions()` before anything that reads a session, and after
+[authentication](/httpserver/authentication/) if a handler keys session state by user.

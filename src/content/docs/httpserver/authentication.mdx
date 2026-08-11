@@ -1,0 +1,215 @@
+---
+title: Authentication
+description: Identifying the caller — Basic, API key and cookie schemes, and writing your own
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An authentication handler answers *"who is this?"* and never *"may they?"*. It publishes a
+`ClaimsPrincipal` on `ctx.User`; [authorization](/httpserver/authorization/) decides what to do about
+it.
+
+```csharp
+builder.Services
+    .AddAuthentication()
+    .AddBasic(o => o.AddUser("ada", password, "admin"));
+
+var app = builder.Build();
+app.UseAuthentication();      // before routing — identity does not depend on the endpoint
+```
+
+An unauthenticated request gets an **anonymous principal rather than null**, so
+`ctx.User.Identity?.IsAuthenticated` is always a safe question to ask. `ctx.Authentication` carries
+the scheme that ran and, if it failed, why.
+
+Handlers are tried in registration order and the first to recognise a request wins. A handler that
+finds credentials and **rejects** them stops the chain — the caller meant to authenticate and got it
+wrong, and letting a later handler paper over that would hide the mistake.
+
+<Aside type="note">
+There is no per-endpoint scheme selection. Register the schemes an app accepts, in the order it
+should try them.
+</Aside>
+
+## Basic
+
+RFC 7617, for the case where the shortest path to a password prompt is the right one: every browser
+and every HTTP client already speaks it, with no token endpoint and no session to manage.
+
+```csharp
+builder.Services
+    .AddAuthentication()
+    .AddBasic(o =>
+    {
+        o.Realm = "Device";
+        o.AddUser("ada", password, "admin");
+    });
+```
+
+For a real account store — which is what a device with an editable password on a settings screen
+needs:
+
+```csharp
+public sealed class UserStore(AppDb db) : IBasicCredentialValidator
+{
+    public async ValueTask<ClaimsPrincipal?> ValidateAsync(string username, string password, CancellationToken ct)
+        => await db.VerifyAsync(username, password, ct) is { } user ? user.ToPrincipal() : null;
+}
+
+builder.Services.AddAuthentication().AddBasic<UserStore>(o => o.Realm = "Device");
+```
+
+`AddBasic<TValidator>` registers the validator against `IBasicCredentialValidator` **and** against
+itself, so the app can inject its own store directly — a settings screen that changes the password
+needs the same instance. There is a factory overload that avoids reflective activation entirely.
+
+Two things it does that a naive implementation does not:
+
+**It refuses to run over an unencrypted connection.** Basic sends the password on every request,
+base64-encoded, which is spelling rather than encryption. Plain HTTP from a real network is rejected
+outright; TLS, a tunnel and loopback are allowed. `AllowInsecureTransport` overrides that, and should
+not.
+
+**It implements the challenge itself.** The pipeline's generic challenge names whatever scheme ran
+last, and a browser handed anything other than `Basic` shows the user no prompt and no way in.
+
+Passwords are not kept — only a hash of `username:password`, compared in fixed time with **every**
+entry checked even after a match, so timing says nothing about whether an account exists. A wrong
+username and a wrong password produce the same answer for the same reason.
+
+## API keys
+
+The scheme for a device, a script or a webhook — anything with no user to log in.
+
+```csharp
+builder.Services
+    .AddAuthentication()
+    .AddApiKey(o =>
+    {
+        o.HeaderName = "X-API-Key";              // default
+        o.AllowAuthorizationHeader = true;       // Authorization: ApiKey <key>
+        o.AddKey(key, name: "ci-pipeline", "deploy");
+    });
+```
+
+Or against a store:
+
+```csharp
+o.ValidateAsync = async (key, ct) => await keys.LookupAsync(key, ct);
+```
+
+Only SHA-256 hashes are kept, never the keys: a dumped options object hands over nothing usable, and
+hashing equalises length, which is what makes a fixed-time comparison meaningful. Every entry is
+checked even after a match, so response time does not leak a key's position in the list. A key maps
+to a named principal with roles, so authorization works on it exactly as on a JWT.
+
+<Aside type="caution">
+`QueryParameterName` accepts the key in the query string. It is off by default and it is documented as
+a bad idea: query strings end up in server logs, proxy logs, browser history and `Referer` headers.
+Use it only when a client genuinely cannot set a header.
+</Aside>
+
+## Cookies
+
+The scheme a browser wants.
+
+```csharp
+builder.Services
+    .AddAuthentication()
+    .AddCookie(o =>
+    {
+        o.Protector = new TicketProtector(key);
+        o.LoginPath = "/login";
+        o.ExpireTimeSpan = TimeSpan.FromDays(14);
+    });
+```
+
+Signing in and out from a handler:
+
+```csharp
+app.OnPost("/login", async ctx =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+
+    if (users.Verify(form.GetFirst("username"), form.GetFirst("password")) is not { } user)
+        return Results.Unauthorized();
+
+    await ctx.SignInAsync(user.ToPrincipal());
+    return Results.Redirect("/");
+});
+
+app.OnPost("/logout", async ctx =>
+{
+    await ctx.SignOutAsync();
+    return Results.Redirect("/");
+});
+```
+
+| Option | Default |
+| --- | --- |
+| `Protector` | **required** |
+| `CookieName` | `.shiny.auth` |
+| `ExpireTimeSpan` | 14 days |
+| `SlidingExpiration` | `true` |
+| `HttpOnly` | `true` |
+| `SecurePolicy` | `SameAsRequest` |
+| `SameSite` | `Lax` |
+| `LoginPath` / `AccessDeniedPath` | `null` |
+| `ReturnUrlParameter` | `returnUrl` |
+| `ValidateTicketAsync` | `null` |
+
+The ticket is **AES-GCM encrypted rather than merely signed** — a cookie lives on a machine you do
+not control and carries claims — and keyed by a short stable key id, so a rotation can add a new
+primary key while cookies issued under the old one keep working until they expire:
+
+```csharp
+o.Protector = new TicketProtector(newKey, oldKey);
+```
+
+Claims are serialized by hand into a length-prefixed binary format. Not for speed: it makes the
+parser total, so a truncated or tampered payload fails as a parse error rather than an exception from
+somewhere deeper.
+
+`SlidingExpiration` reissues at the halfway mark rather than on every request, because a `Set-Cookie`
+on every response breaks shared caching for nothing.
+
+Denial is answered per-caller: a browser navigation gets a redirect to `LoginPath` with the original
+URL attached as `returnUrl`, an API client gets its 401.
+
+`ValidateTicketAsync` runs on every request with the decrypted ticket, which is the hook for checking
+a user that has since been disabled — the claims travel in the cookie, so a ticket cannot otherwise be
+revoked before it expires.
+
+## JWT
+
+`Shiny.Net.HttpServer.Jwt` is a separate package — see [JWT](/httpserver/jwt/).
+
+## Writing a scheme
+
+```csharp
+public sealed class DeviceCertificateHandler(IDeviceRegistry devices) : IAuthenticationHandler
+{
+    public string Scheme => "DeviceCert";
+
+    public async ValueTask<AuthenticateResult> AuthenticateAsync(HttpContext context)
+    {
+        if (context.Connection.ClientCertificate is not { } certificate)
+            return AuthenticateResult.NoResult();          // anonymous; try the next handler
+
+        return await devices.FindAsync(certificate.Thumbprint) is { } device
+            ? AuthenticateResult.Success(device.ToPrincipal())
+            : AuthenticateResult.Fail("unknown device certificate");
+    }
+}
+
+builder.Services.AddAuthentication().AddScheme<DeviceCertificateHandler>();
+```
+
+`NoResult()` and `Fail(reason)` are different answers and the difference matters: no credentials at
+all is an anonymous request, while bad credentials is a failure worth reporting in the
+`WWW-Authenticate` challenge.
+
+Implement `IAuthenticationChallenge` as well if a 401 is not the useful answer for your callers.
+
+There are factory overloads of `AddScheme` for handlers with dependencies, which also avoid the
+container activating your type by reflection.

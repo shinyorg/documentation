@@ -1,0 +1,137 @@
+---
+title: OpenAPI
+description: An OpenAPI 3.0.3 document built entirely from compile-time metadata — no reflection, no document object model
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.MapOpenApi(configure: o =>
+{
+    o.Title = "Widgets";
+    o.Version = "1.0.0";
+    o.AddBearerAuthentication();
+});
+```
+
+`/openapi.json` now serves an OpenAPI 3.0.3 document. It is built on the first request and cached —
+the route table is frozen by the time anything can ask for it — and the endpoint excludes itself from
+what it publishes.
+
+To write it out at build or test time instead of serving it:
+
+```csharp
+var json = OpenApiDocumentBuilder.BuildJson(app);
+File.WriteAllText("openapi.json", json);
+```
+
+## Where the document comes from
+
+Two sources, both compile-time.
+
+**The route table.** Generated endpoints carry an `ApiOperation` the generator emitted from the
+analysis it had already done to write the binder: parameter names and sources, the body type, the
+return type, and the `<summary>` from the method's doc comment. Raw routes get path parameters
+inferred from their template, including the constraint's type.
+
+**Your `JsonSerializerContext`.** Schemas are read off `JsonTypeInfo` rather than
+`Type.GetProperties()`, so property names go through the same naming policy the serializer uses — the
+document cannot describe a payload the server would not actually produce. It also means schema
+generation is reflection-free and survives AOT.
+
+The whole thing is written with `Utf8JsonWriter` straight to bytes: no document object model to keep
+in sync with the spec, and nothing to register in order to serialize it.
+
+## Describing generated endpoints
+
+```csharp
+/// <summary>Fetches a single widget by id.</summary>
+[Get("/{id:int}")]
+[Produces(200, typeof(Widget))]
+[Produces(404, Description = "No widget has that id")]
+public async Task<IActionResult> GetWidget(int id, CancellationToken ct) => …;
+```
+
+| Attribute | Effect |
+| --- | --- |
+| `[Produces(status, type?)]` | Declares a response. Also takes `Description` and `ContentType` |
+| `[ApiTags("…")]` | Groups operations. On a class it covers every endpoint; on a method it replaces the class's. Without it the class name is the tag |
+| `[ApiExclude]` | Omits a class or method from the document — the route still works |
+
+`[Produces]` matters most for a method returning `IActionResult`, which has deliberately hidden its
+status codes; that is the point of the abstraction. When the generator *can* see the return type, it
+infers a 200 from it.
+
+The `<summary>` doc comment becomes the operation summary, so the documentation you already write for
+your own team is the documentation the API publishes.
+
+## Describing raw routes
+
+`Describe` applies to the most recently mapped route:
+
+```csharp
+app.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"))
+   .Describe(o =>
+   {
+       o.Summary = "Liveness probe";
+       o.Tags.Add("ops");
+       o.Responses.Add(new ApiResponse { StatusCode = 200, Type = typeof(string), ContentType = "text/plain" });
+   });
+```
+
+There are shorthands on the route-builder form used by modules and groups: `WithSummary`, `WithTags`
+and `ExcludeFromDescription`.
+
+`ApiOperation` carries `Summary`, `Description`, `OperationId`, `Deprecated`, `Exclude`,
+`RequiresAuthorization`, `Tags`, `Parameters`, `RequestBody` and `Responses`.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Title` / `Version` / `Description` | `API`, `1.0.0` | The `info` block |
+| `Servers` | empty | Left empty, no `servers` block is written — tooling reads that as "relative to wherever you fetched this from", which is usually right for a server whose address is a tunnel URL decided at runtime |
+| `Indented` | `true` | Documents are read by people at least as often as by tools |
+| `IncludeUndescribedRoutes` | `true` | Set false to publish only what was described deliberately |
+| `SecuritySchemes` | empty | Keyed by the name operations reference |
+| `DefaultSecurityScheme` | `null` | Applied to operations that require authorization |
+| `ConfigureOperation` | `null` | A convention applied to every endpoint before it is written |
+
+### Security
+
+```csharp
+o.AddBearerAuthentication();
+```
+
+Adds a `Bearer`/JWT scheme and makes it the default, so every endpoint carrying `[Authorize]` is
+documented as needing a token — and the "Authorize" button in whatever UI reads this actually does
+something. `ApiSecurityScheme` covers the `http`, `apiKey` and `openIdConnect` shapes if you need a
+different one.
+
+### Conventions
+
+```csharp
+o.ConfigureOperation = (operation, endpoint) =>
+{
+    if (operation.RequiresAuthorization)
+        operation.Responses.Add(new ApiResponse { StatusCode = 401 });
+};
+```
+
+## Limits
+
+- **OpenAPI 3.0.3 only.**
+- **A type only gets a schema if it is in a registered `JsonSerializerContext`** — the same
+  requirement as returning it from an endpoint, and the generator warns (SWS006) when it is not met.
+- **A catch-all token is documented as an ordinary path parameter**, since OpenAPI cannot express a
+  multi-segment one.
+- **A trailing optional route parameter becomes two paths**, because OpenAPI has no way to say a path
+  segment is optional and the route genuinely matches two URLs.
+
+<Aside type="note" title="No UI is bundled">
+The document is served; pointing Swagger UI or Scalar at it is up to the host. Embedding one would
+mean shipping a megabyte of someone else's JavaScript in a library whose whole premise is being
+dependency-light — and on a device, that megabyte is the app's download size.
+
+If you want one anyway, serve it as [static files](/httpserver/static-files/) alongside the document.
+</Aside>

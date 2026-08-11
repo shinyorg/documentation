@@ -1,0 +1,87 @@
+---
+title: CORS
+description: Cross-origin policies, preflights answered before routing, and per-endpoint overrides
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseCors(p => p.WithOrigins("https://app.example.com").AllowAnyHeader().AllowAnyMethod());
+```
+
+No container needed. For named policies, register them and apply per endpoint:
+
+```csharp
+builder.Services.AddCors(o =>
+{
+    o.AddDefaultPolicy(p => p.WithOrigins("https://app.example.com").AllowAnyHeader().AllowAnyMethod());
+    o.AddPolicy("public", p => p.AllowAnyOrigin().WithMethods("GET"));
+});
+
+var app = builder.Build();
+app.UseCors();
+
+app.OnGet("/status", ctx => …).RequireCors("public");
+app.OnGet("/internal", ctx => …).DisableCors();
+```
+
+On generated endpoints the same thing is an attribute, emitted as metadata at compile time:
+
+```csharp
+[Route("/api")]
+[EnableCors("public")]
+public class PublicEndpoints
+{
+    [Get("/status")] public string Status() => "ok";
+    [Get("/internal")] [DisableCors] public string Internal() => …;
+}
+```
+
+A method's attribute **replaces** the class's, because a route has exactly one CORS policy — and
+`Disable` anywhere wins over `Enable`.
+
+## Building a policy
+
+| Method | Effect |
+| --- | --- |
+| `WithOrigins(…)` | Named origins. The actual origin is echoed back |
+| `AllowAnyOrigin()` | `*` |
+| `SetIsOriginAllowed(predicate)` | Decide per request |
+| `WithMethods(…)` / `AllowAnyMethod()` | |
+| `WithHeaders(…)` / `AllowAnyHeader()` | Request headers the browser may send |
+| `WithExposedHeaders(…)` | Response headers script may read beyond the safelisted ones |
+| `AllowCredentials()` / `DisallowCredentials()` | Cookies and `Authorization` |
+| `SetPreflightMaxAge(TimeSpan)` | How long a browser may cache the preflight answer |
+
+<Aside type="caution">
+A policy asking for `AllowAnyOrigin()` **and** `AllowCredentials()` throws when it is built, rather
+than producing headers no browser will accept. The combination is meaningless: with credentials, the
+wildcard is not allowed by the specification.
+</Aside>
+
+## What actually goes on the response
+
+The wildcard is only emitted when the policy really does not care who is asking. With credentials, or
+with named origins, the **actual origin is echoed** and `Vary: Origin` is appended — appended, not
+set, because a handler's own `Vary` is not something to trample. Response headers go on from an
+`OnStarting` callback for the same reason.
+
+Preflights are answered by the middleware and never forwarded to a handler.
+
+## Why it runs before routing
+
+`UseCors()` is ordinary middleware and belongs early — before authentication and before routing.
+
+A CORS preflight is an `OPTIONS` to a path that only answers `GET`, so the router would 405 it and
+the real request would never be sent. And a browser sends a preflight **without credentials**, so an
+authentication middleware ahead of CORS would see an anonymous request and 401 the browser's
+question.
+
+Per-endpoint policies still work, because the middleware asks the router which endpoint the request
+*would* reach — for a preflight, the one its `Access-Control-Request-Method` names.
+
+<Aside type="danger" title="CORS is not a defence">
+The headers tell a *browser* what script may read. `curl` and every non-browser client ignore them
+entirely. CORS is never a substitute for [authorization](/httpserver/authorization/) — if an endpoint
+should not be reachable by anyone, say so with a policy, not with an origin list.
+</Aside>

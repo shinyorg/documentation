@@ -1,0 +1,192 @@
+---
+title: JWT
+description: Creating and validating JSON Web Tokens on in-box crypto — no Microsoft.IdentityModel, nothing for the trimmer to chase
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Net.HttpServer.Jwt" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Jwt
+```
+
+Written on `System.Security.Cryptography` and `Utf8JsonWriter`/`Utf8JsonReader`. No
+`Microsoft.IdentityModel`, no package dependency, nothing for the trimmer to chase. HS256/384/512,
+RS256/384/512 and ES256/384/512, for both creating and validating.
+
+## Registration
+
+```csharp
+builder.Services
+    .AddAuthentication()
+    .AddJwtBearer(o =>
+    {
+        o.Issuer = "shiny";
+        o.Audience = "shiny-app";
+        o.SigningKey = JwtSigningKey.FromSecret(secret);
+    });
+
+var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+```
+
+`AddJwtBearer` registers a `JwtTokenValidator` **and** a `JwtTokenGenerator` built from the same
+configuration, so a login endpoint cannot issue tokens the server will then reject — an easy and
+miserable bug when the two are configured separately and drift.
+
+## Issuing a token
+
+```csharp
+[Route("/api/auth")]
+public class AuthEndpoints(JwtTokenGenerator tokens, IUserDirectory users)
+{
+    [Post("/login")]
+    [AllowAnonymous]
+    public IActionResult Login(LoginRequest request)
+    {
+        if (users.Verify(request.Username, request.Password) is not { } user)
+            return new UnauthorizedResult();
+
+        var descriptor = new JwtTokenDescriptor
+        {
+            Issuer = "shiny",
+            Audiences = { "shiny-app" },
+            Subject = user.Username,
+            Lifetime = TimeSpan.FromHours(1)
+        };
+
+        descriptor.AddRoles(user.Roles);
+        descriptor.AddClaim(JwtClaimNames.Name, user.DisplayName);
+
+        return new OkObjectResult(new TokenResponse(tokens.Create(descriptor), 3600));
+    }
+}
+```
+
+`JwtTokenDescriptor` has properties for the registered claims — `Issuer`, `Audiences`, `Subject`,
+`Lifetime`/`ExpiresAt`, `NotBefore`, `IssuedAt`, `TokenId` — and a `Claims` list for everything else.
+Repeating a claim type produces a JSON array, which is how roles usually travel.
+
+Reading them back on the way in:
+
+```csharp
+[Get("/me")]
+[Authorize]
+public Identity Me(HttpContext context) => new(
+    context.User.FindFirst(JwtClaimNames.Subject)?.Value ?? "?",
+    context.User.Identity?.Name ?? "?",
+    [.. context.User.FindAll(JwtClaimNames.Role).Select(c => c.Value)]
+);
+```
+
+<Aside type="note">
+Claim names are the short JWT ones (`sub`, `role`, `name`), not the long
+`schemas.xmlsoap.org/…` URIs .NET historically mapped them to. A token written here and read by any
+other JWT library says the same thing, and `IsInRole` is wired to `role` explicitly rather than
+relying on a mapping table.
+</Aside>
+
+## Keys
+
+```csharp
+JwtSigningKey.CreateSecret();                       // a fresh random HMAC secret, correct length
+JwtSigningKey.FromSecret(bytes, JwtAlgorithm.HS256);
+JwtSigningKey.FromSecret("a passphrase");           // UTF-8 convenience
+JwtSigningKey.FromRsa(rsa, JwtAlgorithm.RS256);     // public-only verifies; private also signs
+JwtSigningKey.FromEcdsa(ecdsa, JwtAlgorithm.ES256);
+```
+
+An HMAC secret must be at least as long as the hash it feeds — 32 bytes for HS256 — because a shorter
+one silently weakens the signature to its own length. `FromSecret` refuses one that is too short
+rather than accepting it quietly.
+
+`KeyId` sets a `kid`, so a validator holding several keys can pick the right one.
+
+<Aside type="danger">
+A signing key generated at startup invalidates every token already issued when the process restarts.
+Load it from configuration, a keychain, or the platform's secure storage — the samples generate one
+per run precisely because they are samples.
+</Aside>
+
+## Validation
+
+`Issuer`, `Audience` and `SigningKey` are shorthand folded into `JwtValidationParameters`, which is
+there for the rest:
+
+| Property | Default |
+| --- | --- |
+| `SigningKeys` | from `SigningKey` — several supports rotation |
+| `ValidIssuers` / `ValidAudiences` | from `Issuer` / `Audience` |
+| `ValidateSignature` | `true` |
+| `ValidateIssuer` | `true` |
+| `ValidateAudience` | `true` |
+| `ValidateLifetime` | `true` |
+| `RequireExpiration` | `true` — a token that never expires is rarely intended |
+| `ClockSkew` | 2 minutes |
+| `NameClaimType` / `RoleClaimType` | `name` / `role` |
+
+Every "validate X" flag defaults to true, and turning one off is a decision someone has to type. The
+opposite arrangement is how tokens end up being accepted from the wrong issuer for a year before
+anyone notices — and registration **throws** if you enable a check without configuring what it should
+accept:
+
+```
+Set Issuer, or turn issuer validation off deliberately with Validation.ValidateIssuer = false.
+```
+
+Rotation is a second key:
+
+```csharp
+o.SigningKey = newKey;
+o.Validation.AddSigningKey(previousKey);   // still accepted until those tokens expire
+```
+
+## What it deliberately gets right
+
+The two classic JWT holes are closed and covered by tests:
+
+- **`alg: none` never reaches a key.**
+- **The algorithm comes from the configured key, not from the token's own header**, so an RS256
+  server cannot be talked into verifying an HS256 token by handing its public key to an HMAC verifier
+  as if it were a shared secret.
+
+Beyond those: signature comparison is fixed-time, ECDSA signatures use the JWS raw `r||s` form rather
+than DER (a DER-encoded signature is the classic reason an ES256 token is rejected by every other
+library), and validation fails closed — an empty issuer allow-list rejects everything rather than
+accepting anything.
+
+## Using the pieces directly
+
+`JwtTokenGenerator` and `JwtTokenValidator` work without the HTTP server at all, which is useful for
+tests and for a client that needs to inspect a token:
+
+```csharp
+var generator = new JwtTokenGenerator(key);
+var token = generator.Create(descriptor);
+
+var validator = new JwtTokenValidator(parameters);
+var result = validator.Validate(token);
+
+if (result.IsValid)
+    Console.WriteLine(result.Principal!.Identity!.Name);
+else
+    Console.WriteLine(result.Error);
+```
+
+Both take an optional `TimeProvider`, so lifetime tests do not have to sleep.
+
+## Limits
+
+- **JWS only** — no JWE (encrypted tokens).
+- **No JWKS endpoint or key discovery.** Keys are configured, not fetched.
+- **No refresh-token flow and no revocation list.** A token is valid until it expires; keep lifetimes
+  short and set a `jti` if you intend to build revocation on top.
+
+## Documenting it
+
+`o.AddBearerAuthentication()` on the [OpenAPI](/httpserver/openapi/) options documents every
+`[Authorize]` endpoint as needing a token, and makes the "Authorize" button in whatever UI reads the
+document actually do something.

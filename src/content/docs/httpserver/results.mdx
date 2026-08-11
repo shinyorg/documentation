@@ -1,0 +1,185 @@
+---
+title: Results & JSON
+description: Returning responses — Results.*, the MVC-shaped IActionResult types, reflection-free JSON, and content negotiation
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Two spellings, one set of objects
+
+`Results.NotFound()` and `new NotFoundResult()` are the same response written two ways — for the
+bodiless results, literally the same object. `IActionResult` derives from `IResult`, so both styles
+mix freely in one app, and the two spellings of a JSON response go through the same metadata and
+produce the same bytes.
+
+```csharp
+// functional
+app.OnGet("/widgets/{id:int}", ctx => store.Find(id) is { } w ? Results.Ok(w) : Results.NotFound());
+
+// MVC-shaped, which reads better when the method is a typed endpoint
+[Get("/{id:int}")]
+public async Task<IActionResult> GetWidget(int id)
+    => await store.FindAsync(id) is { } w ? new OkObjectResult(w) : new NotFoundResult();
+```
+
+| `Results.…` | MVC-shaped equivalent | Response |
+| --- | --- | --- |
+| `Ok()` | `OkResult` | 200, no body |
+| `Ok(value)` | `OkObjectResult` | 200 + JSON (or text, for a `string`) |
+| `Created(location)` / `Created(location, value)` | `CreatedResult` | 201 + `Location` |
+| `NoContent()` | `NoContentResult` | 204 |
+| `BadRequest()` / `BadRequest(message)` | `BadRequestResult` / `ContentResult` | 400 |
+| `Unauthorized()` | `UnauthorizedResult` | 401 |
+| `Forbidden()` | `ForbidResult` | 403 |
+| `NotFound()` / `NotFound(value)` | `NotFoundResult` / `NotFoundObjectResult` | 404 |
+| `Conflict()` | `ConflictResult` | 409 |
+| `UnprocessableEntity()` | `UnprocessableEntityResult` | 422 |
+| `StatusCode(n)` | `StatusCodeResult` | Any status, no body |
+| `Text(...)` / `Content(...)` | `ContentResult` | A literal body with a content type |
+| `Bytes(...)` | `FileContentResult` | Bytes already in memory |
+| `Stream(...)` / `File(path)` | `FileStreamResult` | A streamed body; the stream is disposed for you |
+| `Redirect(location, permanent, preserveMethod)` | `RedirectResult` | 301/302/307/308 |
+| `Json(value, …)` | `JsonResult` | JSON at an explicit status |
+| `Negotiate(value)` | `NegotiatedResult` | Chosen from `Accept` |
+| `Problem(...)` / `ValidationProblem(...)` | `ProblemResult` | RFC 9457 `application/problem+json` |
+| `ServerSentEvents(...)` | — | A `text/event-stream` that stays open |
+
+`Redirect` picks 308/301 when permanent and 307/302 otherwise, preserving the method when asked.
+
+## JSON without reflection
+
+This is the part that keeps the server AOT-clean, and there are two paths. Both are reflection-free.
+
+**Pass the metadata directly.** The most explicit thing you can write — the compiler sees it, nothing
+is discovered at runtime:
+
+```csharp
+return Results.Ok(widget, AppJson.Default.Widget);
+```
+
+**Let the registry find it.** The app registers a `JsonSerializerContext` once, and every JSON result
+looks the type up in it:
+
+```csharp
+[JsonSerializable(typeof(Widget))]
+[JsonSerializable(typeof(IReadOnlyList<Widget>))]
+public partial class AppJson : JsonSerializerContext;
+
+// somewhere at startup — or automatically, if you use the endpoint generator
+JsonTypeInfoRegistry.Register(AppJson.Default);
+
+return Results.Ok(widget);          // finds Widget in the registry
+```
+
+If you reference `Shiny.Net.HttpServer.SourceGenerators`, that registration is emitted for you as a
+module initializer, and any endpoint type your context does not cover is a build warning (SWS006)
+rather than a runtime failure.
+
+Metadata is returned from the owning context rather than rebuilt against fresh options, so
+`Results.Ok(widget)` and `Results.Ok(widget, AppJson.Default.Widget)` produce **byte-identical**
+output. Two spellings of the same intent must not disagree about property casing.
+
+A type with no metadata throws an exception that names it and the fix:
+
+```
+No JSON metadata is registered for 'MyApp.Widget'. Add [JsonSerializable(typeof(Widget))] to a
+JsonSerializerContext in your app; …
+```
+
+<Aside type="caution" title="The reflection overload">
+`Results.Json<T>(value, JsonSerializerOptions?)` still exists for apps that are not published trimmed
+or AOT, and is annotated `[RequiresUnreferencedCode]`/`[RequiresDynamicCode]` — so an AOT build has
+to reach for it deliberately and the analyzer says so.
+</Aside>
+
+### Strings, `null` and derived types
+
+- `ObjectResult` sends a `string` as `text/plain`. Set `SerializeStringsAsJson = true`, or use
+  `JsonResult`, to force a JSON string.
+- A `null` value is the status code with `Content-Length: 0`, not the four bytes `null`.
+- `Results.Ok(value)` looks up the **runtime** type first, so a derived instance returned as its base
+  serializes with all of its own properties.
+
+## Reading JSON
+
+From a raw handler:
+
+```csharp
+app.OnPost("/notes", async ctx =>
+{
+    var note = await ctx.Request.ReadJsonAsync(AppJson.Default.NewNote);
+
+    return note is null ? Results.BadRequest() : Results.Created($"/notes/{note.Id}", note);
+});
+```
+
+There is also a registry-backed `ReadJsonAsync<T>()` with no argument. Both return `null` when the
+body is absent, is not JSON, or deserializes to null — malformed JSON is the caller's mistake, so it
+comes back as `null` for the handler to turn into a 400 rather than an exception that would become a
+500 about a server fault that did not happen.
+
+Typed endpoints get all of this through parameter binding; see
+[Typed Endpoints](/httpserver/endpoints/).
+
+## Content negotiation
+
+`Results.Negotiate(value)` picks a representation from the request's `Accept` header instead of
+always writing JSON — worth it when the same endpoint serves a browser, a shell script and an API
+client.
+
+```csharp
+builder.Services.AddContentNegotiation(o =>
+    o.AddFormatter("text/csv", (ctx, value, ct) =>
+        ctx.Response.WriteTextAsync(ToCsv(value), "text/csv", ct))
+);
+
+app.OnGet("/report", ctx => Results.Negotiate(report));
+```
+
+Selection honours q-values and wildcards, with a specificity tie-break that stops a browser's
+trailing `*/*;q=0.8` outranking the `text/html` it actually asked for. `q=0` is a refusal. Among
+formatters the client accepts equally, the highest `Priority` wins — which is how `*/*` gets JSON.
+
+A client that accepts nothing on offer gets **406**, rather than a body in a format it said it could
+not read. Set `ReturnNotAcceptable = false` to fall back to the highest-priority formatter instead.
+`Vary: Accept` is appended either way, because a shared cache that stored the JSON copy without it
+would serve JSON to a client that asked for text.
+
+Two formatters are registered by default:
+
+| Formatter | Media type | Priority | Writes |
+| --- | --- | --- | --- |
+| `JsonOutputFormatter` | `application/json` | 100 | Anything in the `JsonTypeInfoRegistry` |
+| `PlainTextOutputFormatter` | `text/plain` | 10 | Strings, primitives, `Guid`, `Uri`, the date/time types |
+
+The text formatter deliberately declines objects whose only string form is their type name — a
+response that looks successful and says nothing is worse than a 406. `IOutputFormatter` is
+non-generic because the choice happens at runtime, and the JSON formatter closes that gap through the
+registry rather than reflection: a type gets a representation because its metadata was registered,
+not because something reflected over it.
+
+## Writing the response yourself
+
+Nothing obliges you to return a result at all:
+
+```csharp
+app.OnGet("/ping", async ctx =>
+{
+    ctx.Response.StatusCode = 200;
+    ctx.Response.ContentType = "text/plain";
+    await ctx.Response.WriteAsync("pong");
+});
+```
+
+| Member | Notes |
+| --- | --- |
+| `WriteAsync` / `WriteTextAsync` | UTF-8 string; sets `Content-Length` |
+| `WriteBytesAsync` | Raw bytes; sets `Content-Length` |
+| `WriteStreamAsync` | Copies a stream; sets `Content-Length` when the source can report one, chunked otherwise |
+| `Body` / `BodyWriter` | The raw `Stream` / `PipeWriter` |
+| `StartAsync` | Flushes the head with no body — what a long-lived stream wants |
+| `OnStarting` | Callback immediately before the head goes out |
+| `HasStarted` | Whether headers are already on the wire |
+
+Headers are flushed on the first body write, so set the status code and headers before you start
+writing. Leaving `ContentLength` null streams a response of unknown length (chunked on HTTP/1.1).

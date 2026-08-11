@@ -1,0 +1,209 @@
+---
+title: Routing
+description: Route templates, constraints, match precedence, route groups and modules, and changing routes while the server is running
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Mapping a route
+
+```csharp
+app.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+app.OnPost("/notes", async ctx => { … });
+app.OnDelete("/notes/{id:int}", ctx => { … });
+```
+
+`OnGet`/`OnPost`/`OnPut`/`OnDelete`/`OnPatch` read well next to `OnRequest` — *"when a GET for
+`/hello` arrives, do this"*. `MapGet`/`MapPost`/… are the same methods under the ASP.NET spelling, and
+`Map(method, pattern, handler)` covers any other verb.
+
+Handlers come in two shapes and both are first class:
+
+```csharp
+// RequestDelegate: write the response yourself
+app.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+
+// Return an IResult and let it write
+app.OnGet("/widgets/{id:int}", ctx =>
+{
+    ctx.Request.RouteValues.TryGetInt32("id", out var id);
+    return store.Find(id) is { } w ? Results.Ok(w, AppJson.Default.Widget) : Results.NotFound();
+});
+```
+
+`MapRoute(...)` returns the `RouteEndpoint` it registered, which is what you pass to `Unmap` later.
+
+## Route templates
+
+A template is a `/`-delimited list of segments:
+
+| Syntax | Matches |
+| --- | --- |
+| `/users` | The literal text, compared case-insensitively |
+| `/users/{id}` | Exactly one path segment, captured as `id` |
+| `/users/{id:int}` | The same, but only when the segment parses as an `int` |
+| `/files/{name?}` | A trailing optional parameter — matches with **and** without the segment |
+| `/files/{*path}` | A catch-all: the rest of the path, slashes included |
+
+Templates are parsed once at registration, never per request. A bad template throws
+`RouteTemplateException` there and then rather than silently never matching.
+
+Three rules the parser enforces:
+
+- A catch-all must be the last segment.
+- An optional parameter must be the last segment.
+- A segment is either literal or a parameter, never `v{version}`. Mixed segments are what make a
+  binder complicated, and rejecting them loudly beats matching in a way nobody predicted.
+
+Reading the captured values from a raw handler:
+
+```csharp
+var name = ctx.Request.RouteValues["name"];              // string?
+ctx.Request.RouteValues.TryGetInt32("id", out var id);   // also TryGetInt64, TryGetGuid
+```
+
+Typed endpoints bind these into method parameters instead — see
+[Typed Endpoints](/httpserver/endpoints/).
+
+## Constraints
+
+Constraints are a closed set evaluated by a switch, not a pluggable `IRouteConstraint` resolved from
+a container. A closed set is trim-safe and allocation-free, and it covers what route *matching* is
+for — anything richer belongs in the handler, where it can return a meaningful error instead of a
+bare 404.
+
+| Constraint | Matches |
+| --- | --- |
+| `:int` | `int.TryParse` |
+| `:long` | `long.TryParse` |
+| `:guid` | `Guid.TryParse` |
+| `:bool` | `bool.TryParse` |
+| `:double` | `double.TryParse`, invariant |
+| `:decimal` | `decimal.TryParse`, invariant |
+| `:alpha` | One or more ASCII letters |
+| `:minlength(n)` | At least `n` characters |
+| `:maxlength(n)` | At most `n` characters |
+| `:length(n)` | Exactly `n` characters |
+
+An unknown constraint name is a registration-time error, not a route that quietly never matches.
+
+## How a match is chosen
+
+The route table is a prefix trie, and the walk backtracks. In order of preference:
+
+1. **Literals beat parameters.** `/users/me` wins over `/users/{id}` for `/users/me`.
+2. **Constrained parameters beat unconstrained ones.** `/{id:int}` wins over `/{slug}` for `/42`,
+   regardless of registration order.
+3. **Catch-all is the last resort.**
+
+A parameter must capture something, so `/users//orders` does not bind an empty string to `{id}` and
+reach a handler with no way to tell it apart from a real value. A trailing slash is ignored:
+`/users` and `/users/` select the same endpoint.
+
+### 404, 405 and HEAD
+
+- A path that matches nothing falls through to the [`OnRequest`](/httpserver/) handler, then to the
+  server's own 404. Falling through rather than answering immediately is what lets static files or a
+  SPA index be served from the same pipeline.
+- A path that exists but not for this method is a **405 with an `Allow` header** listing the methods
+  that path does support — never a 404.
+- A `HEAD` request is served by the `GET` handler and the body is dropped on the way out, so every
+  route gets `HEAD` for free.
+
+### Duplicate routes throw
+
+Registering two handlers for the same method and template throws at registration:
+
+```
+Cannot register 'GET /users/{id}': the route 'GET /users/{id}' already handles it.
+```
+
+For generated endpoints the same collision is caught at build time as **SWS005**.
+
+## Groups
+
+`MapGroup` gives a set of routes a shared prefix:
+
+```csharp
+app.MapGroup("/api/v2", api =>
+{
+    api.MapGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+    api.MapPost("/reset", ctx => …).RequireAuthorization("admin");
+});
+```
+
+The builder handed to the callback also has its own `MapGroup`, so groups nest.
+
+## Modules
+
+An `IEndpointModule` is a set of routes that registers itself — a plugin, a feature only mounted when
+a licence says so, an admin surface that appears when a toggle flips.
+
+```csharp
+public sealed class AdminModule : IEndpointModule
+{
+    public void Map(IEndpointRouteBuilder endpoints)
+    {
+        endpoints.MapGet("/admin/stats", ctx => …);
+        endpoints.MapPost("/admin/reset", ctx => …).RequireAuthorization("admin");
+    }
+}
+
+app.MapModule(new AdminModule());       // or app.MapModules() for every one in the container
+app.UnmapModule<AdminModule>();         // takes all of its routes away again
+```
+
+Every route a module registers is tagged with the module type, which is what makes unmounting the
+whole group a single call.
+
+## Changing routes while running
+
+The route table is an immutable trie behind a volatile field. Adding or removing a route builds a new
+table and publishes it with one write, so a request in flight sees the whole change or none of it,
+and matching never takes a lock.
+
+```csharp
+var endpoint = app.MapRoute("GET", "/preview/{id}", handler);   // reachable on the very next request
+…
+app.Unmap(endpoint);                                            // stops matching immediately
+
+app.Unmap("GET", "/preview/{id}");        // by method + template
+app.UnmapAll(e => e.Method == "GET");     // by predicate; returns how many went
+app.ClearRoutes();                        // everything (the OnRequest handler stays)
+```
+
+A change that would produce a duplicate throws and leaves the live table exactly as it was.
+
+<Aside type="note">
+Middleware is a different matter — that pipeline is composed once, when the server starts, and
+`RestartAsync` does not recompose it. Anything that needs to be switchable at runtime belongs in a
+route or in a check inside the middleware itself.
+</Aside>
+
+`app.Router` is the table itself, if you want to enumerate it or subscribe to changes:
+
+```csharp
+foreach (var e in app.Router.Endpoints)
+    Console.WriteLine(e.DisplayName);      // "GET /users/{id}"
+
+app.Router.Changed += (_, count) => logger.LogInformation("{Count} routes registered", count);
+```
+
+## Endpoint metadata
+
+Everything conditional the server does — authorization, CORS, rate limits, IP filters, OpenAPI — is
+metadata attached to the endpoint, read after routing has selected it. On a raw route, the
+`Require…` methods apply to the route just mapped:
+
+```csharp
+app.OnGet("/status", ctx => ctx.Response.WriteAsync("ok"))
+   .RequireCors("public")
+   .DisableRateLimiting();
+
+app.OnGet("/admin/keys", ctx => …)
+   .RequireAuthorization("admin")
+   .RequireIpFilter("admin");
+```
+
+On a generated endpoint the same thing is an attribute. Either way it is metadata resolved at
+registration, never discovered at runtime.

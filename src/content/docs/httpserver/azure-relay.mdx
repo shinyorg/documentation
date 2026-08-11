@@ -1,0 +1,132 @@
+---
+title: Azure Relay
+description: A public HTTPS endpoint with no infrastructure to run — Azure owns the address and forwards down a connection the device dialled out
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Net.HttpServer.AzureRelay" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.AzureRelay
+```
+
+The device dials out to Azure Relay and holds a hybrid connection open. Azure owns the address and
+forwards requests down it. Nothing to run, nothing to keep patched, and a real certificate on a real
+domain.
+
+```csharp
+builder.Services.AddHttpServer(autoStart: false, configureServer: server =>
+{
+    server.MapGet("/ping", ctx => ctx.Response.WriteTextAsync("pong"));
+});
+
+builder.Services.AddAzureRelayTunnel(o =>
+{
+    o.ConnectionString = configuration["Relay:ConnectionString"];
+    o.HybridConnectionName = "my-device";
+});
+```
+
+The device is then reachable at `https://{namespace}/{hybridConnectionName}/…`.
+
+`autoStart` defaults to `true`. Turn it off and resolve `AzureRelayTunnel` to call
+`StartAsync`/`StopAsync` yourself — an app can be serving on the local network the whole time and
+expose itself publicly only while the user has asked for it.
+
+## Two modes
+
+### `Http` (default)
+
+Azure Relay terminates HTTPS and hands over a parsed request. The provider synthesises HTTP/1.1 onto
+an in-memory connection, serves it through the **whole normal pipeline**, and reads the response back
+off the wire with a small response parser.
+
+Every result type and every piece of middleware works unchanged, and any client that speaks HTTP — a
+browser, `curl`, a webhook — can reach the device with no client library at all.
+
+The cost is that the response is buffered, which rules out [SSE](/httpserver/sse/) and
+[WebSockets](/httpserver/websockets/).
+
+### `RelayedStream`
+
+```csharp
+o.Mode = AzureRelayMode.RelayedStream;
+```
+
+Wraps the relayed byte stream as an ordinary connection instead. Full fidelity — keep-alive,
+streaming and WebSocket upgrades all work, because nothing in between is parsing the traffic — but
+callers must speak Azure Relay with `HybridConnectionClient` rather than plain HTTP.
+
+## Credentials
+
+<Aside type="danger">
+A connection string contains the shared access key, and **a key shipped inside a mobile app is a key
+you have published**. Anyone who extracts it can listen on your hybrid connection and impersonate the
+device.
+</Aside>
+
+The safer shape is for your backend to mint a short-lived SAS token — it holds the key — and hand it
+to the device:
+
+```csharp
+// on the backend
+var token = AzureRelaySas.Create(
+    relayNamespace: "my-namespace.servicebus.windows.net",
+    hybridConnectionName: "device-42",
+    keyName: "device-listen",
+    key: policyKey,
+    validFor: TimeSpan.FromHours(4)
+);
+```
+
+```csharp
+// on the device
+builder.Services.AddAzureRelayTunnel(o =>
+{
+    o.Namespace = "my-namespace.servicebus.windows.net";
+    o.HybridConnectionName = "device-42";
+    o.RefreshSharedAccessSignature = async ct => await api.GetRelayTokenAsync(ct);
+});
+```
+
+`RefreshSharedAccessSignature` is consulted on **every reconnect**, so the device never holds a
+long-lived credential. Keep tokens short — hours, not months. `AzureRelaySas.GetExpiry(token)` reads
+the expiry back if you want to refresh ahead of time, and `CreateForResource` covers a scope wider
+than one hybrid connection.
+
+Use a **listen-only** SAS policy for the device. It does not need send rights.
+
+## Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `ConnectionString` | `null` | From the portal; `EntityPath` supplies the name when present |
+| `Namespace` / `HybridConnectionName` | `null` | The separate form |
+| `SharedAccessKeyName` / `SharedAccessKey` | `null` | Read the warning above |
+| `SharedAccessSignature` | `null` | A pre-issued token |
+| `RefreshSharedAccessSignature` | `null` | Preferred on a device |
+| `Mode` | `Http` | |
+| `KeepAliveInterval` | SDK default | On cellular, longer is kinder — every ping wakes the radio |
+| `StripHybridConnectionNameFromPath` | `true` | See below |
+| `Authorize` | `null` | `RelayedStream` mode only |
+| `PublicScheme` | `https` | |
+| `MaxResponseHeadSize` | 64 KB | |
+
+`StripHybridConnectionNameFromPath` removes the connection name from the front of the path, so a
+handler mapped at `/api/widgets` is reachable relayed **and** locally at the same route. Azure Relay
+addresses a device as `https://{namespace}/{name}/{path}`, so without it every route would need the
+connection name baked in.
+
+In `Http` mode, authorize in the pipeline like any other request — `Authorize` is only consulted for
+a `RelayedStream` rendezvous.
+
+<Aside type="caution" title="This package is not AOT-clean, deliberately">
+`Microsoft.Azure.Relay` drags in Azure.Identity, MSAL and IdentityModel, none of which are trim- or
+AOT-clean. The core server still is; this package is the one place that trade-off is made, and
+quarantining that weight is exactly why it is a separate package.
+
+If you are publishing with `PublishAot` or `PublishTrimmed`, use [SSH](/httpserver/ssh/) or the
+[relay](/httpserver/tunneling/) instead.
+</Aside>

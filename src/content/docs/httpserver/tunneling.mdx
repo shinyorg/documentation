@@ -1,0 +1,188 @@
+---
+title: Tunnelling
+description: Making a server on a device reachable from the internet — the provider model, and the relay that ships in the box
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A server embedded in a phone app has no reachable address. It sits behind NAT, behind a carrier's
+CGNAT, on a network that changes when the user walks out of the building. Nothing can connect *in*.
+
+A tunnel solves that by dialling *out*: the device opens a connection to something with a public
+address, and requests arrive back down it.
+
+```csharp
+var provider = new RelayTunnelProvider(new RelayTunnelOptions
+{
+    Host = "relay.example.com",
+    Token = token,
+    Subdomain = "my-phone"
+});
+
+await app.RunTunnelAsync(provider, logger, cancellationToken);
+```
+
+## The provider model
+
+`ITunnelProvider` is an `IConnectionListener`, and that is the whole design. From the server's point
+of view a tunnel is just another way for connections to show up, so **nothing above the transport
+knows a tunnel exists** — the same routes, middleware, authorization, results and generated endpoints
+serve tunnelled requests unchanged.
+
+```csharp
+public interface ITunnelProvider : IConnectionListener
+{
+    string Name { get; }
+    string? PublicUrl { get; }      // available once BindAsync has completed
+}
+```
+
+`RunTunnelAsync` opens the tunnel, serves everything arriving through it, and drains in-flight
+connections on shutdown. It **composes with** `StartAsync` rather than replacing it: a server can
+listen locally and answer tunnelled requests at the same time, from the same routes. Used on its own,
+no local port is bound at all — which is what an embedded server on a phone usually wants.
+
+Tunnelled connections report `ctx.Connection.IsTunneled`, count against
+`MaxConcurrentConnections` like any other, and are drained by a graceful shutdown exactly like local
+ones.
+
+## Which provider
+
+| Provider | Package | Needs | Good for |
+| --- | --- | --- | --- |
+| [Quick tunnel](/httpserver/ssh/) | `…​.Ssh` | Nothing at all | Demos, support, showing someone a device |
+| [SSH](/httpserver/ssh/) | `…​.Ssh` | A host you can log into | A stable address you control |
+| [Azure Relay](/httpserver/azure-relay/) | `…​.AzureRelay` | An Azure Relay namespace | A managed public HTTPS endpoint |
+| Relay (below) | core | A VPS running the relay | Full control, multi-tenant, your own protocol |
+
+<Aside type="note" title="No ngrok or Cloudflare provider, deliberately">
+Both tunnel through a binary — `ngrok`, `cloudflared` — and neither publishes a .NET SDK or a
+documented protocol. The only ways in are to spawn a process (impossible on iOS and Android, which is
+the platform this server exists for) or to reimplement a private, versioned protocol. An ngrok
+provider that drove the agent was written and then removed for exactly that reason.
+
+The pure-managed tunnels — SSH, Azure Relay, and the relay below — are the ones that work on a device.
+</Aside>
+
+## The reference relay
+
+Both ends live in the core package, under `Shiny.Net.HttpServer.Tunneling`: a 9-byte frame protocol
+(type / stream id / length) and `TunnelChannel`, the shared framing pump both ends use.
+
+### The client
+
+```csharp
+var provider = new RelayTunnelProvider(
+    new RelayTunnelOptions
+    {
+        Host = "relay.example.com",
+        Port = 5050,
+        Token = token,
+        Subdomain = "my-phone",
+        UseTls = true
+    },
+    logger
+);
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `Host` / `Port` | `localhost` / 5050 | The **control** port, not the public one |
+| `Token` | `null` | Presented at registration |
+| `Subdomain` | `null` | Leave null and the relay assigns one |
+| `UseTls` | `true` | Turn off only for local testing |
+| `ServerCertificateValidation` | `null` | For a relay behind a private CA |
+| `HandshakeTimeout` | 15 seconds | |
+| `KeepAliveInterval` | 30 seconds | Mobile networks drop idle connections aggressively |
+| `ReconnectDelay` | 3 seconds | `null` to fail instead of reconnecting |
+
+The client dials out over TCP (plus optional TLS), registers with its token and requested subdomain,
+and unpacks each inbound stream into a connection handed to the server. Outbound-only, so it works
+from a cell network behind CGNAT.
+
+### The relay
+
+```csharp
+var relay = new RelayServer(
+    new RelayServerOptions
+    {
+        ControlPort = 5050,
+        PublicPort = 443,
+        Domain = "example.com",
+        PublicScheme = "https",
+        ControlHttps = new HttpsOptions { Certificate = certificate },
+        PublicHttps = new HttpsOptions { Certificate = certificate },
+        Token = token
+    },
+    loggerFactory
+);
+
+await relay.StartAsync(cancellationToken);
+
+Console.WriteLine($"Control : {relay.ControlUrl}");
+Console.WriteLine($"Public  : {relay.PublicUrl}");
+```
+
+Two listeners: a **control port** where clients register, and a **public port** where the world
+arrives. Requests are routed to a tunnel by their `Host` header.
+
+| Option | Default |
+| --- | --- |
+| `Address` | Loopback — an unconfigured relay is not public |
+| `ControlPort` / `PublicPort` | 5050 / 8080 |
+| `Domain` | `localhost` — `abc123.example.com` |
+| `PublicScheme` / `IncludePortInPublicUrl` | `http` / `true` |
+| `ControlHttps` / `PublicHttps` | `null` |
+| `Authorize` | Default: accepts any token matching `Token`, grants the requested subdomain when free |
+| `Token` | `null` — accepts anything |
+| `MaxTunnels` | 100 |
+| `MaxRequestHeadSize` | 32 KB |
+| `AddForwardedHeaders` | `true` |
+| `RequestHeadTimeout` / `KeepAliveTimeout` | 15s / 130s |
+
+`Authorize` is the hook for a real registry — return the subdomain to grant, or `null` to refuse:
+
+```csharp
+o.Authorize = request => devices.Lookup(request.Token)?.Subdomain;
+```
+
+### What makes keep-alive safe
+
+The relay reads **every** request head, not just the first, so it can route by `Host` — and reads
+enough framing (`Content-Length`, chunked) to know where each body ends.
+
+That is what makes connection reuse safe: a connection is pinned to the tunnel its first request
+named, and a later request on it for a different host gets **421 Misdirected Request** rather than
+being delivered to another tenant. Browsers never hit that, because their connection pools are keyed
+by authority.
+
+## Forwarded headers
+
+The relay injects `X-Forwarded-For`, `-Proto` and `-Host`. The tunnelled server still has to opt into
+trusting them:
+
+```csharp
+builder.Configure(o => o.UseForwardedHeaders = true);
+```
+
+Without the opt-in, `Request.Scheme` reflects the tunnel's own transport and the client IP is the
+relay's. With it, `Request.Scheme` is what the public caller used — which matters, because
+[Basic authentication](/httpserver/authentication/) refuses to run over an unencrypted connection and
+a tunnel's public leg is the one that is actually TLS.
+
+## Security
+
+A tunnel makes a device-local server reachable by anyone who learns the URL. Before opening one:
+
+- Put [authentication](/httpserver/authentication/) in front of everything, and consider
+  `SetFallbackPolicy` so a route added later is protected by default.
+- Turn on [rate limiting](/httpserver/rate-limiting/). The address is public, and so are the
+  scanners.
+- Assume the URL is public knowledge. A free tunnel's hostname is not a secret.
+
+<Aside type="caution">
+The relay's registration tokens are compared with a fixed-time equality check, but there is **no
+per-tunnel rate limiting**, so a relay exposed publicly wants something in front of it. It also
+forwards responses verbatim without inspecting them — correct, but it means it cannot enforce
+anything on the way out.
+</Aside>

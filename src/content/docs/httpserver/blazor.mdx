@@ -1,0 +1,68 @@
+---
+title: Blazor WebAssembly
+description: Serving a published Blazor WebAssembly app — SPA fallback, precompressed assets and the cache policy a publish needs
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A Blazor WebAssembly app is a folder of static files, so nothing is special-cased for its sake. This
+is the [static file handler](/httpserver/static-files/) with the three settings a Blazor publish
+needs — and getting any of them wrong produces a blank page and a stack trace from inside the runtime
+rather than an obvious error.
+
+```csharp
+app.UseBlazorWebAssembly("./wwwroot");
+app.MapGet("/api/readings", …);          // the app's own API, alongside it
+```
+
+For the packaged case — a MAUI or single-file build with no `wwwroot` on disk:
+
+```csharp
+app.UseBlazorWebAssembly(typeof(App).Assembly, "MyApp.wwwroot");
+```
+
+## What it arranges
+
+**The single-page fallback.** A Blazor route like `/counter` exists only in the client-side router, so
+a reload of that URL has to return `index.html`. The fallback is still restricted to requests that
+look like navigations, so a missing `.js` 404s honestly.
+
+**Precompressed assets.** A publish emits `.br` and `.gz` beside every file, compressed once at
+maximum effort. Serving those beats recompressing 20-odd megabytes per request at a level chosen for
+speed. `ServePrecompressedFiles` is on, and the disk source is configured to look for `br` then
+`gzip`.
+
+**Cache policy.** Everything under `_framework` and `_content` is content-fingerprinted by the
+publish, so it is served `public, max-age=31536000, immutable`. The entry document is `no-cache` —
+it keeps the same URL by definition, and caching it is how a deploy silently fails to reach anyone.
+`no-cache` rather than `no-store`: the browser may keep its copy, it just has to revalidate, and with
+an ETag that is a conditional request answered by a 304.
+
+You can still adjust everything through the optional `configure` callback, which runs after those
+defaults are applied.
+
+## Content types
+
+Only one thing was ever actually missing when this was verified against a real publish — 26 MB of
+assets and 36 wasm assemblies, loaded in Chrome and interactive. `.dat`, the ICU globalization data,
+had no content type, and an unknown extension is not served, so the runtime died on a 404 before it
+started.
+
+`.dat`, `.blat`, `.webcil`, `.dll`, `.pdb` and `.webmanifest` are in the built-in map. If a publish
+ever emits something else new, add it rather than turning on `ServeUnknownFileTypes`:
+
+```csharp
+app.UseBlazorWebAssembly("./wwwroot", o => o.ContentTypeOverrides[".xyz"] = "application/octet-stream");
+```
+
+<Aside type="tip">
+A blank Blazor page is almost always a 404 on an asset. Open the network tab and look for the first
+failed request — the runtime does not report it usefully itself.
+</Aside>
+
+## Why you would do this
+
+The interesting deployment is not a web server. It is a Blazor app served **by the device it talks
+to**: a MAUI app hosting its own UI, an appliance with no cloud, a piece of equipment whose
+configuration page is only reachable on the LAN. Pair it with a [tunnel](/httpserver/tunneling/) and
+the same app is reachable from anywhere without any of it being deployed anywhere.

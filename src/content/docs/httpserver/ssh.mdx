@@ -1,0 +1,167 @@
+---
+title: SSH & Quick Tunnels
+description: ssh -R in library form, and a zero-account public HTTPS address for a phone
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Net.HttpServer.Ssh" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Ssh
+```
+
+`ssh -R`, in library form, over SSH.NET. Pure managed code, so it runs on iOS and Android where an
+agent-based tunnel cannot — which is the whole reason this exists rather than a wrapper around
+`ngrok`.
+
+The device opens an ordinary **outbound** SSH connection and asks the server to forward a remote port
+back down it. Nothing has to connect *to* the device, which is what makes it work from behind
+carrier-grade NAT.
+
+## Quick tunnels
+
+The zero-ceremony version: no account, nothing installed, no infrastructure.
+
+```csharp
+await app.RunQuickTunnelAsync(url => Console.WriteLine($"Reachable at {url}"));
+```
+
+| Host | What it gives you |
+| --- | --- |
+| `QuickTunnelHost.LocalhostRun` (default) | `localhost.run` — authenticates nobody, fresh `*.lhr.life` address each time |
+| `QuickTunnelHost.Sish` | The public `sish` at `tuns.sh` — derives the subdomain from your key, so the same key gets the same address |
+| `QuickTunnelHost.Serveo` | `serveo.net` — same idea, longest-running, least reliable of the three |
+
+`Sish` is the one to use when the URL goes on a label or into a customer's bookmark.
+
+### In an app with a UI
+
+```csharp
+builder.Services.AddHttpServer(o => o.Port = 8080, autoStart: false);
+builder.Services.AddQuickTunnel(QuickTunnelHost.Sish, subdomain: "my-device");
+```
+
+`autoStart` on the tunnel defaults to **off**, which is almost always right: putting a server on the
+public internet is a decision a person makes by tapping something, not a side effect of the app
+launching.
+
+```csharp
+public sealed class ShareViewModel(QuickTunnel tunnel)
+{
+    public async Task ShareAsync() => await tunnel.StartAsync();
+
+    // …
+    tunnel.PropertyChanged += (_, _) => MainThread.BeginInvokeOnMainThread(() =>
+    {
+        this.Url = tunnel.PublicUrl;
+        this.Status = tunnel.State.ToString();
+    });
+}
+```
+
+`QuickTunnel` is `INotifyPropertyChanged` with `PublicUrl`, `State`
+(`Stopped`/`Connecting`/`Connected`/`Reconnecting`/`Failed`) and `LastError`.
+
+<Aside type="danger" title="Bind to PublicUrl, don't read it once">
+A free tunnel assigns a **different address on every reconnect**, and a phone reconnects whenever it
+changes network. An app that captured the URL once and painted it on a label would be showing a dead
+link minutes later. `PublicUrl` is cleared the instant the connection drops rather than left stale.
+
+The events fire on a **background thread**. Marshal to the UI thread yourself — MAUI will not do it
+for you.
+</Aside>
+
+## A host you own
+
+A VPS with a stable hostname, your own TLS, and `permitlisten` restricting the key to one port:
+
+```csharp
+builder.Services.AddSshTunnel(o =>
+{
+    o.Host = "tunnel.example.com";
+    o.Username = "tunnel";
+    o.PrivateKeyPath = keyPath;
+    o.RemoteBindAddress = "0.0.0.0";
+    o.RemotePort = 8080;
+    o.PublicUrl = "https://device-1.example.com";
+    o.HostKeyFingerprints.Add("SHA256:47DEQpj8HBSa+…");
+});
+```
+
+Resolve `SshTunnel` and call `StartAsync`/`StopAsync`, or leave `autoStart: true` (the default here)
+to run it with the host.
+
+For a console app, drive the provider directly:
+
+```csharp
+var provider = new SshTunnelProvider(options, logger);
+await app.RunTunnelAsync(provider, logger, cancellationToken);
+```
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `Host` / `Port` / `Username` | — / 22 / — | |
+| `PrivateKeyPath` / `PrivateKey` / `PrivateKeyPassPhrase` | `null` | `PrivateKey` is bytes, for a key kept in the keychain or an embedded resource |
+| `Password` | `null` | Prefer a key |
+| `RemoteBindAddress` | `localhost` | `0.0.0.0` exposes it directly and needs `GatewayPorts` on the server |
+| `RemotePort` | `0` | Zero asks the server to allocate one; read it back from `SshTunnelProvider.RemotePort` |
+| `PublicUrl` | `null` | The address the world will use, when you know it up front |
+| `CaptureUrlFromSession` | `false` | See below |
+| `UrlPattern` / `UrlCaptureTimeout` | first `https://` / 15s | |
+| `HostKeyFingerprints` / `AcceptAnyHostKey` | empty / `false` | See below |
+| `ConnectTimeout` | 30 seconds | |
+| `KeepAliveInterval` | 30 seconds | Carriers drop idle NAT mappings in a minute or two |
+| `AutoReconnect` / `ReconnectDelay` / `MaxReconnectDelay` | `true` / 2s / 2m | Backoff doubles |
+| `LocalPort` | `0` | Ephemeral, which is what you want |
+
+`RemoteBindAddress = "localhost"` keeps the forwarded port private to the server, which is right when
+a reverse proxy on that box terminates TLS and forwards to it. Hosted tunnels want `localhost` with
+`RemotePort` 80.
+
+### Host keys are checked
+
+<Aside type="caution">
+SSH.NET trusts any host key by default. This provider does not: connecting without either a pinned
+SHA-256 fingerprint or an explicit `AcceptAnyHostKey` **fails**, with a message telling you how to
+find the fingerprint:
+
+```bash
+ssh-keyscan -p 22 tunnel.example.com | ssh-keygen -lf -
+```
+
+An unverified host key means anything between the device and the server can pose as the server — and
+a tunnel exists precisely to carry traffic across networks you do not control. `AcceptAnyHostKey` is
+reasonable while you are finding the fingerprint to pin, and not reasonable in something you ship.
+</Aside>
+
+### Reading an assigned URL
+
+`CaptureUrlFromSession` reads the address a hosted tunnel assigns, which sish, localhost.run and
+Serveo all print on the session channel and nowhere else. It is off by default, because a server you
+own has no such banner and opening a shell channel on it is pointless — the quick-tunnel presets turn
+it on for you.
+
+`UrlPattern` picks the URL out of that output; the default takes the first `https://` address.
+
+## How it plugs in
+
+The provider owns a private ephemeral **loopback** listener and points the remote forward at it, so
+the app binds no port of its own and the whole thing plugs into `RunTunnelAsync` like any other
+[`ITunnelProvider`](/httpserver/tunneling/). Accepted connections report
+`ctx.Connection.IsTunneled`.
+
+Reconnect with backoff is on by default, because a phone changing networks kills the tunnel
+underneath it.
+
+`SshTunnelProvider` also exposes `IsConnected`, `RemotePort`, and the `ConnectivityChanged` /
+`PublicUrlChanged` events that `QuickTunnel` surfaces as bindable properties.
+
+## Before you open one
+
+Everything in [Tunnelling → Security](/httpserver/tunneling/#security) applies. A quick tunnel in
+particular hands a public HTTPS address to anyone who learns it, on a server whose defaults were
+chosen for loopback — put [authentication](/httpserver/authentication/) in front of it first.

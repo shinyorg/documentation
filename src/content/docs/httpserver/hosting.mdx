@@ -1,0 +1,187 @@
+---
+title: Hosting & Lifecycle
+description: Constructing the server, wiring dependency injection, and starting, stopping and restarting it at runtime
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+There are three ways to get a server, and which one you want depends on who owns the container.
+
+## Without a container
+
+```csharp
+var server = new HttpServer(new HttpServerOptions { Port = 8080 });
+
+server.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+
+await server.RunAsync();
+```
+
+Everything works except `ctx.RequestServices`, which resolves nothing. This is the right shape for a
+console tool, a test fixture, or anything small enough that a container would be ceremony.
+
+`RunAsync` starts the server and waits until its cancellation token fires, then shuts down
+gracefully. It is the one-liner for a console host; `StartAsync`/`StopAsync` are what an app with a
+UI uses.
+
+## With the builder
+
+```csharp
+var builder = HttpServer.CreateBuilder();
+
+builder.Configure(o =>
+{
+    o.Port = 8080;
+    o.HideExceptionDetails = false;   // development
+});
+
+builder.Services.AddLogging(l => l.AddSimpleConsole());
+builder.Services.AddSingleton<IWidgetStore, InMemoryWidgetStore>();
+builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
+
+var app = builder.Build();
+
+app.MapMyAppEndpoints();
+await app.RunAsync();
+```
+
+`builder.Options` is the same object `Configure` hands you, so either spelling works. `Build()` can
+only be called once — it builds the provider and hands the server back.
+
+Logging is optional. An app that never called `AddLogging` gets a no-op factory rather than a
+resolution failure at startup.
+
+<Aside type="tip">
+The `HttpServer` itself is registered in the container, so an endpoint class or a hosted service can
+inject it — which is how a route ends up able to restart the server it is running on.
+</Aside>
+
+## Inside an app that already has a container
+
+A MAUI app, a generic host, a Shiny host — anything with an existing `IServiceCollection`:
+
+```csharp
+builder.Services.AddHttpServer(
+    o => o.Port = 8080,
+    server =>
+    {
+        server.MapGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+        server.MapMyAppEndpoints();
+    }
+);
+```
+
+The `configureServer` callback runs once, immediately before the server starts, so it can resolve
+anything in the container while registering routes.
+
+By default the server is registered as a singleton and started with the host through an
+`IHostedService`. Pass `autoStart: false` when the app should decide:
+
+```csharp
+builder.Services.AddHttpServer(o => o.Port = 8080, autoStart: false);
+```
+
+The server is still registered and fully configured, just not listening — which is exactly what an
+app with a **"share over Wi-Fi"** toggle wants. Resolve it and call `StartAsync` when the user says
+so.
+
+## Per-request dependency injection
+
+A fresh `IServiceScope` is created before the pipeline runs and disposed after it completes,
+including `IAsyncDisposable` registrations. `Scoped` services therefore behave exactly as they do in
+ASP.NET Core: one instance per request/response exchange, shared by every middleware, endpoint class
+and handler involved in it.
+
+```csharp
+app.OnGet("/scope", ctx =>
+{
+    var a = ctx.GetRequiredService<RequestId>();
+    var b = ctx.GetRequiredService<RequestId>();
+
+    // same-instance=True — and a different instance on the next request
+    return ctx.Response.WriteAsync($"same-instance={ReferenceEquals(a, b)}");
+});
+```
+
+`ctx.GetRequiredService<T>()` and `ctx.GetService<T>()` are shorthand for `ctx.RequestServices`.
+Generated endpoint classes get constructor injection from the same scope, and middleware registered
+as a type (`app.Use<TMiddleware>()`) is resolved per request from it too.
+
+## Lifecycle
+
+Start and stop are ordinary runtime operations here, not just process startup and shutdown. An app
+with a toggle flips this switch repeatedly over one process lifetime, so the transitions are
+serialized against each other, idempotent, and leave the server genuinely restartable.
+
+```csharp
+await app.StartAsync();     // binds and begins accepting; returns once listening
+await app.StopAsync();      // unbinds, then waits for in-flight requests
+await app.RestartAsync();   // both, as one operation, re-reading Options
+```
+
+| Member | What it gives you |
+| --- | --- |
+| `State` | `Stopped`, `Starting`, `Running` or `Stopping` |
+| `StateChanged` | Raised on every transition, on the thread that caused it |
+| `IsRunning` | `State == Running` |
+| `ListenUrl` | The URL being served — the real port when `Port` was `0` |
+| `ListenUrls` | Every URL, when several endpoints are configured |
+
+Starting an already-running server does nothing rather than throwing, because the caller is often a
+button and a double tap is not a bug. A failed bind returns to `Stopped` rather than sticking in
+`Starting`.
+
+```csharp
+app.StateChanged += (_, state) => this.Status = state.ToString();
+
+// Port 0 lets the OS choose; read it back once running.
+await app.StartAsync();
+Console.WriteLine($"Serving on {app.ListenUrl}");
+```
+
+`RestartAsync` re-reads `Options`, so a changed port or TLS configured after the fact takes effect.
+**Routes and middleware are not re-read** — the middleware pipeline is composed once and stays
+composed. Routes, however, can be changed at any time without a restart; see
+[Routing](/httpserver/routing/).
+
+<Aside type="caution" title="Restarting from inside a request">
+Restarting tears down the connection the request arrived on. Kick it off rather than awaiting it
+inline:
+
+```csharp
+app.OnPost("/server/restart", async ctx =>
+{
+    _ = Task.Run(async () =>
+    {
+        await Task.Delay(100);
+        await app.RestartAsync();
+    });
+
+    await ctx.Response.WriteAsync("restarting");
+});
+```
+</Aside>
+
+## Shutdown
+
+`StopAsync` unbinds the listener first so nothing new arrives, then waits for in-flight requests to
+finish. Connections still running when the cancellation token fires are aborted.
+
+`DisposeAsync` stops the server and releases everything. In a console host the usual shape is:
+
+```csharp
+using var cts = new CancellationTokenSource();
+Console.CancelKeyPress += (_, e) => { e.Cancel = true; cts.Cancel(); };
+
+await app.RunAsync(cts.Token);
+```
+
+## Serving a connection you already have
+
+`ServeAsync(IConnection)` runs the whole pipeline over a connection the server did not accept
+itself. That is how tunnelling works — a tunnel provider dials out, unpacks inbound streams, and
+hands each one to the server — and it is available to anything else that can produce an
+`IConnection`, including in-memory pipes for tests.
+
+A server that is `Stopped` still serves tunnelled connections: not listening is not the same as not
+running.

@@ -5,6 +5,68 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 13.2 TBD
+
+<RN type="feature">
+**Orleans persistent stream provider.** `siloBuilder.AddDocumentDbStreams("Default", …)` gives an Orleans
+cluster **durable, inspectable streams on the database it already uses** for membership, grain storage and
+reminders — no queue service to run, and a backlog you can actually look at in ShinyDocDbMyAdmin when a
+queue will not drain. Reads take no locks and write nothing per message (Orleans guarantees one pulling
+agent per queue, so the receiver works from a cursor), an adaptive backoff keeps an idle cluster from
+polling ten times a second per queue, and where the backend has a native change feed one subscription per
+silo wakes every receiver the moment anything is enqueued — including from another silo.
+
+Sequencing deliberately does **not** use a native identity column: those hand out values at insert time
+while rows appear at commit time, so a late-committing transaction can be stepped over by the receiver's
+watermark and its event never delivered. Instead each queue has a counter row whose position is reserved
+under a row lock inside the enqueue transaction, which makes assignment order and commit order the same
+order, and the sequence gap-free.
+
+**Durable rewind.** `IsRewindable` is **true**: a subscriber can resume from a `StreamSequenceToken` older
+than anything still in memory, because the cache replays the events table instead of reporting a cache miss.
+No queue-backed provider can do this — behind Azure Queue or SQS the message is gone once handed over. The
+rewind window is exactly `Retention`, and replay reads through a second `(QueueId, StreamId, Seq)` index so it
+reads one stream's history rather than scanning the queue.
+
+**Operations.** `IStreamAdmin` (keyed by provider name) reports per-queue depth, lag, retained history and
+which streams are not draining, and ShinyDocDbMyAdmin gains a **Streams** screen answering the same questions
+in both the web and terminal front ends. Both are read-only by design: a stream event is a position in a
+gap-free sequence that every subscriber holds a cursor into, so unlike an outbox message there is no safe
+operator action on one. Delivery cursors are also persisted per queue, so a queue retaining history for
+rewind does not replay all of it on restart.
+
+**Backends:** PostgreSQL, SQL Server, MySQL, MariaDB, Oracle, CockroachDB. SQLite, LiteDB, DuckDB and the
+document/key-partitioned stores are refused **at silo start** — the gate is the new
+`SupportsPessimisticLocking` capability, not a hard-coded list. CockroachDB's `SERIALIZABLE` transactions can
+abort a contended enqueue with a retryable `40001`; the provider retries those automatically. This is a
+database-backed queue: expect thousands of events/sec on PostgreSQL, not the hundreds of thousands an
+event-streaming platform delivers.
+</RN>
+
+<RN type="enhancement">
+**Sharing a table now fails with an answer, not just a refusal.** Pointing two document types at the same
+`cfg.Table` has always thrown — a custom table is exclusive to one type by design — but the message only said
+`'x' is already mapped to another type`, which reads as a library bug and pushes you toward the wrong fix
+(renaming one of them). It now states the rule and names the thing that actually delivers co-location: leave
+`cfg.Table` unset on all of them and set `DocumentStoreOptions.TableName`, which puts every type in one table
+discriminated by `TypeName`. No behaviour change.
+</RN>
+
+<RN type="enhancement">
+**`LockMode` now takes a real row lock.** It shipped validated but inert — the API required an active
+transaction and then issued an ordinary read, so `session.Get(id, LockMode.Update)` blocked nothing on any
+backend. It now emits the engine's own locking syntax: `FOR UPDATE` / `FOR SHARE` on PostgreSQL, MySQL and
+CockroachDB, `LOCK IN SHARE MODE` for MariaDB's shared lock (MariaDB never adopted `FOR SHARE`), `FOR
+UPDATE` on Oracle, and the `WITH (UPDLOCK, HOLDLOCK)` table hint on SQL Server. Oracle throws for
+`LockMode.Share` rather than degrading to an unlocked read — it has no shared row lock. SQLite and DuckDB
+are unchanged and correct as they were: an explicit write transaction already locks the whole database.
+
+The new `IDocumentStore.SupportsPessimisticLocking` reports whether a backend takes a real row lock, so
+anything that reserves values from a shared row — counters, sequences, leases — can check rather than
+assume. Two new `IDatabaseProvider` hooks (`BuildLockClause`, `BuildLockTableHint`) are defaulted, so
+custom providers need no changes.
+</RN>
+
 ## 13.1.2 - August 7, 2026
 
 <RN type="fix">

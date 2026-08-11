@@ -1,0 +1,94 @@
+---
+title: Server-Sent Events
+description: text/event-stream responses that stay open — framing, resumption with Last-Event-ID, and heartbeats
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Server-Sent Events are the right shape when traffic only flows server → client: a progress feed, a
+log tail, a sensor reading. They survive proxies better than WebSockets, and the browser's
+`EventSource` reconnects on its own.
+
+```csharp
+app.OnGet("/events", ctx => ctx.SendEventsAsync(async stream =>
+{
+    while (!stream.Aborted.IsCancellationRequested)
+    {
+        await stream.SendAsync($"tick {DateTime.UtcNow:O}");
+        await Task.Delay(1000, stream.Aborted);
+    }
+}));
+```
+
+`SendEventsAsync` sets the headers, flushes them so the client's `onopen` fires before the first
+event, and runs the callback until it returns or the client disconnects. A client that goes away
+mid-stream is how an event stream normally ends, not a fault worth turning into a 500 nobody can
+receive — so the cancellation is swallowed.
+
+## From an `IAsyncEnumerable`
+
+When the source is already async, that is the whole endpoint:
+
+```csharp
+app.OnGet("/readings", ctx => ctx.SendEventsAsync(sensor.ReadingsAsync(ctx.RequestAborted)));
+```
+
+## As a result
+
+```csharp
+[Get("/events")]
+public IResult Events() => Results.ServerSentEvents(async stream =>
+{
+    await foreach (var item in queue.ReadAllAsync(stream.Aborted))
+        await stream.SendAsync("item", item.Id);
+});
+```
+
+## The stream
+
+| Member | Notes |
+| --- | --- |
+| `SendAsync(data)` | A plain `data:` event |
+| `SendAsync(eventName, data)` | A named event |
+| `SendAsync(ServerSentEvent)` | Full control — `Data`, `Event`, `Id`, `Retry`, `Comment` |
+| `SendHeartbeatAsync()` | A comment-only event, to keep the connection warm |
+| `Aborted` | Cancelled when the client disconnects — how the loop knows to stop |
+| `LastEventId` | The client's `Last-Event-ID` when it is reconnecting |
+
+Multi-line data is framed correctly (one `data:` line per line), and **every send is flushed
+immediately**. Buffering is the enemy here: an event the client receives three minutes late because
+it was waiting for a full chunk is worse than useless, and it is the single most common reason SSE
+"does not work".
+
+## Resumption
+
+`EventSource` sends the last `id:` it saw back as `Last-Event-ID` when it reconnects. Send ids, read
+that on the way in, and a reconnect picks up where it left off:
+
+```csharp
+app.OnGet("/log", ctx => ctx.SendEventsAsync(async stream =>
+{
+    var from = long.TryParse(stream.LastEventId, out var id) ? id + 1 : 0;
+
+    await foreach (var entry in log.ReadFromAsync(from, stream.Aborted))
+        await stream.SendAsync(new ServerSentEvent { Id = entry.Sequence.ToString(), Data = entry.Text });
+}));
+```
+
+The `retry` argument to `SendEventsAsync` sets the client's reconnect delay:
+
+```csharp
+ctx.SendEventsAsync(produce, retry: TimeSpan.FromSeconds(5));
+```
+
+<Aside type="tip">
+Send a heartbeat every 20–30 seconds if anything between you and the client might time out an idle
+connection. It is a comment, so `EventSource` ignores it — but the socket stays warm and, on a phone,
+so does the radio's idea that the connection is alive.
+</Aside>
+
+## Headers it sets
+
+`Content-Type: text/event-stream`, `Cache-Control: no-cache` and `X-Accel-Buffering: no`. The last
+two are for the intermediaries: a proxy that buffers an event stream breaks it. No `Content-Length`
+is set, so the response is chunked and stays open.

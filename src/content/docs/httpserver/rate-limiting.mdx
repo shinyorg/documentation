@@ -1,0 +1,105 @@
+---
+title: Rate Limiting
+description: Fixed window, sliding window, token bucket and concurrency limiters, partitioned by caller and enforced before routing
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseRateLimiter(new FixedWindowRateLimitPolicy(300, TimeSpan.FromMinutes(1)));
+```
+
+No container needed. For named policies applied per endpoint:
+
+```csharp
+builder.Services.AddRateLimiter(o =>
+{
+    o.GlobalPolicy = new FixedWindowRateLimitPolicy(300, TimeSpan.FromMinutes(1));
+    o.AddTokenBucket("uploads", capacity: 5, tokensPerPeriod: 1, period: TimeSpan.FromSeconds(10));
+    o.AddConcurrency("reports", permitLimit: 2);
+});
+
+var app = builder.Build();
+app.UseRateLimiter();
+
+app.OnPost("/upload", ctx => …).RequireRateLimiting("uploads");
+app.OnGet("/health", ctx => …).DisableRateLimiting();
+```
+
+On generated endpoints, `[EnableRateLimiting("uploads")]` and `[DisableRateLimiting]` do the same
+thing as compile-time metadata.
+
+## The algorithms
+
+| Policy | Shape |
+| --- | --- |
+| `FixedWindowRateLimitPolicy(permits, window)` | N per fixed window. Simplest; allows a burst across a boundary |
+| `SlidingWindowRateLimitPolicy(permits, window, segments)` | The same, smoothed over `segments` sub-windows (8 by default) |
+| `TokenBucketRateLimitPolicy(capacity, tokensPerPeriod, period)` | A burst allowance that refills steadily |
+| `ConcurrencyRateLimitPolicy(permits)` | N **in flight** at once, rather than N per unit of time |
+
+The concurrency limiter is the one that matters for expensive work on a device: it holds the lease for
+the whole request and releases it when the request completes, which is what makes it mean anything.
+
+All four take an optional `TimeProvider`, so their tests do not sleep.
+
+## Partitioning
+
+Every policy is partitioned by a selector, `ByIpAddress` by default:
+
+```csharp
+o.AddFixedWindow("per-user", 1000, TimeSpan.FromHours(1), RateLimitPartitioners.ByUser);
+o.AddFixedWindow("per-key", 100, TimeSpan.FromMinutes(1), RateLimitPartitioners.ByHeader("X-API-Key"));
+```
+
+| Partitioner | Keys on |
+| --- | --- |
+| `ByIpAddress` | `Connection.RemoteIpAddress` (the default) |
+| `ByUser` | The authenticated principal |
+| `ByHeader(name)` | A header value |
+| `ByIpAddressAndPath` | Address plus request path |
+| `Global` | One bucket for everything |
+
+Or write your own — it is a `Func<HttpContext, string?>`, and returning `null` exempts the request.
+
+Idle partitions are swept, because a limiter partitioned by IP and left alone grows an entry per
+address that ever knocked. Sweeping never happens while a partition holds permits or a live window, so
+nobody resets their own allowance by pausing.
+
+## Rejections
+
+| Option | Default |
+| --- | --- |
+| `RejectionStatusCode` | 429 |
+| `IncludeRetryAfterHeader` | `true` |
+| `IncludeRateLimitHeaders` | `true` |
+| `OnRejected` | `null` |
+
+`Retry-After` is rounded **up**. Rounding down invites exactly the retry storm the header exists to
+prevent.
+
+```csharp
+o.OnRejected = async (ctx, lease) =>
+{
+    logger.LogWarning("Throttled {Ip}", ctx.Connection.RemoteIpAddress);
+    await ctx.Response.WriteAsync("Slow down.");
+};
+```
+
+Naming a policy that was never registered throws at the first request that names it, rather than
+quietly running unlimited.
+
+## Why it runs before routing
+
+`UseRateLimiter()` is ordinary middleware and belongs early. Its whole value is in the work it
+prevents, and everything registered before it is work a throttled request still costs.
+
+A limiter that only covered mapped routes would let a scanner's 404s through at full price. Because
+it runs before routing, per-endpoint policies are resolved by asking the router which endpoint the
+request *would* reach.
+
+<Aside type="caution" title="Rate limit state is per process">
+Each server counts its own requests, so a fleet behind a load balancer enforces its limit N times
+over. A distributed limiter needs a shared store, which is a dependency this deliberately does not
+take. For the case this library exists for — one server on one device — per-process is exactly right.
+</Aside>

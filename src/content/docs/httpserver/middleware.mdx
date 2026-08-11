@@ -1,0 +1,170 @@
+---
+title: Middleware
+description: The request pipeline — lambdas, classes, ordering, and the difference between Use and UseAfterRouting
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Middleware has the same shape as ASP.NET Core's: do work, call `next` or don't, do more work.
+
+```csharp
+app.Use(async (ctx, next) =>
+{
+    var sw = Stopwatch.StartNew();
+    await next(ctx);
+    logger.LogInformation("{Path} -> {Status} in {Ms}ms",
+        ctx.Request.Path, ctx.Response.StatusCode, sw.ElapsedMilliseconds);
+});
+```
+
+Not calling `next` short-circuits everything below it, including routing.
+
+## As a class
+
+Once middleware has dependencies, its own tests, or more than a screenful of code, it wants to be a
+type:
+
+```csharp
+public sealed class ApiKeyMiddleware(IKeyStore keys) : IHttpMiddleware
+{
+    public async ValueTask InvokeAsync(HttpContext context, RequestDelegate next)
+    {
+        if (!keys.IsValid(context.Request.Headers.GetFirst("X-Api-Key")))
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return;
+        }
+
+        await next(context);
+    }
+}
+```
+
+Two ways to add it:
+
+```csharp
+builder.Services.AddSingleton<ApiKeyMiddleware>();
+app.Use<ApiKeyMiddleware>();      // resolved per request, from the request's own scope
+
+app.Use(new ApiKeyMiddleware(store));   // an instance you already have
+```
+
+`Use<T>()` resolves from the request scope, so a middleware registered `Scoped` gets the same
+instances as everything else handling that request, and one registered `Singleton` costs a dictionary
+lookup. Constructing it any other way would mean reflection, which is the one thing this server does
+not do.
+
+`Use(IHttpMiddleware)` uses **the same instance for every request**, so it must be thread-safe and
+hold no per-request state.
+
+## Ordering
+
+Middleware runs in registration order, wrapping routing and the terminal handler:
+
+```
+Use(A) ─┐
+  Use(B) ─┐
+    routing ─┐
+      UseAfterRouting(C) ─┐
+        endpoint handler
+```
+
+The pipeline is composed once, the first time the server starts or serves a connection. Registering
+middleware after that throws — and `RestartAsync` does **not** recompose it. Routes, by contrast, can
+change at any time.
+
+`RequestDelegate` returns `ValueTask` because most handlers complete synchronously and should not
+allocate a `Task` to say so.
+
+## `Use` vs `UseAfterRouting`
+
+`UseAfterRouting` runs after the router has chosen an endpoint, wrapping only the endpoint's own
+invocation. The difference is `ctx.Endpoint`: there it is populated, so the middleware can read the
+endpoint's metadata and decide accordingly.
+
+```csharp
+app.UseAfterRouting(async (ctx, next) =>
+{
+    if (ctx.Endpoint?.GetMetadata<AuditMetadata>() is { } audit)
+        await auditLog.RecordAsync(audit.Name, ctx.User);
+
+    await next(ctx);
+});
+```
+
+That is what authorization needs: `[Authorize]` is a property of the endpoint, and there is no
+endpoint before routing has run. Requests that matched nothing skip this stage entirely and go
+straight to the 404 or 405.
+
+<Aside type="note" title="Why CORS, rate limiting and IP filtering run before routing">
+All three are ordinary `Use` middleware, and that is deliberate. A limiter that only covered mapped
+routes would let a scanner's 404s through at full price; a whitelist that did would answer the whole
+internet's 404s; and a CORS preflight is an `OPTIONS` to a path that only answers `GET`, so the
+router would 405 it and the real request would never be sent.
+
+Per-endpoint policies still work, because each of those middleware asks the router which endpoint the
+request *would* reach — for a preflight, the one its `Access-Control-Request-Method` names.
+</Aside>
+
+## The order that matters
+
+For an app using most of the built-ins, this is the order that is actually correct:
+
+```csharp
+app.Use<RequestTimingMiddleware>();   // outermost: sees everything, including rejections
+
+app.UseCors();          // a preflight carries no credentials — authenticating it would 401 the
+                        // browser's question and the real request would never be sent
+app.UseRateLimiter();   // before routing, so a throttled request costs nothing beyond parsing
+app.UseIpFilter();
+
+app.UseResponseCompression();
+
+app.UseAuthentication();   // before routing — identity does not depend on the endpoint
+app.UseAuthorization();    // after routing — what is required is metadata on the endpoint
+
+app.UseSessions();
+app.UseStaticFiles();      // falls through to routing when no file matches
+```
+
+`UseAuthorization()` registers itself as after-routing middleware for you; the rest are ordinary
+`Use`.
+
+## Writing to the response from middleware
+
+Headers are flushed on the first body write, and mutating them afterwards throws. Middleware that
+wants to add a header around a handler registers a callback instead of setting it after `next`:
+
+```csharp
+app.Use((ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        ctx.Response.Headers["X-Served-By"] = "Shiny";
+        return ValueTask.CompletedTask;
+    });
+
+    return next(ctx);
+});
+```
+
+`OnStarting` runs immediately before the status line and headers go to the wire — the last chance to
+change either. `ctx.Response.HasStarted` tells you whether that moment has already passed.
+
+<Aside type="tip">
+Use `Headers.Append` rather than the indexer for headers that may legitimately appear more than once
+(`Vary`, `Set-Cookie`). A handler's own `Vary` is not something to trample, which is why the built-in
+middleware appends.
+</Aside>
+
+## Per-request state
+
+`ctx.Items` is a scratch dictionary allocated on first use, for passing state between middleware in
+one request. Anything with a lifetime beyond the request belongs in a [session](/httpserver/sessions/)
+or a singleton service.
+
+<Aside type="caution">
+`HttpContext` instances are **pooled and reused** across requests on the same connection. Do not hold
+onto a context — or its request, response or items — past the end of your handler. Copy out what you
+need.
+</Aside>

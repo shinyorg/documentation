@@ -1,0 +1,146 @@
+---
+title: Authorization
+description: Policies, roles and claims — enforced after routing, with 401 and 403 meaning different things
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Authentication answers *"who is this?"*. Authorization answers *"may they?"*. The split is
+load-bearing: a handler never decides whether a request is allowed, so an endpoint can be public on a
+server that still knows who is calling it.
+
+```csharp
+builder.Services.AddAuthorization(o =>
+{
+    o.AddPolicy("admin", p => p.RequireRole("admin"));
+    o.AddPolicy("owner", p => p.RequireAssertion(ctx =>
+        ctx.User.FindFirst("sub")?.Value == ctx.HttpContext.Request.RouteValues["userId"]));
+});
+
+var app = builder.Build();
+
+app.UseAuthentication();    // before routing — identity does not depend on the endpoint
+app.UseAuthorization();     // after routing — what is required is metadata on the endpoint
+```
+
+`UseAuthorization()` registers itself as after-routing middleware, so `ctx.Endpoint` is populated when
+it runs. Requests that matched no route never reach it.
+
+## Requiring it
+
+On a generated endpoint:
+
+```csharp
+[Route("/api/admin")]
+[Authorize("admin")]
+public class AdminEndpoints
+{
+    [Get("/stats")]
+    public Stats GetStats() => …;
+
+    [Get("/health")]
+    [AllowAnonymous]
+    public string Ping() => "ok";
+
+    [Post("/keys")]
+    [Authorize(Roles = "admin,security")]
+    public IActionResult RotateKeys() => …;
+}
+```
+
+On a raw route:
+
+```csharp
+app.OnGet("/secrets", ctx => …).RequireAuthorization("admin");
+app.OnGet("/ping", ctx => …).AllowAnonymous();
+```
+
+Two rules:
+
+- **A method's `[Authorize]` adds to its class's** rather than replacing it, so narrowing an endpoint
+  is additive and cannot accidentally widen it. Every named policy must pass.
+- **`[AllowAnonymous]` always wins**, including over a class-level `[Authorize]` and over a fallback
+  policy.
+
+A bare `[Authorize]` with no policy and no roles applies `DefaultPolicy`, which requires an
+authenticated caller unless you replace it.
+
+## Policies
+
+```csharp
+o.AddPolicy("support", p => p
+    .RequireAuthenticatedUser()
+    .RequireRole("support", "admin")             // any one of them
+    .RequireClaim("tenant", "acme", "globex")    // any one of the values; omit values to require the claim
+    .RequireAssertion(ctx => ctx.HttpContext.Connection.IsEncrypted, "a TLS connection")
+);
+```
+
+Everything in a policy must pass. `RequireAssertion` takes a sync or async predicate and an optional
+description — the description is what appears in the denial log line, so give it one.
+
+A policy built with no requirements at all gets `RequireAuthenticatedUser()` added, because a policy
+that authorizes anonymous callers is never what someone writing `AddPolicy` meant.
+
+Naming a policy that was never registered throws at the first request that needs it, rather than
+silently letting everyone through.
+
+### Custom requirements
+
+```csharp
+public sealed class WorkingHoursRequirement(TimeProvider clock) : IAuthorizationRequirement
+{
+    public string Describe() => "a request during working hours";
+
+    public ValueTask<bool> IsSatisfiedAsync(AuthorizationContext context)
+        => new(clock.GetLocalNow().Hour is >= 8 and < 18);
+}
+
+o.AddPolicy("business-hours", p => p.AddRequirement(new WorkingHoursRequirement(TimeProvider.System)));
+```
+
+`AuthorizationContext` gives you the `ClaimsPrincipal` and the `HttpContext`, so a requirement can
+look at route values, headers or the connection.
+
+## Deny by default
+
+```csharp
+o.SetFallbackPolicy(p => p.RequireAuthenticatedUser());
+```
+
+The fallback applies to endpoints with **no** `[Authorize]` at all. Setting it flips the app to
+deny-by-default, which is the safer posture for anything reachable from a
+[tunnel](/httpserver/tunneling/): a route added later is protected until someone says otherwise with
+`[AllowAnonymous]`.
+
+## 401 versus 403
+
+This is enforced, not approximated.
+
+- An **anonymous** caller gets **401** with a `WWW-Authenticate` challenge naming the scheme, and for
+  a bad token the reason as `error_description`.
+- An **authenticated** caller who still is not allowed gets **403** — another login will not help
+  them.
+
+Returning 401 to an authenticated user invites them to log in again forever; returning 403 to an
+anonymous one hides the fact that a token would have helped.
+
+<Aside type="note">
+The reason for a rejection goes in the challenge and the log, **never** in the body. Telling an
+anonymous caller exactly which claim they are missing is a free hint for someone probing.
+</Aside>
+
+A scheme can answer denial its own way through `IAuthenticationChallenge` — which is how
+[cookie authentication](/httpserver/authentication/) redirects a browser to a login page instead of
+handing it a 401 it cannot act on. The middleware asks rather than deciding, because only the scheme
+knows what its callers can do with an answer.
+
+## Bodies for denials
+
+401 and 403 are written with no body. If you want them shaped like every other failure, add
+[problem details](/httpserver/errors/):
+
+```csharp
+builder.Services.AddProblemDetails();
+app.UseProblemDetails();
+```

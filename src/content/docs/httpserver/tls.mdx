@@ -1,0 +1,128 @@
+---
+title: TLS & Certificates
+description: HTTPS endpoints, self-signed certificates generated in managed code, client certificates, and pinning
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## An HTTPS endpoint
+
+```csharp
+builder.Configure(o =>
+{
+    o.Listen(IPAddress.Loopback, 5000);                         // cleartext to the device
+    o.ListenHttps(IPAddress.Any, 5001, certificate);            // TLS to the network
+});
+```
+
+TLS is per endpoint rather than per server because that is how it is actually used. The single-endpoint
+shorthand is `o.Https = new HttpsOptions { Certificate = certificate }`.
+
+| `HttpsOptions` | Default | Notes |
+| --- | --- | --- |
+| `Certificate` | — | Must include a private key |
+| `CertificateSelector` | `null` | Per-connection choice from SNI; takes precedence over `Certificate` |
+| `SslProtocols` | TLS 1.2 + 1.3 | |
+| `ClientCertificateMode` | `NoCertificate` | `AllowCertificate` or `RequireCertificate` |
+| `ClientCertificateValidation` | `null` | Consulted only when client certs are requested |
+| `HandshakeTimeout` | 10 seconds | |
+
+The handshake happens off the accept loop. A client that connects and then says nothing costs a
+connection slot until `HandshakeTimeout` fires, and nothing else — negotiating inside the accept loop
+would stall every other connection to the server.
+
+`RequireCertificate` is genuinely enforced: `SslStream` asks for a client certificate but does not
+insist on one, so the check happens in the validation callback. Beyond presence, any client
+certificate is accepted unless `ClientCertificateValidation` says otherwise — requiring a chain the
+server knows nothing about would reject every legitimate certificate. The certificate is available on
+`ctx.Connection.ClientCertificate`, which is enough to build an
+[authentication scheme](/httpserver/authentication/) on.
+
+## Self-signed certificates
+
+A public CA cannot issue for `192.168.1.42` or for a phone that changes networks, so an embedded
+server has to sign its own.
+
+```csharp
+var certificate = ServerCertificate.Create();
+options.ListenHttps(IPAddress.Any, 5001, certificate);
+```
+
+Everything is managed `System.Security.Cryptography` — no OpenSSL, no platform tooling, nothing to
+ship alongside the app, and it runs on iOS and Android unchanged.
+
+`Create()` encodes the rules that get certificates rejected **on a device** rather than here:
+
+- Subject alternative names covering `localhost`, the host name and every local address — the common
+  name has been ignored by clients for years.
+- A `serverAuth` extended key usage.
+- A 397-day lifetime, under Apple's 398-day ceiling.
+- RSA-2048 or P-256.
+- Backdated an hour for clock skew.
+- A PKCS#12 round-trip, because on Apple platforms the key on a freshly created certificate is not in
+  a form `SslStream` will accept as a server credential.
+
+```csharp
+var certificate = ServerCertificate.Create(o =>
+{
+    o.CommonName = "My Device";
+    o.DnsNames.Add("device.local");
+    o.IPAddresses.Add(IPAddress.Parse("10.0.0.5"));
+    o.KeyAlgorithm = CertificateKeyAlgorithm.EcdsaP256;    // faster to generate on a phone
+    o.AllowClientAuthentication = true;
+});
+```
+
+### Persisting it
+
+```csharp
+var path = Path.Combine(FileSystem.AppDataDirectory, "server.pfx");
+var certificate = ServerCertificate.CreateOrLoad(path);
+```
+
+Loads the stored certificate, generating and saving a new one when the file is missing, unreadable or
+expired — and renewing 30 days out (`RenewBefore`). Stability is the point: a client that pinned the
+certificate keeps working across app restarts.
+
+The file holds an unprotected private key unless `ExportPassword` is set. It is written owner-only
+and replaced atomically, but that is defence in depth — put it somewhere only the app can read. On
+iOS and Android the app's own data directory already is that.
+
+## Trust
+
+This is the part that does not have one answer, and it is worth stating plainly.
+
+**Your own app's `HttpClient`** — nothing to install:
+
+```csharp
+var handler = CertificatePinning.CreateHandler(certificate);
+using var client = new HttpClient(handler);
+```
+
+Pinning replaces chain validation with an SPKI pin, which is **stricter** than the public PKI, not
+weaker. `CreateValidator(pins)` gives you the raw callback for a `SslStream` or a socket you own, and
+`certificate.GetPublicKeyPin()` produces the pin string to hard-code or ship in configuration.
+
+**A browser or WebView** — the certificate must be installed and trusted per device. On iOS that is a
+profile install *plus* a separate switch under Settings › General › About › Certificate Trust
+Settings. On Android 7+ a user-installed CA is trusted by Chrome but not by apps, which additionally
+need a `network_security_config`. Nothing in this library avoids that ceremony.
+
+<Aside type="danger" title="Anything internet-facing">
+Don't. Terminate TLS at the [tunnel or relay](/httpserver/tunneling/) with a real certificate and let
+the server speak cleartext behind it — which is what the tunnelling support already does. A
+self-signed certificate on a public address is a warning page at best.
+</Aside>
+
+## The pragmatic default
+
+For a device-local server, **plain HTTP on loopback** plus `NSAllowsLocalNetworking` on iOS or an
+Android `network_security_config` entry stays the right answer. TLS earns its keep on the
+network-facing endpoint, and a tunnel gives you a real certificate for free. See
+[.NET MAUI](/httpserver/maui/) for the platform configuration each of those needs.
+
+## HTTP/2 and ALPN
+
+ALPN is the only way HTTP/2 is negotiated over TLS, and it is offered automatically when
+`Options.Http2.Enabled` is on — `h2` first, `http/1.1` second, and the client picks. See
+[Protocols](/httpserver/protocols/).

@@ -1,0 +1,105 @@
+---
+title: Response Compression
+description: Brotli, gzip and deflate negotiated from Accept-Encoding — and why it is worth more on a device than in a datacentre
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseResponseCompression();
+```
+
+That is the whole setup. Brotli, gzip and deflate are negotiated from `Accept-Encoding`, and text-ish
+content types are compressed.
+
+This is worth more here than in a datacentre. An embedded server is reached over cellular or a
+[tunnel](/httpserver/tunneling/), where the CPU is idle and the bytes are not.
+
+## Configuration
+
+```csharp
+builder.Services.AddResponseCompression(o =>
+{
+    o.Level = CompressionLevel.Optimal;
+    o.MinimumBytes = 512;
+    o.MimeTypes.Add("application/vnd.myapp+json");
+});
+
+app.UseResponseCompression();
+```
+
+Or inline, for a server with no container:
+
+```csharp
+app.UseResponseCompression(o => o.Level = CompressionLevel.SmallestSize);
+```
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Providers` | brotli, gzip, deflate | Best first; remove one to stop offering it |
+| `MimeTypes` | text/\*, JSON, XML, JS, wasm, SVG, ndjson | Exact, or `type/*` prefix |
+| `ExcludedMimeTypes` | `text/event-stream` | Never compressed |
+| `MinimumBytes` | 1024 | Only applies when the length is known up front |
+| `Level` | `Fastest` | |
+| `EnableForHttps` | `true` | See below |
+| `ShouldCompress` | `null` | A predicate that overrides all of the above |
+
+`MimeTypes` is everything text or text-shaped. Images, video, fonts and archives are already
+compressed, and running them through gzip spends CPU to make them very slightly larger. `MinimumBytes`
+exists for the same reason at the other end: below roughly a packet's worth there is nothing to win.
+
+`text/event-stream` is excluded because compressing it is legal and usually wrong — the compressor
+buffers, and a stream whose whole purpose is immediacy arrives in bursts instead.
+
+## Negotiation
+
+`Accept-Encoding` is parsed with q-values. `q=0` is a refusal, not a weak preference. Higher `q`
+wins; equal `q` falls back to the provider's own priority, which is how `gzip, br` — no stated
+preference — still picks brotli. A bare `*` accepts anything not otherwise named, so the server's
+first choice applies.
+
+## How it works
+
+The decision is made **on the first byte written**, not when the middleware runs — nothing has set a
+content type yet at that point.
+
+It works by wrapping the response body control, so every write path funnels through one place: a
+handler using `Body`, `BodyWriter`, `WriteAsync`, a result type or the static file middleware is
+covered without knowing this exists.
+
+Compressing clears the declared `Content-Length`, since the compressed size is unknown until the last
+block. Ranges, pre-encoded bodies, 204/304, `HEAD` and already-compressed media types are all passed
+through untouched.
+
+`Vary: Accept-Encoding` is **appended** from an `OnStarting` callback either way — appended rather
+than set, because a handler's own `Vary` is not something to trample, and from a callback because
+setting it before the handler runs would let the handler overwrite it.
+
+## Ordering
+
+Put it early. It has to wrap everything that writes a body, including static files:
+
+```csharp
+app.UseCors();
+app.UseResponseCompression();
+app.UseStaticFiles("./wwwroot");
+```
+
+## HTTPS and BREACH
+
+`EnableForHttps` is on by default, because a tunnelled server is HTTPS end to end and switching
+compression off there would mean never compressing at all.
+
+<Aside type="caution">
+The reason it is a switch: BREACH infers a secret by watching compressed response sizes, and it needs
+a response containing **both** a secret (a CSRF token) and attacker-controlled input. An API
+returning data has neither; a rendered HTML page with a hidden token in it might. Turn it off for
+those — or use `ShouldCompress` to exclude just them.
+</Aside>
+
+## Precompressed files
+
+For content published with `.br`/`.gz` sidecars — a Blazor publish does this — serving those beats
+recompressing per request: they were compressed once at maximum effort, and this middleware runs at a
+level chosen for speed. Turn on `ServePrecompressedFiles` in
+[static files](/httpserver/static-files/) (and [Blazor](/httpserver/blazor/) does it for you).

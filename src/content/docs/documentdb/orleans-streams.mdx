@@ -1,0 +1,190 @@
+---
+title: Orleans Streams
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+A **persistent Orleans stream provider** backed by `IDocumentStore` — durable, inspectable streams on the database your cluster already uses for membership, grain storage and reminders. It completes the picture the [Orleans provider](/documentdb/orleans) started: membership, grain storage, reminders, grain directory, and now streams, all on one connection string.
+
+<NugetBadge name="Shiny.DocumentDb.Orleans" showLabel={true} />
+
+:::caution[This is not an Event Hub replacement]
+This is a database-backed queue. Expect throughput in the **thousands** of events per second on PostgreSQL, not the hundreds of thousands an event-streaming platform delivers. It exists so a team already running PostgreSQL or SQL Server can have durable streams without adding a second piece of infrastructure — not to compete with Event Hub, Kafka or SQS on scale. Benchmark against your own workload before committing.
+:::
+
+## When to use
+
+- You want **durable** streams without running a queue service. Orleans' in-memory provider does not survive a restart; Azure Queue / Event Hub / SQS mean another service to run, pay for and secure.
+- You want the backlog to be **inspectable**. Stream events are ordinary documents, so [ShinyDocDbMyAdmin](/documentdb/admin) can show you a queue that will not drain, its depth, and the actual payload that is stuck. None of the cloud queue providers offer that.
+- You are already using DocumentDb for the rest of the Orleans stack and want one store, one connection string, one backup.
+
+## Supported backends
+
+The provider gate is enforced **at silo start**, not on the first event — a cluster that boots and then loses events under load is a far worse failure than one that refuses to boot.
+
+| Backend | Supported | Notes |
+|---|---|---|
+| PostgreSQL | ✅ | Change-feed nudge available (`LISTEN`/`NOTIFY`) |
+| SQL Server | ✅ | Change-feed nudge available |
+| MySQL / MariaDB | ✅ | Poll-only |
+| Oracle | ✅ | Poll-only |
+| CockroachDB | ✅ | Poll-only (no `LISTEN`/`NOTIFY`). Transactions are `SERIALIZABLE`, so contended enqueues can abort with a retryable `40001`; the provider retries them automatically |
+| SQLite / SQLCipher | ❌ | A local file cannot back a multi-silo cluster's queues. For a single silo, Orleans' in-memory provider already applies |
+| LiteDB | ❌ | As SQLite, plus a single-writer whole-file lock the poll loop would sit inside |
+| DuckDB | ❌ | Analytical engine; small concurrent writes are its worst case |
+| Cosmos / DynamoDB / Firestore / Azure Table | ❌ | Pay-per-request. Pulling agents poll every queue continuously, so idle cost is charged forever |
+| MongoDB / RavenDB / Redis / Amazon DocumentDB | ❌ | Each needs its own sequencing answer; not yet built |
+
+The gate is a **capability check, not a name list**: the provider requires `IDocumentStore.SupportsPessimisticLocking`, because a real row lock is what keeps the sequence correct (see [How sequencing works](#how-sequencing-works)). Any backend that grows real row locking qualifies automatically.
+
+## Setup
+
+```csharp
+siloBuilder.AddDocumentDbStreams("Default", o =>
+{
+    o.DatabaseProvider = new PostgreSqlDatabaseProvider(connectionString);
+    // o.TotalQueueCount = 8;                                  // default
+    // o.TableName       = "orleans_streams";                  // default
+    // o.Retention       = TimeSpan.FromHours(1);              // default; null keeps everything
+});
+```
+
+Produce and consume with the ordinary Orleans stream API — nothing here is provider-specific:
+
+```csharp
+public class ProducerGrain : Grain, IProducerGrain
+{
+    public async Task Publish(OrderPlaced evt)
+    {
+        var stream = this.GetStreamProvider("Default")
+            .GetStream<OrderPlaced>(StreamId.Create("orders", this.GetPrimaryKey()));
+
+        await stream.OnNextAsync(evt);
+    }
+}
+
+[ImplicitStreamSubscription("orders")]
+public class ConsumerGrain : Grain, IGrainWithGuidKey, IStreamSubscriptionObserver
+{
+    public async Task OnSubscribed(IStreamSubscriptionHandleFactory handleFactory)
+        => await handleFactory.Create<OrderPlaced>()
+            .ResumeAsync((evt, token) => this.Handle(evt));
+
+    Task Handle(OrderPlaced evt) => Task.CompletedTask;
+}
+```
+
+An external client can produce directly with `clientBuilder.AddDocumentDbStreams(...)`, which gives that client a database connection of its own. That is reasonable on a trusted network and wrong for anything internet-facing — publish through a grain instead.
+
+## Options
+
+| Option | Default | Notes |
+|---|---|---|
+| `TotalQueueCount` | `8` | Queues streams hash across, **and** the number of sequence counter rows — so this is the enqueue-concurrency dial. Do not change it with a non-empty backlog: streams re-hash and events can land on a queue nobody reads |
+| `PollInterval` | `100ms` | Floor of the adaptive backoff — the fastest the provider queries one queue |
+| `MaxPollInterval` | `1s` | Ceiling on an idle queue. On a backend with no change feed this is the worst-case latency for the first event after an idle period |
+| `BatchSize` | `100` | Max event rows read per poll |
+| `Retention` | `1 hour` | How long delivered events are kept before the sweep removes them. `null` keeps everything — an audit trail, and a table that grows without bound |
+| `PurgeInterval` | `1 minute` | How often each receiver sweeps its own queue |
+| `UseChangeFeedNudge` | `true` | Use the native change feed to cut the backoff short when an event is enqueued on any silo |
+
+`OrleansStoreOptions` members (`DatabaseProvider`, `StoreFactory`, `TableName`, `JsonSerializerOptions`, `UseReflectionFallback`) work exactly as they do for the [other system stores](/documentdb/orleans#system-stores-reminders-clustering-grain-directory).
+
+## How sequencing works
+
+Orleans needs a monotonic `long` position per queue, and the receiver reads by watermark (`Seq > cursor`). The obvious implementation — a `BIGSERIAL` / `IDENTITY` / `AUTO_INCREMENT` column — is a **correctness trap**, and it is worth understanding why the provider does not use one.
+
+Sequence values are handed out at **insert** time; rows become visible at **commit** time. Those orders differ:
+
+1. Transaction A inserts and takes sequence 5.
+2. Transaction B inserts, takes 6, and commits first.
+3. The receiver reads up to 6 and advances its cursor past 5.
+4. Transaction A commits. Event 5 is now behind the cursor and is **never delivered**.
+
+Silently, and only under load. So instead each queue has a **counter row**, and an enqueue reserves its position under a row lock inside the same transaction:
+
+```
+BEGIN
+  counter = Get(queueId, LockMode.Update)   -- SELECT … FOR UPDATE
+  seq     = counter.Next++
+  INSERT the event row with Seq = seq
+COMMIT
+```
+
+The lock does double duty: a second producer blocks until the first **commits**, so assignment order and commit order are the same order by construction, and the sequence comes out gap-free. The trade is explicit — **enqueue throughput per queue is bounded by the lock hold time on one row** — and the dial is `TotalQueueCount`, since each queue has its own counter row.
+
+## Cost and latency
+
+Two things determine what this provider costs you.
+
+**Reads are free of writes.** Orleans guarantees a single pulling agent per queue per cluster, so the receiver reads by an in-memory cursor and takes no locks and writes nothing per message. The only writes on the read path are one range update per delivered batch set (the acknowledgement watermark) and the periodic retention sweep. A `(QueueId, Seq)` index is created automatically, which turns each poll into a B-tree seek rather than a scan.
+
+**Idle polling is the real cost.** Orleans' pulling agents fire every 100ms per queue whether or not anything is streaming — eight queues is ~80 wake-ups per second per silo at idle. The provider backs off (100ms → doubling → `MaxPollInterval`) and returns immediately without querying while backed off, so an idle cluster settles at one query per queue per second rather than ten. Where the backend has a native change feed, one subscription per silo wakes every receiver as soon as anything is enqueued — including from another silo — so the backoff costs no real latency. On MySQL, MariaDB, Oracle and CockroachDB there is no change feed, so `MaxPollInterval` **is** your worst-case first-event latency. Tune it deliberately.
+
+## Rewind
+
+A subscriber can resume from a `StreamSequenceToken` older than anything still in memory, because the cache
+replays the events table rather than reporting a cache miss:
+
+```csharp
+// Resume where this consumer left off, even across a silo restart.
+await stream.SubscribeAsync(handler, lastToken);
+```
+
+This is the capability a queue-backed provider cannot offer: behind Azure Queue or SQS the message is gone
+once handed over, so Orleans' own caches answer a too-old token with `QueueCacheMissException`. Behind this
+one the row is still there.
+
+Two things to know:
+
+- **The rewind window is exactly `Retention`.** The sweep that bounds table growth is the same thing that
+  bounds how far back a subscriber can resume. Past it, you get the ordinary cache miss — which is the honest
+  answer. Set `Retention` to the replay window you actually want, and size the table for it.
+- **Replay reads through a second index.** The events table carries `(QueueId, Seq)` for the receiver and
+  `(QueueId, StreamId, Seq)` for rewind, so a replay reads one stream's history rather than scanning the
+  queue. Two indexes on a write-hot table is a real cost, paid deliberately.
+
+Replaying pages from storage blocks the pulling agent's thread briefly on the first page, then prefetches the
+next while the current one is consumed. That is a deliberate trade: `IQueueCacheCursor` is a synchronous
+interface, and a cursor that returned "nothing yet" while loading would stall on a quiet stream rather than
+finish.
+
+## Operations
+
+`IStreamAdmin` is the in-process operational view — resolve it keyed by provider name for health checks and
+dashboards:
+
+```csharp
+var admin = services.GetRequiredKeyedService<IStreamAdmin>("Default");
+
+foreach (var queue in await admin.Queues())
+    logger.LogInformation("{Queue}: depth {Depth}, lag {Lag}", queue.QueueId, queue.Depth, queue.Lag);
+
+foreach (var stuck in await admin.StuckStreams(TimeSpan.FromMinutes(5)))
+    logger.LogWarning("{Stream} has {Count} undelivered since {Since}", stuck.StreamId, stuck.UndeliveredCount, stuck.OldestUndeliveredAt);
+```
+
+It is **read-only**, and that is a design decision rather than a gap. An outbox message is a unit of work
+someone owns, so requeueing it is meaningful; a stream event is a position in a gap-free sequence that every
+subscriber holds a cursor into. Deleting one tears a hole in that sequence and re-dating one reorders
+delivery. A stuck stream is fixed on the consumer side.
+
+[ShinyDocDbMyAdmin](/documentdb/admin) has a **Streams** screen answering the same questions — per-queue
+depth, retained history, oldest undelivered, and which streams are not draining — in both the web and terminal
+front ends. Watch the *oldest undelivered* figure rather than the depth: depth alone cannot tell a busy queue
+from a dead pulling agent, but age can.
+
+## Delivery guarantees
+
+- **At-least-once**, as Orleans' persistent streams are defined. Consumers must be idempotent.
+- **Ordered per queue.** Events on one stream are delivered in enqueue order.
+- **Failover replays.** A new pulling agent resumes from the persisted checkpoint (falling back to the acknowledgement watermark on the rows), so anything delivered but not acknowledged when a silo died is redelivered — and a queue whose history is being retained for rewind does not replay all of it on restart.
+- **Not transactional with grain state.** Producing to a stream is not atomic with the producing grain's state write — that is what the [outbox](/documentdb/outbox) is for.
+
+## Limitations
+
+- **`TotalQueueCount` is not safely changeable** on a cluster with a non-empty backlog.
+- **Retention bounds rewind.** Delivered events are swept after `Retention`, and that sweep is the rewind
+  window — a subscriber cannot resume from before it. Set it to `null` to keep everything, and plan for the
+  table growth.
+- **PostgreSQL housekeeping.** A high-churn stream table wants autovacuum attention; time-range partitioning is a good deployment recipe, not something this provider ships.
+- **The `StoreFactory` escape hatch skips index creation** — supply your own `(QueueId, Seq)` index or every poll scans the table.

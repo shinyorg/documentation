@@ -202,6 +202,7 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'blehosting/' },
           { label: 'GATT Service', link: 'blehosting/gatt' },
+          { label: 'Source Generator', link: 'blehosting/source-generator' },
           { label: 'L2CAP', link: 'blehosting/l2cap' },
           { label: 'Release Notes', link: 'blehosting/release-notes' }
         ]
@@ -699,6 +700,7 @@ export const sidebarTopics = [
               { label: 'OData Endpoints', link: 'documentdb/odata' },
               { label: 'Offline Sync (Shiny.Data.Sync)', link: 'documentdb/data-sync' },
               { label: 'Orleans Persistence', link: 'documentdb/orleans' },
+              { label: 'Orleans Streams', link: 'documentdb/orleans-streams' },
               { label: 'Aspire', link: 'documentdb/aspire' },
             ]
           },
@@ -876,6 +878,63 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'blazorhost/' },
           { label: 'Release Notes', link: 'blazorhost/release-notes' }
+        ]
+      },
+      {
+        label: 'HTTP Server',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'httpserver/' },
+          { label: 'Hosting & Lifecycle', link: 'httpserver/hosting' },
+          { label: 'Configuration', link: 'httpserver/configuration' },
+          { label: 'Routing', link: 'httpserver/routing' },
+          { label: 'Middleware', link: 'httpserver/middleware' },
+          { label: 'Typed Endpoints', link: 'httpserver/endpoints' },
+          { label: 'Results & JSON', link: 'httpserver/results' },
+          { label: 'Errors & Problem Details', link: 'httpserver/errors' },
+          {
+            label: 'Content',
+            items:[
+              { label: 'Static Files', link: 'httpserver/static-files' },
+              { label: 'Blazor WebAssembly', link: 'httpserver/blazor' },
+              { label: 'Uploads & Downloads', link: 'httpserver/files' },
+              { label: 'File Browser', link: 'httpserver/file-browser' },
+              { label: 'Response Compression', link: 'httpserver/compression' }
+            ]
+          },
+          {
+            label: 'Realtime',
+            items:[
+              { label: 'WebSockets', link: 'httpserver/websockets' },
+              { label: 'Server-Sent Events', link: 'httpserver/sse' }
+            ]
+          },
+          {
+            label: 'Security',
+            items:[
+              { label: 'Authentication', link: 'httpserver/authentication' },
+              { label: 'Authorization', link: 'httpserver/authorization' },
+              { label: 'JWT', link: 'httpserver/jwt' },
+              { label: 'TLS & Certificates', link: 'httpserver/tls' },
+              { label: 'CORS', link: 'httpserver/cors' },
+              { label: 'Rate Limiting', link: 'httpserver/rate-limiting' },
+              { label: 'IP Filtering', link: 'httpserver/ip-filtering' }
+            ]
+          },
+          {
+            label: 'Tunnelling',
+            items:[
+              { label: 'Overview', link: 'httpserver/tunneling' },
+              { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh' },
+              { label: 'Azure Relay', link: 'httpserver/azure-relay' }
+            ]
+          },
+          { label: 'Sessions', link: 'httpserver/sessions' },
+          { label: 'OpenAPI', link: 'httpserver/openapi' },
+          { label: 'Protocols', link: 'httpserver/protocols' },
+          { label: 'Model Context Protocol', link: 'httpserver/mcp' },
+          { label: '.NET MAUI', link: 'httpserver/maui' },
+          { label: 'Release Notes', link: 'httpserver/release-notes' }
         ]
       },
       {

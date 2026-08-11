@@ -1,0 +1,128 @@
+---
+title: Configuration
+description: Endpoints, ports, limits, timeouts and the server-wide switches on HttpServerOptions
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`HttpServerOptions` is the whole surface. Defaults are chosen to be safe on a phone, not maximal on
+a server.
+
+```csharp
+var builder = HttpServer.CreateBuilder();
+
+builder.Configure(o =>
+{
+    o.Address = IPAddress.Any;
+    o.Port = 8080;
+    o.Limits.MaxRequestBodySize = 200 * 1024 * 1024;
+});
+```
+
+## The single-endpoint shorthand
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Address` | `IPAddress.Loopback` | An embedded server should not be LAN-reachable unless its author says so |
+| `Port` | `5000` | `0` lets the OS pick one — read it back from `ListenUrl` |
+| `Https` | `null` | Plain HTTP. See [TLS & Certificates](/httpserver/tls/) |
+
+These three describe one endpoint and are what most embedded servers want.
+
+## Several endpoints at once
+
+`Options.Endpoints` holds any number of address/port/TLS combinations, each bound by its own listener
+and accept loop. TLS is per endpoint rather than per server because that is how it is actually used
+— cleartext to the device, TLS to the network:
+
+```csharp
+builder.Configure(o =>
+{
+    o.Listen(IPAddress.Loopback, 5000);
+    o.ListenHttps(IPAddress.Any, 5001, certificate);
+});
+```
+
+<Aside type="caution">
+The list takes over entirely once it has anything in it — `Address`/`Port`/`Https` are **not** folded
+in. A loopback endpoint you still want has to be listed explicitly. This is deliberate: adding one
+endpoint should never silently mean two.
+</Aside>
+
+`ListenUrls` reports them all and `ListenUrl` the first. A partial bind failure unwinds every
+endpoint that did bind rather than leaving the server half listening, and `RestartAsync` re-reads the
+list.
+
+## Limits
+
+`Options.Limits` exists to keep a misbehaving or hostile client from exhausting memory.
+
+| Property | Default |
+| --- | --- |
+| `MaxRequestLineSize` | 8 KB |
+| `MaxRequestHeadersTotalSize` | 32 KB |
+| `MaxRequestHeaderCount` | 100 |
+| `MaxRequestBodySize` | 30 MB (`null` removes the limit) |
+| `KeepAliveTimeout` | 130 seconds |
+| `RequestHeadersTimeout` | 30 seconds |
+| `MaxRequestsPerConnection` | 1000 (`null` removes the limit) |
+| `InputBufferSize` | 16 KB |
+
+A body larger than `MaxRequestBodySize` is a 413, not a truncated read. Raise it for an upload
+endpoint, or raise it globally and bound the individual endpoint instead — see
+[Uploads & Downloads](/httpserver/files/).
+
+## Connections
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `MaxConcurrentConnections` | 256 | Excess connections **wait** rather than being rejected. `null` removes the cap |
+| `Backlog` | 128 | Pending-connection queue depth handed to `listen()` |
+| `NoDelay` | `true` | Nagle off — request/response latency beats packet efficiency |
+
+The connection cap is for the whole server, not per endpoint, so keep it comfortably above the number
+of endpoints. A cap smaller than that leaves some of them unable to accept at all until a connection
+elsewhere finishes.
+
+## Response headers
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `ServerHeader` | `"Shiny"` | `null` omits the header entirely |
+| `IncludeDateHeader` | `true` | RFC 9110 asks origin servers to send `Date` |
+
+## Forwarded headers
+
+```csharp
+o.UseForwardedHeaders = true;
+```
+
+With this on, `Request.Scheme` and the client IP come from `X-Forwarded-Proto` / `X-Forwarded-For`.
+
+<Aside type="danger">
+Only enable this when the server genuinely sits behind a proxy or tunnel you control. Trusting
+`X-Forwarded-For` unconditionally lets any client claim any address it likes — including past an
+[IP filter](/httpserver/ip-filtering/), which reads the transport address precisely so that one
+header cannot walk around it.
+</Aside>
+
+`ctx.GetClientIpAddress(useForwardedHeaders: true)` does the same lookup for a single call site,
+taking the left-most entry (the original client) and stripping an optional port.
+
+## Exception detail
+
+```csharp
+o.HideExceptionDetails = false;   // development only
+```
+
+On by default: an unhandled handler exception produces a 500 with no detail. Turning it off returns
+the exception text instead, which is a development convenience and a production disclosure. For
+anything structured, use [Errors & Problem Details](/httpserver/errors/) — `IncludeExceptionDetails`
+there does the same job for RFC 9457 bodies.
+
+## HTTP/2
+
+`Options.Http2` configures the HTTP/2 stack; see [Protocols](/httpserver/protocols/) for what is
+negotiated and how. The short version is that `Enabled` is on by default and costs nothing, because
+the protocol is still chosen per connection: ALPN over TLS, the connection preface over cleartext,
+and HTTP/1.1 for anything else.

@@ -8,6 +8,8 @@ L2CAP Connection-Oriented Channels (CoC) let a BLE peripheral publish a PSM that
 
 `IBleHostingManager.OpenL2Cap` publishes a PSM and invokes your callback for every accepted central connection. The PSM stays alive until you dispose the returned `L2CapInstance`. Centrals connect to it using [Shiny.BluetoothLE's L2CAP API](../ble/l2cap).
 
+`[L2CapService]` from the [source generator](./source-generator) wraps all of this — it owns the listener lifetime, runs one handler per accepted central, disposes each channel when the handler returns, and can publish the assigned PSM as a GATT read characteristic so centrals can actually discover it.
+
 ## Opening an L2CAP Listener
 
 ```csharp

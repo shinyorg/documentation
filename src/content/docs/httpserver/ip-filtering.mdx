@@ -1,0 +1,93 @@
+---
+title: IP Filtering
+description: CIDR allow and deny lists enforced before routing, with per-endpoint policies
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseIpFilter(p => p.AllowLoopback().AllowPrivateNetworks());
+```
+
+That is the shape most device servers want: reachable from the LAN, not from anywhere else.
+
+For named policies applied per endpoint:
+
+```csharp
+builder.Services.AddIpFilter(o =>
+{
+    o.AddPolicy("admin", p => p.AllowLoopback());
+    // No DefaultPolicy here — setting one applies to every request, including the 404s.
+});
+
+var app = builder.Build();
+app.UseIpFilter();
+
+app.OnGet("/admin/keys", ctx => …).RequireIpFilter("admin");
+app.OnGet("/ping", ctx => …).AllowAnyIp();
+```
+
+On generated endpoints, `[RequireIpFilter("admin")]` and `[AllowAnyIp]` do the same as compile-time
+metadata.
+
+## Building a policy
+
+| Method | Effect |
+| --- | --- |
+| `Allow(params string[] ranges)` | CIDR ranges, or bare addresses |
+| `Deny(params string[] ranges)` | |
+| `AllowLoopback()` | `127.0.0.0/8` and `::1` |
+| `AllowPrivateNetworks()` | The RFC 1918 ranges, link-local, and unique-local IPv6 |
+| `AllowUnknownAddress(bool)` | Whether a request whose remote address is unknown passes |
+
+```csharp
+o.AddPolicy("partner", p => p
+    .Allow("203.0.113.0/24", "198.51.100.7")
+    .Deny("203.0.113.66")
+);
+```
+
+The rules:
+
+- **Deny beats allow**, including a wider allow.
+- **One allow entry turns a blacklist into a whitelist.** A policy with any `Allow` in it refuses
+  everything not listed.
+- **An unknown remote address fails closed** unless `AllowUnknownAddress()` says otherwise.
+
+`IpAddressRange` masks host bits itself, so `10.0.0.5/8` is accepted and means `10.0.0.0/8` — rather
+than being rejected the way `System.Net.IPNetwork` does. IPv4-mapped IPv6 addresses are unmapped on
+both sides, so a dual-stack listener does not silently break every IPv4 rule.
+
+## Rejections
+
+| Option | Default |
+| --- | --- |
+| `RejectionStatusCode` | 403 |
+| `OnRejected` | `null` |
+
+```csharp
+o.OnRejected = (ctx, address) =>
+{
+    logger.LogWarning("Blocked {Address}", address);
+    return ValueTask.CompletedTask;
+};
+```
+
+## The address it checks
+
+<Aside type="danger">
+The filter reads `Connection.RemoteIpAddress` — the transport address. It honours `X-Forwarded-For`
+only when the server as a whole opted in with
+[`UseForwardedHeaders`](/httpserver/configuration/), and that opt-in is exactly the trade-off: a
+filter that read the header by default could be walked past with one line of `curl`.
+
+Behind a proxy **without** the opt-in, a whitelist sees the proxy, not the caller. **With** it,
+whoever can reach the port can claim any address they like. Neither is wrong; know which one you are
+running.
+</Aside>
+
+## Why it runs before routing
+
+`UseIpFilter()` is ordinary middleware and belongs early. A whitelist that only covered mapped routes
+would answer the whole internet's 404s. Per-endpoint policies still work, because the middleware asks
+the router which endpoint the request *would* reach.

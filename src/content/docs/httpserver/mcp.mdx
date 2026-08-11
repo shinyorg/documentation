@@ -1,0 +1,146 @@
+---
+title: Model Context Protocol
+description: Host an MCP server over Streamable HTTP without ASP.NET Core — including inside a .NET MAUI app
+---
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+`Shiny.Net.HttpServer.Mcp` puts a Model Context Protocol server on a route of the Shiny HTTP server,
+speaking the Streamable HTTP transport. It is the piece the MCP SDK's own ASP.NET Core package would
+otherwise supply — which is why this exists, since ASP.NET Core does not run in a .NET MAUI app.
+
+<NugetBadge name="Shiny.Net.HttpServer.Mcp" showLabel={true} />
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+The MCP server itself — its tools, prompts and resources — is configured with the MCP SDK's own
+`AddMcpServer()`. What this package adds is the HTTP in front of it.
+
+## Getting started
+
+```csharp
+var builder = HttpServer.CreateBuilder();
+builder.Configure(o => o.Port = 8181);
+
+builder.Services
+    .AddMcpServer(o =>
+    {
+        o.ServerInfo = new Implementation { Name = "thermostat", Version = "1.0.0" };
+        o.ServerInstructions = "Reads and adjusts a thermostat. Temperatures are in Celsius.";
+    })
+    .WithTools<ThermostatTools>()
+    .WithHttpTransport();
+
+var app = builder.Build();
+
+app.MapMcp();                 // http://host:port/mcp
+await app.RunAsync();
+```
+
+`MapMcp()` mounts one path across four verbs: `POST` for client messages, `GET` for the
+server-to-client stream, `DELETE` to end a session, and `OPTIONS` for the browser preflight. It
+returns a handle covering all four, so a convention applies to the set rather than to whichever
+route happened to be mapped last:
+
+```csharp
+app.MapMcp("/tools").RequireAuthorization();
+```
+
+Authorization is applied to the three protocol verbs and deliberately not to the preflight — a
+browser sends `OPTIONS` without credentials, so rejecting it would make the endpoint unreachable
+rather than more secure.
+
+Tools are ordinary methods, and constructor and parameter injection work exactly as they do in an
+endpoint class, because the MCP server is created from the HTTP server's own container:
+
+```csharp
+[McpServerToolType]
+public sealed class ThermostatTools
+{
+    [McpServerTool(Name = "get_temperature"), Description("Reads the current temperature in Celsius.")]
+    public static string GetTemperature(Thermostat thermostat)
+        => $"Currently {thermostat.Current:0.0}°C, set to {thermostat.Target:0.0}°C.";
+}
+```
+
+## Trimming, AOT, and MAUI
+
+The package is trim- and AOT-clean, and publishes clean under `PublishAot`. There is one thing the
+compiler cannot check for you.
+
+A tool's parameter and return types are published to the client as a JSON schema, and building that
+schema by reflection does not survive trimming — which covers .NET MAUI on iOS and Mac Catalyst, and
+anything published with `PublishTrimmed` or `PublishAot`. **Tools whose parameters and results are
+only primitives and strings need nothing extra.** Anything richer needs a source-generated context:
+
+```csharp
+[JsonSerializable(typeof(Query))]
+[JsonSerializable(typeof(Reading))]
+[JsonSerializable(typeof(IReadOnlyList<Reading>))]
+public partial class ToolJson : JsonSerializerContext;
+
+builder.Services
+    .AddMcpServer()
+    .WithTools<SensorTools>(ToolJson.Default.Options)
+    .WithHttpTransport();
+```
+
+Miss one and `MapMcp()` throws at startup, naming the type it could not describe and showing the
+context to add. That is the whole reason the check is worth having: without it the app compiles
+clean, publishes clean, and fails the first time a client asks for the tool list — on the device.
+
+A tool's types are often ones the app already serializes. In the MAUI sample the HTTP API and the MCP
+tools trade in the same `DeviceSummary` and `Note`, so the context the app already declares is simply
+handed to `WithTools`:
+
+```csharp
+builder.Services
+    .AddMcpServer(o => o.ServerInfo = new Implementation { Name = "shiny-device", Version = "1.0.0" })
+    .WithTools<DeviceTools>(ApiJsonContext.Default.Options)
+    .WithHttpTransport();
+```
+
+:::caution
+`WithToolsFromAssembly()`, `WithPromptsFromAssembly()` and the `IEnumerable<Type>` overloads scan for
+attributes at runtime and are annotated `RequiresUnreferencedCode`. They are the wrong call to make
+in a trimmed app; use the generic `WithTools<T>()` overload, which is annotated for trimming rather
+than excluded from it.
+:::
+
+## Sessions
+
+By default a client that initializes gets a session, and it lives across requests and across
+connections — one process on a device holding real state between calls, which is the interesting
+case for this server. Sessions are also what the `GET` stream attaches to, so anything needing the
+server to speak first (sampling, elicitation, roots, notifications) needs one.
+
+```csharp
+.WithHttpTransport(o =>
+{
+    o.IdleSessionTimeout = TimeSpan.FromMinutes(10);
+    o.MaxSessions = 32;
+})
+```
+
+A client that goes away without sending `DELETE` — which is most of them, most of the time — is
+reclaimed by `IdleSessionTimeout`. `MaxSessions` is a ceiling: exceeding it answers 429 rather than
+accepting work the device cannot hold. A session with a request still open is never idle, so an SSE
+stream sitting quietly for an hour is not reclaimed out from under its client.
+
+Set `Stateless = true` to run every request against a throwaway server with no session state, which
+is what you want behind a load balancer where the next request may not reach the process that
+answered this one.
+
+## Browser origins
+
+`AllowedOrigins` is empty by default, and that is the safe setting: a request carrying `Origin` is by
+definition coming from a page, and a server bound to localhost is otherwise a DNS-rebinding target.
+Native MCP clients send no `Origin` and are unaffected.
+
+```csharp
+.WithHttpTransport(o => o.AllowedOrigins.Add("http://localhost:6274"))   // the MCP Inspector
+```
+
+`AllowAnyOrigin` is convenient while developing and is exactly the setting that makes a locally bound
+MCP server reachable from any page the user happens to have open.
