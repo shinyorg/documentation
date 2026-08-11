@@ -28,18 +28,41 @@ The zero-ceremony version: no account, nothing installed, no infrastructure.
 await app.RunQuickTunnelAsync(url => Console.WriteLine($"Reachable at {url}"));
 ```
 
-| Host | What it gives you |
-| --- | --- |
-| `QuickTunnelHost.LocalhostRun` (default) | `localhost.run` — authenticates nobody, fresh `*.lhr.life` address each time |
-| `QuickTunnelHost.Sish` | The public `sish` at `tuns.sh` — derives the subdomain from your key, so the same key gets the same address |
-| `QuickTunnelHost.Serveo` | `serveo.net` — same idea, longest-running, least reliable of the three |
+| Host | What it gives you | What it needs |
+| --- | --- | --- |
+| `QuickTunnelHost.Pinggy` (default) | `pinggy.io` — a fresh `*.pinggy-free.link` address, reported in about two seconds | Nothing. It wants a key but not a registered one, so `UseEphemeralKey` generates one in memory |
+| `QuickTunnelHost.Sish` | The public `sish` at `tuns.sh` — derives the subdomain from your key, so the same key gets the same address | A key **enrolled at pico.sh**. An unknown key is refused outright |
+| `QuickTunnelHost.LocalhostRun` | `localhost.run` — forwards fine, but cannot report its own address here (see below) | A localhost.run account with a custom domain, set as `PublicUrl` |
+| `QuickTunnelHost.Serveo` | `serveo.net` — same idea, longest-running | A key, and patience: it is frequently unreachable for days |
 
-`Sish` is the one to use when the URL goes on a label or into a customer's bookmark.
+Anonymous pinggy tunnels expire after 60 minutes. Pass an access token as the `subdomain` argument to
+lift that — pinggy carries the token in the SSH username, so that argument is where it goes.
+
+`Sish` is the one to use when the URL goes on a label or into a customer's bookmark, since the
+address follows the key rather than changing every run.
+
+<Aside type="caution" title="localhost.run cannot report its address to this library">
+It never confirms the SSH session request that carries the assigned URL. The `ssh` binary does not
+wait for that confirmation and prints the address anyway; SSH.NET does wait, and there is no
+supported way around it — the channel types are internal to the library. So `localhost.run` works
+only when you already know where it answers:
+
+```csharp
+builder.Services.AddQuickTunnel(
+    QuickTunnelHost.LocalhostRun,
+    configure: o => o.PublicUrl = "https://my-device.example.com"   // your custom domain
+);
+```
+
+Without a `PublicUrl`, `StartAsync` returns `null`, `State` goes to `Failed`, and `LastError` says
+so. It does not invent an address.
+</Aside>
 
 ### In an app with a UI
 
 ```csharp
 builder.Services.AddHttpServer(o => o.Port = 8080, autoStart: false);
+builder.Services.AddQuickTunnel();                                  // pinggy, nothing to configure
 builder.Services.AddQuickTunnel(QuickTunnelHost.Sish, subdomain: "my-device");
 ```
 
@@ -140,12 +163,26 @@ reasonable while you are finding the fingerprint to pin, and not reasonable in s
 
 ### Reading an assigned URL
 
-`CaptureUrlFromSession` reads the address a hosted tunnel assigns, which sish, localhost.run and
-Serveo all print on the session channel and nowhere else. It is off by default, because a server you
-own has no such banner and opening a shell channel on it is pointless — the quick-tunnel presets turn
-it on for you.
+`CaptureUrlFromSession` reads the address a hosted tunnel assigns, which these providers print on the
+session channel and nowhere else. It is off by default, because a server you own has no such banner
+and opening a shell channel on it is pointless — the quick-tunnel presets turn it on for you.
 
-`UrlPattern` picks the URL out of that output; the default takes the first `https://` address.
+`UrlPattern` picks the URL out of that output. **Give it a pattern that only the tunnel address can
+satisfy.** The built-in default takes the first `https://` it sees, which is fine for a provider that
+prints one line and wrong for every provider that greets you first: they open with links to their own
+documentation, dashboard and social media, and on localhost.run that greeting arrives on the
+channel's *error* stream, ahead of the address, in the same read. Each quick-tunnel preset ships a
+pattern anchored to its own domain — copy that approach for a provider of your own:
+
+```csharp
+o.UrlPattern = new Regex(@"https://[a-z0-9-]+\.tunnel\.example\.com", RegexOptions.IgnoreCase);
+```
+
+`UrlCaptureTimeout` (15s) bounds the whole capture, including opening the session channel — which is
+a blocking call inside SSH.NET that waits for the server to confirm the request. If nothing matches
+in that window, `PublicUrl` stays **null** and a warning is logged. It is not filled in with a guess:
+for a hosted tunnel, `http://{host}:{port}` is a link to the provider's own front page, and an app
+would happily display it as though it were yours.
 
 ## How it plugs in
 

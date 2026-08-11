@@ -933,6 +933,7 @@ export const sidebarTopics = [
           { label: 'OpenAPI', link: 'httpserver/openapi' },
           { label: 'Protocols', link: 'httpserver/protocols' },
           { label: 'Model Context Protocol', link: 'httpserver/mcp' },
+          { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
           { label: '.NET MAUI', link: 'httpserver/maui' },
           { label: 'Release Notes', link: 'httpserver/release-notes' }
         ]

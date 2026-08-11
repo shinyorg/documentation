@@ -337,12 +337,19 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
+              id: 'httpserver-10',
+              content: 'Shiny.Net.HttpServer v1 - A lightweight feature rich HTTP Server - Tunnels, Websockets, AOT, ASPNET Featureset, & Works EVERYWHERE!',
+              variant: 'tip',
+              link: { text: 'Let me see!', href: '/httpserver/' },
+              dismissable: false
+            },            
+            {
               id: 'docdb-v13',
               content: 'Document DB 13 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & More!',
               variant: 'tip',
               link: { text: 'SHOW ME!!', href: '/documentdb/' },
               dismissable: false
-            },  
+            },
             {
               id: 'music4-10',
               content: 'Shiny.Music v4.1: More AI integration, wave form analysis, & VU metering!',
@@ -358,12 +365,26 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'mobilev5-5',
+              content: 'Client v5.5.0: New !',
+              variant: 'tip',
+              link: { text: 'Show Me!', href: '/client' },
+              dismissable: false
+            },            
+            {
               id: 'obd-10',
               content: 'OBD v1.0.0: Initial Release - BLE, WIFI, & USB Support for most OBD Commands!',
               variant: 'tip',
               link: { text: 'Drive Me There', href: '/obd' },
               dismissable: false
-            }            
+            },
+            {
+              id: 'obd-11',
+              content: 'OBD v1.1.0: OBD Emulation Library',
+              variant: 'tip',
+              link: { text: 'Drive Me There Again', href: '/obd' },
+              dismissable: false
+            }        
           ]
         }),
         starlightDocSearch({

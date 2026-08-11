@@ -1,0 +1,178 @@
+---
+title: "Introducing Shiny.Net.HttpServer — HTTP/1.1, HTTP/2 & HTTP/3 Anywhere .NET Runs"
+date: 2026-08-11
+authors:
+  - allanritchie
+tags:
+  - httpserver
+  - release
+  - MAUI
+  - AOT
+  - MCP
+excerpt: "Six new packages: a dependency-light, AOT/trim-clean HTTP server that runs where ASP.NET Core cannot — including inside a .NET MAUI app. Routing, middleware, DI scopes, WebSockets, SSE, TLS, source-generated typed endpoints, an OpenAPI document built with zero reflection, tunnelling, and an MCP transport."
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+ASP.NET Core is heavyweight and does not run on .NET MAUI, or in a number of embedded server
+scenarios. That is the gap this fills.
+
+**Shiny.Net.HttpServer** is a dependency-light, AOT- and trim-clean HTTP/1.1, HTTP/2 and HTTP/3
+server that runs anywhere .NET runs — plus tunnelling, so a server embedded in a phone app is
+reachable from the public internet. It is available today in beta.
+
+```csharp
+var server = new HttpServer(new HttpServerOptions { Port = 8080 });
+server.OnGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+await server.RunAsync();
+```
+
+Only `Microsoft.Extensions.*` abstractions are taken as dependencies. Everything else — JSON, crypto,
+JWT, OpenAPI, HPACK, QPACK — is built on what is in the box. Every shipping project has the trim, AOT
+and single-file analyzers enabled, so "AOT-clean" is enforced by the build rather than claimed in a
+readme.
+
+## The packages
+
+| Package | Description |
+| --- | --- |
+| <NugetBadge name="Shiny.Net.HttpServer" showLabel={true} /> | The server: protocols, routing, middleware, DI scopes, static files, WebSockets, SSE, sessions, OpenAPI, CORS, rate limiting, IP filtering, tunnelling |
+| <NugetBadge name="Shiny.Net.HttpServer.SourceGenerators" showLabel={true} /> | Compile-time typed endpoints — route registration, parameter binding, OpenAPI. Zero reflection |
+| <NugetBadge name="Shiny.Net.HttpServer.Jwt" showLabel={true} /> | JWT authentication on in-box crypto — no `Microsoft.IdentityModel` dependency |
+| <NugetBadge name="Shiny.Net.HttpServer.Ssh" showLabel={true} /> | SSH remote-forwarding tunnel provider, including zero-account quick tunnels |
+| <NugetBadge name="Shiny.Net.HttpServer.AzureRelay" showLabel={true} /> | Azure Relay tunnel provider |
+| <NugetBadge name="Shiny.Net.HttpServer.Mcp" showLabel={true} /> | Model Context Protocol (Streamable HTTP) transport — host an MCP server without ASP.NET Core |
+
+```bash
+dotnet add package Shiny.Net.HttpServer
+dotnet add package Shiny.Net.HttpServer.SourceGenerators
+```
+
+The generator package is an analyzer — it runs inside the compiler and never lands in your output.
+
+## Four tiers, one app
+
+Each tier is built on the one below, and they compose in the same server. Pick the altitude that
+suits the endpoint rather than the framework's opinion.
+
+**Tier 0 — a single delegate.** No routing at all.
+
+```csharp
+server.OnRequest(async ctx => await ctx.Response.WriteAsync("hello"));
+```
+
+**Tier 1 — [routing](/httpserver/routing/).** Templates with constraints, mutable at runtime.
+
+```csharp
+server.OnGet("/api/users/{id:int}", async ctx => { /* … */ });
+```
+
+**Tier 2 — [middleware](/httpserver/middleware/).** ASP.NET-shaped.
+
+```csharp
+server.UseAuthentication();
+server.UseEmbeddedFiles(typeof(App).Assembly, "MyApp.wwwroot");
+```
+
+**Tier 3 — [source-generated typed endpoints](/httpserver/endpoints/).** Constructor injection,
+typed parameter binding, and OpenAPI metadata, all emitted at compile time.
+
+```csharp
+[Route("/api/users")]
+public class UserEndpoints(IUserService users, ILogger<UserEndpoints> logger)
+{
+    [Get("/{id:int}")]
+    public async Task<IActionResult> GetUser(int id, CancellationToken ct)
+        => await users.FindAsync(id, ct) is { } u ? new OkObjectResult(u) : new NotFoundResult();
+}
+
+app.MapMyAppEndpoints();   // emitted for every [Route] class in the assembly
+```
+
+Results come in both spellings — `Results.*` and `IActionResult`.
+
+## What is in the box
+
+| | |
+| --- | --- |
+| **[Protocols](/httpserver/protocols/)** | HTTP/1.1, HTTP/2 (own HPACK), HTTP/3 (own QPACK), [WebSockets](/httpserver/websockets/), [SSE](/httpserver/sse/). Never guessed — ALPN over TLS, connection preface over cleartext |
+| **[Content](/httpserver/static-files/)** | Static files from disk or embedded resources, a published [Blazor WASM](/httpserver/blazor/) app, streaming multipart uploads, byte ranges and conditional GETs, a [file browser](/httpserver/file-browser/), and brotli/gzip/deflate |
+| **[Security](/httpserver/authentication/)** | Authentication and [authorization](/httpserver/authorization/) split ASP.NET-style — Basic, API key, cookie and [JWT](/httpserver/jwt/) schemes, policies, roles and claims, plus [CORS](/httpserver/cors/), [rate limiting](/httpserver/rate-limiting/) and [IP filtering](/httpserver/ip-filtering/) |
+| **[TLS](/httpserver/tls/)** | Per-endpoint TLS, self-signed certificates generated in managed code (iOS and Android included), client certificates, and SPKI pinning for your own `HttpClient` |
+| **[OpenAPI](/httpserver/openapi/)** | An OpenAPI 3.0.3 document built entirely from compile-time metadata and your `JsonSerializerContext` — no reflection, no document object model |
+| **[Tunnelling](/httpserver/tunneling/)** | A pluggable `ITunnelProvider`, the reference relay, [SSH remote forwarding](/httpserver/ssh/), quick tunnels, and [Azure Relay](/httpserver/azure-relay/) |
+| **[Lifecycle](/httpserver/hosting/)** | Start, stop and restart at runtime, serialized and idempotent, with observable state |
+
+## Reaching a device from the internet
+
+A cellular device sits behind carrier-grade NAT with no routable address and no port to forward, and
+an agent-based tunnel like ngrok or cloudflared cannot run on iOS at all — there is no process to
+spawn. So tunnelling is built in, and every provider works the same way: the device opens an
+**outbound** connection and asks the far end to forward traffic back down it.
+
+The zero-ceremony version needs no account and nothing installed:
+
+```csharp
+builder.Services.AddHttpServer(autoStart: false, configureServer: s => s.MapGet("/", …));
+builder.Services.AddQuickTunnel();
+
+// then, from a button:
+var url = await tunnel.StartAsync();
+```
+
+`QuickTunnel` is `INotifyPropertyChanged` with `PublicUrl`, `State` and `LastError`, so a view binds
+directly to it. **Bind to `PublicUrl` rather than reading it once** — a free tunnel assigns a new
+address on every reconnect, and a phone reconnects whenever it changes network. See
+[SSH & Quick Tunnels](/httpserver/ssh/) for the host presets and what each one requires.
+
+## MCP without ASP.NET Core
+
+The MCP SDK's own HTTP transport is an ASP.NET Core package, which makes this the piece that
+genuinely could not be done any other way — an MCP server hosted inside a .NET MAUI app.
+
+```csharp
+builder.Services
+    .AddMcpServer(o => o.ServerInfo = new() { Name = "thermostat", Version = "1.0.0" })
+    .WithTools<ThermostatTools>()
+    .WithHttpTransport();
+
+var app = builder.Build();
+app.MapMcp();              // POST/GET/DELETE/OPTIONS on /mcp
+```
+
+One thing the compiler cannot check for you: a tool's parameter and return types are published to the
+client as a JSON schema, and building that schema by reflection does not survive trimming. Tools that
+trade only in primitives need nothing extra — give the rest a source-generated context, and
+`MapMcp()` will name any type you missed at startup.
+
+```csharp
+[JsonSerializable(typeof(Query))]
+[JsonSerializable(typeof(IReadOnlyList<Reading>))]
+public partial class ToolJson : JsonSerializerContext;
+
+.WithTools<ThermostatTools>(ToolJson.Default.Options)
+```
+
+Full detail on [MCP](/httpserver/mcp/).
+
+## Trade-offs worth knowing up front
+
+Two packages are deliberately **not** AOT- or trim-clean, and they are separate packages for exactly
+that reason. `Shiny.Net.HttpServer.Ssh` carries SSH.NET, which brings BouncyCastle and its own
+algorithm registries. `Shiny.Net.HttpServer.AzureRelay` pulls in Azure.Identity, MSAL and
+IdentityModel. Reference either and you accept the weight; leave them out and the core server stays
+clean AOT.
+
+This is a beta. The API surface is settled and the test suite is substantial, but it has not yet been
+run in anger by a large number of people — [issues and feedback](https://github.com/shinyorg/httpserver/issues)
+are very welcome.
+
+Finally, the security note that a tunnel makes urgent: a quick tunnel hands a public HTTPS address to
+anyone who learns it, pointed at a server whose defaults were chosen for loopback. Put
+[authentication](/httpserver/authentication/) in front of it before you open one.
+
+## Getting started
+
+Full documentation is at [shinylib.net/httpserver](/httpserver/), and the source — including a .NET
+MAUI sample that serves a page, exposes a file browser behind a password, hosts an MCP server and
+publishes the lot through a tunnel — is at
+[github.com/shinyorg/httpserver](https://github.com/shinyorg/httpserver).

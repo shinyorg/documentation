@@ -1,0 +1,238 @@
+---
+title: Shiny.Mediator
+description: Publish mediator requests, commands and streams as HTTP endpoints generated at compile time — the Shiny.Mediator.AspNet shape, without ASP.NET Core
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Net.HttpServer.Mediator" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Mediator
+```
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+If you already write [Shiny.Mediator](/mediator/) handlers, this publishes them over HTTP. It is the
+same shape as `Shiny.Mediator.AspNet` — a group attribute on the handler, a verb attribute on
+`Handle` — and it runs where ASP.NET Core cannot.
+
+The generator is **inside this package**. One reference gets you the attributes and the code that
+reads them; there is no second package to forget.
+
+```csharp
+[MediatorHttpGroup("/api/widgets", Tags = ["Widgets"])]
+public class WidgetHandlers(IWidgetStore store) : IRequestHandler<GetWidget, Widget>
+{
+    [MediatorHttpGet("/{id:int}")]
+    public Task<Widget> Handle(GetWidget request, IMediatorContext context, CancellationToken ct)
+        => store.FindAsync(request.Id, ct);
+}
+
+public record GetWidget(int Id) : IRequest<Widget>;
+```
+
+```csharp
+builder.Services.AddShinyMediator(_ => { });
+
+var app = builder.Build();
+app.MapGeneratedMediatorEndpoints();   // every handler in the assembly
+```
+
+`MapGeneratedMediatorEndpoints()` registers the lot. Each handler also gets its own
+`Map{HandlerName}MediatorEndpoints()` if you want to mount them separately.
+
+## How a contract gets filled in
+
+This is the one place the integration deliberately differs from the ASP.NET package, and it is not a
+style choice. ASP.NET binds a contract with `[AsParameters]` and `[FromBody]`, which is reflection
+over a delegate's parameters — annotated `RequiresDynamicCode`, and unusable in a trimmed app. Here
+the binding is **written out at compile time**, member by member, exactly as the
+[typed endpoint generator](/httpserver/endpoints/) does.
+
+| Verb | Where the contract comes from |
+| --- | --- |
+| `GET`, `DELETE` | Each member is read individually — from a route token if the template has one with that name, otherwise from the query string |
+| `POST`, `PUT`, `PATCH` | The whole contract is deserialized from the JSON body, then any route token naming a member is applied over the top |
+
+So this works, and the `{id}` in the URL wins over whatever the body claimed:
+
+```csharp
+[MediatorHttpPut("/{id:int}")]
+public Task<Widget> Handle(RenameWidget request, IMediatorContext context, CancellationToken ct) => …;
+
+public record RenameWidget(int Id, string Name) : IRequest<Widget>;
+```
+
+The URL is the authority on which resource is being addressed, so a body that disagrees with the
+path it was sent to does not get to win.
+
+Applying that override needs somewhere to put it. A **record** is rebuilt with a `with` expression;
+a class needs a settable property. An init-only property on a non-record cannot be reached once the
+body has been read, and that is a build warning (`SWM008`) rather than a surprise at runtime.
+
+A member bound from the route or query must be something a string can become — a primitive, an enum,
+a `Guid`, anything implementing `IParsable<T>`, or an array of those. Anything else is `SWM003` at
+build time, with the fix in the message: move the endpoint to `POST`/`PUT` so the contract arrives as
+JSON. Nullable members and members with a default are optional; everything else is required and a
+missing value is a `400`.
+
+## Commands and streams
+
+An `ICommand` has no result, so it answers with a status code and no body — `204` by default:
+
+```csharp
+[MediatorHttpDelete("/{id:int}")]
+public Task Handle(DeleteWidget command, IMediatorContext context, CancellationToken ct) => …;
+
+[MediatorHttpDelete("/{id:int}/archive", SuccessStatusCode = 202)]
+public Task Handle(ArchiveWidget command, IMediatorContext context, CancellationToken ct) => …;
+```
+
+An `IStreamRequest<T>` becomes a [Server-Sent Events](/httpserver/sse/) response — one frame per
+item, serialized through your `JsonSerializerContext`:
+
+```csharp
+[MediatorHttpGet("/watch", EventName = "widget")]
+public async IAsyncEnumerable<Widget> Handle(
+    WatchWidgets request,
+    IMediatorContext context,
+    [EnumeratorCancellation] CancellationToken ct
+) { … }
+```
+
+SSE rather than a JSON array because a stream is open-ended: the caller wants each item as it
+arrives, and an array cannot be read until it closes. `EventName` sets the SSE `event:` field; leave
+it off and frames carry data only, which is what a browser's default `onmessage` handler reads. A
+stream request must be a `GET` — anything else is `SWM007`.
+
+## Policies and metadata
+
+Everything the [typed endpoint generator](/httpserver/endpoints/) can attach, these attributes can
+attach — set on the group, overridden per endpoint.
+
+```csharp
+[MediatorHttpGroup(
+    "/api/widgets",
+    RequiresAuthorization = true,
+    AuthorizationPolicies = ["widgets:read"],
+    RateLimitingPolicy = "api",
+    Tags = ["Widgets"]
+)]
+public class WidgetHandlers : …
+{
+    [MediatorHttpGet("/health", AllowAnonymous = true, ExcludeFromDescription = true)]
+    public Task<Health> Handle(GetHealth request, IMediatorContext context, CancellationToken ct) => …;
+}
+```
+
+| | |
+| --- | --- |
+| **Authorization** | `RequiresAuthorization`, `AuthorizationPolicies`, `Roles`, `AllowAnonymous` |
+| **CORS** | `CorsPolicy`, `DisableCors` |
+| **Rate limiting** | `RateLimitingPolicy`, `DisableRateLimiting` |
+| **IP filtering** | `IpFilterPolicy`, `AllowAnyIp` — no ASP.NET counterpart; it is one of the things [this server does itself](/httpserver/ip-filtering/) |
+| **OpenAPI** | `OperationId`, `Summary`, `Description`, `Tags`, `ExcludeFromDescription` |
+
+There is no `CachePolicy`, because this server has no output caching to point it at.
+
+Authorization is emitted as endpoint **metadata**, not as a check inside the handler — so a denied
+request never reaches the mediator, and the handler's dependencies are never constructed. An endpoint
+asking for authorization also beats a group that said `AllowAnonymous`, which is the direction that
+fails safe.
+
+## Binding it by hand
+
+The attributes only see what is declared in source. For a route decided at runtime, or a contract
+from an assembly you do not own, the same calls are available directly:
+
+```csharp
+app.MapGroup("/api", api =>
+{
+    api.MapMediatorPost<CreateWidget, Widget>("/widgets");
+    api.MapMediatorGet<GetWidget, Widget>("/widgets/{id}", ctx =>
+        new GetWidget(int.Parse(ctx.Request.RouteValues["id"]!)));
+});
+```
+
+Body verbs need nothing from you — the contract comes out of the JSON body using the registered
+metadata. `GET` and `DELETE` take a `bind` delegate, because turning a query string into a contract
+without reflection means somebody has to write the assignment. That somebody is normally the
+generator.
+
+## Two things that will bite you
+
+<Aside type="danger" title="Shiny.Mediator's client generator fires on this server's [Get]/[Post] attributes">
+`Shiny.Mediator` ships a generator that turns a contract carrying `[Get]`/`[Post]`/`[Put]`/
+`[Patch]`/`[Delete]` into a typed HTTP **client**. It matches those attributes **by simple name, with
+no namespace check** — so it also fires on this server's own
+[minimal endpoint](/httpserver/endpoints/) attributes and reports `SHINYMED_HTTP001` as an *error*
+against every one of them.
+
+The two features are unrelated. If your project uses both, turn that diagnostic off:
+
+```xml
+<PropertyGroup>
+  <NoWarn>$(NoWarn);SHINYMED_HTTP001</NoWarn>
+</PropertyGroup>
+```
+
+Projects that use `[Route]` classes or only mediator handlers are unaffected — it is specifically the
+class-level verb attributes that collide.
+</Aside>
+
+<Aside type="caution" title="Stream requests need an IConfiguration in the container">
+`AddShinyMediator` registers a timer-refresh middleware into the stream pipeline that takes an
+`IConfiguration`. A bare `ServiceCollection` has none, so a stream request fails on its first item —
+*after* the event-stream headers have already gone out, which makes it look like the connection
+dropped rather than like a DI error.
+
+A generic host registers `IConfiguration` for you. A hand-built container does not:
+
+```csharp
+services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
+```
+</Aside>
+
+## Build-time diagnostics
+
+Everything the generator can refuse to do, it refuses at build time. The `SWM` prefix keeps these
+separate from the endpoint generator's `SWS` codes, so you can suppress one family without silencing
+the other.
+
+| Code | Meaning |
+| --- | --- |
+| `SWM001` | Invalid route template |
+| `SWM002` | The attribute is not on a mediator handler |
+| `SWM003` | A contract member cannot be bound from the route or query string |
+| `SWM004` | The contract has no public constructor the generator can call |
+| `SWM005` | Duplicate route in the assembly |
+| `SWM006` | No `[JsonSerializable]` metadata for a contract or result *(warning)* |
+| `SWM007` | A stream request published on something other than `GET` |
+| `SWM008` | A route token cannot be applied to a body-bound contract *(warning)* |
+| `SWM009` | A route token nothing binds *(warning)* |
+| `SWM010` | The handler is not reachable from generated code |
+
+## JSON metadata
+
+Same rule as everywhere else in this server: what crosses the wire needs compiled metadata.
+
+```csharp
+[JsonSerializable(typeof(Widget))]
+[JsonSerializable(typeof(CreateWidget))]
+public partial class ApiJson : JsonSerializerContext;
+```
+
+The generator registers every context it finds in the assembly and warns (`SWM006`) about a contract
+or result that no context covers. Registration is idempotent, so a project using both this and the
+[endpoint generator](/httpserver/endpoints/) registers each context once.
+
+## Before you expose one
+
+A mediator handler is often the inside of your application — it was written assuming the caller had
+already been checked. Publishing it over HTTP moves it to the edge. Put
+[authentication](/httpserver/authentication/) in front of it, and prefer declaring
+`RequiresAuthorization` on the group so a new endpoint is protected by default rather than by
+remembering.
