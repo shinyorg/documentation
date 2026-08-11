@@ -122,6 +122,43 @@ the RFC, round trips, and every malformed-input path), but the wire protocol has
 a real HTTP/3 client. Server push and Extended CONNECT are not implemented.
 </Aside>
 
+## Trailing headers
+
+Headers sent *after* the body, which is the only way to report something a response could not know
+before it started writing — a checksum, a row count, or the status of an RPC whose failure surfaced
+halfway through the stream. [gRPC](/httpserver/grpc/) is built on them.
+
+```csharp
+app.OnGet("/export", async ctx =>
+{
+    ctx.Response.DeclareTrailer("X-Row-Count");
+
+    var rows = await WriteCsvAsync(ctx.Response.Body);
+
+    ctx.Response.AppendTrailer("X-Row-Count", rows.ToString());
+});
+```
+
+`Response.Trailers` stays writable for the whole response, unlike `Response.Headers`, and is read at
+completion. Each protocol carries them its own way:
+
+| | How they travel |
+| --- | --- |
+| HTTP/1.1 | The trailer section after the terminating chunk |
+| HTTP/2 | A trailing `HEADERS` frame with `END_STREAM` |
+| HTTP/3 | A second `HEADERS` frame after the last `DATA` |
+
+<Aside type="caution">
+An HTTP/1.1 response that declared a `Content-Length` **cannot** carry trailers: the body ends at its
+last byte and there is no chunk to attach them to. Leave the length unset when trailers matter.
+Name them in `DeclareTrailer` too — an intermediary is entitled to drop trailers it was not told to
+expect.
+</Aside>
+
+On HTTP/2 and HTTP/3, a response that never wrote a body sends its trailers in the one header block
+it does send. That shape has a name in gRPC — Trailers-Only — and is how a call that failed before
+producing anything reports its status.
+
 ## Which one you actually get
 
 On a device, almost always HTTP/1.1: a browser will not speak HTTP/2 without TLS, and a

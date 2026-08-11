@@ -1,0 +1,173 @@
+---
+title: WebDAV
+description: A directory served as an RFC 4918 class 1 & 2 WebDAV mount — browsable and writable from Finder, Windows Explorer and any WebDAV client
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The [file browser](/httpserver/file-browser/) is a JSON API you drive with `curl` or a client of your
+own. This is the protocol every desktop operating system already has a client for: point Finder or
+Windows Explorer at the URL and the app's storage appears as a drive, with no client code at all.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.WebDav
+```
+
+```csharp
+app.MapWebDav("/dav", o =>
+{
+    o.RootPath = FileSystem.AppDataDirectory;
+    o.AllowWrite = true;
+    o.AllowDelete = true;
+})
+.RequireAuthorization();
+```
+
+Mount it from the client side with **Finder → Go → Connect to Server** (`http://device:8080/dav`),
+**Explorer → Map network drive**, `gio mount dav://…` on Linux, or any of the client libraries. On a
+phone, behind a [tunnel](/httpserver/tunneling/), that is a short path from "an app has files" to
+"those files are a drive on my desktop".
+
+## The samples
+
+`samples/Sample.Api` mounts one at `/dav` over a directory beside the binary — run it and open
+`http://localhost:8080/dav` in a browser, or mount it, without building anything of your own.
+`samples/Sample.Maui` is the real case: the same mount over `FileSystem.AppDataDirectory`, behind the
+app's Basic password, with the address to paste into Finder shown on the Server tab.
+
+## What it implements
+
+Compliance classes **1 and 2**: every method RFC 4918 defines, over one directory.
+
+| Method | Notes |
+| --- | --- |
+| `OPTIONS` | Answers `DAV: 1, 2`, `MS-Author-Via: DAV` and an `Allow` built from the options |
+| `PROPFIND` | `Depth: 0`/`1`, `allprop`, `propname` and named `prop` requests, answered 207 |
+| `PROPPATCH` | Sets and removes dead properties, atomically |
+| `MKCOL` | Creates a collection |
+| `GET` / `HEAD` | The file's bytes, with byte ranges and conditional GETs |
+| `PUT` | Writes a file |
+| `DELETE` | Removes a file, or a collection's whole subtree |
+| `COPY` / `MOVE` | `Destination`, `Overwrite`, and `Depth` on a `COPY` |
+| `LOCK` / `UNLOCK` | Exclusive and shared write locks, including on an unmapped URL |
+
+Alongside them: the `If` header — both lock tokens and entity tags, tagged and untagged lists — plus
+`lockdiscovery`, `supportedlock` and RFC 4331 quota properties.
+
+`GET` on a collection is not something WebDAV defines. This serves a plain HTML index, so the first
+thing anyone does with a new mount — open it in a browser to see whether it works — does something
+useful. Turn it off with `DirectoryBrowsing = false`.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `RootPath` | required | Everything is resolved inside it; nothing outside it is reachable |
+| `AllowWrite` | `false` | `PUT`, `MKCOL`, `PROPPATCH`, `COPY`, `LOCK` |
+| `AllowDelete` | `false` | `DELETE`. `MOVE` needs this **and** `AllowWrite` |
+| `EnableLocking` | `true` | Class 2. See below — this one is not really optional |
+| `DefaultLockTimeout` | 5 min | When the client asked for no particular duration |
+| `MaxLockTimeout` | 1 hour | The longest this will grant, whatever was asked for |
+| `MaxUploadBytes` | 64 MB | Counted as the body streams, not taken from `Content-Length` |
+| `MaxXmlBodyBytes` | 1 MB | `PROPFIND`, `PROPPATCH` and `LOCK` bodies |
+| `AllowInfiniteDepth` | `false` | See below |
+| `MaxPropFindResults` | 50 000 | Past this a `PROPFIND` answers 507 |
+| `DirectoryBrowsing` | `true` | The HTML index for a browser `GET` |
+| `ServeHiddenFiles` | `false` | A content directory routinely holds a `.env` or a database journal |
+| `Filter` | `null` | Return false to hide an entry **and** refuse every operation on it |
+| `DefaultContentType` | `application/octet-stream` | Downloads only |
+| `DisplayName` | `null` | The root collection's `displayname` |
+| `PropertyStore` | in memory | Where dead properties live |
+
+## Leave locking on
+
+`EnableLocking` defaults to on because class 2 is not really optional in practice. Finder and the
+Windows redirector both mount a class 1 server **read-only**, whatever `AllowWrite` says — the
+`DAV: 1, 2` header is what they check, and they check it once, at mount time.
+
+Two details that follow from real clients rather than from the specification's happy path:
+
+- A `LOCK` on a URL that does not exist yet **creates an empty file** to hold the lock (RFC 4918
+  §7.3) and answers 201. This is exactly what a Mac does when you save a new document; a server that
+  answers 404 here cannot be written to from Finder at all.
+- Locks live in memory and belong to the mount, so they do not survive a restart. For an embedded
+  server that is the right lifetime — the process being restarted is the app.
+
+## Depth: infinity
+
+`AllowInfiniteDepth` is off. A `PROPFIND` with `Depth: infinity` walks a whole subtree into one
+response, and RFC 4918 anticipates a server declining: the refusal is a 403 carrying
+`<DAV:propfind-finite-depth/>`, which tells the client to ask again with a depth it can bound. Every
+client that matters does.
+
+Worth knowing, because the interaction surprises people: RFC 4918 makes a **missing** `Depth` on a
+`PROPFIND` mean infinity, so a client that omits the header gets that same refusal. Clients send it.
+
+`DELETE`, `MOVE` and `COPY` are unaffected — those are recursive by definition, and are gated by
+`AllowWrite` and `AllowDelete` instead.
+
+## Dead properties
+
+A `PROPPATCH` that sets something outside the `DAV:` namespace is storing a *dead property* — opaque
+XML the server keeps and hands back. There is nowhere on a file system to put those, so they go to an
+`IWebDavPropertyStore`, which is in-memory by default. Windows Explorer sets its own file-attribute
+properties on every write and macOS keeps some metadata this way, so losing them across a restart is
+untidy rather than fatal. Implement the interface and assign `PropertyStore` to keep them.
+
+Properties in the `DAV:` namespace are computed, not stored, and a `PROPPATCH` naming one answers 403
+`cannot-modify-protected-property` — and, because RFC 4918 makes a `PROPPATCH` atomic, everything
+else in the same request answers 424 and nothing is written.
+
+## Authorization
+
+`MapWebDav` returns the routes it registered — twenty-two of them — and fans policies across the lot,
+so a verb added in a later version cannot quietly arrive unprotected.
+
+```csharp
+// everything behind a policy
+app.MapWebDav("/dav", …).RequireAuthorization("files");
+
+// reads open, anything that changes something behind a policy
+app.MapWebDav("/dav", …).RequireAuthorizationForChanges("editors");
+```
+
+`RequireAuthorizationForChanges` counts locking as a change: a lock reserves the right to write, and
+one taken anonymously is a way to stop everyone else writing.
+
+`ReadRoutes`, `WriteRoutes`, `DeleteRoutes`, `LockRoutes` and `Routes` are there for anything else you
+want to attach to one group, and `RequireCors`, `RequireRateLimiting`, `RequireIpFilter` and
+`WithMetadata` fan out the same way.
+
+The mount is excluded from the [OpenAPI](/httpserver/openapi/) document. It is one protocol behind
+twenty-two routes, and RFC 4918 already documents it.
+
+## The defaults, and why
+
+**Read-only until told otherwise.** `AllowWrite` and `AllowDelete` are both off. Unlike the file
+browser, a `DELETE` here takes a collection's whole subtree — the protocol requires it, because a
+client that drags a folder to the trash expects what is in it to go too — which is one more reason
+the permission is opt-in.
+
+**Uploads are bounded and atomic.** `MaxUploadBytes` is counted as the body streams rather than
+trusting `Content-Length`, and the bytes go to a staging file that is moved into place, so a refused
+or interrupted upload leaves the previous file intact.
+
+**The XML parser is hardened.** No DTD, no resolver, no entity expansion — a WebDAV body arrives from
+the network, and an XML parser that resolves entities is the shortest route from "accepts XML" to
+"reads /etc/passwd".
+
+**Containment reuses the static file handler's path normalization**, checked after decoding, again
+after resolving links, and again on the `Destination` of a `COPY` or `MOVE` — which is decoded segment
+by segment, so an encoded `%2F` stays part of a name instead of becoming a separator.
+
+**It is AOT- and trim-clean**, like the rest of the repo. The XML is read and written with
+`XmlReader`/`XmlWriter`; nothing reflects over anything.
+
+<Aside type="danger">
+This exposes a device's storage over the network, and WebDAV clients send Basic credentials on
+**every** request. Serve it over [TLS](/httpserver/tls/) and put
+[authentication](/httpserver/authentication/) in front of it, and consider an
+[IP filter](/httpserver/ip-filtering/) restricting it to the local network. `Filter` is the way to
+narrow it further: an app that only means to share one folder should return false for everything else
+rather than trusting the root path to stay tidy.
+</Aside>

@@ -891,6 +891,7 @@ export const sidebarTopics = [
           { label: 'Middleware', link: 'httpserver/middleware' },
           { label: 'Typed Endpoints', link: 'httpserver/endpoints' },
           { label: 'Results & JSON', link: 'httpserver/results' },
+          { label: 'Serialization & Formats', link: 'httpserver/serialization' },
           { label: 'Errors & Problem Details', link: 'httpserver/errors' },
           {
             label: 'Content',
@@ -899,6 +900,7 @@ export const sidebarTopics = [
               { label: 'Blazor WebAssembly', link: 'httpserver/blazor' },
               { label: 'Uploads & Downloads', link: 'httpserver/files' },
               { label: 'File Browser', link: 'httpserver/file-browser' },
+              { label: 'WebDAV', link: 'httpserver/webdav' },
               { label: 'Response Compression', link: 'httpserver/compression' }
             ]
           },
@@ -932,8 +934,10 @@ export const sidebarTopics = [
           { label: 'Sessions', link: 'httpserver/sessions' },
           { label: 'OpenAPI', link: 'httpserver/openapi' },
           { label: 'Protocols', link: 'httpserver/protocols' },
+          { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc' },
           { label: 'Model Context Protocol', link: 'httpserver/mcp' },
           { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
+          { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
           { label: '.NET MAUI', link: 'httpserver/maui' },
           { label: 'Release Notes', link: 'httpserver/release-notes' }
         ]

@@ -1,0 +1,234 @@
+---
+title: Shiny.DocumentDb
+description: A document type as a complete HTTP resource — list, by-id, count, create, replace, merge-patch, delete and a live SSE tail — without ASP.NET Core
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Net.HttpServer.DocumentDb" showLabel={true} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.DocumentDb
+```
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+Turns a [Shiny.DocumentDb](/documentdb/) document type into a complete HTTP resource in one line. It is
+the same shape as `Shiny.DocumentDb.AspNetCore`, on a server that runs where ASP.NET Core cannot — so a
+phone can serve its own database over HTTP, and through a [tunnel](/httpserver/tunneling/), to anyone.
+
+The engine underneath is identical, so a filter, a scope or a cursor means the same thing on either.
+
+```csharp
+builder.Services.AddDocumentStore(o => o.DatabaseProvider = new SqliteDatabaseProvider(path));
+
+var app = builder.Build();
+
+app.MapDocuments<Order>("/orders", o =>
+{
+    o.Operations = DocumentEndpoints.All;
+    o.TypeInfo = AppJson.Default.Order;
+    o.AllowFilterOn(x => x.Status, x => x.Total);
+})
+.RequireAuthorization("orders");
+```
+
+That maps eight routes:
+
+| | |
+| --- | --- |
+| `GET /orders` | List, with filtering, sorting, paging and sparse fieldsets |
+| `GET /orders/{id}` | One document, with an `ETag` |
+| `GET /orders/count` | A count, honouring the same filter |
+| `GET /orders/stream` | A live [SSE](/httpserver/sse/) tail of inserts, updates and deletes |
+| `POST /orders` | Create, answering `201` with a `Location` |
+| `PUT /orders/{id}` | Replace, with optional `If-Match` |
+| `PATCH /orders/{id}` | RFC 7396 JSON Merge Patch |
+| `DELETE /orders/{id}` | Delete |
+
+`Operations` defaults to `Read | Count` — the safe half. A route that was never mapped is a routing
+answer (404, or 405 when the path exists for another verb), not an authorization one.
+
+## Querying a list
+
+| Parameter | Meaning |
+| --- | --- |
+| `?filter=` | The document [filter grammar](/documentdb/querying/) — `status == 'open' and total > 10` |
+| `?orderby=` | `total desc, name`. Cursor paging needs a stable order; see `DefaultOrderBy` |
+| `?fields=` | Sparse fieldset — `id,total`. Cannot be combined with `cursor` |
+| `?skip=` / `?take=` | Offset paging. `take` is **clamped** to `MaxPageSize` rather than refused |
+| `?cursor=` | Keyset paging. The response is `{ items, nextCursor }` rather than a bare array |
+
+A list that is neither projected nor cursor-paged streams the stored JSON straight to the socket
+without ever materializing a CLR object — unless the type is encrypted, where only the typed path can
+decrypt, which the endpoint probes rather than assumes.
+
+## The field allow-list
+
+`AllowFilterOn` decides what a client may filter, sort or project on. Empty means everything, which is
+fine for an internal API and wrong for a public one, where an unlisted field should be a `400` rather
+than a table scan.
+
+```csharp
+o.AllowFilterOn(x => x.Status, x => x.Total);
+```
+
+It is enforced **lexically**, before the filter reaches the grammar parser — the point is to refuse an
+unlisted field early. String literals are skipped, so a value that looks like a field name is never
+mistaken for one, and identifiers followed by `(` are function calls, so the scalar-function library
+keeps working. `id` is always allowed: it is in the route, in every response, and how a client
+addresses a document at all.
+
+## Scopes
+
+A scope is a server-side predicate AND-ed into every read and enforced on every write — typically the
+caller's tenant or owner. There is no way for a request to remove one.
+
+```csharp
+o.Scope<ITenantContext>((tenant, ctx) => x => x.TenantId == tenant.TenantId);
+```
+
+A document outside the scope is **404** on read, write and delete — never 403, which would confirm the
+record exists. Return `DocumentScope.DenyAll<T>()` for "no access"; the endpoints never treat "no
+scope" as "everything", and a callback returning null is an error rather than an open door.
+
+A scope on a write is checked on **both sides**: the incoming document must fall inside it, and so must
+the stored one. A `PATCH` that would move a document out of scope is refused after the merge.
+
+<Aside type="caution" title="Read the request from the scope context, not IHttpContextAccessor">
+On this server the ambient `IHttpContextAccessor` is only populated when
+[`UseSessions()`](/httpserver/sessions/) is in the pipeline. A scope callback does not need it — it is
+handed the context:
+
+```csharp
+o.Scope(ctx =>
+{
+    var tenant = ctx.Http.Request.Headers.GetFirst("X-Tenant") ?? "";
+    return x => x.TenantId == tenant;
+});
+```
+
+`ctx.Http`, `ctx.Services` (the request scope), `ctx.User` and `ctx.CancellationToken` are all there.
+`Scope<TService>` resolves the service from the request scope and hands you both.
+</Aside>
+
+Every `Scope<TService>` service is checked **at map time** — a scope that cannot resolve its service
+would refuse every request, so it is a startup error instead.
+
+## Concurrency
+
+When the document type has a version property mapped, reads carry an `ETag` and writes accept
+`If-Match`:
+
+```csharp
+o.ConfigureDocument<Order>(cfg => cfg.MapVersionProperty(x => x.Version));   // on the store
+o.RequireIfMatch = true;                                                     // on the endpoint
+```
+
+A stale `If-Match` is `412`. With `RequireIfMatch`, a write or delete that sends none is `428
+Precondition Required`. Without it, a client that does not speak ETags gets documented
+last-writer-wins rather than a 412 it cannot act on.
+
+## PATCH means RFC 7396
+
+An explicit `null` in a `PATCH` body **removes** the member:
+
+```http
+PATCH /orders/a
+{"notes": null}
+```
+
+The store's own merge cannot assume that — a serialized document carries a null for every unset
+member, and treating those as deletions would wipe fields nobody touched. An HTTP patch body is not a
+serialized document: every member in it was written by the caller. The endpoints apply the merge
+themselves so that promise holds on every provider.
+
+## The live tail
+
+`DocumentEndpoints.Stream` maps `GET /stream` as Server-Sent Events, one frame per change:
+
+```
+event:insert
+data:{"id":"a","document":{ … }}
+```
+
+The scope is evaluated **once**, when the connection opens — a stream can outlive any sane notion of
+current permissions, so an app that needs re-authorization closes the connection. A delete carries no
+document, so neither the scope nor a `?filter=` can be checked against it; those events are dropped
+rather than leaked past a scope that cannot be evaluated. `StreamHeartbeat` (30s) keeps proxies from
+killing an idle connection.
+
+Mapping `Stream` on a provider without change monitoring is a **startup** error, not a route that can
+only ever return 501.
+
+## Schema-free collections
+
+`MapDocumentCollection` publishes a JSON collection that has no CLR type. Documents are plain JSON,
+filtered with the string grammar. Relational providers only.
+
+```csharp
+app.MapDocumentCollection("/events", "events", o =>
+{
+    o.Operations = DocumentEndpoints.Read | DocumentEndpoints.Count;
+    o.IdProperty = "id";
+    o.AllowFilterOn("type", "createdAt");
+});
+```
+
+Scopes here are grammar clauses rather than expressions, and they are enforced in SQL on every path —
+including deletes, which resolve their target through the scoped query first. **Inserts and replaces
+are refused outright when a scope is present**: a schema-free body has no evaluator, so the boundary
+could not be enforced on the way in. Use `MapDocuments<T>` for scoped writes.
+
+## Composing policy
+
+`MapDocuments` and `MapDocumentCollection` return a `DocumentResourceBuilder`. ASP.NET has
+`RouteGroupBuilder` for this; this server attaches metadata per route, so the builder fans each call
+out across every route the resource mapped:
+
+```csharp
+app.MapDocuments<Order>("/orders", o => o.Operations = DocumentEndpoints.All)
+   .RequireAuthorization("orders")
+   .RequireRateLimiting("api")
+   .RequireIpFilter("lan")
+   .WithTags("Orders");
+```
+
+That matters more than the syntax saved: adding an operation later cannot quietly leave one route
+unprotected. `Routes` exposes the underlying `RouteEndpointBuilder`s, and `ForEach` covers anything the
+named methods do not.
+
+## JSON metadata is required
+
+```csharp
+o.TypeInfo = AppJson.Default.Order;
+```
+
+The ASP.NET build of these endpoints falls back to the reflection serializer when this is unset. This
+one does not: the trim and AOT analyzers are on for every shipping project here, and a fallback that
+works on a desktop and throws on a trimmed phone is worse than a clear error in both places. Leave it
+unset and the store's own metadata is used; if there is none either, the first request fails with a
+message naming the property to set.
+
+## Differences from the ASP.NET package
+
+| | `Shiny.DocumentDb.AspNetCore` | This package |
+| --- | --- | --- |
+| Host | ASP.NET Core | Anywhere .NET runs, including .NET MAUI |
+| Group composition | `RouteGroupBuilder` | `DocumentResourceBuilder`, fanned across routes |
+| Missing `TypeInfo` | Falls back to reflection | Clear error — no reflection fallback |
+| Output caching | `CacheOutput` on the group | Not available; this server has none |
+| Request scope service | `IHttpContextAccessor` works anywhere | Use `ctx.Http` unless `UseSessions()` is mapped |
+
+Everything else — the filter grammar, cursors, scopes, ETags, merge-patch semantics, the SSE frame
+shape — is the same, because the engine underneath is the same.
+
+## Before you expose one
+
+A document store is usually the inside of an application. Publishing it over HTTP moves it to the
+edge, and `DocumentEndpoints.All` includes delete. Put
+[authentication](/httpserver/authentication/) in front of it, prefer stating `RequireAuthorization` on
+the resource so a new operation is protected by default, and set an `AllowFilterOn` allow-list before
+anything untrusted can reach it.

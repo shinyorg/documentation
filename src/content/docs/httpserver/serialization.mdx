@@ -1,0 +1,329 @@
+---
+title: Serialization & Formats
+description: Reading and writing bodies in XML, MessagePack, protobuf or a format of your own — input and output formatters, Content-Type dispatch, and negotiating by default
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+JSON is the default and covers most of what an HTTP API does. This page is about the rest: an
+integration on the far side of a corporate gateway that speaks XML, a battery-powered client that
+wants MessagePack instead of 40% more bytes, a service already generating protobuf messages from a
+`.proto`.
+
+Formats plug in on both sides. `IOutputFormatter` writes a response, `IInputFormatter` reads a
+request body, and neither needs an endpoint to change:
+
+```csharp
+builder.Services.AddContentNegotiation(o =>
+{
+    o.NegotiateByDefault = true;
+    o.AddXml();
+    o.AddMessagePack();
+});
+```
+
+That is the whole setup. Every endpoint now accepts `Content-Type: application/xml` and
+`application/msgpack` request bodies, and answers whichever format the caller's `Accept` header asks
+for.
+
+<Aside type="note" title="Nothing reflects over your types">
+Every formatter here reads the same source-generated `JsonTypeInfo` the JSON path reads. A type gets
+an XML or MessagePack representation because its metadata was registered — not because something
+reflected over it — so the whole path survives trimming and Native AOT, and none of it needs
+format-specific attributes on your DTOs.
+</Aside>
+
+## Reading request bodies
+
+The formatter is chosen by the request's `Content-Type`. The client is stating a fact about what it
+sent, so there is no preference ordering here — an exact media type match, and a **415** when
+nothing reads it.
+
+| Registered | Reads |
+| --- | --- |
+| Always | `application/json`, `text/json`, any `+json` suffix, **and a body with no `Content-Type`** |
+| `AddXml()` | `application/xml`, `text/xml`, any `+xml` suffix |
+| `AddMessagePack()` | `application/msgpack`, `application/x-msgpack`, `application/vnd.msgpack` |
+| `AddProtobuf(...)` | `application/x-protobuf`, `application/protobuf`, `application/vnd.google.protobuf` |
+
+A body arriving with no `Content-Type` at all is read as JSON. Plenty of clients omit the header,
+this server has always treated those bodies as JSON, and answering 415 to them now would break
+working callers to make a point about a header.
+
+### It reaches every endpoint
+
+Typed endpoints, mediator contracts and hand-written handlers all read bodies through the same
+dispatch, so registering a formatter is all it takes:
+
+```csharp
+[Route("/api/probes")]
+public class ProbeEndpoints
+{
+    [Post]
+    public IActionResult Create(Probe probe) => new OkObjectResult(probe);
+}
+```
+
+```bash
+curl -X POST http://localhost:8080/api/probes \
+  -H 'Content-Type: application/xml' \
+  -d '<Probe><name>kitchen</name><value>21.5</value></Probe>'
+```
+
+Handlers that read a body themselves get the same thing from `EndpointBinder.TryReadBodyAsync<T>`:
+
+```csharp
+app.MapPost("/probes", async ctx =>
+{
+    var body = await EndpointBinder.TryReadBodyAsync<Probe>(ctx);
+
+    if (!body.Success)
+    {
+        await EndpointBinder.BodyReadFailedAsync(ctx, "probe", body.Status, nameof(Probe));
+        return;
+    }
+
+    await Save(body.Value!);
+});
+```
+
+`BodyReadStatus` distinguishes the three things that can go wrong, because they are not the same
+answer:
+
+| Status | Response | Means |
+| --- | --- | --- |
+| `NoBody` | 400 | The endpoint needs a body and there wasn't one |
+| `Malformed` | 400 | Right format, unreadable content — a syntax error, or a document that will not fit the type |
+| `UnsupportedMediaType` | 415 | Nothing registered reads this `Content-Type` |
+
+The 415 matters more than it looks. "Your JSON is broken" sends a caller hunting for a syntax error
+that is not there; "I do not speak protobuf" sends them to fix a header. The 415 body lists the
+content types that would have worked.
+
+`ReadJsonAsync<T>()` and `TryReadJsonBodyAsync<T>()` are unchanged and still read JSON and only
+JSON, for a handler that wants exactly that regardless of what the caller declared.
+
+## Writing responses
+
+Output formatters are chosen from `Accept`, honouring q-values, wildcards and specificity — see
+[Results & JSON](/httpserver/results/#content-negotiation) for how selection works.
+
+```csharp
+app.MapGet("/report", _ => Results.Negotiate(report));
+```
+
+| Formatter | Media type | Priority | Writes |
+| --- | --- | --- | --- |
+| `JsonOutputFormatter` | `application/json` | 100 | Anything in the `JsonTypeInfoRegistry` |
+| `MessagePackOutputFormatter` | `application/msgpack`, `application/x-msgpack` | 50 | Anything in the `JsonTypeInfoRegistry` |
+| `XmlOutputFormatter` | `application/xml`, `text/xml` | 40 | Anything in the `JsonTypeInfoRegistry` |
+| `BinaryOutputFormatter` | whatever you register it as | 45 | Types with a registered codec |
+| `PlainTextOutputFormatter` | `text/plain` | 10 | Strings, primitives, `Guid`, `Uri`, the date/time types |
+
+Every added format sits below JSON on purpose, so a client sending `*/*` still gets JSON. A binary
+body is what you want when you asked for it and the last thing you want when you were guessing.
+
+### Negotiating by default
+
+`Results.Negotiate(value)` is per-result and explicit. `NegotiateByDefault` makes it the rule:
+
+```csharp
+builder.Services.AddContentNegotiation(o =>
+{
+    o.NegotiateByDefault = true;
+    o.AddXml();
+});
+```
+
+With it on, `Results.Ok(value)` and `new OkObjectResult(value)` — and therefore every generated
+endpoint that returns a value — pick their representation from `Accept` instead of always writing
+JSON.
+
+It is **off by default**, and the default is the interesting part. Turning it on means an endpoint's
+response format depends on a request header, so a client that starts sending `Accept: text/plain`
+silently changes what it gets. That is exactly what you want for an API serving browsers, scripts and
+clients alike, and exactly what you do not want for one whose contract says JSON.
+
+Two things stay put either way:
+
+- `Results.Json(...)` and `JsonResult` name a format, so they write JSON.
+- An `ObjectResult` with an explicit `ContentType` has stated its intent and opts out.
+
+## XML
+
+```csharp
+builder.Services.AddContentNegotiation(o => o.AddXml());
+```
+
+`XmlSerializer` is the obvious tool for this and cannot be used: it builds its mapping by reflecting
+over the type at runtime, which is precisely what a trimmed or AOT-published app has thrown away. So
+the mapping comes from the metadata that is already registered, and the document shape is fixed:
+
+| JSON | XML |
+| --- | --- |
+| An object | An element with one child element per member, named as the member serializes |
+| A collection | An element whose children are its items — `<item>` on the way out, any name on the way in |
+| `null` | An empty element with `xsi:nil="true"` |
+| A member name XML cannot spell | `<entry key="my key">` |
+| Everything else | Text |
+
+```xml
+<Probe xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <name>kitchen</name>
+  <postalCode>01234</postalCode>
+  <value>21.5</value>
+  <tags><item>indoor</item><item>calibrated</item></tags>
+  <note xsi:nil="true" />
+</Probe>
+```
+
+Reading is **type-directed**, and that is what makes it trustworthy rather than a heuristic. XML has
+no types: `<postalCode>01234</postalCode>` is text, and only the target member knows whether that is
+a string, a number or an enum ordinal. Guessing from the text is how a postal code of `01234` arrives
+as the number `1234`.
+
+Configure the root and item element names if a client cares what they are called:
+
+```csharp
+o.AddXml(x =>
+{
+    x.RootElementName = "reading";
+    x.ItemElementName = "entry";
+});
+```
+
+The root element's name is ignored when reading — the endpoint decides what type a body is, not the
+document.
+
+<Aside type="caution" title="Bodies from the network">
+DTDs are prohibited, the resolver is null and entity expansion is capped, so an XML endpoint cannot
+be talked into reading `/etc/passwd` or expanding a billion-laughs bomb. `MaxBodyBytes` (1 MB by
+default) bounds the buffer, because XML has to be parsed into a tree before it can be walked, and a
+body over the limit is a 413.
+</Aside>
+
+## MessagePack
+
+```csharp
+builder.Services.AddContentNegotiation(o => o.AddMessagePack());
+```
+
+A binary encoding of the same shape the JSON formatter produces — typically 20–40% smaller on the
+wire and cheaper to parse on a constrained client. It needs no dependency, no attributes and no
+`.proto`: any type already reachable through the `JsonTypeInfoRegistry` has a MessagePack
+representation.
+
+It works by transcoding against that metadata, which is deliberate — the two representations of an
+endpoint can never drift apart, because they come from the same property names and the same
+converters. What it costs is worth knowing before you pick MessagePack for a payload built out of
+either of these:
+
+- A `byte[]` member travels as a base64 `str` rather than a MessagePack `bin`, because that is what
+  JSON does with bytes. (Incoming `bin` is read and handed over as base64, so a round trip works.)
+- A `decimal` too precise for a `double` loses digits, for the same reason.
+
+Maps must be **string-keyed**. MessagePack's integer-key mode is more compact still, but the keys
+carry no member names, so nothing could bind them to a property — an integer key is refused with a
+400 rather than quietly producing a DTO full of defaults. With MessagePack-CSharp on the client, that
+means `[MessagePackObject(keyAsPropertyName: true)]` or the contractless resolver.
+
+Extension and timestamp types have no JSON counterpart and are refused. An app that needs the native
+encoding should write its own `IOutputFormatter` over the MessagePack library of its choice — which
+is what the next section is for.
+
+## Protobuf, and formats with a codec you supply
+
+Protobuf cannot be produced without a schema: field numbers and wire types live in the `.proto`, and
+the only thing that has them is the code `protoc` already generated. Reaching them at runtime means
+reflecting over your message types. So serialization is **supplied rather than discovered** — the
+same bargain [gRPC](/httpserver/grpc/) strikes in this repo, for the same reason:
+
+```csharp
+builder.Services.AddContentNegotiation(o => o.AddProtobuf(p => p
+    .Add<Reading>(m => m.ToByteArray(), Reading.Parser.ParseFrom)
+    .Add<ReadingList>(m => m.ToByteArray(), ReadingList.Parser.ParseFrom)
+));
+```
+
+`ToByteArray()` and `Parser.ParseFrom` are the pair every protobuf-generated message type already
+exposes. One line per message type, no new dependency in this package, and nothing reflects over
+anything.
+
+A type with no registered codec has no protobuf representation, so it negotiates away to another
+format rather than failing at serialization time, and a request body of that type answers 415.
+`AddWriteOnly<T>` and `AddReadOnly<T>` cover a type that only ever travels one way.
+
+Nothing about `BinaryCodecRegistry` is protobuf-specific. The same registry carries MessagePack-CSharp's
+native codec, CBOR, Avro or an encoding of your own, under whichever media type you register it as:
+
+```csharp
+o.AddBinaryFormat(
+    "application/x-msgpack-native",
+    new BinaryCodecRegistry().Add<Reading>(
+        MessagePackSerializer.Serialize,
+        bytes => MessagePackSerializer.Deserialize<Reading>(bytes)
+    )
+);
+```
+
+A codec that throws on bad bytes becomes a 400 whatever exception type it picked — every serializer
+spells "those bytes are not a valid message" differently, and all of them describe a bad request.
+
+## Writing a formatter
+
+For a format that does not warrant a type, both directions take a delegate:
+
+```csharp
+builder.Services.AddContentNegotiation(o => o
+    .AddFormatter("text/csv", (ctx, value, ct) =>
+        ctx.Response.WriteTextAsync(ToCsv(value), "text/csv", ct))
+    .AddInputFormatter("text/csv", async (ctx, type, ct) =>
+        InputFormatterResult.FromValue(
+            ParseCsv(type, await ctx.Request.ReadBodyAsStringAsync(cancellationToken: ct))
+        ))
+);
+```
+
+For a real one, implement the interfaces. Both are non-generic because the formatter is selected at
+runtime — from `Accept` on the way out, from `Content-Type` on the way in — so the value's static
+type is not available at the selection point:
+
+```csharp
+public sealed class CborOutputFormatter : IOutputFormatter
+{
+    public string MediaType => "application/cbor";
+    public int Priority => 45;
+    public string? Charset => null;   // bytes, not text in an encoding
+
+    public bool CanWrite(object? value) => value is null || Cbor.Knows(value.GetType());
+
+    public ValueTask WriteAsync(HttpContext ctx, object? value, CancellationToken ct)
+        => ctx.Response.WriteBytesAsync(Cbor.Encode(value), cancellationToken: ct);
+}
+```
+
+`CanWrite` and `CanRead` are the honest half of the interface. A formatter that claims a media type
+it cannot actually handle turns a clean 406 or 415 into a 500 at serialization time, so declining is
+the useful answer.
+
+Register with `Add(output, input)` to put a format on both lists at once.
+
+## Reference
+
+### `ContentNegotiationOptions`
+
+| Member | Default | Notes |
+| --- | --- | --- |
+| `Formatters` | JSON, plain text | Output formatters, by `Accept` then `Priority` |
+| `InputFormatters` | JSON | Input formatters, by `Content-Type` |
+| `ReturnNotAcceptable` | `true` | 406 when nothing the client accepts can be produced |
+| `NegotiateByDefault` | `false` | Makes `Results.Ok(value)` honour `Accept` |
+| `AddFormatter(...)` | | An output formatter from a delegate |
+| `AddInputFormatter(...)` | | An input formatter from a delegate |
+| `Add(output, input)` | | Both at once |
+| `AddXml(...)` | | XML, both directions |
+| `AddMessagePack()` | | MessagePack, both directions |
+| `AddProtobuf(...)` | | Protobuf over codecs you supply |
+| `AddBinaryFormat(...)` | | Any binary format over codecs you supply |
+| `Select(request, value)` | | The output formatter for a request, or null |
+| `SelectInput(request, type)` | | The input formatter for a body, or null |

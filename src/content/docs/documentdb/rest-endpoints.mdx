@@ -259,3 +259,56 @@ read through the typed path (which is what decrypts), so the endpoint falls back
 
 By-id deliberately materializes: the scope is evaluated in memory there, so there is nothing to save — and
 the version for the `ETag` comes off the same instance.
+
+## Hosting DocumentDb on another server
+
+This package is one host. If you need the same shape somewhere ASP.NET Core cannot go — an embedded server in
+a .NET MAUI app, a custom transport, a message pump — the pieces a host actually needs are public, in the
+`Shiny.DocumentDb.Hosting` namespace. Nothing here is specific to HTTP, and a host package can live in any
+repo without a change to DocumentDb first.
+
+```csharp
+using Shiny.DocumentDb.Hosting;
+
+// 1. A scope has to be checked against an INCOMING document, before there is anything to query against.
+Expression<Func<Order, bool>> scope = x => x.TenantId == tenantId;
+var inScope = DocumentPredicate.Compile(scope);          // never uses Reflection.Emit
+
+query = query.Where(scope);                              // push down for reads
+if (!inScope(incoming))                                  // enforce on POST/PUT
+    return BadRequest();
+
+// 2. A live tail applies ?filter= to changes arriving in memory, not through a query.
+var filter = DocumentPredicate.Compile(DocumentFilter.Parse(request.Filter, AppJsonContext.Default.Order));
+await foreach (var change in ((IObservableDocumentStore)store).NotifyOnChange<Order>(ct))
+{
+    if (change.Document != null && filter(change.Document))
+        await WriteEvent(change);
+}
+
+// 3. ETag / If-Match needs to know whether the type has a mapped version property.
+var version = store.GetVersionMapping(typeof(Order));    // null → this type has no ETag to publish
+var etag = version?.GetVersion(order);
+```
+
+| Member | What it is for |
+|---|---|
+| `DocumentPredicate.Compile<T>(expr)` | A delegate equivalent to `expr.Compile()` **without `Reflection.Emit`** |
+| `DocumentFilter.Parse<T>(filter, typeInfo)` | The [string-expression grammar](/documentdb/querying) → an expression |
+| `DocumentFilter.ParseJson(filter, typeInfo?)` | The same, over a [schema-free collection](/documentdb/json-collections) body |
+| `DocumentStoreAccessor.GetMappings(store)` | The store's `DocumentMappingRegistry`, on any provider |
+| `DocumentStoreAccessor.GetVersionMapping(store, type)` | The optimistic-concurrency mapping, or `null` |
+
+Two things are worth being explicit about.
+
+**`Compile` is not `Expression.Compile()`, and the difference is the point.** The BCL method generates IL at
+runtime, which forfeits the trimmed/Native-AOT guarantee of the app doing the hosting — exactly the
+environment an embedded server exists for. `DocumentPredicate.Compile` walks the tree instead. That it never
+generates code is the contract; the walk is the implementation.
+
+**It is the same evaluator the query layer uses.** A host that wrote its own would eventually have the
+pushed-down predicate and the in-memory check disagree about what a scope means, and that disagreement is a
+scope bypass rather than a cosmetic difference. One interpreter, one set of semantics.
+
+Everything else a host needs — `IDocumentStore`, `IDocumentQuery<T>`, `IJsonDocumentCollection`,
+`DocumentChange<T>`, `IdAccessor<T>`, `ConcurrencyException` — was already public.

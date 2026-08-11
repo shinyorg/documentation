@@ -9,7 +9,9 @@ tags:
   - MAUI
   - AOT
   - MCP
-excerpt: "Six new packages: a dependency-light, AOT/trim-clean HTTP server that runs where ASP.NET Core cannot — including inside a .NET MAUI app. Routing, middleware, DI scopes, WebSockets, SSE, TLS, source-generated typed endpoints, an OpenAPI document built with zero reflection, tunnelling, and an MCP transport."
+  - gRPC
+  - WebDAV
+excerpt: "Ten new packages: a dependency-light, AOT/trim-clean HTTP server that runs where ASP.NET Core cannot — including inside a .NET MAUI app. Routing, middleware, DI scopes, WebSockets, SSE, TLS, source-generated typed endpoints, an OpenAPI document built with zero reflection, XML/MessagePack/protobuf without reflection, gRPC and gRPC-Web, a WebDAV mount, mediator and DocumentDb integrations, tunnelling, and an MCP transport."
 ---
 import NugetBadge from '/src/components/NugetBadge.astro';
 
@@ -41,6 +43,10 @@ readme.
 | <NugetBadge name="Shiny.Net.HttpServer.Ssh" showLabel={true} /> | SSH remote-forwarding tunnel provider, including zero-account quick tunnels |
 | <NugetBadge name="Shiny.Net.HttpServer.AzureRelay" showLabel={true} /> | Azure Relay tunnel provider |
 | <NugetBadge name="Shiny.Net.HttpServer.Mcp" showLabel={true} /> | Model Context Protocol (Streamable HTTP) transport — host an MCP server without ASP.NET Core |
+| <NugetBadge name="Shiny.Net.HttpServer.Grpc" showLabel={true} /> | [gRPC and gRPC-Web](/httpserver/grpc/) — unary, client-, server- and bidirectional streaming. Marshalling is supplied, so nothing reflects over your messages |
+| <NugetBadge name="Shiny.Net.HttpServer.WebDav" showLabel={true} /> | A directory as an [RFC 4918](/httpserver/webdav/) class 1 & 2 WebDAV mount |
+| <NugetBadge name="Shiny.Net.HttpServer.Mediator" showLabel={true} /> | [Shiny.Mediator](/httpserver/mediator/) requests, commands and streams as endpoints, bound at compile time |
+| <NugetBadge name="Shiny.Net.HttpServer.DocumentDb" showLabel={true} /> | A [Shiny.DocumentDb](/httpserver/documentdb/) document type as a complete HTTP resource |
 
 ```bash
 dotnet add package Shiny.Net.HttpServer
@@ -99,8 +105,14 @@ Results come in both spellings — `Results.*` and `IActionResult`.
 | **[Security](/httpserver/authentication/)** | Authentication and [authorization](/httpserver/authorization/) split ASP.NET-style — Basic, API key, cookie and [JWT](/httpserver/jwt/) schemes, policies, roles and claims, plus [CORS](/httpserver/cors/), [rate limiting](/httpserver/rate-limiting/) and [IP filtering](/httpserver/ip-filtering/) |
 | **[TLS](/httpserver/tls/)** | Per-endpoint TLS, self-signed certificates generated in managed code (iOS and Android included), client certificates, and SPKI pinning for your own `HttpClient` |
 | **[OpenAPI](/httpserver/openapi/)** | An OpenAPI 3.0.3 document built entirely from compile-time metadata and your `JsonSerializerContext` — no reflection, no document object model |
+| **[Formats](/httpserver/serialization/)** | Content negotiation both ways — responses from `Accept`, request bodies from `Content-Type`. JSON built in; XML, MessagePack and protobuf one line each |
 | **[Tunnelling](/httpserver/tunneling/)** | A pluggable `ITunnelProvider`, the reference relay, [SSH remote forwarding](/httpserver/ssh/), quick tunnels, and [Azure Relay](/httpserver/azure-relay/) |
 | **[Lifecycle](/httpserver/hosting/)** | Start, stop and restart at runtime, serialized and idempotent, with observable state |
+
+[Route constraints](/httpserver/routing/) cover `byte`, `short`, `float`, the temporal types and value
+bounds (`{page:range(1,100)}`), and a constraint decides whether a route *matches* rather than
+converting anything — so a refused segment is a 404 and one that matched but will not parse is a 400.
+Responses can also send trailing headers on all three protocol versions.
 
 ## Reaching a device from the internet
 
@@ -154,6 +166,149 @@ public partial class ToolJson : JsonSerializerContext;
 
 Full detail on [MCP](/httpserver/mcp/).
 
+## Formats beyond JSON
+
+JSON is the default and covers most of an HTTP API. For the rest — an integration behind a corporate
+gateway that speaks XML, a battery-powered client that would rather not spend 40% more radio time on
+braces, a service already generating protobuf from a `.proto` — formats plug in on both sides.
+`IOutputFormatter` writes responses; `IInputFormatter` reads request bodies.
+
+```csharp
+builder.Services.AddContentNegotiation(o =>
+{
+    o.NegotiateByDefault = true;   // Results.Ok(value) honours Accept
+    o.AddXml();
+    o.AddMessagePack();
+});
+```
+
+That is the whole setup, and **no endpoint changes**. Request bodies are dispatched on `Content-Type`,
+so every existing `[FromBody]` parameter, mediator contract and hand-written handler accepts the
+registered formats immediately; responses are chosen from `Accept`.
+
+`XmlSerializer` could not be used for the XML side at all — it builds its mapping by reflecting over
+the type at runtime, which is precisely what a trimmed or AOT-published app has thrown away. The same
+goes for MessagePack-CSharp's default resolver. Instead both read the source-generated `JsonTypeInfo`
+your types already have, so:
+
+- No new dependency, and no `[XmlRoot]`, `[DataMember]` or `[MessagePackObject]` on your DTOs.
+- A type gets an XML or MessagePack representation on exactly the same terms as JSON — its metadata
+  was registered.
+- The representations cannot drift apart, because the property names and converters have one source.
+
+Reading XML is **type-directed** for the same reason it has to be. XML has no types:
+`<postalCode>01234</postalCode>` is text, and only the target member knows whether that is a string, a
+number or an enum ordinal. Guessing from the text is how a postal code arrives as the number `1234`.
+
+Protobuf needs a schema, so its codecs are supplied rather than discovered — field numbers live in the
+`.proto`, and the only thing that has them is the code `protoc` already generated:
+
+```csharp
+o.AddProtobuf(p => p.Add<Reading>(m => m.ToByteArray(), Reading.Parser.ParseFrom));
+```
+
+The same `BinaryCodecRegistry` carries CBOR, Avro, or MessagePack-CSharp's native codec under whichever
+media type you register it as. One behaviour change to note: a body whose `Content-Type` nothing reads
+now answers **415** rather than 400 — the difference between sending a caller to fix a header and
+sending them hunting for a syntax error that is not there. Full detail on
+[Serialization & Formats](/httpserver/serialization/).
+
+## gRPC and gRPC-Web
+
+[gRPC](/httpserver/grpc/) runs over the same HTTP/2 stack as everything else, callable from
+`Grpc.Net.Client`, `grpcurl` or any gRPC client in any language — and therefore from a .NET MAUI app,
+where ASP.NET Core cannot run at all.
+
+```csharp
+app.MapGrpcService("greet.Greeter", svc =>
+{
+    svc.AddMarshaller<HelloRequest>(m => m.ToByteArray(), HelloRequest.Parser.ParseFrom);
+    svc.MapUnary<HelloRequest, HelloReply>("SayHello", (request, ctx) => …);
+});
+```
+
+All four method shapes are supported, with streams as `IAsyncEnumerable<T>` in both directions flushed
+as each message is yielded, `grpc-timeout` arriving as the handler's `CancellationToken`, per-message
+compression negotiated from `grpc-accept-encoding`, and status in trailers. `MaxReceiveMessageSize` is
+enforced on the decompressed size as well as the length prefix, since a few compressed kilobytes can
+otherwise expand into gigabytes.
+
+gRPC-Web is enabled by default in both framings, which is how a browser calls in and how anything on
+HTTP/1.1 does. It matters more here than on a server: native gRPC needs a tunnel that forwards raw TCP,
+and most hosted providers terminate HTTP/1.1, so gRPC-Web is generally what reaches a device from the
+internet.
+
+## A directory as a mounted drive
+
+The [file browser](/httpserver/file-browser/) is a JSON API you drive with `curl`.
+[WebDAV](/httpserver/webdav/) is the protocol every desktop already has a client for.
+
+```csharp
+app.MapWebDav("/dav", o =>
+{
+    o.RootPath = FileSystem.AppDataDirectory;
+    o.AllowWrite = true;
+})
+.RequireAuthorization();
+```
+
+Point Finder or Windows Explorer at that URL and the app's storage appears as a drive, with no client
+code at all. RFC 4918 compliance classes 1 and 2 — `PROPFIND`, `PROPPATCH`, `MKCOL`, `COPY`, `MOVE`,
+`LOCK`/`UNLOCK` and the `If` header.
+
+Class 2 is on by default and is not really optional: Finder and the Windows redirector both mount a
+class 1 server read-only whatever `AllowWrite` says. Writes and deletes are opt-in, and `PROPFIND` with
+`Depth: infinity` is refused by default rather than walking a device's storage into one response — note
+that a missing `Depth` header means infinity per the specification, so it gets the same refusal.
+
+## Mediator and DocumentDb as endpoints
+
+If you already write [Shiny.Mediator](/httpserver/mediator/) handlers, they can be endpoints. It is the
+`Shiny.Mediator.AspNet` shape without ASP.NET Core:
+
+```csharp
+[MediatorHttpGroup("/api/gadgets")]
+public class GadgetHandlers : IRequestHandler<GetGadget, Gadget>
+{
+    [MediatorHttpGet("/{id:int}")]
+    public Task<Gadget> Handle(GetGadget request, IMediatorContext ctx, CancellationToken ct) => …;
+}
+
+app.MapGeneratedMediatorEndpoints();
+```
+
+The binding is the part that had to change. The ASP.NET package uses `[AsParameters]`/`[FromBody]`,
+which is reflection over a delegate's parameters and annotated `RequiresDynamicCode`; here a source
+generator writes it out member by member at compile time, so a contract that cannot be bound is a build
+error rather than a 500. An `ICommand` answers with a status code and no body; an `IStreamRequest<T>`
+becomes a Server-Sent Events response.
+
+And if the data lives in [Shiny.DocumentDb](/httpserver/documentdb/), a document type is a complete
+resource in one line:
+
+```csharp
+app.MapDocuments<Order>("/orders", o =>
+{
+    o.TypeInfo = AppJson.Default.Order;
+    o.AllowFilterOn(x => x.Status, x => x.Total);
+    o.Scope<ITenantContext>((tenant, _) => x => x.TenantId == tenant.TenantId);
+})
+.RequireAuthorization("orders");
+```
+
+List, by-id, count, create, replace, RFC 7396 merge-patch, delete and a live SSE tail, with filtering,
+cursor paging, sparse fieldsets and `ETag`/`If-Match` — plus a schema-free lane for JSON collections
+with no CLR type. It is a port of `Shiny.DocumentDb.AspNetCore` onto this server running the same
+engine, so filters, cursors, scopes and merge semantics are identical on both.
+
+Two differences are deliberate. `MapDocuments` returns a builder that fans `RequireAuthorization`, CORS,
+rate limiting and IP filtering across every route it registered, because this server attaches metadata
+per route rather than per group — so adding an operation later cannot quietly leave one unprotected.
+And there is no reflection fallback when `TypeInfo` is unset, because a fallback that works on a
+desktop and throws on a trimmed phone is worse than a clear error in both places. Server-side scopes
+answer 404 rather than 403 for a document outside the scope. The package requires Shiny.DocumentDb
+13.2.1 or newer.
+
 ## Trade-offs worth knowing up front
 
 Two packages are deliberately **not** AOT- or trim-clean, and they are separate packages for exactly
@@ -162,9 +317,14 @@ algorithm registries. `Shiny.Net.HttpServer.AzureRelay` pulls in Azure.Identity,
 IdentityModel. Reference either and you accept the weight; leave them out and the core server stays
 clean AOT.
 
-This is a beta. The API surface is settled and the test suite is substantial, but it has not yet been
-run in anger by a large number of people — [issues and feedback](https://github.com/shinyorg/httpserver/issues)
-are very welcome.
+The other eight are clean, the four newest included — which is much of why gRPC and protobuf ask for
+marshalling rather than discovering it, and why XML and MessagePack are written against your existing
+JSON metadata instead of a reflective serializer.
+
+This is a beta. The API surface is settled and the test suite is substantial — around 1,260 tests, run
+against a live socket rather than an in-memory harness, since most of what a server can get wrong only
+exists at that boundary. But it has not yet been run in anger by a large number of people —
+[issues and feedback](https://github.com/shinyorg/httpserver/issues) are very welcome.
 
 Finally, the security note that a tunnel makes urgent: a quick tunnel hands a public HTTPS address to
 anyone who learns it, pointed at a server whose defaults were chosen for loopback. Put

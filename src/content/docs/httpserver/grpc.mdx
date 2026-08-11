@@ -1,0 +1,223 @@
+---
+title: gRPC
+description: gRPC and gRPC-Web served over the same HTTP/2 stack — unary, streaming and bidirectional methods, callable from Grpc.Net.Client, grpcurl or a browser, without ASP.NET Core
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A gRPC method is a `POST` to `/{service}/{method}` whose body is a run of length-prefixed messages,
+and whose outcome arrives in [trailers](/httpserver/protocols/#trailing-headers) after them. Both
+halves of that need HTTP/2, which this server has had all along — so gRPC works here, including on
+.NET MAUI, where ASP.NET Core cannot run at all.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Grpc
+```
+
+```csharp
+app.MapGrpcService("greet.Greeter", svc =>
+{
+    svc.AddMarshaller<HelloRequest>(m => m.ToByteArray(), HelloRequest.Parser.ParseFrom);
+    svc.AddMarshaller<HelloReply>(m => m.ToByteArray(), HelloReply.Parser.ParseFrom);
+
+    svc.MapUnary<HelloRequest, HelloReply>("SayHello", (request, context) =>
+        new ValueTask<HelloReply>(new HelloReply { Message = $"Hello {request.Name}" }));
+});
+```
+
+Any gRPC client in any language can call it — `Grpc.Net.Client`, `grpcurl`, Go, Python — because what
+goes on the wire is the protocol, not an approximation of it.
+
+## Serialization is yours
+
+Nothing in this package knows what protobuf is. You hand it two functions per message type, and it
+never reflects over your types, never pulls a serializer into your app, and stays trim- and AOT-clean
+as a result.
+
+```csharp
+// Google.Protobuf generated messages — the shape generated code already has
+svc.AddMarshaller<HelloRequest>(m => m.ToByteArray(), HelloRequest.Parser.ParseFrom);
+
+// System.Text.Json, source-generated, for callers speaking application/grpc+json
+svc.AddMarshaller(GrpcMarshaller.Json(AppJsonContext.Default.HelloRequest));
+
+// Anything else: straight into the connection buffer, no byte[] in the middle
+svc.AddMarshaller(GrpcMarshaller.Create<Reading>(
+    (value, writer) => value.WriteTo(writer),
+    payload => Reading.Parse(payload)
+));
+```
+
+To use `.proto` files, add `Grpc.Tools` to your project as usual and let it generate the message
+classes; you need the message types, not the generated service base or `Grpc.Core`.
+
+```xml
+<PackageReference Include="Google.Protobuf" Version="3.*" />
+<PackageReference Include="Grpc.Tools" Version="2.*" PrivateAssets="All" />
+<Protobuf Include="Protos/greet.proto" GrpcServices="None" />
+```
+
+Marshallers are registered per message type, so a service with twenty methods over eight types names
+each type once. A method mapped without one throws at startup, naming the method — not on the first
+call that tries to decode a message.
+
+## The four method shapes
+
+```csharp
+svc.MapUnary<Req, Res>("Get", async (request, context) => ...);
+
+svc.MapServerStreaming<Req, Res>("Watch", Watch);
+static async IAsyncEnumerable<Res> Watch(Req request, GrpcCallContext context) { ... }
+
+svc.MapClientStreaming<Req, Res>("Upload", async (requests, context) =>
+{
+    await foreach (var request in requests) { ... }
+    return new Res();
+});
+
+svc.MapDuplexStreaming<Req, Res>("Chat", Chat);
+static async IAsyncEnumerable<Res> Chat(IAsyncEnumerable<Req> requests, GrpcCallContext context) { ... }
+```
+
+Streams are `IAsyncEnumerable<T>` in both directions. Each response message is flushed as the
+enumerator yields it, so a handler that awaits between items is a live feed rather than a batch
+delivered at the end. Nothing sequences the two sides of a duplex call: read everything then answer,
+answer before you have read, or interleave — the HTTP/2 stream underneath carries both directions
+independently.
+
+## Call context
+
+| Member | What it gives you |
+| --- | --- |
+| `RequestHeaders` | The caller's metadata |
+| `ResponseHeaders` | Headers to send back, until the first message goes out |
+| `ResponseTrailers` | Metadata sent after the last message — writable for the whole call |
+| `CancellationToken` | Cancelled on disconnect, deadline, or shutdown |
+| `Deadline` | When the caller stops caring, or null |
+| `User` | The authenticated caller, when authentication ran in front of the endpoint |
+| `RequestServices` | The request's DI scope |
+| `Peer` | The caller's address |
+| `WriteResponseHeadersAsync()` | Sends headers now, without waiting for the first message |
+
+## Reporting failure
+
+Throw `GrpcStatusException` for an outcome the caller is meant to see. It is the gRPC equivalent of
+returning a 4xx.
+
+```csharp
+if (order is null)
+    throw new GrpcStatusException(GrpcStatusCode.NotFound, $"No order {request.Id}.");
+```
+
+Anything else that escapes a handler is reported as `Unknown` with a generic message, and logged in
+full on the server. Set `EnableDetailedErrors = true` to send the exception message to callers —
+worth knowing that exception messages routinely name paths, connection strings and internal types.
+
+Because the status travels in trailers, a call that fails **halfway through a stream** reports
+properly: the messages already sent stand, and the status that follows them says what went wrong.
+
+## Deadlines
+
+A caller's `grpc-timeout` is parsed into `context.CancellationToken` and enforced. Past it the call is
+cancelled and the caller is told `DeadlineExceeded`, so a handler with expensive work left can check
+`context.Deadline` and stop rather than finish for nobody.
+
+```csharp
+using var call = client.GetOrderAsync(request, deadline: DateTime.UtcNow.AddSeconds(5));
+```
+
+## gRPC-Web
+
+On by default, and the only form a browser can make. It carries the same calls over HTTP/1.1 by
+moving the trailers into the body, so it needs no trailer support at either end. Both framings are
+served — binary (`application/grpc-web`) and base64 (`application/grpc-web-text`) — on the same
+routes as native gRPC, decided per request by the content type.
+
+```csharp
+builder.Services.AddCors(o => o.AddPolicy("grpc-web", p => p
+    .WithOrigins("https://app.example.com")
+    .WithMethods("POST")
+    .WithHeaders("content-type", "x-grpc-web", "x-user-agent", "grpc-timeout")
+    .WithExposedHeaders("grpc-status", "grpc-message")));
+
+var app = builder.Build();
+app.UseCors();
+
+app.MapGrpcService("greet.Greeter", svc => { ... })
+   .RequireCors("grpc-web");
+```
+
+<Aside type="caution">
+gRPC-Web has no client-streaming or bidirectional calls — the protocol cannot express them. Those
+methods answer `Unimplemented` to a web caller and work normally for everyone else.
+</Aside>
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `MaxReceiveMessageSize` | 4MB | Refused on the length prefix, before the bytes are read |
+| `MaxSendMessageSize` | unlimited | What the server sends is the server's own doing |
+| `ResponseCompression` | none | `"gzip"` or `"deflate"`, used only when the caller accepts it |
+| `EnableDetailedErrors` | `false` | Whether unhandled exception messages reach callers |
+| `EnableGrpcWeb` | `true` | Costs nothing until a gRPC-Web request arrives |
+| `Marshallers` | empty | Shared across every method of the service |
+
+Request messages are decompressed when the caller flags them, and decompression is bounded by
+`MaxReceiveMessageSize` — a few compressed kilobytes can otherwise expand into gigabytes.
+
+## Policy
+
+`MapGrpcService` returns a builder that fans policy across every method it mapped, and each `Map`
+call returns its own route for anything that needs to differ.
+
+```csharp
+var svc = app.MapGrpcService("greet.Greeter", s =>
+{
+    s.MapUnary<HelloRequest, HelloReply>("SayHello", SayHello);
+    s.MapUnary<Empty, HealthReply>("Check", Check).AllowAnonymous();
+});
+
+svc.RequireAuthorization().RequireRateLimiting("api");
+```
+
+Every gRPC route carries `GrpcMethodMetadata`, so middleware can tell a gRPC call from an HTTP one
+and name it without parsing the path. The routes are excluded from OpenAPI: gRPC describes itself
+with a `.proto` file, and there is nothing useful for an OpenAPI document to say about a
+length-prefixed protobuf body.
+
+## Cleartext
+
+Native gRPC needs HTTP/2, which over TLS is settled by ALPN and needs nothing configured. Without
+TLS, both ends have to agree to speak HTTP/2 on a cleartext connection:
+
+```csharp
+builder.Options.Http2.AllowCleartext = true;   // server
+```
+
+```csharp
+var channel = GrpcChannel.ForAddress("http://device:8080");   // .NET client
+```
+
+A caller stuck on HTTP/1.1 gets a `505` naming gRPC-Web as the way in, rather than a call that fails
+on its last frame.
+
+## Through a tunnel
+
+Native gRPC needs HTTP/2 the whole way, which decides what works over which
+[tunnel](/httpserver/tunneling/):
+
+| | Native gRPC | gRPC-Web |
+| --- | --- | --- |
+| SSH remote forwarding to your own host | ✅ raw TCP, so h2c passes through | ✅ |
+| Quick tunnels (pinggy, localhost.run) | ❌ the provider terminates HTTP/1.1 | ✅ |
+| The reference relay | ❌ routes by reading HTTP/1.x request heads | ✅ |
+| Azure Relay | ❌ HTTP/1.1, and it drops trailers | ✅ |
+
+gRPC-Web works over all of them, because it needs nothing more than an HTTP/1.1 POST.
+
+## What is not here
+
+No server reflection and no health-checking service. Both are defined as gRPC services over protobuf
+messages this package would have to know about, which is exactly the dependency it avoids — map them
+yourself if you need them, the same way as any other service.
