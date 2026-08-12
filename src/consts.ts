@@ -79,7 +79,7 @@ export const ShinyCategories: ShinyCategory[] = [
 ];
 
 export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk'];
-export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di'];
+export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'httpserver'];
 export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-sqlcipher', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost'];
 export const ASPNET_ONLY_IDS = ['documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost'];
 export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost'];
@@ -763,6 +763,19 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Blazor App Support (device/browser info, culture & time-zone changes)",
         "category": "core",
         "version": "5.1.5"
+    },
+    {
+        // Runs anywhere .NET runs, which is the point of it — including inside a MAUI app, where
+        // ASP.NET Core cannot. No aspnetNuget: this is the alternative to ASP.NET Core, not an
+        // add-on for it. No blazorNuget either — a WASM app in the browser cannot listen on a
+        // socket; serving a Blazor app *from* this server is a different thing entirely.
+        "id": "httpserver",
+        "nuget": "Shiny.Net.HttpServer",
+        "linuxNuget": "Shiny.Net.HttpServer",
+        "macOsSupported": true,
+        "description": "HTTP Server (HTTP/1.1, HTTP/2 & HTTP/3, WebSockets, SSE, tunnelling)",
+        "category": "core",
+        "version": "1.0.0-beta.9"
     }
 ];
 
@@ -803,7 +816,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'discovery', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence'];
+        const ids = ['ble', 'blehosting', 'obd', 'jobs', 'gps', 'geofencing', 'spatial-geofencing', 'httptransfers', 'notifications', 'discovery', 'push', 'contactstore', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence', 'httpserver'];
         return compos.some(x => ids.includes(x.id));
     }
 };

@@ -57,6 +57,7 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     // Essentials
     jobs: [{ kind: 'shinyapp', paramId: 'jobs' }],
     httptransfers: [{ kind: 'shinyapp', paramId: 'httptransfers' }],
+    httpserver: [{ kind: 'shinyapp', paramId: 'httpserver' }],
     notifications: [{ kind: 'shinyapp', paramId: 'notifications' }],
     aiconversation: [
         { kind: 'shinyapp', paramId: 'aiconversation' },

@@ -97,6 +97,19 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasHttpServer = nugets.find(x => x.nuget === "Shiny.Net.HttpServer") !== undefined;
+    // Skipped when discovery already emitted the same entitlement above - the Apple SDK writes each
+    // CustomEntitlements item into the plist, so two of these means a duplicated key.
+    if (isMaui && hasHttpServer && !hasDiscovery) {
+        pr += "\r\n<!--\r\n";
+        pr += "\t// Mac Catalyst runs sandboxed and the sandbox grants OUTGOING connections only.\r\n";
+        pr += "\t// Without this the bind is refused and the server simply never appears - no error.\r\n";
+        pr += "-->\r\n";
+        pr += "<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.security.network.server\" Type=\"Boolean\" Value=\"true\" />\r\n";
+        pr += "</ItemGroup>\r\n";
+    }
+
     if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {

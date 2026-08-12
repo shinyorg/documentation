@@ -87,10 +87,14 @@ const AppleInfoPlist = (props: Props) => {
   if (has('blehosting') || has('ble') || has('obd')) {
     addKey('NSBluetoothPeripheralUsageDescription');
   }
+  // iOS 14+ gates anything touching the local network, and that includes *serving* on it.  Emitted
+  // once even when both are selected - a duplicate key makes the whole plist invalid.
+  if (has('discovery') || has('httpserver')) {
+    addKey('NSLocalNetworkUsageDescription');
+  }
   if (has('discovery')) {
     // Browsing silently returns NOTHING if the service type is missing from NSBonjourServices - there
     // is no error.  List every type you browse for AND every type you publish.
-    addKey('NSLocalNetworkUsageDescription');
     src += `
         <key>NSBonjourServices</key>
         <array>

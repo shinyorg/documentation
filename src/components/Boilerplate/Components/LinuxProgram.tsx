@@ -13,7 +13,9 @@ const LinuxProgram = (props: Props) => {
 
   let src = `using Platform.Maui.Linux.Gtk4.Essentials.Hosting;
 using Platform.Maui.Linux.Gtk4.Hosting;
-using Shiny;
+using Shiny;${has('httpserver') ? `
+using System.Net;          // IPAddress
+using Shiny.Net.HttpServer;` : ''}
 
 namespace ShinyApp;
 
@@ -54,6 +56,18 @@ public static class MauiProgram
   if (has('mediator')) {
     src += `
         builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;
+  }
+  if (has('httpserver')) {
+    src += `
+        // No sandbox and no local-network prompt here - make sure the firewall allows the port.
+        builder.Services.AddHttpServer(
+            options =>
+            {
+                options.Address = IPAddress.Any;
+                options.Port = 8080;
+            },
+            server => server.MapGet("/ping", ctx => ctx.Response.WriteTextAsync("pong"))
+        );`;
   }
   if (has('stores')) {
     src += `

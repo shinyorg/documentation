@@ -8,7 +8,9 @@ export interface Props {
 
 const MauiProgram = (props: Props) => { 
   let src = `
-  using Shiny;
+  using Shiny;${Data.hasComponent('httpserver', props.components) ? `
+  using System.Net;          // IPAddress
+  using Shiny.Net.HttpServer;` : ''}
 
   namespace ShinyApp;
   
@@ -110,6 +112,27 @@ const MauiProgram = (props: Props) => {
   if (has('mediator')) {
     src += `
       builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;
+  }
+  if (has('httpserver')) {
+    src += `
+      builder.Services.AddHttpServer(
+          options =>
+          {
+              // Any, not loopback - the point is for another device to reach this one.
+              // Port 0 lets the OS pick, so two copies of the app never collide.
+              options.Address = IPAddress.Any;
+              options.Port = 0;
+          },
+          server =>
+          {
+              server.MapGet("/ping", ctx => ctx.Response.WriteTextAsync("pong"));
+              // server.UseEmbeddedFiles(typeof(MauiProgram).Assembly, "ShinyApp.wwwroot");
+          },
+
+          // Started from the UI instead, so the app does not open a port before anyone asked it to.
+          // Resolve HttpServer from DI and call StartAsync() / StopAsync() from your view model.
+          autoStart: false
+      );`;
   }
   if (has('shell')) {
     src += `
