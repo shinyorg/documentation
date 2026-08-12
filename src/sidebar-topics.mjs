@@ -456,6 +456,15 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'ShinyButton',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'controls/button/' },
+          { label: 'States & Commands', link: 'controls/button/states' },
+          { label: 'Blazor Usage', link: 'controls/button/blazor' },
+        ]
+      },
+      {
         label: 'Fab & FabMenu',
         jumpTo: true,
         items:[
@@ -527,6 +536,18 @@ export const sidebarTopics = [
           { label: 'Timelines & Playback', link: 'controls/keyframe/timelines' },
           { label: 'Drawn Scenes', link: 'controls/keyframe/scenes' },
           { label: 'Offscreen Export', link: 'controls/keyframe/export' },
+        ]
+      },
+      {
+        label: 'Motion Icons',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/motion-icons/' },
+          { label: 'Triggers', link: 'controls/motion-icons/triggers' },
+          { label: 'The Icon Set', link: 'controls/motion-icons/icons' },
+          { label: 'Presets', link: 'controls/motion-icons/presets' },
+          { label: 'Custom Artwork', link: 'controls/motion-icons/custom' },
         ]
       },
       {
@@ -992,6 +1013,18 @@ export const sidebarTopics = [
           { label: 'Configuration', link: 'aspire/gluetun/configuration' },
           { label: 'Container Routing', link: 'aspire/gluetun/routing' },
           { label: 'Release Notes', link: 'aspire/gluetun/release-notes' }
+        ]
+      },
+      {
+        label: 'Aspire Tunnelling',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'aspire/tunnel/' },
+          { label: 'Providers', link: 'aspire/tunnel/providers' },
+          { label: 'The Shiny Relay', link: 'aspire/tunnel/relay' },
+          { label: 'Port Forwarding', link: 'aspire/tunnel/port-forward' },
+          { label: 'How It Works', link: 'aspire/tunnel/custom-providers' },
+          { label: 'Release Notes', link: 'aspire/tunnel/release-notes' }
         ]
       },
       {

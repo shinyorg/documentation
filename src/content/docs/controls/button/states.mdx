@@ -1,0 +1,159 @@
+---
+title: States & Commands
+description: The ShinyButton state machine, and how it follows a MAUI ICommand's CanExecute and async execution
+---
+
+`ShinyButton` has four states and three ways to drive them. Which one you use depends on who owns the outcome.
+
+## The state machine
+
+```
+Normal ──tap──> Busy ──work finishes──> Normal
+                 │
+                 ├── command sets Success ──> Success ──StateRevertDelay──> Normal
+                 └── work faults ──────────> Error   ──StateRevertDelay──> Normal
+```
+
+- `State` is `TwoWay` by default, so an auto-revert reports itself back to a bound view model rather than leaving it out of step.
+- `Success` and `Error` are transient by default — they revert after `StateRevertDelay` (1.5s). `TimeSpan.Zero` holds the state until something else changes it.
+- Leaving a state early cancels its pending revert, so a stale timer can never drag the button back to `Normal` from wherever it has since moved.
+- `DisableWhileBusy` (on by default) stops the button accepting taps while it works.
+- `StateChanged` reports every transition with `From` and `To`, however it was caused.
+
+## Three ways to drive it
+
+### 1. Let the command do it (MAUI)
+
+The default, and the one to reach for. If `Command` is an async command, the button enters `Busy` on tap and leaves it when the work finishes. Nothing in the view model exists for the UI's benefit:
+
+```csharp
+public partial class OrderViewModel : ObservableObject
+{
+    [RelayCommand]
+    async Task SaveAsync() => await this.api.SaveAsync();
+}
+```
+
+```xml
+<shiny:ShinyButton Text="Save" BusyText="Saving..." Command="{Binding SaveCommand}" />
+```
+
+If the command's task faults, the button goes to `Error` (`ShowErrorOnFault`, on by default). The command still owns its own error handling — the button only reflects that it failed.
+
+### 2. Bind `State` when the view model owns the outcome
+
+A command that wants to show a tick sets `State` itself. The button respects that: it only unwinds `Busy` if it is still the one holding it, so a `Success` the command set is never overwritten by the button's own reset.
+
+```csharp
+[ObservableProperty]
+ButtonState submitState = ButtonState.Normal;
+
+[RelayCommand]
+async Task SubmitAsync()
+{
+    await this.api.SubmitAsync();
+    this.SubmitState = ButtonState.Success;
+}
+```
+
+```xml
+<shiny:ShinyButton Text="Submit"
+                   State="{Binding SubmitState}"
+                   BusyText="Submitting..."
+                   SuccessText="Submitted"
+                   Command="{Binding SubmitCommand}" />
+```
+
+### 3. Bind `IsBusy` when the busy state comes from elsewhere
+
+For work this button did not start — a background refresh, a shared loading flag:
+
+```xml
+<shiny:ShinyButton Text="Refresh" IsBusy="{Binding IsRefreshing}" />
+```
+
+`IsBusy` and `State` are two views of one value. Setting `IsBusy` true enters `Busy`; setting it false returns to `Normal` **only if the button is currently busy**, so it cannot cut a `Success` or `Error` short.
+
+:::tip
+Do not add an `IsBusy` property to a view model just to drive this button while its own async command runs. That is what option 1 is for.
+:::
+
+## Command state (MAUI only)
+
+Two independent behaviours, both on by default.
+
+### CanExecute → disabled
+
+The button subscribes to its command's `CanExecuteChanged` and disables itself when the command cannot execute. Crucially it does this through MAUI's own `IsEnabledCore` — the same mechanism `Microsoft.Maui.Controls.Button` uses — rather than writing `IsEnabled`:
+
+```csharp
+[ObservableProperty]
+[NotifyCanExecuteChangedFor(nameof(SaveCommand))]
+bool isValid;
+
+[RelayCommand(CanExecute = nameof(IsValid))]
+async Task SaveAsync() => await this.api.SaveAsync();
+```
+
+The distinction matters. A button that wrote `IsEnabled` would overwrite your binding, and a command becoming executable again would silently re-enable a button you had deliberately switched off:
+
+```xml
+<!-- Stays disabled no matter what GuardedCommand's CanExecute says -->
+<shiny:ShinyButton Text="Not yet" IsEnabled="False" Command="{Binding GuardedCommand}" />
+```
+
+`CanExecute` is re-evaluated when `CommandParameter` changes, too, so a command guarded on its parameter behaves correctly.
+
+The subscription is torn down on `Unloaded` and restored on `Loaded`, so a long-lived view model command does not root the page it was shown on.
+
+### AutoBusy
+
+`ICommand.Execute` returns `void`, so a button handed an async command has no handle on the work it just started. Every async command implementation solves this the same way — MVVM Toolkit's `IAsyncRelayCommand`, Prism's, ReactiveUI's and most hand-rolled ones all expose an `ExecutionTask` or an `IsRunning`/`IsExecuting` flag — but there is no shared interface to type against.
+
+Rather than put an MVVM framework dependency into the core controls package (which would land it in every consumer's app, whichever framework they actually use), the shape is discovered once per command type and cached. A command exposing none of it simply is not an async command as far as the button is concerned, and `State` is left entirely to you.
+
+```xml
+<!-- Turn it off to own State yourself -->
+<shiny:ShinyButton Text="Save" AutoBusy="False" State="{Binding SaveState}" Command="{Binding SaveCommand}" />
+```
+
+:::caution[Trimming and NativeAOT]
+`AutoBusy`'s detection uses reflection — the same trade-off `DataGrid`'s string-path columns make. For a fully trimmed or NativeAOT build, set `AutoBusy="False"` and drive `State` from your view model.
+:::
+
+## Blazor
+
+There is no `ICommand` on the web, so the command-state work above is MAUI-only. Its equivalent is that `Clicked` is awaited: with `AutoBusy` (the default) an `async` handler holds the button busy for exactly as long as it runs.
+
+```razor
+<ShinyButton Text="Save" BusyText="Saving..." Clicked="SaveAsync" />
+
+@code {
+    async Task SaveAsync() => await http.PostAsJsonAsync("/api/save", model);
+}
+```
+
+Three details:
+
+- A **synchronous** handler never flickers. The returned task is checked for completion before any state change, so a handler that finished inline does not produce a one-frame spinner.
+- A handler that **throws** sets `Error` (when `ShowErrorOnFault` is set) and the exception is still rethrown, so your error boundary or logging sees it.
+- `@bind-State` and `@bind-IsBusy` both work. Internally the component tracks the rendered state separately from the parameters and only lets a parameter the parent actually *changed* override it — which is what allows an async handler to hold the button busy while the parent keeps re-supplying `IsBusy="false"` on every render.
+
+```razor
+<ShinyButton Text="Submit"
+             @bind-State="submitState"
+             BusyText="Submitting..."
+             SuccessText="Submitted"
+             StateRevertDelay="@TimeSpan.FromSeconds(2)"
+             Clicked="SubmitAsync" />
+
+@code {
+    ButtonState submitState = ButtonState.Normal;
+
+    async Task SubmitAsync()
+    {
+        await http.PostAsJsonAsync("/api/submit", model);
+        submitState = ButtonState.Success;
+    }
+}
+```

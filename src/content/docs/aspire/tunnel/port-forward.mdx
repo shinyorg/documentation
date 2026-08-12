@@ -1,0 +1,107 @@
+---
+title: Port Forwarding
+description: Reaching a database or API on the far side of an SSH bastion, as an ordinary Aspire dependency
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ssh" showLabel={true} />
+
+The other direction. Instead of publishing something local to the internet, this opens a local port
+that SSH carries to a service you cannot reach directly — the staging database behind a bastion, an
+on-premises API, a queue on a private network.
+
+```csharp
+var db = builder.AddSshPortForward("staging-db", "bastion.example.com", "10.0.0.5", 5432, ssh =>
+{
+    ssh.Username = "ops";
+    ssh.PrivateKeyPath = "/home/me/.ssh/id_ed25519";
+    ssh.AcceptAnyHostKey = true;
+});
+
+builder.AddProject<Projects.Api>("api")
+    .WithReference(db);
+```
+
+The app model treats it as an ordinary dependency: a resource with a connection string, which
+referencing resources wait for.
+
+## Shaping the connection string
+
+Without a template the value is `host:port`, which suits a client that takes a host and a port and
+nothing else. Most do not:
+
+```csharp
+var password = builder.AddParameter("db-password", secret: true);
+
+var db = builder
+    .AddSshPortForward("staging-db", "bastion.example.com", "10.0.0.5", 5432, ssh =>
+    {
+        ssh.Username = "ops";
+        ssh.PrivateKeyPath = "/home/me/.ssh/id_ed25519";
+        ssh.AcceptAnyHostKey = true;
+    })
+    .WithConnectionString(f => ReferenceExpression.Create(
+        $"Host={f.Host};Port={f.Port};Database=app;Username=app;Password={password}"
+    ));
+```
+
+`f.Host` and `f.Port` are expressions, not values — they resolve when the forward is up, and the
+resource that referenced them waits until then.
+
+## The local port
+
+Ephemeral by default, which is what you want: nothing else has to find it. The port is then **reused
+verbatim on every reconnect**, so anything handed the first one keeps working rather than being
+quietly stranded when the SSH connection drops and comes back.
+
+Fix it when a client has the port written into a config file you would rather not touch:
+
+```csharp
+db.WithLocalPort(15432);
+```
+
+## Container resources
+
+The forward is bound by the AppHost on the developer's machine. A project reaches it over loopback; a
+container has its own loopback and has to come back across the bridge, so `f.Host` resolves per
+caller — `localhost` for a project, the container host name for a container.
+
+For that to work the forward has to be listening on something a container can reach:
+
+```csharp
+db.WithContainerAccess();   // binds 0.0.0.0 instead of 127.0.0.1
+```
+
+<Aside type="caution" title="0.0.0.0 is reachable by the network">
+Loopback is the default deliberately. A forward bound to every interface is reachable by anything on
+the network the machine is attached to — including, on a café or conference network, other people.
+Turn it on when a container needs it, not by habit.
+</Aside>
+
+## Authentication and host keys
+
+The `configure` callback takes the same `SshTunnelOptions` as
+[the SSH tunnel provider](/aspire/tunnel/providers/#ssh): password, private key from a path or from
+bytes, passphrase, connect timeout, keep-alive interval, and reconnect behaviour.
+
+As there, **connecting fails unless a host key is pinned or `AcceptAnyHostKey` is set**. For a
+bastion you own, pin it:
+
+```csharp
+ssh.HostKeyFingerprints.Add("SHA256:47DEQpj8HBSa+…");
+```
+
+## What the dashboard shows
+
+The forward appears as its own resource with the far side, the local address, and the host it is
+travelling through:
+
+| Property | Example |
+| --- | --- |
+| `forward.remote` | `10.0.0.5:5432` |
+| `forward.local` | `127.0.0.1:49152` |
+| `forward.via` | `bastion.example.com` |
+
+A dropped SSH connection puts the resource back into a starting state and reconnects with an
+exponential backoff, up to `MaxReconnectDelay`.

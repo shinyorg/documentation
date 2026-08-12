@@ -1,0 +1,111 @@
+---
+title: How It Works
+description: The resource model, the connection pump, and plugging in an ITunnelProvider of your own
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel" showLabel={true} />
+
+## The provider model
+
+`ITunnelProvider` is `Shiny.Net.HttpServer`'s, unchanged: an `IConnectionListener` that yields
+connections which arrived from somewhere other than a local socket.
+
+```csharp
+public interface ITunnelProvider : IConnectionListener
+{
+    string Name { get; }
+    string? PublicUrl { get; }      // available once BindAsync has completed
+}
+```
+
+What differs between the two libraries is what happens to those connections. The HTTP server
+[serves them itself](/httpserver/tunneling/) — a tunnelled request is indistinguishable from a local
+one to its routes and middleware. Here there is nothing to serve them *with*: the thing being
+published is somebody else's ASP.NET Core app, listening on a port Aspire allocated. So each
+connection is joined to that port instead.
+
+The join is byte-for-byte and protocol-blind. Putting an HTTP implementation in between would only
+add a version to disagree about, and would break WebSockets, Server-Sent Events and gRPC streaming in
+the process.
+
+## Adding your own
+
+```csharp
+var tunnel = builder.AddTunnel("public", "my-provider", (context, cancellationToken) =>
+    ValueTask.FromResult<ITunnelProvider>(
+        new MyTunnelProvider(context.TargetHost, context.TargetPort, context.LoggerFactory)
+    )
+);
+
+api.WithTunnel(tunnel);
+```
+
+The factory runs when the tunnel starts, not when the app model is built — which is the only point at
+which the target's port is known. `TunnelProviderContext` carries it:
+
+| Member | |
+| --- | --- |
+| `TargetHost`, `TargetPort` | Where the tunnel should forward, as the AppHost can reach it |
+| `LoggerFactory` | Writes to the tunnel resource's own log stream in the dashboard |
+| `Resource` | The tunnel being opened |
+| `Services` | The AppHost's services |
+
+An `async` factory is fine — resolving a parameter, waiting on another resource, fetching a token.
+
+## Lifecycle
+
+<Aside type="tip" title="Endpoint allocation, not readiness">
+A tunnel opens when its target's endpoints are **allocated**, which happens before the target process
+is launched. That is what lets a service reference its own public URL: the address exists before the
+process that needs it starts. The tunnel refuses connections for the second or two before anything is
+listening on the port, which is logged at debug and is not an error.
+</Aside>
+
+1. **Starting** — the factory runs and `BindAsync` is awaited. A failure here marks the resource
+   failed *and* faults anything waiting on the URL, so a referencing resource reports the reason
+   instead of hanging.
+2. **Running** — `PublicUrl` is published to the dashboard and to the connection string. Connections
+   are accepted and pumped for as long as the AppHost runs.
+3. **Reconnects** — providers that supervise their own connection (the relay, SSH) reconnect on their
+   own. The address is polled and republished, because most hosted endpoints assign a new one; while
+   it is down, the resource shows no address rather than a dead one.
+4. **Shutdown** — the tunnel is unbound and disposed with the AppHost.
+
+## The two resource shapes
+
+Container agents cannot share a base class with in-process tunnels — one has to be a
+`ContainerResource` so Aspire will start it. Both implement `ITunnelResource`, which is what
+`WithTunnelUrl` and `WithReference` actually need:
+
+```csharp
+public interface ITunnelResource : IResource
+{
+    EndpointReference? TargetEndpoint { get; }
+    string? PublicUrl { get; }
+    ReferenceExpression PublicUrlExpression { get; }
+    Task<string> GetPublicUrlAsync(CancellationToken cancellationToken = default);
+}
+```
+
+| Type | |
+| --- | --- |
+| `TunnelResource` | Base for tunnels the AppHost carries itself |
+| `InProcessTunnelResource` | `AddTunnel`, the Shiny relay client, Azure Relay |
+| `SshTunnelResource` | `AddSshTunnel`, `AddQuickTunnel` |
+| `ContainerTunnelResource` | Base for agents run in a container |
+| `CloudflaredResource`, `NgrokResource` | The two agents |
+
+`WithTunnel` attaches an endpoint to any `TunnelResource`. The container agents are attached with
+`WithOrigin` instead, because pointing an agent at something means writing its command line rather
+than opening a socket.
+
+## Choosing the endpoint
+
+`WithTunnel(tunnel)` with no endpoint name takes the `http` endpoint; failing that, `https`; failing
+that, the resource's only endpoint. Several endpoints and none of them named `http` or `https` is an
+error rather than a guess.
+
+`http` is preferred over `https` on purpose — TLS is terminated at the public end of the tunnel, so
+what arrives here is cleartext, and putting cleartext HTTP into a TLS listener fails every request.

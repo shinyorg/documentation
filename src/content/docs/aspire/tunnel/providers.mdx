@@ -1,0 +1,181 @@
+---
+title: Providers
+description: Quick tunnels, SSH, Azure Relay, Cloudflare and ngrok — what each one needs and what it gives you
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+Every provider attaches to a resource the same way and surfaces its address the same way. What
+differs is where the address comes from and what you have to have first.
+
+## Quick tunnels
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ssh" showLabel={true} />
+
+The zero-ceremony version: no account, nothing installed, no infrastructure. The AppHost opens an
+outbound SSH connection to a public endpoint that hands back an address.
+
+```csharp
+api.WithQuickTunnel();                                    // pinggy.io, the default
+api.WithQuickTunnel(QuickTunnelHost.Sish);                // tuns.sh
+api.WithQuickTunnel(subdomain: "<pinggy-access-token>");  // lifts the 60-minute anonymous cap
+api.WithQuickTunnel(configure: o => o.AutoReconnect = false);
+```
+
+`QuickTunnelHost` picks the endpoint. The presets — host, port, username convention, and the regex
+that reads the assigned address out of the session banner — come from `Shiny.Net.HttpServer.Ssh`, so
+a tunnel is described identically here and in a MAUI app.
+
+| Host | Notes |
+| --- | --- |
+| `Pinggy` | The default. No signup, and it reports the address it assigns in a form that can actually be read back. Anonymous tunnels are capped at 60 minutes; pass an access token as `subdomain` to lift that |
+| `Sish` | The public `tuns.sh` instance, run by pico.sh. Needs a **registered** key — point `PrivateKeyPath` at the one you enrolled, or at your own sish deployment |
+| `Serveo` | The longest-running of them, and frequently unreachable for days at a time. Do not build a demo on it |
+| `LocalhostRun` | Forwards fine but never confirms the session request that carries the URL, so the address cannot be read. Usable only with an account whose custom domain you set as `PublicUrl` |
+
+<Aside type="caution" title="Traffic passes through someone else's server">
+These hosts publish no stable key to pin and there is no first use to trust, so `AcceptAnyHostKey` is
+on for them. That is stated in the preset rather than hidden: a free tunnel means your traffic
+crosses infrastructure you do not control.
+</Aside>
+
+## SSH
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ssh" showLabel={true} />
+
+`ssh -R` in library form, against a host you can log into. The AppHost dials out and asks the server
+to forward a port back down the connection, pointed straight at the port Aspire allocated for the
+target.
+
+```csharp
+api.WithSshTunnel("tunnel.example.com", ssh =>
+{
+    ssh.Username = "deploy";
+    ssh.PrivateKeyPath = "/home/me/.ssh/id_ed25519";
+    ssh.RemoteBindAddress = "0.0.0.0";          // needs GatewayPorts in the server's sshd config
+    ssh.RemotePort = 8080;                      // 0 asks the server to allocate one
+    ssh.PublicUrl = "https://api.example.com";  // where it really answers, if a proxy fronts it
+    ssh.HostKeyFingerprints.Add("SHA256:47DEQpj8HBSa+…");
+});
+```
+
+Nothing has to connect *in*, so this works from behind NAT, from a CI runner, and from a corporate
+network that allows nothing but outbound 443.
+
+Options are `SshTunnelOptions`, the same type
+[Shiny.Net.HttpServer.Ssh](/httpserver/ssh/) uses. Reconnect behaviour, keep-alives, ephemeral keys
+and host-key pinning all work as documented there.
+
+<Aside type="caution" title="Connecting fails unless a host key is pinned">
+Either add a fingerprint to `HostKeyFingerprints` or set `AcceptAnyHostKey`. An unverified host key
+means anything on the path can pose as the server, and a tunnel exists precisely to carry traffic
+across networks you do not control. Get the fingerprint with:
+
+```bash
+ssh-keyscan -p 22 tunnel.example.com | ssh-keygen -lf -
+```
+</Aside>
+
+### Where the address comes from
+
+In order of preference:
+
+1. `PublicUrl`, if you set it — the only honest answer when a reverse proxy terminates TLS in front
+   of the forwarded port.
+2. The session banner, when `CaptureUrlFromSession` is on. Hosted endpoints choose the address
+   themselves and print it on the session channel; there is no other way to learn it.
+3. `http://{host}:{remotePort}` — derived, and correct only for a direct forward.
+
+## Azure Relay
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel.AzureRelay" showLabel={true} />
+
+Hybrid Connections: Azure holds the public endpoint, the AppHost connects outbound to it, and
+requests are relayed back. The address is stable and yours, which is what separates this from a quick
+tunnel — a webhook registered against it survives restarts, network changes and reconnects.
+
+```csharp
+var cs = builder.AddParameter("relay-cs", secret: true);
+
+api.WithAzureRelayTunnel(cs, hybridConnectionName: "api");
+```
+
+The hybrid connection may instead be named by the connection string's `EntityPath`. Anything else on
+`AzureRelayOptions` — the mode, keep-alive interval, SAS refresh callback, authorization hook — is
+reachable through `configure`:
+
+```csharp
+api.WithAzureRelayTunnel(cs, "api", configure: o =>
+{
+    o.Mode = AzureRelayMode.Http;
+    o.KeepAliveInterval = TimeSpan.FromSeconds(30);
+});
+```
+
+A plain string overload exists for a connection string that is not a secret, and
+`AddAzureRelayTunnel` gives you the tunnel resource when something needs to reference it.
+
+## Cloudflare
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Cloudflare" showLabel={true} />
+
+`cloudflared` runs as an ordinary container resource: Aspire starts it, stops it, and shows its logs
+like anything else.
+
+```csharp
+// A throwaway trycloudflare.com address, no account
+api.WithCloudflareTunnel();
+```
+
+A **named tunnel** runs against a token from your own Cloudflare account and answers on a host name
+you control. Ingress is configured in Cloudflare rather than here, so the address is stated rather
+than discovered:
+
+```csharp
+builder.AddCloudflareTunnel("public")
+    .WithNamedTunnel(builder.AddParameter("cf-token", secret: true), "https://api.example.com");
+```
+
+To keep the agent and point it at an endpoint yourself:
+
+```csharp
+builder.AddCloudflareTunnel("public")
+    .WithOrigin(api.GetEndpoint("http"));
+```
+
+## ngrok
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ngrok" showLabel={true} />
+
+The ngrok agent, also as a container resource. An auth token is **required** — ngrok will not start
+an anonymous tunnel.
+
+```csharp
+var token = builder.AddParameter("ngrok-token", secret: true);
+
+api.WithNgrokTunnel(token);
+```
+
+A domain reserved in your account, which is what makes a registered webhook survive a restart:
+
+```csharp
+builder.AddNgrokTunnel("public", token)
+    .WithOrigin(api.GetEndpoint("http"))
+    .WithDomain("api.ngrok.app");
+```
+
+The agent is started with `--log stdout --log-format json`, because its default interactive terminal
+UI prints nothing useful to a container log.
+
+### How the container agents report their address
+
+Both pick a hostname per run and announce it in their own output. There is no other channel that
+reports it and no way to know it in advance, so the address is read back out of the resource's log
+stream and published from there — into the dashboard, and into the connection string that
+`WithReference` and `WithTunnelUrl` resolve.
+
+<Aside type="note" title="Reaching the host from a container">
+The agent runs in a container and the target listens on the host, so the origin address is built from
+the endpoint's `HostAndPort` property resolved in the container's network context — Aspire rewrites
+it to the container host bridge. Nothing needs configuring for this on Docker Desktop or Podman.
+</Aside>

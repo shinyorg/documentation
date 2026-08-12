@@ -1,0 +1,112 @@
+---
+title: The Shiny Relay
+description: Hosting the relay in the app model, so devices and embedded servers can register into a development environment
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Aspire.Hosting.Tunnel" showLabel={true} />
+
+The relay is the public end of a Shiny tunnel: a **control port** where tunnel clients register, and
+a **public port** where traffic arrives to be routed by `Host` header. It is
+[the same relay](/httpserver/tunneling/) that ships in `Shiny.Net.HttpServer` — `AddShinyRelay` runs
+it inside the AppHost process and shows it in the dashboard.
+
+```csharp
+var relay = builder.AddShinyRelay("relay", controlPort: 5050, publicPort: 8080)
+    .WithToken(builder.AddParameter("relay-token", secret: true))
+    .WithDomain("localtest.me");
+
+api.WithShinyRelayTunnel(relay, subdomain: "api");
+```
+
+## Why host it here
+
+Two reasons, and the second is the interesting one.
+
+**Publishing an app-model resource.** Same as any other provider, on infrastructure that is entirely
+yours and needs no account.
+
+**Giving devices somewhere to register.** A MAUI app running `Shiny.Net.HttpServer` has an embedded
+server with no reachable address. Point its `RelayTunnelProvider` at the relay running in your
+AppHost and the phone's server becomes reachable from your development environment — with nothing
+listening on the phone, no cloud account, and no third party in the path.
+
+```csharp
+// In the MAUI app
+var provider = new RelayTunnelProvider(new RelayTunnelOptions
+{
+    Host = "192.168.1.20",   // the developer machine
+    Port = 5050,
+    Token = token,
+    UseTls = false,
+    Subdomain = "my-phone"
+});
+
+await app.RunTunnelAsync(provider, logger, cancellationToken);
+```
+
+## Configuration
+
+```csharp
+var relay = builder.AddShinyRelay("relay", controlPort: 5050, publicPort: 8080)
+    .WithToken(builder.AddParameter("relay-token", secret: true))
+    .WithDomain("localtest.me", scheme: "http", includePort: true)
+    .WithBindAddress("0.0.0.0", clientHost: "192.168.1.20")
+    .ConfigureRelay(o => o.MaxTunnels = 20);
+```
+
+| Method | Does |
+| --- | --- |
+| `WithToken(string)` / `WithToken(parameter)` | The shared secret a client must present to register. Null accepts anything, which is only reasonable while the relay is bound to loopback |
+| `WithDomain(domain, scheme, includePort)` | Base domain for assigned hosts — `example.com` gives `abc123.example.com`. Turn `includePort` off when something in front of the relay answers on the scheme's default port |
+| `WithBindAddress(address, clientHost)` | The interface both listeners bind. Loopback by default; `clientHost` is what clients are told to dial, which matters because `0.0.0.0` is not an address anything can connect to |
+| `ConfigureRelay(o => …)` | Everything else on `RelayServerOptions` — TLS for either listener, `MaxTunnels`, a custom `Authorize` callback, timeouts |
+
+<Aside type="caution" title="The ports are the relay's own">
+The relay listens inside the AppHost process rather than being launched as a container or an
+executable, so there is nothing for the orchestrator to proxy and nothing for it to allocate. Pick
+ports that are free. A port already in use shows as a failed relay resource in the dashboard.
+</Aside>
+
+<Aside type="tip" title="Bind an outward-facing address for devices">
+Loopback is the default so that an unconfigured relay is not exposed to the network. A phone on the
+same Wi-Fi cannot reach loopback — set `WithBindAddress("0.0.0.0", clientHost: "<your LAN address>")`
+when something off-box has to register.
+</Aside>
+
+## Referencing the relay
+
+`ShinyRelayResource` is an `IResourceWithConnectionString`, and its connection string is what a client
+needs in order to register:
+
+```
+Host=192.168.1.20;Port=5050;UseTls=false;Token=s3cret
+```
+
+Those names match the properties of `RelayTunnelOptions` on the client side, so a project that
+configures its own tunnel can read them straight across:
+
+```csharp
+builder.AddProject<Projects.DeviceSimulator>("simulator")
+    .WithReference(relay);
+```
+
+## Against a relay running elsewhere
+
+No relay resource is needed to *use* one — for the relay on your own VPS:
+
+```csharp
+api.WithShinyRelayTunnel("relay.example.com", port: 5050, token: token, subdomain: "api");
+```
+
+TLS on the control connection is on by default here and off for a relay hosted in the app model,
+which reflects where each is: registration carries the token, and a token crossing the internet
+should be encrypted.
+
+## Ordering
+
+A tunnel client dialling a relay that has not finished binding would fail, so the two are wired
+together rather than raced. The relay is in the same process, which makes the wait exact — the client
+waits on the relay's own "listening" signal, not on a timer or a port poll. Ordering between the two
+resources in your AppHost file does not matter.

@@ -1,0 +1,154 @@
+---
+title: Getting Started
+description: Public addresses for Aspire resources — quick tunnels, SSH, the Shiny relay, Azure Relay, Cloudflare and ngrok
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Steps, Aside } from '@astrojs/starlight/components';
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+A public address for something that is only listening on localhost.
+
+The problem is the one [Shiny.Net.HttpServer](/httpserver/tunneling/) solves for an embedded server,
+and the pieces are the same pieces: a pluggable `ITunnelProvider`, the Shiny relay at both ends, SSH
+remote forwarding, zero-account quick tunnels, and Azure Relay. What changes is who runs them — here
+it is the Aspire AppHost, on behalf of a resource in the app model.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="aspire" /> |
+| Downloads | <NugetDownloads name="Shiny.Aspire.Hosting.Tunnel" /> |
+
+<PlatformSupport frameworks={["dotnet"]} />
+
+## Packages
+
+All of these install into the **AppHost** project. Nothing is installed into the projects being
+published — a tunnelled service is not modified and never learns it is reachable from anywhere else.
+
+| Package | Description |
+| --- | --- |
+| <NugetBadge name="Shiny.Aspire.Hosting.Tunnel" showLabel={true} /> | The tunnel resource, the pluggable provider, and the Shiny relay hosted in the app model |
+| <NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ssh" showLabel={true} /> | Quick tunnels, SSH remote forwarding, and local forwards to services behind a bastion |
+| <NugetBadge name="Shiny.Aspire.Hosting.Tunnel.AzureRelay" showLabel={true} /> | Azure Relay Hybrid Connections |
+| <NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Cloudflare" showLabel={true} /> | `cloudflared` as a container resource |
+| <NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ngrok" showLabel={true} /> | The ngrok agent as a container resource |
+
+## Quick Start
+
+<Steps>
+1. Install the package into your AppHost project
+
+   <NugetBadge name="Shiny.Aspire.Hosting.Tunnel.Ssh" showLabel={true} />
+
+2. Publish a resource
+
+   ```csharp
+   var builder = DistributedApplication.CreateBuilder(args);
+
+   var api = builder.AddProject<Projects.Api>("api");
+
+   // A public HTTPS address. No account, nothing installed.
+   api.WithQuickTunnel();
+
+   builder.Build().Run();
+   ```
+
+3. Read the address off the tunnel resource in the dashboard, or hand it to the service that needs it
+
+   ```csharp
+   var tunnel = builder.AddQuickTunnel("public");
+
+   builder.AddProject<Projects.Api>("api")
+       .WithTunnel(tunnel)
+       .WithTunnelUrl("PUBLIC_URL", tunnel);
+   ```
+</Steps>
+
+## The core idea
+
+A tunnel is a resource whose **public URL is its connection string**. That single decision is what
+makes the rest work without introducing new concepts:
+
+- `WithReference(tunnel)` injects it as `ConnectionStrings__<name>`
+- `WithTunnelUrl("PUBLIC_URL", tunnel)` names the variable yourself
+- both **wait for the tunnel to actually open** before the referencing resource starts
+
+A tunnel opens when its target's **endpoints are allocated**, which happens before the target process
+is launched. A service may therefore reference its own tunnel — which is the usual case, since a
+webhook receiver has to hand out its own address, and an OAuth client has to register its own
+redirect URI.
+
+<Aside type="tip" title="Not circular">
+Waiting for the target to be *running* would have deadlocked exactly the case tunnels are most often
+wanted for. Endpoint allocation reserves the port up front, so the address is known and injected
+before the process that needs it starts. The tunnel answers with a connection error for the second or
+two before anything is listening, which is the honest answer.
+</Aside>
+
+## Which provider
+
+| Method | Package | Address | Needs |
+| --- | --- | --- | --- |
+| [`WithQuickTunnel()`](/aspire/tunnel/providers/#quick-tunnels) | `…​.Ssh` | Assigned, changes on reconnect | Nothing at all |
+| [`WithSshTunnel(host, …)`](/aspire/tunnel/providers/#ssh) | `…​.Ssh` | Yours | An SSH server you can log into |
+| [`WithShinyRelayTunnel(relay)`](/aspire/tunnel/relay/) | core | Yours | The relay, hosted here or on a VPS |
+| [`WithAzureRelayTunnel(cs)`](/aspire/tunnel/providers/#azure-relay) | `…​.AzureRelay` | Stable, yours | An Azure Relay namespace |
+| [`WithCloudflareTunnel()`](/aspire/tunnel/providers/#cloudflare) | `…​.Cloudflare` | Assigned, or your domain | Docker; an account for named tunnels |
+| [`WithNgrokTunnel(token)`](/aspire/tunnel/providers/#ngrok) | `…​.Ngrok` | Assigned, or a reserved domain | Docker; an ngrok account |
+
+The first four run **inside the AppHost** as managed code — no daemon, no binary to install, nothing
+to log into, and identical on every developer's machine and in CI. The last two run the vendor's
+agent in a container.
+
+<Aside type="note" title="Why ngrok and Cloudflare are here, when they are not in Shiny.Net.HttpServer">
+The HTTP server [deliberately ships no agent-based provider](/httpserver/tunneling/): its reason for
+existing is running inside a MAUI app, where spawning `cloudflared` is not an option. An AppHost has
+no such constraint — it already starts containers for a living — so the agents are modelled here as
+what they are, ordinary container resources with their logs in the dashboard.
+</Aside>
+
+## Two spellings, always
+
+Every provider offers both. `AddXTunnel(...)` on the builder returns the tunnel, for when something
+needs to reference it; `WithXTunnel(...)` on a target resource creates and attaches it in one line
+and returns the target, for when nothing does.
+
+```csharp
+// Attach in one line — the tunnel resource is named "{target}-tunnel"
+api.WithQuickTunnel();
+
+// Keep a handle, because something else needs the URL
+var tunnel = builder.AddQuickTunnel("public");
+api.WithTunnel(tunnel);
+worker.WithTunnelUrl("API_PUBLIC_URL", tunnel);
+```
+
+Pass `name:` explicitly when one resource has **more than one** tunnel — both default to
+`{target}-tunnel`, and Aspire rejects duplicate resource names.
+
+## Things worth knowing
+
+- **The target must be a cleartext endpoint.** TLS terminates at the public end of the tunnel, so
+  what arrives is plain HTTP. The `http` endpoint is chosen by default for exactly that reason; name
+  another with `endpointName` only if it is also cleartext.
+- **Tunnels are excluded from the manifest.** They are a development-time affordance for reaching a
+  machine that is not on the internet; a deployed app has a real address.
+- **An assigned address changes on reconnect.** An environment variable handed to a running process
+  cannot be revised afterwards, so `WithTunnelUrl` resolves once and keeps that value. The dashboard
+  shows the current one.
+- **Anything reachable through a tunnel is reachable by anyone who has the URL.** These hostnames are
+  unguessable, not private. Put authentication in front of anything that matters.
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-aspire" />
+
+## Requirements
+
+- .NET 10
+- .NET Aspire 13.1+
+- Docker (for the Cloudflare and ngrok packages only)

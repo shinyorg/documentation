@@ -1,0 +1,97 @@
+---
+title: Custom Artwork
+description: Animating your own icons — raw path data, multi-part definitions, and hand-authored motion
+---
+
+## A single path
+
+The quickest route. The path is drawn in a 24×24 box and every preset applies to it:
+
+```xml
+<shiny:MotionIconView PathData="M12 2 3 20h18z" Motion="Pop" Trigger="Press" />
+```
+
+```razor
+<MotionIcon PathData="M12 2L3 20h18z" Motion="MotionPreset.Pop" />
+```
+
+## Multiple parts
+
+An icon is split into parts for exactly one reason: a part is the unit a motion track can target. A bell is a body and a clapper because those two swing differently; a chevron is one part because nothing about it moves independently.
+
+```csharp
+var toggle = new MotionIconDefinition(
+    "toggle",
+    [
+        new MotionIconPart("plate", "M3 8h18v8H3z"),
+        new MotionIconPart("knob", "M11 12a3 3 0 1 1 6 0 3 3 0 0 1-6 0z")
+        {
+            Origin = new MotionPoint(14f, 12f)
+        }
+    ],
+    MotionSpecBuilder.Build(500, m => m
+        .MoveX("knob", k => k
+            .At(0d, 0d, MotionEase.BackOut)
+            .At(0.5d, -6d, MotionEase.BackInOut)
+            .At(1d, 0d))));
+
+MotionIconLibrary.Register(toggle);
+```
+
+Every part shares the icon's full viewBox as its coordinate space, which is what makes `Origin` mean the same thing on both hosts — MAUI resolves it against the layer, the browser against `transform-box: view-box`, and both land on the same pixel.
+
+## Paint
+
+`Fill` and `Stroke` are *kinds*, not colours, so the same artwork renders black on a light page, white on a dark one, and themed inside an app without knowing anything about it:
+
+```csharp
+new MotionIconPart("dot", "M12 10a2 2 0 1 1 0 4 2 2 0 0 1 0-4z")
+{
+    Fill = IconPaint.Accent,   // the host's AccentColor
+    Stroke = IconPaint.None
+}
+```
+
+`IconPaint.Current` (the default for strokes) follows the control's `Color`, `IconPaint.Accent` follows `AccentColor`, and `IconPaint.Fix("#EC4899")` bakes a colour into the artwork. There is a `MotionIconPart.Filled(...)` helper for the common filled-and-unstroked case.
+
+## Channels
+
+If you are hand-authoring a spec, these are the properties a track can drive:
+
+`Opacity`, `TranslateX`, `TranslateY`, `Rotate`, `Scale`, `ScaleX`, `ScaleY`, `StrokeWidth` (a multiplier on the host's), and `Trim` (the fraction of a stroke that is drawn — the "draw on" channel). Colour tracks drive `Fill` and `Stroke`.
+
+There is deliberately **no path-morph channel**. Every channel here has a native, identically-behaving implementation on both hosts, which is the only way the same icon can be guaranteed to look the same in both. Animating SVG's `d` property is not supported in every browser, so a morph channel would have meant hand-written fallbacks on the web the moment anyone opened Firefox. Hinged and "morphing" icons are built from separate parts moved by transforms instead — exactly as they would be in a design tool, and exactly how the hamburger becomes a cross.
+
+## Easing
+
+`MotionEase` is a closed enum rather than a delegate, because a spec has to survive being compiled into CSS and a lambda cannot be. The curves match `Shiny.Controls.Keyframe.Easings` term for term, so a motion icon and a hand-written keyframe timeline beside it share a visual language.
+
+Where CSS has a keyword that means exactly the same thing, the generated stylesheet uses it. Everything else — the overshoot and bounce curves CSS has no name for — is sampled into a `linear()` curve rather than approximated with a "close enough" cubic-bezier, which is what would otherwise make a bounce bounce differently in the browser than on the phone.
+
+## Rules worth knowing before you draw
+
+### Write path data with explicit `L` commands
+
+`Microsoft.Maui.Graphics` does **not** implement SVG's implicit-lineto rule. In the spec, a bare coordinate pair after a moveto is a lineto — `"M6 6 18 18"` is a diagonal line, and that is what a browser draws. MAUI's parser reads the second pair as another *moveto* and the path draws nothing at all.
+
+It also cannot read run-together decimals: `l.06.06` stops the parser dead and the remainder of the path is silently dropped.
+
+Both forms are common in artwork exported from design tools, and both fail **silently** — the icon renders perfectly on Blazor and as a bare dot on MAUI. Write `"M6 6L18 18"` and `l.06 .06`.
+
+### End every track at its resting value
+
+Stopping reverts to the artwork as drawn on both hosts — MAUI resets the poses, the browser drops the animation — so a track that finishes anywhere else ends with a visible jump. A reveal is free to *start* somewhere else: a check starts undrawn, a pin starts above the icon. It just has to land home.
+
+Rotation is the exception, and only when the artwork is symmetric under the angle it stops at — a plus at 90°, a cross at 180°, eight sun rays at 45°.
+
+### Set an origin on anything hinged
+
+The default pivot is the icon's centre, which is right for a spin and wrong for a bell (crown), a trash lid (hinge), or a bar growing out of an axis (baseline).
+
+### Rotate about the part's own centre, then translate
+
+That is the order both hosts apply transforms in, and it is what makes the hamburger's bars cross in the middle rather than swing round the outside.
+
+### Don't mix `Scale` with `ScaleX` / `ScaleY` on the same part
+
+The two hosts resolve the conflict differently. Use one or the other.
