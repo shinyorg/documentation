@@ -366,9 +366,9 @@ export default defineConfig({
             },
             {
               id: 'mobilev5-5',
-              content: 'Client v5.5.0: New !',
+              content: 'Client v5.5.0: BLE Hosting Easy Mode, SSDP/UPNP Discovery!',
               variant: 'tip',
-              link: { text: 'Show Me!', href: '/client' },
+              link: { text: 'Discover It!', href: '/client' },
               dismissable: false
             },            
             {
