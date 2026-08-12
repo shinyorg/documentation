@@ -406,6 +406,17 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'MediaElement',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/mediaelement/' },
+          { label: 'Transport Bar', link: 'controls/mediaelement/transport-bar' },
+          { label: 'Background Playback & PiP', link: 'controls/mediaelement/background-playback' },
+          { label: 'Blazor Usage', link: 'controls/mediaelement/blazor' },
+        ]
+      },
+      {
         label: 'ChatView',
         jumpTo: true,
         items:[

@@ -1,0 +1,458 @@
+---
+title: "Shiny.DocumentDb v13 — Encryption, an Outbox, and a Front Door"
+date: 2026-08-12
+authors:
+  - allanritchie
+tags:
+  - documentdb
+  - release
+  - security
+  - AI
+  - Orleans
+excerpt: "v13 puts AES-256-GCM field encryption in the core package, adds a transactional outbox that commits with the write that caused it, and gives a document type a front door — REST + Server-Sent Events, and an MCP server. Per-type configuration collapses into one ConfigureDocument block, Orleans gets durable streams on the database it already uses, and the admin tools learn to read an encrypted store without a key."
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import { Image } from 'astro:assets';
+import encBrowseImg from '/src/assets/documentdb/admin-encryption-browse.jpg';
+import encCardImg from '/src/assets/documentdb/admin-encryption.jpg';
+import encDowngradeImg from '/src/assets/documentdb/admin-encryption-downgrade.jpg';
+import tuiBrowseImg from '/src/assets/documentdb/admin-tui-browse.png';
+import tuiQueryImg from '/src/assets/documentdb/admin-tui-query-console.png';
+import tuiHistoryImg from '/src/assets/documentdb/admin-tui-history.png';
+import tuiVectorsImg from '/src/assets/documentdb/admin-tui-vectors.png';
+
+<NugetBadge name="Shiny.DocumentDb" showLabel={true} />
+
+v13 is the release where DocumentDb stopped being only a place to put documents and became something you
+can put *in front of* things — an HTTP resource, an MCP endpoint, an Orleans stream provider, an outbox
+that commits with the write that caused it. And underneath all of that, the data can now be encrypted at
+rest, field by field, on every provider.
+
+- **[Field-level encryption](/documentdb/encryption/)** — AES-256-GCM, in the core package, no new
+  dependency. Deterministic mode keeps equality filters working.
+- **[Transactional outbox](/documentdb/outbox/)** — record "this happened" in the same transaction as the
+  write that made it happen. No second datastore, no dual-write window.
+- **[REST + live queries](/documentdb/rest-endpoints)** — a document type becomes list / by-id / count /
+  create / replace / merge-patch / delete plus an SSE tail, in one line.
+- **[MCP server](/documentdb/mcp)** — point Claude Code, Claude Desktop or Copilot at a store.
+- **[`ConfigureDocument<T>`](/documentdb/migrating-v12-v13/)** — every per-type mapping method collapses
+  into one block. **Breaking**, and the biggest thing to know before you upgrade.
+- **[Orleans persistent streams](/documentdb/orleans-streams/)** (13.2) — durable, rewindable, inspectable streams
+  on the database the cluster already uses.
+- **[VectorData connector](/documentdb/vectordata)** — MEVD over any vector-capable backend.
+- Query terminals (`First` / `Single`), multi-property `ExecuteUpdate`, raw JSON terminals, validate-on-build,
+  real row locks, and multi-tenancy that survives a real deployment.
+
+Full detail is on the [release notes](/documentdb/release-notes/). This post walks the headliners.
+
+---
+
+## Field-level encryption
+
+Some documents carry a field that shouldn't be readable by anyone holding the database file — an SSN, a
+government id, a bank account. Whole-database encryption (SQLCipher, TDE) protects the file; it does
+nothing about the DBA, the backup, or the read replica.
+
+v13 encrypts individual properties:
+
+```csharp
+opts.UseEncryptor(new AesGcmDocumentEncryptor("k1", key));
+
+opts.ConfigureDocument<Patient>(cfg =>
+{
+    cfg.MapProperty(x => x.Ssn, p => p.Encrypt());                              // opaque
+    cfg.MapProperty(x => x.Email, p => p.Encrypt(EncryptionMode.Deterministic)); // still queryable
+});
+```
+
+And that's it. `Get`, `ToList`, `Insert`, `Update`, LINQ — nothing about how you read or write documents
+changes. The stored body holds `enc:1:k1:…` where the value used to be.
+
+The mechanism is the part I'm happiest with: it's installed as a **`JsonTypeInfo` modifier**, so every
+write path is covered *by construction* — including temporal history and backup export, which are exactly
+the two places a bolt-on encryption layer forgets. No provider knows it exists.
+
+**Deterministic mode** keeps equality filters working by rewriting the predicate's constant into the
+ciphertext actually stored, so `Where(x => x.Email == "a@b.com")` still matches. The docs say in bold what
+that costs you: deterministic ciphertext leaks equality and frequency. Anything that can't be answered
+against ciphertext — a range, a `Contains`, an `OrderBy` — throws with an explanation rather than quietly
+matching nothing.
+
+Key rotation is a key ring plus `RewrapAsync<T>()`, and values written before a property was mapped keep
+reading, so you can turn it on for a store that already has data. AES-GCM is in the BCL, so there's no new
+dependency, and it's AOT-clean.
+
+:::caution[Breaking, and worth checking before you upgrade]
+Encrypted properties now leave the library as **plaintext**, not as re-encrypted envelopes. The converters
+are symmetric, so any code that materialized a document and serialized it again through the store's own
+`JsonSerializerOptions` was silently re-encrypting what it had just decrypted. Three places did: OData
+responses, the AI `query`/`get`/`insert` tool results, and `GetDiff`/`GetDiffBetween`.
+
+`GetDiff` was outright broken by this — under randomized mode it compared the stored envelope against a
+freshly-encrypted one, so **every** mapped property came back as changed, every time.
+
+The fix is right, but it *is* a disclosure change if you were relying on the old behaviour: a property that
+went over the wire as an opaque `enc:1:…` string now goes over it as its value. Check your exposed OData
+entity sets before upgrading.
+:::
+
+## A transactional outbox
+
+The dual-write problem: you save an order and publish `OrderPlaced`. Two systems, no shared transaction.
+The process dies in between and you have an order nobody was told about, or a message about an order that
+doesn't exist.
+
+An outbox fixes it by making the message part of the same transaction as the write:
+
+```csharp
+o.AddOutbox();                                  // maps OutboxMessage → its own "outbox" table
+services.AddDocumentOutbox<BusDispatcher>();    // the processor + IOutboxAdmin
+
+await using var session = store.OpenSession();
+session.Add(order).Enqueue(new OrderPlaced(order.Id, order.Total));
+await session.SaveChanges();                    // both rows commit together, or neither does
+```
+
+Or declaratively, per type: `cfg.PublishToOutbox(ctx => new OrderChanged(...))`.
+
+Delivery is at-least-once with an attempt counter, exponential backoff and dead-lettering. Claiming is
+per-message optimistic concurrency, so you scale workers by running more of them — there's no coordinator.
+The `traceparent` captured at enqueue is restored at dispatch, so a consumer's span links back to the
+request that caused the message.
+
+**On the provider tier**, because this one has a real boundary: relational plus LiteDB. Everything else
+implements a unit of work by *compensation*, which does precisely nothing for a process that dies
+mid-unit — which is the exact window an outbox exists to close. Rather than ship a promise that doesn't
+hold, a new `IDocumentStore.SupportsTransactions` capability gates those backends out **at host startup**,
+by name. Cosmos DB is a further no: "same transaction" there means "same logical partition", and the store
+partitions by type name. Those backends should use
+[`IChangeFeedDocumentStore`](/documentdb/change-monitoring/) instead.
+
+## A front door: REST, SSE and MCP
+
+### REST endpoints, in one line
+
+```csharp
+app.MapDocuments<Order>("/orders", o =>
+{
+    o.Operations = DocumentEndpoints.All;
+    o.AllowFilterOn(x => x.Status, x => x.Total);
+    o.TypeInfo = AppJsonContext.Default.Order;
+    o.Scope<ITenantContext>((tenant, _) => x => x.TenantId == tenant.TenantId);
+})
+.RequireAuthorization("orders");
+```
+
+List, by-id, count, create, replace, RFC 7396 merge-patch, delete, and a live Server-Sent-Events tail.
+Plain JSON, framework reference only, AOT-clean.
+
+Filtering uses the store's own string grammar behind a **per-endpoint field allowlist** — an unlisted field
+is a `400`, not a table scan. `take` is clamped to `MaxPageSize`. Cursor paging, sparse fieldsets,
+`ETag`/`If-Match` concurrency and `ProblemDetails` errors are all in.
+
+`Scope(...)` is worth calling out: it's resolved per request from the request's DI scope, AND-ed into every
+operation, and can't be removed by the caller. Out-of-scope documents are `404`, not `403` — a `403`
+confirms the row exists. `MapDocumentCollection` does the same for a schema-free
+[JSON collection](/documentdb/json-collections).
+
+### An MCP server
+
+```bash
+shiny-documentdb-mcp --provider sqlite --connection "Data Source=app.db"
+```
+
+```csharp
+builder.Services.AddDocumentDbMcpServer(mcp => { … }).WithHttpTransport();
+app.MapDocumentDbMcp("/mcp").RequireAuthorization("mcp");
+```
+
+Point an MCP client at a store and let it explore. The tools are the *same* `Extensions.AI` tools — one
+implementation, one security model — plus resources (`documentdb://types`, `.../schema`, `.../sample`,
+`documentdb://stats`), two prompts, and an audit line per call.
+
+Read-only by default, and writes need **two** locks: the per-type capability *and* `AllowWrites()`. Page
+caps, property hiding, no raw-SQL tool, no schema mutation. The stdio tool discovers what to expose from
+the stored `TypeName` discriminators, so it needs no compiled document classes at all, and it reads
+connections from the admin tool's existing profile store.
+
+### AI scopes resolved per call
+
+The non-removable per-type `Where` scope on the AI tools now has a form resolved on every call from the
+call's own services — because "which rows may *this* caller see" almost always lives in a request-scoped
+service:
+
+```csharp
+t.Where(o => o.TenantId == "acme")                                        // static, as before
+ .Where<ITenantContext>((tenant, _) => o => o.TenantId == tenant.TenantId) // resolved per call
+ .Where<IPermissionService>(async (perms, ctx) => …);                      // async form
+```
+
+It fails **closed**. A filter that throws, a service that won't resolve, or a call with no services fails
+the tool call rather than running the query unscoped, and registration asserts at startup that each
+`Where<TService>` service is actually registered.
+
+## One block per document type
+
+This is the breaking change to plan for. Every flat per-type mapping method is gone; the type is named
+once and its whole configuration reads top to bottom:
+
+```csharp
+options.ConfigureDocument<Patient>(cfg =>
+{
+    cfg.Table = "Patients";
+    cfg.MapIdProperty(x => x.Id);
+    cfg.AddSoftDelete(x => x.IsDeleted);
+    cfg.MapSpatialProperty(r => r.Location);
+    cfg.MapProperty(x => x.Ssn, p => p.Encrypt(EncryptionMode.Deterministic));
+    cfg.MapVectorProperty(d => d.Embedding, dimensions: 1536);
+    cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90));
+});
+```
+
+`MapTypeToTable` / `MapTypeToCollection` / `MapTypeToContainer` / `MapTypeToStore` / `MapTypeToPartition`,
+`MapIdProperty`, `MapVersionProperty`, `AddQueryFilter`, `AddSoftDelete`, `MapSpatialProperty`,
+`MapVectorProperty`, `MapFullTextProperty`, `MapComputedProperty`, `MapBlob`, `MapBlobCollection`,
+`MapTemporal`, `MapIndexedProperty`, `MapEncryptedProperty`, `MapJsonSchema`, `OnBeforeWrite` and
+`OnAfterWrite` all move onto the builder. Store-level configuration is untouched.
+
+The builder is written once against `IDocumentStoreOptions`, so **every provider gets the same surface**,
+and provider packages add their own vocabulary over it (`cfg.ToContainer` on Cosmos, `cfg.ToCollection` on
+MongoDB/LiteDB/Firestore, `cfg.ToStore` on IndexedDB, `cfg.ToPartition` and `cfg.MapIndexedProperty` on
+Azure Table/DynamoDB). There's a full old→new table in
+[Migrating v12 → v13](/documentdb/migrating-v12-v13/).
+
+Two things landed alongside it:
+
+**Validate-on-build.** One configuration sweep when the store is constructed, reporting **every** problem
+together through a `DocumentConfigurationException` instead of one per restart. It catches features the
+backend doesn't have (a vector mapping on LiteDB, `cfg.Table` on RavenDB) and randomized-encrypted
+properties used where the database has to read *through* them — a full-text index, a computed expression, a
+spatial or vector payload, the concurrency version. `DocumentConfigurationValidator.Collect(options)`
+returns the same list without throwing.
+
+**A model hook on `DocumentContext`**, so a source-generated context can declare its model next to its
+`[Document]` list rather than inside `AddDocumentStore`:
+
+```csharp
+[Document(typeof(Patient))]
+public partial class AppContext : DocumentContext
+{
+    static partial void OnConfiguring(DocumentModelBuilder model)
+        => model.Document<Patient>(cfg => cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90)));
+}
+```
+
+## Query surface
+
+**Single-row terminals.** `First`, `FirstOrDefault`, `Single` and `SingleOrDefault`, with predicate
+(`First(x => x.Age == 40)`) and string-grammar (`First("status == 'open'")`) overloads, on every provider.
+
+They are not sugar over `ToList()`: the row limit reaches the provider, so a relational store emits
+`LIMIT 1` and MongoDB/Cosmos page server-side rather than materializing every match to use the first.
+`Single` fetches two rows, so "more than one matched" costs no extra round trip.
+
+**`ExecuteUpdate` sets several properties at once:**
+
+```csharp
+await store.Query<Order>()
+    .Where(o => o.Status == "open" && o.CreatedAt < cutoff)
+    .ExecuteUpdate(b => b
+        .Set(o => o.Status, "expired")
+        .Set(o => o.ClosedAt, DateTimeOffset.UtcNow));
+```
+
+One statement, one predicate evaluation, atomic — where three separate calls were three statements with a
+window between them.
+
+**Raw JSON terminals** end a typed query with JSON instead of `T`, so a document that only has to reach an
+HTTP response never becomes an object:
+
+```csharp
+ctx.Response.ContentType = "application/json";
+await store.Query<Order>().Where(o => o.Status == "open")
+    .WriteJsonArrayTo(ctx.Response.Body, ct);
+```
+
+The whole typed builder still applies — `Where`, `OrderBy`, `Paginate`, query filters, soft delete,
+tenancy. OData and the AI `query` tool now read through this lane internally, which took an OData page from
+two passes per document to one. (There's more on this in
+[Hidden Gems](/blog/2026/08/documentdb-hidden-gems/).)
+
+## Multi-tenancy that survives deployment
+
+`AddMultiTenantDocumentStore` got the hardening it needed: a **bounded** store cache (LRU + idle eviction,
+with lease-based deferred disposal so eviction can't pull a store out from under a running request), an
+overload taking a **built store** so tenants can live on any provider, per-tenant initialization, and
+`IDocumentSession` / `IDocumentSessionFactory` wired to the current tenant — they weren't registered at all
+before.
+
+```csharp
+services.AddMultiTenantDocumentStore(
+    tenantId => new MongoDbDocumentStore(MongoOptionsFor(tenantId)),   // any provider
+    o =>
+    {
+        o.MaxCachedStores = 250;
+        o.IdleTimeout = TimeSpan.FromMinutes(30);
+        o.SeedFromRegisteredSeeders();      // startup seeders now run per tenant, on first touch
+    });
+```
+
+There was also a genuinely nasty bug in here worth naming: the scoped `IDocumentStore` registration handed
+the cached store to the DI scope, and the container disposes any `IDisposable` a scoped factory returns —
+so a tenant's shared store was **disposed at the end of the first request that touched it**. The cache now
+owns store lifetime and the scope owns a lease.
+
+The consequence is a breaking one: with eviction in play, a captured `IDocumentStore` from a tenant-routed
+registration may become disposed while the process lives. Resolve it per scope, or opt out with
+`IdleTimeout = null` and `MaxCachedStores = int.MaxValue`.
+
+## Orleans: durable streams (13.2)
+
+```csharp
+siloBuilder.AddDocumentDbStreams("Default", …);
+```
+
+Orleans clusters already use DocumentDb for membership, grain storage and reminders. Now they can use it
+for **streams** — no queue service to run, and a backlog you can actually look at when a queue won't drain.
+
+Two design points I'd defend in a code review:
+
+**Sequencing doesn't use an identity column.** Identity hands out values at insert time, but rows appear at
+commit time — so a late-committing transaction can be stepped over by the receiver's watermark and its
+event never delivered. Instead each queue has a counter row whose position is reserved under a row lock
+inside the enqueue transaction, which makes assignment order and commit order the same order, and the
+sequence gap-free.
+
+**`IsRewindable` is true.** A subscriber can resume from a `StreamSequenceToken` older than anything still
+in memory, because the cache replays the events table instead of reporting a cache miss. No queue-backed
+provider can do that — behind Azure Queue or SQS the message is gone once handed over.
+
+`IStreamAdmin` reports per-queue depth, lag, retained history and which streams aren't draining, and the
+admin tool gained a **Streams** screen. Backends: PostgreSQL, SQL Server, MySQL, MariaDB, Oracle,
+CockroachDB — gated at silo start by the new `SupportsPessimisticLocking` capability, not a hard-coded
+list. Expect thousands of events/sec on PostgreSQL; this is a database-backed queue, not Kafka.
+
+Which brings up the other 13.2 fix: **`LockMode` now takes a real row lock.** It shipped validated but
+inert — the API demanded a transaction and then issued an ordinary read, so `session.Get(id, LockMode.Update)`
+blocked nothing anywhere. It now emits the engine's own syntax: `FOR UPDATE` / `FOR SHARE` on PostgreSQL,
+MySQL and CockroachDB, `LOCK IN SHARE MODE` on MariaDB, `WITH (UPDLOCK, HOLDLOCK)` on SQL Server. Oracle
+throws for `LockMode.Share` rather than degrading to an unlocked read.
+
+## The admin tools
+
+Two of these have never had a post, so here they are properly.
+
+### It reads an encrypted store — without a key
+
+The admin tools shipped before encryption did, so they knew nothing about it. Now they read the envelope,
+describe it, and refuse to quietly destroy it, all with **no key at all**.
+
+<Image src={encBrowseImg} alt="Browse grid with the protected columns switched on, each cell reading 'encrypted · key k2' and one row still showing a plaintext tax id" />
+
+An `enc:1:k1:…` value renders as what it is rather than a wall of base64, with a *show ciphertext* toggle —
+because pasting a deterministic ciphertext into the filter console is the only predicate that can match
+one. The Structure tab reports the path's type as `encrypted`, not `string`.
+
+<Image src={encCardImg} alt="Encryption card listing two protected paths with their observed mode, the key ids in the sample, and per-key counts across the whole type" />
+
+The Encryption card answers the one question `RewrapAsync<T>()` can't: **did it finish?** It counts how many
+values sit under each key id, how many are still plaintext, and how many are under a key the sample never
+saw. Retiring a key early makes documents unreadable and nothing else tells you. Mode is reported as
+`deterministic (observed)` only when a repeated ciphertext proves it, and never as "randomized", which is
+unprovable.
+
+<Image src={encDowngradeImg} alt="The same editor refusing to save: taxId would be written in clear text, with a Save in clear text button beside Cancel" />
+
+And there's a downgrade guard on every write: saving a body where a path that held an envelope would go
+back as clear text **throws**, unless the caller explicitly allows it. The failure this prevents isn't an
+exception — the library reads a non-envelope as pre-encryption plaintext — so it was previously a silent
+loss of protection.
+
+### There's a terminal front end
+
+Shipped in 12.5 and never blogged: **ShinyDocDbMyAdmin.Tui**, a `dotnet tool` that is the same tool as the
+web UI. Same connection store, same screens, no browser, works over SSH.
+
+<Image src={tuiBrowseImg} alt="The browse grid for the Order type, with columns inferred from the JSON bodies and the explorer tree on the left" />
+
+The column inference, the explorer tree, the filters — all the same, because both front ends are the same
+core with a different renderer.
+
+<Image src={tuiQueryImg} alt="The filter grammar console, with the table, type, where, order-by and project fields" />
+
+<Image src={tuiHistoryImg} alt="The temporal history for the Order type, one row per version with operation, interval, duration and actor" />
+
+<Image src={tuiVectorsImg} alt="Embedding statistics for the Product type: dimensions, norms and per-document components" />
+
+Vectors, geometry, full-text, blobs, import/export, and the new outbox and streams screens are all there
+too. Full tour: [the terminal UI docs](/documentdb/admin/terminal).
+
+### And a Docker Desktop extension
+
+```bash
+docker extension install aritchie/shiny-docdb-myadmin-extension
+```
+
+Adds a tab that starts the admin container, waits for it, opens it — and hands it **every database
+container already running on your machine, connected**. PostgreSQL (including PostGIS, pgvector and
+TimescaleDB), MySQL, MariaDB, SQL Server, Oracle Free/XE and CockroachDB are discovered by image, with
+credentials taken from each container's own environment. Addressing goes over the Docker network, so a
+database that never published a port still works.
+
+Marketplace submissions are paused while Docker reviews Marketplace security, so for now you'll need
+**Settings → Extensions → "Allow only extensions distributed through the Docker Marketplace"** turned off
+to install it. The image is also mirrored to Docker Hub as `aritchie/shiny-docdb-myadmin` alongside GHCR —
+one push, same digests, so the two can't disagree about what a version contains.
+
+## VectorData connector
+
+New package: `Shiny.DocumentDb.Extensions.VectorData`. Point the .NET AI ecosystem (MEAI, the Microsoft
+Agent Framework, Semantic Kernel) at a document store through MEVD's `VectorStore` /
+`VectorStoreCollection<TKey, TRecord>`:
+
+```csharp
+builder.Services.AddDocumentDbVectorStore(o =>
+{
+    o.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db") { EnableVectorExtension = true };
+    o.MapVectorRecord<Note>();      // reads [VectorStoreKey]/[VectorStoreVector]
+});
+
+var notes = sp.GetRequiredService<VectorStore>().GetCollection<string, Note>("Note");
+await foreach (var hit in notes.SearchAsync(query, top: 5,
+    new VectorSearchOptions<Note> { Filter = n => n.Tag == "release" })) { }
+```
+
+Every other MEVD connector is single-store. This one runs the same record model over **any** vector-capable
+DocumentDb backend — SQLite for dev and mobile, PostgreSQL/pgvector or SQL Server for production, Cosmos /
+Atlas / Redis — swapped by configuration. MEVD's filter is already an `Expression<Func<T, bool>>`, so it
+goes to `NearestVectors` untouched and still pushes into the ANN search.
+
+## Breaking changes
+
+1. **`ConfigureDocument<T>`** replaces every flat per-type mapping method.
+   See [Migrating v12 → v13](/documentdb/migrating-v12-v13/).
+2. **Encrypted properties serialize as plaintext** out of OData, the AI tools and `GetDiff`. Check exposed
+   entity sets.
+3. **A document type carries one spatial / vector / full-text mapping.** A second one used to silently
+   replace the first; it now throws, naming both.
+4. **Tenant stores can be disposed while the process lives** (idle/LRU eviction). Resolve per scope.
+5. **`DocumentBulkContext.Assignment` → `Assignments`** (an ordered list, since a set-based update can carry
+   several).
+6. **`IDatabaseProvider.BuildJsonSetExpression()`** takes the source expression and parameter names, and
+   **`IDocumentStoreOptions`** gained `SerializerOptions` / `EnsureSerializerOptions()`. Custom providers and
+   options classes only; every in-box one is updated.
+
+There's also a smaller, quieter one in 13.2.1 that matters if you host DocumentDb over a transport:
+`DocumentPredicate.Compile<T>`, `DocumentFilter.Parse<T>` and `DocumentStoreAccessor.GetMappings` are now
+**public**, in `Shiny.DocumentDb.Hosting`. Hosts used to need an `InternalsVisibleTo` entry and a release
+here to go with it; now a host package can live in any repo. `DocumentPredicate.Compile`'s contract is that
+producing the delegate **never uses `Reflection.Emit`** — enforced by a Native AOT publish in CI, not a
+comment — so a host can check a scope against an incoming document on POST/PUT without forfeiting the trim
+guarantee of the app doing the hosting.
+
+---
+
+The full changelog is on the [release notes](/documentdb/release-notes/) page, and if you want the tour of
+the things that *aren't* new but never got explained, that's
+[Hidden Gems](/blog/2026/08/documentdb-hidden-gems/).

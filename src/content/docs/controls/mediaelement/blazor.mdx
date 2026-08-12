@@ -1,0 +1,104 @@
+---
+title: MediaElement on Blazor
+description: Using the Shiny MediaElement in Blazor WebAssembly — HTML5 audio/video, a drawn transport bar, Fullscreen and Picture-in-Picture APIs, and navigator.mediaSession
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+`Shiny.Blazor.Controls.MediaElement` mirrors the MAUI control on the web, over an HTML5 `<video>` element. Same property names, same semantics — with methods where MAUI has commands, and `EventCallback` parameters where MAUI has events.
+
+- <NugetDownloads name="Shiny.Blazor.Controls.MediaElement" />
+
+## Installation
+
+```bash
+dotnet add package Shiny.Blazor.Controls.MediaElement
+```
+
+```razor
+@using Shiny.Blazor.Controls.Media
+@using Shiny.Controls.Media
+```
+
+No `Program.cs` registration — the component imports its own JS module on first render.
+
+```razor
+<MediaElement Source="https://example.com/clip.mp4"
+              AutoPlay="true"
+              Aspect="MediaAspect.AspectFit"
+              Style="max-width:640px;aspect-ratio:16/9;"
+              OnStateChanged="OnStateChanged" />
+```
+
+## Why the bar is drawn rather than native
+
+`<video controls>` is all-or-nothing. The `controlsList` attribute can only *subtract* download, fullscreen and remote playback, and only in Chromium — there is no way to hide the volume control or the scrubber while keeping the rest. So the transport bar is drawn in Razor, exactly as on MAUI, and each piece toggles independently:
+
+```razor
+<MediaElement Source="@url"
+              ShowPlayPauseButton="true"
+              ShowSeekBar="true"
+              ShowVolumeControl="false"
+              ShowFullScreenButton="true"
+              ShowTimeLabels="true"
+              AutoHideTransportBar="true" />
+```
+
+The scrubber is an `<input type="range">` whose track paints three bands — played, buffered-ahead and remaining — from hard gradient stops driven by CSS custom properties, since a range input only has one track of its own.
+
+## Methods instead of commands
+
+| MAUI | Blazor |
+| --- | --- |
+| `PlayCommand` | `PlayAsync()` |
+| `PauseCommand` | `PauseAsync()` |
+| `StopCommand` | `StopAsync()` |
+| `TogglePlayPauseCommand` | `TogglePlayPauseAsync()` |
+| `SeekCommand` | `SeekAsync(TimeSpan)` |
+| `MuteCommand` | `ToggleMuteAsync()` / `SetMutedAsync(bool)` |
+| `ToggleFullScreenCommand` | `ToggleFullScreenAsync()` / `SetFullScreenAsync(bool)` |
+| `PictureInPictureCommand` | `TryEnterPictureInPictureAsync()` / `ExitPictureInPictureAsync()` |
+
+```razor
+<MediaElement @ref="player" Source="@url" />
+<button @onclick="() => player!.SeekAsync(TimeSpan.FromSeconds(30))">Skip to 0:30</button>
+
+@code {
+    MediaElement? player;
+}
+```
+
+Read-only state is on the instance: `CurrentState`, `Position`, `Duration`, `BufferedProgress`, `IsFullScreen`, `IsPictureInPictureActive`, `Capabilities`.
+
+Events are parameters: `OnStateChanged`, `OnMediaOpened`, `OnMediaEnded`, `OnMediaFailed`, `OnPositionChanged`, `OnFullScreenChanged`, `OnPictureInPictureChanged`. `IsMuted` supports `@bind-IsMuted`.
+
+Blazor also adds `Poster` — an image shown before the first frame decodes.
+
+## What the browser will actually allow
+
+`Capabilities` is probed once when the component starts, and the transport bar hides what it can't honour.
+
+**Volume.** iOS Safari silently ignores writes to `video.volume`, and nothing advertises that — so the check is empirical: write a value, read it back, see if it stuck. Where it didn't, the volume *slider* is dropped and only the mute button is offered.
+
+**Fullscreen.** Uses the Fullscreen API on the container element, so the drawn transport bar comes with it. iOS Safari has no Fullscreen API for arbitrary elements, so it falls back to the video element's own native presentation — which loses the custom bar, but beats having no fullscreen. Because the component listens to `fullscreenchange` on the document rather than tracking its own requests, an exit via **Escape** or the browser's own chrome updates `IsFullScreen` correctly.
+
+**Picture-in-Picture.** `video.requestPictureInPicture()` where `document.pictureInPictureEnabled` is true.
+
+## Autoplay
+
+Browsers block autoplay with sound until the user has interacted with the page. When `AutoPlay` is set and the play promise rejects, the component reports it through `OnMediaFailed` and shows the error overlay rather than leaving a player that silently never starts. Pair `AutoPlay` with `IsMuted` if you need it to work on a cold page load.
+
+## Background playback
+
+`EnableBackgroundPlayback` publishes `Metadata` to `navigator.mediaSession`, which puts it in the OS media widget — macOS Now Playing, the Android notification, the Windows SMTC flyout — and routes those buttons back into the player.
+
+Whether audio actually keeps playing when the tab is hidden is **the browser's decision**, not the app's. Most keep audio running and throttle video; there is no web API to force it. This is the one place the Blazor control can't match MAUI, because the platform genuinely doesn't offer the control.
+
+## Styling
+
+The component ships scoped CSS with theme-token fallbacks — `--shiny-color-primary` for the played track, `--shiny-media-control` for the glyphs, `--shiny-media-radius` for the corner. Pass `CssClass` and `Style` for per-instance overrides. The spinner honours `prefers-reduced-motion`.
+
+## Interop notes
+
+Everything crossing back into .NET goes through a single named `MediaStatus` DTO pushed on each media event, rather than one interop call per property — `timeupdate` and `progress` fire several times a second, and that traffic is visible in a WASM profile.
+
+The DTOs are deliberately plain named classes, never anonymous types and never arrays of DTOs: the IL trimmer follows the annotation only as far as the declared type, so either of those deserializes fine in a debug run and then throws in a trimmed, published WebAssembly build.

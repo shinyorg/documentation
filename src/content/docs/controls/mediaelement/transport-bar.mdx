@@ -1,0 +1,112 @@
+---
+title: Transport Bar
+description: Show or hide the play/pause button, seek bar, volume control and fullscreen toggle independently, style the bar to your theme, and drive playback from commands
+---
+
+The transport bar is drawn by Shiny rather than handed to the platform. That is not a stylistic preference — it is what makes the rest of this page possible.
+
+Native transport UI is **all-or-nothing on every platform but Windows**: iOS's `AVPlayerViewController` exposes a single `showsPlaybackControls`, Android's Media3 `PlayerControlView` lets you drop a couple of buttons but not the seek bar, GTK's `GtkMediaControls` has no options at all, and HTML5's `controlsList` can only subtract download / fullscreen / cast, and only in Chromium. Only WinUI's `MediaTransportControls` has per-element visibility. So a control that promised "hide the volume slider" while using native UI would be honest on exactly one of six targets.
+
+Drawing it also means the player looks identical everywhere and picks up your Shiny theme pack.
+
+## Showing and hiding
+
+Each piece is an independent bindable property.
+
+```xml
+<media:MediaElement Source="{Binding ClipUrl}"
+                    ShowPlayPauseButton="True"
+                    ShowSeekBar="True"
+                    ShowVolumeControl="False"
+                    ShowFullScreenButton="True"
+                    ShowTimeLabels="True" />
+```
+
+| Property | Default | Hides |
+| --- | --- | --- |
+| `ShowTransportBar` | true | the whole bar |
+| `ShowPlayPauseButton` | true | the play/pause button |
+| `ShowSeekBar` | true | the scrubber |
+| `ShowVolumeControl` | true | the mute button and volume slider |
+| `ShowFullScreenButton` | true | the fullscreen toggle |
+| `ShowTimeLabels` | true | the elapsed and total time labels |
+| `ShowPictureInPictureButton` | false | the PiP button |
+
+`ShowPictureInPictureButton` defaults to **false** because PiP needs a manifest opt-in only the app can make — see [Background Playback & PiP](/controls/mediaelement/background-playback/). It also hides itself where the platform can't do PiP at all, as does the volume *slider* on a backend that refuses programmatic volume (the mute button stays, since muting always works).
+
+Turn `ShowTransportBar` off entirely to drive playback from your own UI through the commands below.
+
+## Auto-hide
+
+`AutoHideTransportBar` (default true) fades the bar out after `TransportBarAutoHideDelay` (3 seconds) of no interaction, and a tap on the video brings it back.
+
+It only hides **while playing**. A paused frame, a stopped one, a failed load and an audio-only track all keep their controls — which is both what every player does and what keeps the buttons reachable to a screen reader. For an audio player, set it false:
+
+```xml
+<media:MediaElement Source="{Binding EpisodeUrl}"
+                    AutoHideTransportBar="False"
+                    ShowFullScreenButton="False" />
+```
+
+## Styling
+
+| Property | Default |
+| --- | --- |
+| `TransportBarBackgroundColor` | a translucent scrim over the video |
+| `ControlColor` | white — the bar sits over video, not over your page background |
+| `SeekBarColor` | the theme's `Shiny.Color.Primary` |
+| `VideoBackgroundColor` | black — behind the video and in the letterbox bars |
+
+Leave `SeekBarColor` unset and the scrubber follows the active theme pack through a dynamic resource, so switching themes at runtime moves it too. Setting it explicitly takes over.
+
+## The seek bar
+
+`MediaSeekBar` is a purpose-built control rather than a reuse of Shiny's `Slider`, because a scrubber needs two things a value slider doesn't have: a **second track** showing how far the download has buffered ahead of the playhead, and explicit drag signals so the owner can stop writing the player's position into the thumb while a finger is on it.
+
+It's public, so a hand-rolled transport bar can use it:
+
+```xml
+<media:MediaSeekBar Position="{Binding Source={x:Reference Player}, Path=Position}"
+                    Duration="{Binding Source={x:Reference Player}, Path=Duration}"
+                    BufferedProgress="{Binding Source={x:Reference Player}, Path=BufferedProgress}" />
+```
+
+`DragStarted`, `Seeking` and `DragCompleted` let you update labels live under the finger and only commit the seek on release — scrubbing a remote stream on every pan tick would thrash the buffer.
+
+## Commands
+
+Every operation is available as an `ICommand`, so a view model or a custom bar never needs a code-behind handler.
+
+| Command | Does |
+| --- | --- |
+| `PlayCommand` | start or resume |
+| `PauseCommand` | suspend in place |
+| `StopCommand` | halt and rewind |
+| `TogglePlayPauseCommand` | flip between the two |
+| `SeekCommand` | move the playhead — see below |
+| `MuteCommand` | toggle, or set outright with a `bool` parameter |
+| `ToggleFullScreenCommand` | flip `IsFullScreen` |
+| `PictureInPictureCommand` | detach into a floating window |
+
+The plain methods are there too: `Play()`, `Pause()`, `Stop()`, `TogglePlayPause()`, `SeekAsync()`, `ToggleMute()`, `ToggleFullScreen()`, `TryEnterPictureInPictureAsync()`, `ExitPictureInPictureAsync()`.
+
+### Seek parameters
+
+`SeekCommand` accepts a `TimeSpan`, a number of seconds, or a string of either. **A bare number is seconds** — XAML can only hand a command a string, and `TimeSpan.Parse("30")` would read that as thirty *days*, so the presence of a colon is what picks the parser:
+
+```xml
+<Button Text="Skip to 30s"   Command="{Binding Source={x:Reference Player}, Path=SeekCommand}" CommandParameter="30" />
+<Button Text="Skip to 1:30"  Command="{Binding Source={x:Reference Player}, Path=SeekCommand}" CommandParameter="00:01:30" />
+```
+
+An unparseable parameter is ignored rather than seeking to zero.
+
+### CanExecute
+
+`PictureInPictureCommand.CanExecute` is false where the platform can't do PiP, so a bound button disables itself instead of doing nothing when tapped.
+
+## Accessibility
+
+Each glyph button carries a semantic description that follows its state ("Play" ⇄ "Pause", "Mute" ⇄ "Unmute", "Enter full screen" ⇄ "Exit full screen") and a **stable** automation id that does not — a UI test looking for the play button shouldn't have to know it is currently called "Pause". The ids are `MediaPlayPauseButton`, `MediaMuteButton`, `MediaFullScreenButton` and `MediaPictureInPictureButton`.
+
+The icons are drawn as vector paths rather than Unicode media symbols, which carry emoji presentation on some platforms — rendering full-colour at a different optical size on Android and Windows than on iOS, and ignoring the control's tint.

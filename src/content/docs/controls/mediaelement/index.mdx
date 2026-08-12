@@ -1,0 +1,148 @@
+---
+title: MediaElement
+description: Cross-platform .NET MAUI & Blazor audio/video playback with a themed, per-element-toggleable transport bar, background audio with OS lock-screen controls, and Picture-in-Picture
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+{/* TODO: capture screenshots for mediaelement — drive the Sample app (Features/Media) with mauidevflow
+    for MAUI and the Sample.Blazor /mediaelement page with Playwright, save to
+    public/images/mediaelement/s1.png, s2.png, … and reference them here with
+    <img src="/images/mediaelement/s1.png" width="220" alt="MediaElement" /> */}
+
+`Shiny.Maui.Controls.MediaElement` plays **local and remote audio and video** on iOS, Android, Windows, Mac Catalyst and macOS AppKit, with a companion `Shiny.Maui.Controls.MediaElement.Linux` for the GTK4 head and `Shiny.Blazor.Controls.MediaElement` for the web. One API across all six; each sits on the platform's real player — AVPlayer, Media3/ExoPlayer, `Windows.Media.Playback`, `GtkMediaFile`, and HTML5 media.
+
+Two decisions shape the whole control.
+
+**The transport bar is drawn by Shiny, not handed to the platform.** That is the only way each piece of it can be shown or hidden on its own: native transport UI is all-or-nothing everywhere except Windows — iOS's `AVPlayerViewController` has a single `showsPlaybackControls`, HTML5's `controlsList` can only subtract download/fullscreen/cast and only in Chromium, and GTK's `GtkMediaControls` has no knobs at all. Drawing it also means one look on every target, themed from your Shiny theme pack.
+
+**The player outlives the view.** An `IMediaPlayerBackend` owns the platform player and the *view* is pushed into it. That is what makes the two hard features work rather than being approximations: entering fullscreen hands the same running player to a second surface on a modal page, so nothing re-buffers and your layout is left alone; and backgrounding detaches the video surface entirely while the audio keeps going.
+
+- [Transport Bar](/controls/mediaelement/transport-bar/) — showing and hiding each control, styling, commands
+- [Background Playback & PiP](/controls/mediaelement/background-playback/) — lock-screen audio, Picture-in-Picture, and the manifest opt-ins your app must make
+- [Blazor Usage](/controls/mediaelement/blazor/) — the WebAssembly specifics
+
+- <NugetDownloads name="Shiny.Maui.Controls.MediaElement" />
+- <NugetDownloads name="Shiny.Maui.Controls.MediaElement.Linux" />
+- <NugetDownloads name="Shiny.Blazor.Controls.MediaElement" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} os={["ios", "android", "windows", "macos", "linux", "web"]} />
+
+## Setup
+
+```bash
+dotnet add package Shiny.Maui.Controls.MediaElement
+```
+
+```csharp
+builder
+    .UseShinyControls()
+    .UseShinyMediaElement();
+```
+
+```xml
+xmlns:media="http://shiny.net/maui/media"
+```
+
+```xml
+<media:MediaElement Source="https://example.com/clip.mp4"
+                    AutoPlay="True"
+                    Aspect="AspectFit"
+                    HeightRequest="220" />
+```
+
+The types live in `Shiny.Maui.Controls.Media`; the enums and DTOs shared with Blazor (`MediaElementState`, `MediaAspect`, `MediaMetadata`, `MediaPlaybackCapabilities`) live in `Shiny.Controls.Media` and are surfaced under the same XAML namespace.
+
+### Linux (GTK4)
+
+There is no Linux target framework, so the GTK backend ships as its own package — otherwise referencing GirCore would drag GTK into every non-platform consumer of the main package's `net10.0` build. It **replaces** the normal registration rather than supplementing it:
+
+```bash
+dotnet add package Shiny.Maui.Controls.MediaElement.Linux
+```
+
+```csharp
+builder.UseShinyMediaElementGtk();   // instead of UseShinyMediaElement()
+```
+
+Decoding comes from GStreamer through GTK's media backend, so the machine needs `gtk4-media-gstreamer` (Fedora/Arch) or `libgtk-4-media-gstreamer` (Debian/Ubuntu), plus codec plugins for whatever you play. Without it the control still lays out and reports a load failure through `MediaFailed`.
+
+## Sources
+
+`Source` is a `MediaSource` with a `TypeConverter`, so a bare string in XAML is classified for you:
+
+| You write | You get | Plays from |
+| --- | --- | --- |
+| `https://…`, `http://…`, an HLS or DASH manifest | `UriMediaSource` | the network |
+| a rooted path, or `file:///…` | `FileMediaSource` | the device filesystem |
+| anything else — `intro.mp4`, `clips/intro.mp4` | `ResourceMediaSource` | a `Resources/Raw` file in the app package |
+
+Or build them explicitly:
+
+```csharp
+player.Source = MediaSource.FromUri("https://example.com/clip.mp4");
+player.Source = MediaSource.FromFile(downloadedPath);
+player.Source = MediaSource.FromResource("intro.mp4");
+```
+
+Each backend resolves the packaged form to its own scheme — `asset:///` on Android, the app bundle on Apple, `ms-appx:///` on Windows, the app directory on GTK.
+
+## Properties
+
+| Property | Type | Default | Notes |
+| --- | --- | --- | --- |
+| `Source` | `MediaSource` | null | see above |
+| `AutoPlay` | bool | false | play as soon as the source opens |
+| `IsLooping` | bool | false | suppresses `MediaEnded` |
+| `Volume` | double | 1 | clamped 0..1 |
+| `IsMuted` | bool | false | independent of `Volume` |
+| `PlaybackRate` | double | 1 | clamped 0.25..4 |
+| `Position` | TimeSpan | 0 | two-way — read back every `PositionUpdateInterval`, and assigning it seeks |
+| `Duration` | TimeSpan | 0 | read-only; zero until the source opens, and for live streams |
+| `CurrentState` | `MediaElementState` | None | None / Opening / Buffering / Playing / Paused / Stopped / Failed |
+| `BufferedProgress` | double | 0 | 0..1, drawn as the scrubber's secondary track |
+| `Aspect` | `MediaAspect` | AspectFit | AspectFit / AspectFill / Fill |
+| `KeepScreenOn` | bool | false | inhibit display sleep while playing |
+| `PositionUpdateInterval` | TimeSpan | 250ms | how often the playhead is polled |
+| `IsFullScreen` | bool | false | two-way |
+| `EnableBackgroundPlayback` | bool | false | see [Background Playback](/controls/mediaelement/background-playback/) |
+| `Metadata` | `MediaMetadata` | null | Title / Artist / Album / ArtworkUri for the OS transport UI |
+| `Capabilities` | `MediaPlaybackCapabilities` | None | read-only — what this backend actually honours |
+
+`Position` deserves a note: the control polls the player rather than each backend pushing, so every platform ticks at the same rate. The tick writes the player's own position into the property, and an *outside* write is what means "seek" — so binding `Position` two-way to a view model doesn't fight the player.
+
+**Events:** `StateChanged`, `MediaOpened`, `MediaEnded`, `MediaFailed`, `PositionChanged`, `SeekCompleted`, `FullScreenChanged`, `PictureInPictureChanged`.
+
+## Fullscreen
+
+`IsFullScreen`, `ToggleFullScreen()` and `ToggleFullScreenCommand` push a modal page carrying a second surface bound to the **same player**. Playback continues rather than restarting, the inline control keeps its place in your layout, and Android's back gesture collapses it. `FullScreenChanged` fires however it was triggered.
+
+The alternative — reparenting the control into an overlay — would recreate its platform view, which for a video surface means a visible stall and a fresh buffer on a remote stream.
+
+## Capabilities
+
+Support genuinely differs by platform, so read `Capabilities` before offering an affordance. The built-in transport bar already hides what the backend can't do.
+
+| | Background audio | Picture-in-Picture | Playback rate | Volume | Buffer progress |
+| --- | --- | --- | --- | --- | --- |
+| iOS / Mac Catalyst | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Android | ✅ | ✅ (API 26+) | ✅ | ✅ | ✅ |
+| Windows | ✅ (SMTC) | ❌ | ✅ | ✅ | ✅ |
+| macOS AppKit | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Linux GTK4 | ❌ | ❌ | ❌ | ✅ | ❌ |
+| Blazor | browser's call | ✅ where available | ✅ | ⚠️ probed | ✅ |
+
+- **Windows** has no per-element Picture-in-Picture API. The nearest thing, a compact-overlay `AppWindow`, shrinks the whole app window rather than detaching the video, so it isn't offered as PiP.
+- **macOS AppKit** could do PiP through AVKit, but the MAUI AppKit host is preview-quality and it is untested there — the capability is deliberately not advertised rather than offering a button that may do nothing.
+- **Linux** continues playing while the window is hidden, because a desktop process is never suspended; there are no OS transport controls, though, so `BackgroundAudio` isn't claimed. There is no MPRIS integration yet, `GtkMediaStream` has no rate control, and it reports no buffered-ahead figure.
+- **Blazor** probes volume at runtime by writing a value and reading it back, because iOS Safari silently ignores writes to `video.volume` and nothing advertises that.
+
+## Substituting the player
+
+`MediaPlayerBackends.Factory` is the hook every `MediaElement` uses to create its player — a static hook rather than DI because a control declared in XAML has no service provider, and because the GTK head has to replace it from a different assembly.
+
+```csharp
+MediaPlayerBackends.Factory = () => new MyBackend();
+```
+
+Implement `IMediaPlayerBackend` to plug in your own player, or a fake so the control's own logic can be tested with no device attached.
