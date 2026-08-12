@@ -1,0 +1,543 @@
+---
+// Fixed footer banner (homepage only) that rotates through blog posts released
+// in the last `days` window, newest first. Renders nothing when the window is
+// empty. Future-dated posts are excluded here as well as by the production
+// draft filter in `src/content.config.ts`.
+import { getCollection } from 'astro:content';
+
+interface Props {
+  /** How far back to look for posts. */
+  days?: number;
+  /** Rotation interval in milliseconds. */
+  interval?: number;
+}
+
+const { days = 30, interval = 6000 } = Astro.props;
+
+const now = Date.now();
+const cutoff = now - days * 24 * 60 * 60 * 1000;
+
+const posts = (await getCollection('docs'))
+  .filter((entry) => entry.id.startsWith('blog/') && entry.data.date instanceof Date && !entry.data.draft)
+  .filter((entry) => {
+    const time = entry.data.date.getTime();
+    return time <= now && time >= cutoff;
+  })
+  .sort((a, b) => b.data.date.getTime() - a.data.date.getTime())
+  .map((entry) => ({
+    href: `/${entry.id}/`,
+    title: entry.data.title,
+    tag: entry.data.tags?.[0],
+    date: entry.data.date,
+    dateLabel: entry.data.date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      timeZone: 'UTC',
+    }),
+    dateTime: entry.data.date.toISOString().slice(0, 10),
+  }));
+
+// Dismissal is keyed to the newest post, so a new release brings the banner back.
+const dismissKey = posts.length > 0 ? `shiny-recent-banner:${posts[0].href}` : '';
+---
+
+{posts.length > 0 && (
+  <aside
+    class="recent-banner not-content"
+    id="recent-banner"
+    data-interval={interval}
+    data-dismiss-key={dismissKey}
+    aria-label="Recently published posts"
+    hidden
+  >
+    <div class="recent-banner-progress" aria-hidden="true"><span></span></div>
+
+    <div class="recent-banner-inner">
+      <span class="recent-banner-eyebrow">
+        <span class="recent-banner-pulse" aria-hidden="true"></span>
+        <span class="recent-banner-eyebrow-text">Just Released</span>
+      </span>
+
+      <div class="recent-banner-viewport" aria-live="polite">
+        {posts.map((post, i) => (
+          <a
+            class="recent-banner-item"
+            href={post.href}
+            data-index={i}
+            aria-hidden={i === 0 ? undefined : 'true'}
+            tabindex={i === 0 ? undefined : -1}
+          >
+            <time class="recent-banner-date" datetime={post.dateTime}>{post.dateLabel}</time>
+            {post.tag && <span class="recent-banner-tag">{post.tag}</span>}
+            <span class="recent-banner-title">{post.title}</span>
+            <span class="recent-banner-cta" aria-hidden="true">Read&nbsp;&rarr;</span>
+          </a>
+        ))}
+      </div>
+
+      {posts.length > 1 && (
+        <div class="recent-banner-dots" role="tablist" aria-label="Choose a post">
+          {posts.map((post, i) => (
+            <button
+              class="recent-banner-dot"
+              type="button"
+              role="tab"
+              data-index={i}
+              aria-label={post.title}
+              aria-selected={i === 0 ? 'true' : 'false'}
+            ></button>
+          ))}
+        </div>
+      )}
+
+      <button class="recent-banner-close" type="button" aria-label="Dismiss">
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+  </aside>
+)}
+
+<style>
+  .recent-banner {
+    /* Starlight adds a prose top-margin to markdown siblings — zero it so the
+       fixed bar sits flush against the viewport bottom. */
+    margin: 0;
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 99;
+    border-top: 1px solid var(--sl-color-gray-6);
+    /* Opaque: page content scrolls underneath and must not bleed through. */
+    background:
+      linear-gradient(90deg,
+        color-mix(in srgb, var(--shiny-purple-vivid, #6A3DF0) 7%, var(--sl-color-bg)),
+        var(--sl-color-bg) 45%,
+        color-mix(in srgb, var(--shiny-green-vivid, #0FBF7A) 6%, var(--sl-color-bg)));
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.1);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    animation: recent-banner-in 0.45s cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+  .recent-banner[hidden] {
+    display: none;
+  }
+
+  :global(:root[data-theme='dark']) .recent-banner {
+    border-top-color: var(--sl-color-gray-5);
+    box-shadow: 0 -4px 26px rgba(0, 0, 0, 0.45);
+  }
+
+  @keyframes recent-banner-in {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+  }
+
+  /* ── Interval progress line ────────────────────────────── */
+  .recent-banner-progress {
+    position: absolute;
+    top: -1px;
+    left: 0;
+    right: 0;
+    height: 2px;
+    overflow: hidden;
+  }
+
+  .recent-banner-progress span {
+    display: block;
+    height: 100%;
+    width: 100%;
+    transform-origin: left center;
+    transform: scaleX(0);
+    background: linear-gradient(90deg,
+      var(--shiny-purple-vivid, #6A3DF0),
+      var(--shiny-green-vivid, #0FBF7A),
+      var(--shiny-lime-vivid, #A6D900));
+  }
+
+  .recent-banner.is-rotating .recent-banner-progress span {
+    animation: recent-banner-fill var(--recent-banner-interval, 6s) linear forwards;
+  }
+
+  .recent-banner.is-paused .recent-banner-progress span {
+    animation-play-state: paused;
+  }
+
+  @keyframes recent-banner-fill {
+    from { transform: scaleX(0); }
+    to { transform: scaleX(1); }
+  }
+
+  /* ── Layout ────────────────────────────────────────────── */
+  .recent-banner-inner {
+    display: flex;
+    align-items: center;
+    gap: 0.85rem;
+    max-width: 78rem;
+    margin: 0 auto;
+    padding: 0.6rem 1rem;
+  }
+
+  /* ── Eyebrow ───────────────────────────────────────────── */
+  .recent-banner-eyebrow {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    flex-shrink: 0;
+    padding: 0.3rem 0.7rem;
+    border-radius: 999px;
+    background: linear-gradient(135deg, var(--shiny-purple-vivid, #6A3DF0), var(--shiny-green-vivid, #0FBF7A));
+    color: #fff;
+    font-size: 0.68rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    white-space: nowrap;
+  }
+
+  .recent-banner-pulse {
+    width: 0.45rem;
+    height: 0.45rem;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.8);
+    animation: recent-banner-pulse 2s ease-out infinite;
+  }
+
+  @keyframes recent-banner-pulse {
+    0% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0.75); }
+    70% { box-shadow: 0 0 0 0.45rem rgba(255, 255, 255, 0); }
+    100% { box-shadow: 0 0 0 0 rgba(255, 255, 255, 0); }
+  }
+
+  /* ── Rotating viewport ─────────────────────────────────── */
+  .recent-banner-viewport {
+    position: relative;
+    flex: 1;
+    min-width: 0;
+    height: 1.75rem;
+  }
+
+  .recent-banner-item {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+    text-decoration: none;
+    color: var(--sl-color-white);
+    opacity: 0;
+    transform: translateY(0.7rem);
+    pointer-events: none;
+    transition: opacity 0.45s ease, transform 0.45s cubic-bezier(0.32, 0.72, 0, 1);
+  }
+
+  .recent-banner-item.is-active {
+    opacity: 1;
+    transform: translateY(0);
+    pointer-events: auto;
+  }
+
+  /* Outgoing item scrolls up and out. */
+  .recent-banner-item.is-leaving {
+    opacity: 0;
+    transform: translateY(-0.7rem);
+  }
+
+  .recent-banner-date {
+    flex-shrink: 0;
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--sl-color-gray-3);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .recent-banner-tag {
+    flex-shrink: 0;
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.3rem;
+    border: 1px solid var(--sl-color-gray-5);
+    background: var(--sl-color-gray-7, var(--sl-color-gray-6));
+    color: var(--sl-color-gray-2);
+    font-size: 0.66rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+  }
+
+  .recent-banner-title {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .recent-banner-item:hover .recent-banner-title,
+  .recent-banner-item:focus-visible .recent-banner-title {
+    color: var(--sl-color-text-accent);
+    text-decoration: underline;
+    text-underline-offset: 0.2em;
+  }
+
+  .recent-banner-cta {
+    flex-shrink: 0;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--sl-color-text-accent);
+    white-space: nowrap;
+  }
+
+  /* ── Dots ──────────────────────────────────────────────── */
+  .recent-banner-dots {
+    display: flex;
+    align-items: center;
+    gap: 0.3rem;
+    flex-shrink: 0;
+  }
+
+  .recent-banner-dot {
+    width: 0.45rem;
+    height: 0.45rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: var(--sl-color-gray-5);
+    cursor: pointer;
+    transition: background 0.2s ease, transform 0.2s ease;
+  }
+
+  .recent-banner-dot:hover {
+    background: var(--sl-color-gray-4);
+    transform: scale(1.2);
+  }
+
+  .recent-banner-dot[aria-selected='true'] {
+    background: var(--shiny-purple-vivid, #6A3DF0);
+    transform: scale(1.25);
+  }
+
+  /* ── Close ─────────────────────────────────────────────── */
+  .recent-banner-close {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    padding: 0;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    transition: background 0.2s ease, color 0.2s ease;
+  }
+
+  .recent-banner-close:hover {
+    background: var(--sl-color-gray-6);
+    color: var(--sl-color-white);
+  }
+
+  /* ── Small screens ─────────────────────────────────────── */
+  @media (max-width: 50rem) {
+    .recent-banner-inner {
+      gap: 0.55rem;
+      padding: 0.5rem 0.7rem;
+    }
+
+    .recent-banner-eyebrow-text,
+    .recent-banner-cta,
+    .recent-banner-tag {
+      display: none;
+    }
+
+    .recent-banner-eyebrow {
+      padding: 0.4rem;
+    }
+
+    .recent-banner-viewport {
+      height: 2.3rem;
+    }
+
+    .recent-banner-title {
+      white-space: normal;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      font-size: 0.8rem;
+    }
+
+    .recent-banner-date {
+      display: none;
+    }
+
+    /* The homepage "Menu" pill is bottom-right on mobile — lift it clear. */
+    :global(.homenav-toggle) {
+      bottom: calc(4.2rem + env(safe-area-inset-bottom, 0px));
+    }
+  }
+
+  @media print {
+    .recent-banner {
+      display: none;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .recent-banner,
+    .recent-banner-pulse,
+    .recent-banner-progress span {
+      animation: none;
+    }
+
+    .recent-banner-item {
+      transform: none;
+      transition: opacity 0.2s ease;
+    }
+
+    .recent-banner-item.is-leaving {
+      transform: none;
+    }
+  }
+</style>
+
+<script>
+  (function () {
+    var banner = document.getElementById('recent-banner');
+    if (!banner) return;
+
+    var key = banner.getAttribute('data-dismiss-key') || '';
+    try {
+      if (key && window.localStorage.getItem(key) === 'dismissed') return;
+    } catch (e) {
+      /* localStorage unavailable (private mode) — just show the banner. */
+    }
+
+    var items = Array.prototype.slice.call(banner.querySelectorAll('.recent-banner-item'));
+    var dots = Array.prototype.slice.call(banner.querySelectorAll('.recent-banner-dot'));
+    var progress = banner.querySelector('.recent-banner-progress span');
+    var interval = parseInt(banner.getAttribute('data-interval') || '6000', 10);
+    var current = 0;
+    var timer = null;
+
+    banner.style.setProperty('--recent-banner-interval', interval + 'ms');
+
+    // Newest post is index 0 and always leads.
+    items[0].classList.add('is-active');
+    banner.hidden = false;
+
+    // Reserve room so the bar never permanently covers the end of the page.
+    // Done from script (not CSS) to keep the rule off every other page.
+    function reserveSpace() {
+      document.body.style.paddingBottom = banner.hidden ? '' : banner.offsetHeight + 'px';
+    }
+    reserveSpace();
+    window.addEventListener('resize', reserveSpace);
+
+    function show(next) {
+      if (next === current) return;
+      var outgoing = items[current];
+      outgoing.classList.remove('is-active');
+      outgoing.classList.add('is-leaving');
+      outgoing.setAttribute('aria-hidden', 'true');
+      outgoing.setAttribute('tabindex', '-1');
+      window.setTimeout(function () {
+        outgoing.classList.remove('is-leaving');
+      }, 450);
+
+      current = next;
+      var incoming = items[current];
+      incoming.classList.add('is-active');
+      incoming.removeAttribute('aria-hidden');
+      incoming.removeAttribute('tabindex');
+
+      dots.forEach(function (dot, i) {
+        dot.setAttribute('aria-selected', i === current ? 'true' : 'false');
+      });
+    }
+
+    function restartProgress() {
+      if (!progress) return;
+      banner.classList.remove('is-rotating');
+      // Force a reflow so the fill animation restarts from zero.
+      void progress.offsetWidth;
+      banner.classList.add('is-rotating');
+    }
+
+    function start() {
+      if (items.length < 2) return;
+      stop();
+      restartProgress();
+      timer = window.setInterval(function () {
+        show((current + 1) % items.length);
+        restartProgress();
+      }, interval);
+    }
+
+    function stop() {
+      if (timer !== null) {
+        window.clearInterval(timer);
+        timer = null;
+      }
+    }
+
+    banner.addEventListener('mouseenter', function () {
+      stop();
+      banner.classList.add('is-paused');
+    });
+
+    banner.addEventListener('mouseleave', function () {
+      banner.classList.remove('is-paused');
+      start();
+    });
+
+    banner.addEventListener('focusin', function () {
+      stop();
+      banner.classList.add('is-paused');
+    });
+
+    banner.addEventListener('focusout', function () {
+      if (banner.contains(document.activeElement)) return;
+      banner.classList.remove('is-paused');
+      start();
+    });
+
+    dots.forEach(function (dot) {
+      dot.addEventListener('click', function () {
+        show(parseInt(dot.getAttribute('data-index') || '0', 10));
+        start();
+      });
+    });
+
+    var close = banner.querySelector('.recent-banner-close');
+    if (close) {
+      close.addEventListener('click', function () {
+        stop();
+        banner.hidden = true;
+        reserveSpace();
+        try {
+          if (key) window.localStorage.setItem(key, 'dismissed');
+        } catch (e) {
+          /* ignore */
+        }
+      });
+    }
+
+    // Don't burn the interval while the tab is in the background.
+    document.addEventListener('visibilitychange', function () {
+      if (document.hidden) {
+        stop();
+      } else if (!banner.hidden) {
+        start();
+      }
+    });
+
+    start();
+  })();
+</script>
