@@ -526,6 +526,14 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Layout (Blazor)',
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Stacks & Grid', link: 'controls/layout/', jumpTo: true },
+          { label: 'AppLayout', link: 'controls/applayout/', jumpTo: true },
+        ]
+      },
+      {
         label: 'Keyframe Animation',
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },
