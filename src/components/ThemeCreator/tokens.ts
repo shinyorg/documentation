@@ -29,6 +29,25 @@ export const SHAPE: [string, number][] = [
     ['CornerFull', 9999],
 ];
 
+export const BORDER: [string, number][] = [
+    ['Thin', 1],
+    ['Medium', 2],
+    ['Thick', 4],
+];
+
+// Density metrics at scale 1. TouchTarget is deliberately never scaled - shrinking the hit area
+// below the platform minimum is an accessibility bug, not a design choice.
+export const DENSITY: [string, number][] = [
+    ['Scale', 1],
+    ['ControlHeight', 44],
+    ['ControlHeightSmall', 32],
+    ['RowHeight', 48],
+    ['TouchTarget', 44],
+];
+
+/** Empty means "whatever the host app uses", which is `inherit` on the web. */
+export const DEFAULT_MONO_STACK = 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
 export const STATE: [string, number][] = [
     ['HoverOpacity', 0.08],
     ['FocusOpacity', 0.10],
@@ -69,11 +88,14 @@ export const ELEVATION: [string, string][] = [
     ['Level5', '0 8px 12px 6px rgba(0,0,0,0.15), 0 4px 4px rgba(0,0,0,0.3)'],
 ];
 
-// name, offsetX, offsetY, radius, opacity (MAUI Shadow, levels 1..3)
+// name, offsetX, offsetY, radius, opacity (MAUI Shadow, levels 0..5)
 export const MAUI_SHADOW: [string, number, number, number, number][] = [
+    ['Level0', 0, 0, 0, 0],
     ['Level1', 0, 1, 3, 0.20],
     ['Level2', 0, 2, 6, 0.20],
     ['Level3', 0, 4, 8, 0.22],
+    ['Level4', 0, 6, 12, 0.24],
+    ['Level5', 0, 8, 16, 0.26],
 ];
 
 /** camelCase/PascalCase -> kebab-case (OnPrimaryContainer -> on-primary-container). */

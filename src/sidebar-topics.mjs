@@ -378,6 +378,7 @@ export const sidebarTopics = [
         label: 'Theming',
         items:[
           { label: 'Overview', link: 'controls/theming/' },
+          { label: 'Theme Packs', link: 'controls/theming/packs', badge: { text: 'New', variant: 'success' } },
           { label: 'Theme Creator', link: 'controls/theming/creator', badge: { text: 'New', variant: 'success' } },
         ],
       },
@@ -611,12 +612,22 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Wizard & StateView',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'StateView', link: 'controls/stateview/' },
+          { label: 'Wizard', link: 'controls/wizard/' },
+        ]
+      },
+      {
         label: 'Other Controls',
         items:[
           { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
           { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
           { label: 'Slider', link: 'controls/slider/', jumpTo: true },
           { label: 'RangeSlider', link: 'controls/rangeslider/', jumpTo: true },
+          { label: 'ShinyImage', link: 'controls/shinyimage/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },

@@ -88,10 +88,17 @@ export class TonalPalette {
 
     /** Returns the hex for the given tone (0 = black .. 100 = white). */
     tone(tone: number): string {
-        // Taper chroma toward the lightness extremes so tone 100 -> white and tone 0 -> black.
+        // Taper chroma toward the lightness extremes so tone 100 -> white and tone 0 -> black,
+        // approximating how Material's HCT gamut collapses chroma near black/white. Tones in the
+        // 10..90 band (accents and containers) keep full chroma.
+        //
+        // The curve is sqrt rather than linear: a linear taper left tone 98 (Surface) at only 20%
+        // chroma, which on a low-chroma neutral seed is indistinguishable from pure grey, so every
+        // pack's surfaces came out the same off-white. sqrt still reaches exactly 0 at tone 100/0
+        // but keeps ~45% at tone 98, enough for a surface to carry the pack's hue.
         let factor: number;
-        if (tone >= 90) factor = Math.max(0, (100 - tone) / 10.0);
-        else if (tone <= 10) factor = Math.max(0, tone / 10.0);
+        if (tone >= 90) factor = Math.sqrt(Math.max(0, (100 - tone) / 10.0));
+        else if (tone <= 10) factor = Math.sqrt(Math.max(0, tone / 10.0));
         else factor = 1.0;
 
         const c = this.chroma * factor;
