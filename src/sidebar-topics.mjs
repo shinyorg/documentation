@@ -453,7 +453,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
           { label: 'Docking', link: 'controls/docking/', jumpTo: true },
-          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true },
+          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true, badge: { text: 'Blazor', variant: 'note' } },
         ]
       },
       {
@@ -524,6 +524,7 @@ export const sidebarTopics = [
               { label: 'Keyboard Accessory', link: 'controls/textentry/keyboard-accessory', badge: { text: 'New', variant: 'success' } },
             ]
           },
+          { label: 'Speech Add-ins', link: 'controls/speech-addins/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
@@ -618,6 +619,15 @@ export const sidebarTopics = [
         items:[
           { label: 'StateView', link: 'controls/stateview/' },
           { label: 'Wizard', link: 'controls/wizard/' },
+        ]
+      },
+      {
+        label: 'Guidance',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Walkthrough', link: 'controls/walkthrough/' },
+          { label: 'Tooltip', link: 'controls/tooltip/' },
         ]
       },
       {

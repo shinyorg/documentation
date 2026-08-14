@@ -337,6 +337,13 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
+              id: 'controls-10',
+              content: 'Shiny Controls v1.0 - The Ultra Control Suite for .NET MAUI & Blazor',
+              variant: 'tip',
+              link: { text: 'O...M...G!', href: '/controls/' },
+              dismissable: false
+            },
+            {
               id: 'httpserver-10',
               content: 'Shiny.Net.HttpServer v1 - A lightweight feature rich HTTP Server - Tunnels, Websockets, AOT, ASPNET Featureset, & Works EVERYWHERE!',
               variant: 'tip',

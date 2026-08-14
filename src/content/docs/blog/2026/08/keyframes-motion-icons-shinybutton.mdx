@@ -1,0 +1,471 @@
+---
+title: "Level Up Animation with Keyframes for MAUI & Blazor"
+date: 2026-08-20
+authors:
+  - allanritchie
+tags:
+  - controls
+  - MAUI
+  - Blazor
+  - animation
+  - release
+excerpt: "Three layers of one animation story — a seekable keyframe engine for .NET MAUI with CSS @keyframes semantics in XAML, 42 motion icons compiled from a single spec into a drawn scene on MAUI and real CSS keyframes on Blazor, and a ShinyButton that puts both to work in the most ordinary interaction in your app."
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+Animation in .NET MAUI has always had the same shape: `ViewExtensions.FadeTo`, a `Task`, and a `bool` somewhere
+tracking whether you are mid-animation. It works right up until someone asks for the thing every design tool
+does for free — scrub it, reverse it halfway, hold the final pose, export it as a GIF for the marketing page.
+
+This post covers three pieces that ship together and build on each other:
+
+1. **[Keyframe](/controls/keyframe/)** — the CSS `@keyframes` model in XAML and a fluent C# timeline API, where
+   evaluating an animation is a pure function of time.
+2. **[Motion Icons](/controls/motion-icons/)** — 42 animated icons authored once and compiled into a drawn scene
+   on MAUI and real CSS `@keyframes` on Blazor.
+3. **[ShinyButton](/controls/button/)** — where the other two land in a real app: press a button, wait for the
+   network, see whether it worked.
+
+- <NugetBadge name="Shiny.Maui.Controls.Keyframe" showLabel={true} />
+- <NugetBadge name="Shiny.Maui.Controls.Keyframe.Export" showLabel={true} />
+- <NugetBadge name="Shiny.Maui.Controls" showLabel={true} />
+- <NugetBadge name="Shiny.Blazor.Controls" showLabel={true} />
+
+:::tip[Try it in the browser first]
+Motion icons and `ShinyButton` are both live in the **[Blazor Playground](https://shinyorg.github.io/controls/)** —
+no install, no clone. Hover the icons, press the buttons, watch the busy states run.
+:::
+
+## Layer 1 — Keyframes
+
+```bash
+dotnet add package Shiny.Maui.Controls.Keyframe
+```
+
+```xml
+xmlns:kf="http://shiny.net/maui/keyframe"
+```
+
+There is no `builder.Use…()` call. That one XAML namespace is the whole installation.
+
+`Animate.Keyframes` is an attached property on any `VisualElement`, and it is deliberately a direct analogue of a
+CSS `@keyframes` rule plus the `animation-*` properties that drive it — `Duration`, `Delay`, `Iterations`,
+`Direction`, `Fill`, and per-key easing all behave the way the web spec says they do:
+
+```xml
+<Border>
+    <kf:Animate.Keyframes>
+        <kf:Keyframes Duration="0:0:1.2" Iterations="Infinite" Direction="Alternate" Fill="Both">
+
+            <kf:Track Property="Scale">
+                <kf:Key Offset="0"   Value="1" />
+                <kf:Key Offset="0.5" Value="1.15" Easing="CubicOut" />
+                <kf:Key Offset="1"   Value="1" />
+            </kf:Track>
+
+            <kf:Track Property="BackgroundColor">
+                <kf:Key Offset="0" Value="#2563EB" />
+                <kf:Key Offset="1" Value="#EC4899" />
+            </kf:Track>
+
+        </kf:Keyframes>
+    </kf:Animate.Keyframes>
+</Border>
+```
+
+The same thing in C#, because a designer-authored animation and a data-driven one should not be two different
+engines:
+
+```csharp
+var timeline = TimelineBuilder
+    .Create(TimeSpan.FromSeconds(1.2))
+    .PingPong()
+    .RepeatForever()
+    .Fill(FillMode.Both)
+    .Animate(box, (v, x) => v.Scale = x, k => k
+        .From(1)
+        .Key(0.5, 1.15, Easings.CubicOut)
+        .To(1))
+    .Build();
+
+var player = box.Play(timeline);
+```
+
+### The one design constraint
+
+`IAnimationNode.Evaluate(t)` computes the state at `t` **from the keyframes alone**. It never reads the previous
+frame and it never accumulates. Everything interesting falls out of that single property:
+
+| You want to… | Do this | Not this |
+|---|---|---|
+| Scrub from a `Slider` or a gesture | `player.SeekProgress(x)` | Rebuild a timeline at the new position |
+| Reverse mid-flight | `player.Rate = -1` | Build a second, reversed timeline |
+| Export frames | Sample at exact frame times — identical bytes every run | Render off a real-time clock and hope |
+| Test timing | Step a `ManualClock` | `Task.Delay` and a tolerance |
+
+`Rate` scales the per-frame delta rather than the position, so flipping it mid-flight carries on from wherever the
+animation actually is instead of jumping to a rescaled position. That is the difference between "reverse" and
+"restart backwards", and it is the thing you cannot retrofit onto an accumulating animator.
+
+### Easing you can paste in
+
+Curves are a plain `delegate double EasingFunction(double t)`, there are 38 named ones, and the string form parses
+CSS function syntax — because copying a curve out of a design tool or a devtools panel is by far the most common
+way anyone arrives at one:
+
+```xml
+<kf:Key Offset="0" Value="-200" Easing="cubic-bezier(0.34, 1.56, 0.64, 1)" />
+<kf:Keyframes Easing="steps(8)" ... />
+<kf:Keyframes Easing="spring(0.35, 14)" ... />
+```
+
+`Easings.Spring` is a **closed-form solution** of the spring ODE rather than a numeric integration — cheap enough
+to evaluate per frame, and still a pure function of `t`, so a spring seeks and reverses like every other curve
+here. An unrecognised easing string throws a `FormatException` listing every registered name at parse time,
+rather than silently running linear at runtime.
+
+Register your own for XAML in one line:
+
+```csharp
+EasingCatalog.Register("Smoothstep", t => t * t * (3d - 2d * t));
+```
+
+### Details that bite in production
+
+A few deliberate choices worth knowing about:
+
+- **Oklab colour blending by default.** sRGB interpolation dips through grey at the midpoint; Oklab does not.
+  `ColorInterpolator.Srgb` and `.LinearRgb` are still there when you want them.
+- **Shortest-arc angles.** `Rotation` from 350° to 10° turns forward 20°, not back 340°. Use `Spin` when multiple
+  turns are the point.
+- **Implicit keyframes.** Omit `Value` on a key and it resolves to the target's live value when playback starts,
+  so a re-triggered animation continues from where it is instead of snapping.
+- **AOT and trim safe.** The animatable-property registry is hand-registered delegates — not reflection, not
+  compiled `Expression` trees, both of which work in the emulator and vanish on device under Native AOT.
+- **Weak targets.** An `Iterations="Infinite"` animation on a popped page goes inert and gets collected rather
+  than pinning the visual tree, so infinite loops are safe to use freely.
+- **One clock per window.** `MauiClock.For(element)` returns the clock shared by every animation on that
+  element's dispatcher, and it idles by itself when nothing is listening. `Pause()` detaches from the clock
+  rather than ignoring ticks, so the platform can stop producing frames entirely.
+
+### Storyboards, scenes, and export
+
+`Storyboard` composes timelines on a shared clock and is itself an `IAnimationNode`, so storyboards nest — a
+staggered list entrance can be one item inside a larger sequence:
+
+```csharp
+var storyboard = new Storyboard()
+    .Add(introTimeline)
+    .Then(mainTimeline, gap: TimeSpan.FromMilliseconds(200))
+    .Stagger(cardTimelines, interval: TimeSpan.FromMilliseconds(120));
+```
+
+`KeyframeScene` runs the *same* timing model against a layer tree drawn onto a canvas rather than views in the
+visual tree — the Lottie-shaped lane, for loaders, illustrated micro-animations, progress indicators and shape
+morphs. Both are `IAnimationNode`s on the same clock, so one storyboard can sequence real views and scene layers
+together, and `KeyframeView.Progress` is two-way, which gives you a scrubber for a `Slider` binding.
+
+And because sampling is exact, a scene can be rendered offscreen, deterministically:
+
+```csharp
+var exporter = new FrameExporter(scene);
+var options = new ExportOptions { Fps = 25, Scale = 2.0 };
+
+GifEncoder.EncodeToFile("out.gif", exporter.Frames(options), options.Fps);
+```
+
+Frames are enumerated lazily, frame times are computed as `index / fps` in ticks so a long export cannot drift,
+and the GIF encoder is pure managed code. Export is a separate package because it is the only part of Keyframe
+that needs a rasterizer — and it targets plain .NET rather than the platform TFMs, so it runs from a console app,
+a build step, or CI.
+
+:::note[Why MAUI only]
+There is no Blazor counterpart to the XAML surface, and there will not be — the web already has `@keyframes`,
+natively, composited off the main thread. The timing engine itself (`Shiny.Controls.Keyframe.Shared`) is
+host-neutral and depends only on `Microsoft.Maui.Graphics`. Within MAUI it runs on **every head**: nothing in the
+package touches a platform SDK, so iOS, Android, Windows, Mac Catalyst and the macOS AppKit head all consume one
+`net10.0` target.
+:::
+
+## Layer 2 — Motion Icons
+
+42 hand-drawn icons that animate. A bell that swings from its crown with the clapper catching up late. A
+hamburger that morphs into a cross. A tick that draws itself on. A spinner whose arc chases its own tail.
+
+`MotionIconView` on MAUI, `<MotionIcon>` on Blazor — both live in the **core** packages, so there is nothing extra
+to install and nothing to register.
+
+```xml title="MAUI"
+<shiny:MotionIconView Icon="bell" Trigger="Loop" Interval="0:0:1.5" WidthRequest="32" HeightRequest="32" />
+```
+
+```razor title="Blazor"
+<MotionIcon Icon="bell" Trigger="MotionTrigger.Loop" Interval="TimeSpan.FromSeconds(1.5)" Size="32" />
+```
+
+**MAUI** (iOS)
+
+| Triggers & code-driven playback | Presets & scrubbing | The icon set |
+|:---:|:---:|:---:|
+| <img src="/images/motion-icons/s1.png" width="220" alt="Trigger, code-driven and preset demos on MAUI" /> | <img src="/images/motion-icons/s2.png" width="220" alt="Presets applied to any icon, and progress scrubbing" /> | <img src="/images/motion-icons/s3.png" width="220" alt="The built-in icon set on MAUI" /> |
+
+**Blazor**
+
+| Triggers | Driven from code | Two-tone & colour | Presets on any icon |
+|:---:|:---:|:---:|:---:|
+| <img src="/images/motion-icons/blazor-s1.png" width="220" alt="Loop, hover, press and appear triggers on Blazor" /> | <img src="/images/motion-icons/blazor-s2.png" width="220" alt="IsPlaying bound to a busy flag on Blazor" /> | <img src="/images/motion-icons/blazor-s3.png" width="220" alt="Colour and accent colour on Blazor" /> | <img src="/images/motion-icons/blazor-s4.png" width="220" alt="Motion presets applied to any icon on Blazor" /> |
+
+Those are single frames of things that only make sense in motion — the
+**[playground](https://shinyorg.github.io/controls/)** is the honest version.
+
+### One definition, two very different engines
+
+The artwork and its motion live in `Shiny.Controls.MotionIcons.Shared`, a dependency-free package both hosts
+reference. What each host *does* with that definition could hardly be more different:
+
+| | .NET MAUI | Blazor |
+|---|---|---|
+| Rendering | a `KeyframeScene` on a `GraphicsView` | inline SVG |
+| Animation | a keyframe `Timeline`, evaluated per frame | compiled once to CSS `@keyframes` |
+| Driven by | the Keyframe engine's `Player`, on one shared timer per window | the browser's compositor |
+| C# per frame | evaluate + redraw | **none** |
+
+That split is the whole point. On the web nothing about a motion icon needs a render loop — once the keyframes
+are declared the browser composites them off the main thread, at the display's refresh rate, and keeps going
+while WebAssembly is busy elsewhere. A C# ticker driving re-renders would be slower, jankier, and would stop dead
+the moment the app did some work.
+
+On MAUI there is no compositor to hand the work to, so an icon is drawn — but by the Keyframe engine rather than
+by machinery of its own. Motion icons and hand-written timelines share one clock per window, one set of easing
+curves, and one implementation of position, rate and baselines. Because both sides compile the *same* spec, with
+the same easing curves, an icon looks and moves the same in a MAUI app and in a browser.
+
+Where CSS has a keyword that means exactly the same thing as a `MotionEase` member, the generated stylesheet uses
+it. Everything else — the overshoot and bounce curves CSS has no name for — is sampled into a `linear()` curve
+rather than approximated with a "close enough" cubic-bezier, which is what would otherwise make a bounce bounce
+differently in the browser than on the phone.
+
+### Triggers
+
+`Trigger` is a `[Flags]` enum defaulting to `Hover | Press` — hover for desktop, press for touch, so an icon does
+something sensible everywhere without being told.
+
+| Trigger | Behaviour |
+|---|---|
+| `Loop` | Runs continuously. `Interval` inserts a resting gap between cycles — a bell that rings without pause reads as broken. |
+| `Hover` | Runs while the pointer is over it, then **finishes the cycle it is in**, so a half-swung bell settles upright instead of snapping. |
+| `Press` | One play per tap or click. |
+| `Appear` | Plays once when the icon first becomes visible — an `IntersectionObserver` on the web, `Loaded` on MAUI. |
+| `Manual` | No automatic trigger. Bind `IsPlaying` to a busy flag, or call `Play()` / `Stop()` / `StopAtCycleEnd()`. |
+
+The `Interval` gap is folded into the animation itself rather than scheduled by a timer. A CSS animation has no
+way to pause between iterations, so a spec that expressed the gap externally would need a JavaScript timer on the
+web and a dispatcher timer on MAUI, and the two would drift. Squeezing the keys into the front of a longer cycle
+and holding the resting pose through the remainder gets the same result out of
+`animation-iteration-count: infinite`.
+
+On MAUI, `Progress` is two-way, so an icon can be scrubbed from a slider or a gesture — dragging morphs the
+hamburger into a cross and back:
+
+```xml
+<shiny:MotionIconView Icon="menu" Trigger="Manual"
+                      Progress="{Binding Source={x:Reference Scrubber}, Path=Value}" />
+
+<Slider x:Name="Scrubber" Minimum="0" Maximum="1" />
+```
+
+### Presets, and your own artwork
+
+A preset is motion that does not need to know what it is animating — `Pulse`, `Beat`, `Spin`, `Shake`, `Wobble`,
+`Bounce`, `Float`, `Pop`, `Tada`, `Flip`, `Swing`, `Blink`, `Draw`, `Nudge`, `Jiggle`. Every one works on a
+built-in icon, on raw `PathData` of your own, and on a `MotionIconDefinition` you assembled:
+
+```xml
+<shiny:MotionIconView Icon="star" Motion="Tada" Trigger="Hover" />
+<shiny:MotionIconView PathData="M12 2 3 20h18z" Motion="Pop" Trigger="Press" />
+```
+
+`Default` is a fallback chain rather than a preset: it asks the icon for its own motion first, which is why
+`Icon="bell"` rings rather than merely pulsing, and lands on `Pulse` for artwork that has none.
+
+For custom artwork, an icon splits into parts for exactly one reason — a part is the unit a track can target:
+
+```csharp
+var toggle = new MotionIconDefinition(
+    "toggle",
+    [
+        new MotionIconPart("plate", "M3 8h18v8H3z"),
+        new MotionIconPart("knob", "M11 12a3 3 0 1 1 6 0 3 3 0 0 1-6 0z") { Origin = new MotionPoint(14f, 12f) }
+    ],
+    MotionSpecBuilder.Build(500, m => m
+        .MoveX("knob", k => k
+            .At(0d, 0d, MotionEase.BackOut)
+            .At(0.5d, -6d, MotionEase.BackInOut)
+            .At(1d, 0d))));
+
+MotionIconLibrary.Register(toggle);
+```
+
+`Register` replaces a built-in as well as adding a new one, so an app with its own visual language swaps the
+artwork for `check` once at startup rather than passing a definition in at every call site.
+
+There is deliberately **no path-morph channel**. Every channel — `Opacity`, `TranslateX/Y`, `Rotate`, `Scale`,
+`ScaleX/Y`, `StrokeWidth`, `Trim`, plus colour on `Fill` and `Stroke` — has a native, identically-behaving
+implementation on both hosts, which is the only way one icon can be guaranteed to look the same in both.
+Animating SVG's `d` is not supported in every browser, so a morph channel would have meant hand-written fallbacks
+the moment someone opened Firefox. Hinged and morphing icons are built from separate parts moved by transforms,
+exactly as they would be in a design tool.
+
+:::caution[Two rules that fail silently on MAUI]
+`Microsoft.Maui.Graphics` does not implement SVG's implicit-lineto rule — `"M6 6 18 18"` is a diagonal line in a
+browser and *nothing at all* on MAUI, because the parser reads the second pair as another moveto. It also cannot
+read run-together decimals: `l.06.06` stops the parser dead and the rest of the path is dropped. Both forms are
+common in exported artwork, and both render perfectly on Blazor and as a bare dot on MAUI. Write `"M6 6L18 18"`
+and `l.06 .06`.
+:::
+
+On the web, `prefers-reduced-motion: reduce` is honoured automatically — the icon still renders and still
+responds to clicks, it just holds its resting pose. An icon with no `Title` is marked `aria-hidden` so a screen
+reader announces the button's text once rather than twice.
+
+## Layer 3 — ShinyButton
+
+`Microsoft.Maui.Controls.Button` renders text and one image. There is no way to put a spinner inside it, so the
+most ordinary interaction in an app — press a button, wait for the network, see whether it worked — gets
+hand-assembled on every page out of a `Grid`, an `ActivityIndicator`, a swapped label, and an `IsBusy` property on
+the view model that exists purely for the UI's benefit.
+
+`ShinyButton` is that assembly, done once, on both hosts.
+
+**MAUI** (iOS)
+
+| Appearance × Type | Motion icons in the slots | All three busy modes at once |
+|:---:|:---:|:---:|
+| <img src="/images/button/s1.png" width="220" alt="Appearance and Type combinations on MAUI" /> | <img src="/images/button/s2.png" width="220" alt="Motion icons in the leading and trailing slots" /> | <img src="/images/button/s3.png" width="220" alt="ReplaceLeftIcon, ReplaceContent, KeepContent and the native spinner, all busy" /> |
+
+| Success state, command state | Shapes & sizes |
+|:---:|:---:|
+| <img src="/images/button/s4.png" width="220" alt="Success state, plus a button disabled by its consumer" /> | <img src="/images/button/s5.png" width="220" alt="Pill, square, small, large and full-width buttons" /> |
+
+**Blazor**
+
+| Appearance × Type | Motion icons | Busy modes | Success |
+|:---:|:---:|:---:|:---:|
+| <img src="/images/button/blazor-s1.png" width="220" alt="Appearance and Type combinations on Blazor" /> | <img src="/images/button/blazor-s2.png" width="220" alt="Motion icons in the slots on Blazor" /> | <img src="/images/button/blazor-s3.png" width="220" alt="All busy modes on Blazor" /> | <img src="/images/button/blazor-s4.png" width="220" alt="Success state on Blazor" /> |
+
+### Nothing binds IsBusy, because there is no IsBusy
+
+```xml
+<!-- SaveCommand is an AsyncRelayCommand. That is the entire wiring. -->
+<shiny:ShinyButton Text="Save"
+                   BusyText="Saving..."
+                   LeftMotionIcon="download"
+                   Command="{Binding SaveCommand}" />
+```
+
+`ButtonState` is `Normal`, `Busy`, `Success` or `Error`. Each non-normal state stands in its own text and its own
+icon, and `Success`/`Error` return to `Normal` on their own after `StateRevertDelay`:
+
+```xml
+<shiny:ShinyButton Text="Submit"
+                   State="{Binding SubmitState}"
+                   BusyText="Submitting..."
+                   SuccessText="Submitted"
+                   ErrorText="Failed"
+                   SuccessMotionIcon="check"
+                   ErrorMotionIcon="warning"
+                   StateRevertDelay="0:0:2"
+                   Command="{Binding SubmitCommand}" />
+```
+
+Setting `IsBusy` false only unwinds `Busy` — it will **not** cut a `Success` or `Error` short. That matters more
+than it sounds: a view model clearing its busy flag in a `finally` block is exactly the moment the outcome is on
+screen, and the naive projection would wipe the tick before anyone saw it.
+
+On Blazor there is no `ICommand`, so the equivalent is that **`Clicked` is awaited** — an `async` handler holds
+the button busy for exactly as long as it runs:
+
+```razor
+<ShinyButton Text="Save" BusyText="Saving..." LeftMotionIcon="download" Clicked="SaveAsync" />
+
+@code {
+    async Task SaveAsync() => await http.PostAsJsonAsync("/api/save", model);
+}
+```
+
+A **synchronous** handler never flickers — the returned task is checked for completion before any state change,
+so a handler that finished inline does not produce a one-frame spinner.
+
+### Motion icons in the slots
+
+Each side takes an `ImageSource`, a motion icon name, or any `View`. The motion icon is the path worth taking:
+the button colours it from its own resolved foreground and plays it from its own tap, so a tap anywhere on the
+button animates the glyph rather than only one that lands on it.
+
+```xml
+<shiny:ShinyButton Text="Refresh feed"
+                   LeftMotionIcon="refresh"
+                   RightMotionIcon="chevron-down"
+                   Appearance="Outlined" />
+```
+
+This is exactly the case the motion-icon docs warn about: an icon inside a larger tap target should be
+`Manual`, with the host playing it. `ShinyButton` sets that up on both hosts, and
+`MotionIconPlayOnClick="false"` turns it off.
+
+On Blazor the icons default to `currentColor`, so they inherit the button's CSS `color` — including hover and
+disabled — with nothing wired up at all.
+
+### Busy modes, and why they are about layout
+
+| Mode | Behaviour |
+|---|---|
+| `ReplaceLeftIcon` (default) | The indicator takes the left icon's place and the text stays put. Both are `IconSize` square, so the button cannot change width and a row of buttons cannot reflow. |
+| `ReplaceContent` | The content fades to opacity zero — keeping its layout space — and a centred indicator takes over. |
+| `KeepContent` | The indicator appears after the right icon and nothing else moves. |
+
+`ReplaceContent` uses opacity rather than visibility deliberately. Hiding the content would collapse the button
+to the width of the spinner and shove the rest of the row sideways mid-operation; keeping it laid out but
+invisible pins the width with no measuring on your part.
+
+The indicator is, in order: `BusyIconView` if you set one, a motion icon if `BusyMotionIcon` is set (default
+`loader`), or a platform `ActivityIndicator` if you clear it.
+
+### Appearance is emphasis, Type is meaning
+
+They stay orthogonal on purpose — that is what lets a destructive action be loud (`Filled` + `Critical`) or quiet
+(`Text` + `Critical`) without an enum member for every pairing. `Appearance` is `Filled`, `Tonal`, `Outlined`,
+`Text` or `Elevated`; `Type` is `Primary`, `Secondary`, `Success`, `Warning`, `Critical` or `Info`.
+
+Everything resolves through the [theme tokens](/controls/theming/) — `SetDynamicResource` on MAUI,
+`--shiny-color-*` custom properties on Blazor — so a live theme swap restyles a button with no re-render. Any
+explicit colour short-circuits its token, which means it survives every theme change; leave them unset unless you
+mean to pin the colour.
+
+### The command integration (MAUI)
+
+Two behaviours, both on by default, and both with a sharper edge than they look:
+
+**`CanExecute` → disabled** goes through MAUI's own `IsEnabledCore` — the same mechanism
+`Microsoft.Maui.Controls.Button` uses — rather than writing `IsEnabled`. A button that wrote `IsEnabled` would
+overwrite your binding, and a command becoming executable again would silently re-enable a button you had
+deliberately switched off.
+
+**`AutoBusy`** solves the fact that `ICommand.Execute` returns `void`, so a button handed an async command has no
+handle on the work it just started. Every async command implementation exposes an `ExecutionTask` or an
+`IsRunning`/`IsExecuting` flag — MVVM Toolkit's, Prism's, ReactiveUI's, most hand-rolled ones — but there is no
+shared interface to type against. Rather than put an MVVM framework dependency into the core controls package
+(landing it in every consumer's app, whichever framework they actually use), the shape is discovered once per
+command type and cached. Set `AutoBusy="False"` and own `State` yourself for a fully trimmed or NativeAOT build.
+
+## Where to go next
+
+- **[Blazor Playground](https://shinyorg.github.io/controls/)** — motion icons and `ShinyButton`, live, right now.
+- **[Keyframe](/controls/keyframe/)** — [XAML](/controls/keyframe/xaml/),
+  [easing](/controls/keyframe/easing/), [timelines & playback](/controls/keyframe/timelines/),
+  [drawn scenes](/controls/keyframe/scenes/), [offscreen export](/controls/keyframe/export/).
+- **[Motion Icons](/controls/motion-icons/)** — [the icon set](/controls/motion-icons/icons/),
+  [triggers](/controls/motion-icons/triggers/), [presets](/controls/motion-icons/presets/),
+  [custom artwork](/controls/motion-icons/custom/).
+- **[ShinyButton](/controls/button/)** — [states & commands](/controls/button/states/),
+  [Blazor usage](/controls/button/blazor/).
