@@ -39,14 +39,13 @@ export type ShinyComponent = {
     hideFromAppBuilder?: boolean;
 }
 
+/** Mirrors the top-level documentation sections in `src/sidebar-topics.mjs`. */
 export type ShinyCategoryId =
-    | 'core'
-    | 'essentials'
-    | 'devices'
-    | 'platformdata'
-    | 'intelligence'
+    | 'foundation'
+    | 'device'
     | 'controls'
-    | 'storage';
+    | 'storage'
+    | 'server';
 
 export type ShinyCategory = {
     id: ShinyCategoryId;
@@ -61,21 +60,13 @@ export type ShinyCategory = {
     tintDark: string;
 }
 
-/** Ordered so the grid naturally forms balanced rows (12-col).
- *  Row 1: core (12)
- *  Row 2: essentials (8) + storage (4)
- *  Row 3: devices (8) + platformdata (4)
- *  Row 4: intelligence (12)
- *  Row 5: controls (12)
- */
+/** One row per documentation section, in the same order as the sidebar topics. */
 export const ShinyCategories: ShinyCategory[] = [
-    { id: 'core',          title: 'Core & Infrastructure',       span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
-    { id: 'essentials',    title: 'App Essentials',            span: 8,  color: '#F43F5E', tint: '#FFE7EC', tintDark: '#421824' },
-    { id: 'storage',       title: 'Data & Storage',              span: 4,  color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
-    { id: 'devices',       title: 'Device & Sensors',            span: 8,  color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
-    { id: 'platformdata',  title: 'Platform Data',               span: 4,  color: '#8B5CF6', tint: '#EDE9FE', tintDark: '#2E1F5E' },
-    { id: 'intelligence',  title: 'On-Device Intelligence',      span: 12, color: '#14B8A6', tint: '#CCFBF1', tintDark: '#0C3B36' },
+    { id: 'foundation',    title: 'Foundation',                  span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
+    { id: 'device',        title: 'Mobile & Device',             span: 12, color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
+    { id: 'storage',       title: 'Data & Storage',              span: 12, color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
+    { id: 'server',        title: 'Server & Cloud',              span: 12, color: '#14B8A6', tint: '#CCFBF1', tintDark: '#0C3B36' },
 ];
 
 export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'controls', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk'];
@@ -121,7 +112,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Mediator.Blazor",
         "aspnetNuget": "Shiny.Mediator.AspNet",
         "description": "Mediator",
-        "category": "core",
+        "category": "foundation",
         "version" : "6.9.0-beta-0001"
     },
     {
@@ -131,7 +122,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE",
-        "category": "devices",
+        "category": "device",
         "version": DEFAULT_VERSION
     },
     {
@@ -140,14 +131,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Hosting.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE Hosting",
-        "category": "devices",
+        "category": "device",
         "version": DEFAULT_VERSION
     },
     {
         "id": "obd",
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
-        "category": "devices",
+        "category": "device",
         "version": "1.1.0-beta-0001",
         "additionalNugets": [
             { "nuget": "Shiny.Obd", "version": "1.1.0-beta-0001" },
@@ -159,7 +150,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "jobs",
         "nuget": "Shiny.Jobs",
         "description": "Periodic Jobs",
-        "category": "essentials",
+        "category": "device",
         "version": DEFAULT_VERSION
     },
     {
@@ -167,7 +158,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Locations",
         "blazorNuget": "Shiny.Locations.Blazor",
         "description": "GPS",
-        "category": "devices",
+        "category": "device",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -175,14 +166,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "geofencing",
         "nuget": "Shiny.Locations",
         "description": "Geofencing",
-        "category": "devices",
+        "category": "device",
         "version": DEFAULT_VERSION
     },
     {
         "id": "httptransfers",
         "nuget": "Shiny.Net.Http",
         "description": "HTTP file uploads and downloads",
-        "category": "essentials",
+        "category": "device",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -192,7 +183,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Net.Discovery",
         "macOsSupported": true,
         "description": "Network Discovery (mDNS/Bonjour)",
-        "category": "essentials",
+        "category": "device",
         "version": DEFAULT_VERSION
     },
     {
@@ -201,7 +192,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Notifications.Linux",
         "macOsSupported": true,
         "description": "Local Notifications",
-        "category": "essentials",
+        "category": "device",
         "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -211,7 +202,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Push.Blazor",
         "macOsSupported": true,
         "description": "Push Notifications (Native)",
-        "category": "essentials",
+        "category": "device",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -219,7 +210,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushfirebase",
         "nuget": "Shiny.Push.FirebaseMessaging",
         "description": "Push Notifications - Firebase (iOS)",
-        "category": "essentials",
+        "category": "device",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": "5.1.0"
     },
@@ -227,7 +218,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushazure",
         "nuget": "Shiny.Push.AzureNotificationHubs",
         "description": "Push Notifications - Azure Notification Hubs",
-        "category": "essentials",
+        "category": "device",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -235,42 +226,42 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
-        "category": "platformdata",
+        "category": "device",
         "version": "4.1.0"
     },
     {
         "id": "music-ai",
         "nuget": "Shiny.Music.Extensions.AI",
         "description": "Music Library - AI Tools",
-        "category": "platformdata",
+        "category": "device",
         "version": "4.1.0"
     },
     {
         "id": "health",
         "nuget": "Shiny.Health",
         "description": "Health Data",
-        "category": "platformdata",
+        "category": "device",
         "version": "2.0.1"
     },
     {
         "id": "health-ai",
         "nuget": "Shiny.Health.Extensions.AI",
         "description": "Health Data - AI Tools",
-        "category": "platformdata",
+        "category": "device",
         "version": "2.0.1"
     },
     {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
-        "category": "core",
+        "category": "device",
         "version": DEFAULT_VERSION
     },
     {
         "id": "shell",
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
-        "category": "essentials",
+        "category": "device",
         "version": "6.3.2"
     },
     {
@@ -470,14 +461,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "stores",
         "nuget": "Shiny.Extensions.Stores",
         "description": "Key/Value Stores",
-        "category": "core",
+        "category": "storage",
         "version": "5.1.5"
     },
     {
         "id": "localization",
         "nuget": "Shiny.Extensions.Localization.Generator",
         "description": "Localization",
-        "category": "core",
+        "category": "foundation",
         "version": "2.0.1",
         "additionalNugets": [
             { "nuget": "Microsoft.Extensions.Localization", "version": "10.0.11" }
@@ -621,14 +612,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "reflector",
         "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
-        "category": "core",
+        "category": "foundation",
         "version": "5.1.5"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
-        "category": "core",
+        "category": "foundation",
         "version": "5.1.5"
     },
     {
@@ -642,7 +633,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "spatial-geofencing",
         "nuget": "Shiny.Spatial.Geofencing",
         "description": "Spatial Geofencing",
-        "category": "devices",
+        "category": "device",
         "foregroundService": true,
         "version": "2.0.0"
     },
@@ -650,14 +641,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "contactstore",
         "nuget": "Shiny.Contacts",
         "description": "Contact Store",
-        "category": "platformdata",
+        "category": "device",
         "version": "5.5.0-beta-0073"
     },
     {
         "id": "calendarstore",
         "nuget": "Shiny.Calendar",
         "description": "Calendar Store",
-        "category": "platformdata",
+        "category": "device",
         "macOsSupported": true,
         "version": "5.5.0-beta-0073"
     },
@@ -665,7 +656,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "calendarstore-ai",
         "nuget": "Shiny.Calendar.Extensions.AI",
         "description": "Calendar Store - AI Tools",
-        "category": "platformdata",
+        "category": "device",
         "macOsSupported": true,
         "version": "5.5.0-beta-0073"
     },
@@ -673,14 +664,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "aiconversation",
         "nuget": "Shiny.AiConversation",
         "description": "AI Conversations",
-        "category": "essentials",
+        "category": "device",
         "version": "3.0.0-beta-0029"
     },
     {
         "id": "faceintelligence",
         "nuget": "Shiny.FaceIntelligence.Onnx",
         "description": "Face Recognition",
-        "category": "intelligence",
+        "category": "device",
         "version": RECOGNITION_VERSION,
         "additionalNugets": [
             { "nuget": "Shiny.FaceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
@@ -691,7 +682,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "voiceintelligence",
         "nuget": "Shiny.VoiceIntelligence.Onnx",
         "description": "Voice / Speaker Recognition",
-        "category": "intelligence",
+        "category": "device",
         "version": RECOGNITION_VERSION,
         "additionalNugets": [
             { "nuget": "Shiny.VoiceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
@@ -702,7 +693,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentintelligence",
         "nuget": "Shiny.DocumentIntelligence",
         "description": "Document Scanning & Extraction",
-        "category": "intelligence",
+        "category": "device",
         "macOsSupported": true,
         "version": RECOGNITION_VERSION
     },
@@ -710,28 +701,28 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "speech",
         "nuget": "Shiny.Speech",
         "description": "Speech (STT/TTS)",
-        "category": "devices",
+        "category": "device",
         "version": "3.0.0-beta-0029"
     },
     {
         "id": "speechazure",
         "nuget": "Shiny.Speech.Azure",
         "description": "Speech - Azure AI Speech",
-        "category": "devices",
+        "category": "device",
         "version": "3.0.0-beta-0029"
     },
     {
         "id": "speechelevenlabs",
         "nuget": "Shiny.Speech.ElevenLabs",
         "description": "Speech - ElevenLabs TTS",
-        "category": "devices",
+        "category": "device",
         "version": "3.0.0-beta-0029"
     },
     {
         "id": "speechtypecast",
         "nuget": "Shiny.Speech.Typecast",
         "description": "Speech - Typecast TTS",
-        "category": "devices",
+        "category": "device",
         "version": "3.0.0-beta-0029"
     },
     {
@@ -739,21 +730,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Data.Sync",
         "blazorNuget": "Shiny.Data.Sync.Blazor",
         "description": "Data Sync",
-        "category": "essentials",
+        "category": "storage",
         "version": "5.5.0-beta-0073"
     },
     {
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
-        "category": "core",
+        "category": "device",
         "version": "5.1.5"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
-        "category": "core",
+        "category": "server",
         "version": "5.1.5"
     },
     {
@@ -761,7 +752,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.BlazorHosting",
         "blazorNuget": "Shiny.Extensions.BlazorHosting",
         "description": "Blazor App Support (device/browser info, culture & time-zone changes)",
-        "category": "core",
+        "category": "server",
         "version": "5.1.5"
     },
     {
@@ -774,7 +765,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Net.HttpServer",
         "macOsSupported": true,
         "description": "HTTP Server (HTTP/1.1, HTTP/2 & HTTP/3, WebSockets, SSE, tunnelling)",
-        "category": "core",
+        "category": "server",
         "version": "1.0.0-beta.11"
     }
 ];

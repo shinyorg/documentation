@@ -1,0 +1,292 @@
+---
+title: Geofencing
+description: GPS-driven geofence monitoring over DocumentDb spatial documents on iOS, Android, and Mac Catalyst
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Steps } from '@astrojs/starlight/components';
+
+`Shiny.DocumentDb.Geofencing` turns any spatially-mapped document type into geofence regions and watches
+them with background GPS. Your regions are just documents — the same ones you already query, insert, and
+sync — so there is no separate region store to keep in step, and no cap on how many you can monitor.
+
+It builds on [Shiny.Locations](/locations/gps) for background GPS and DocumentDb's
+[spatial queries](/documentdb/spatial) for the per-reading region lookup.
+
+:::caution[iOS, Android, and Mac Catalyst only]
+The package multi-targets `net10.0-ios`, `net10.0-android`, `net10.0-maccatalyst`, and `net10.0`, but the
+`AddDocumentGeofencing` registration only exists on the three platform targets — the plain `net10.0` build
+carries the types so shared projects still compile, and has no GPS to drive them.
+:::
+
+## Why document geofencing?
+
+Platform geofencing ([Shiny.Locations](/locations/geofencing)) is capped at 20 regions on iOS and 60 on
+Android, and every region is a circle.
+
+| | Platform Geofencing | Document Geofencing |
+|---|---|---|
+| **Max regions** | 20 (iOS) / 60 (Android) | Unlimited |
+| **Region shapes** | Circles only | Any polygon (with holes), or a point + radius |
+| **Data source** | Registered one at a time | Your documents, filtered by a predicate |
+| **Region payload** | Identifier string | The whole document |
+| **Where regions live** | On the device | On-device SQLite *or* a shared server database |
+| **Detection** | OS-level callbacks | GPS + spatial query |
+| **Battery** | Very efficient (OS-managed) | Configurable reading thresholds |
+
+:::tip
+For a handful of simple circles, [platform geofencing](/locations/geofencing) is more battery efficient —
+the OS does the work. Reach for document geofencing when you have many regions, real polygon boundaries, or
+regions that change server-side.
+:::
+
+## Setup
+
+<Steps>
+1. Install the NuGet package
+
+   <NugetBadge name="Shiny.DocumentDb.Geofencing" showLabel={true} />
+
+   ```bash
+   dotnet add package Shiny.DocumentDb.Geofencing
+   ```
+
+2. Map a geometry on your region document
+
+   ```csharp
+   public class Zone
+   {
+       public string Id { get; set; } = null!;
+       public string Name { get; set; } = null!;
+       public bool Active { get; set; }
+       public Geometry Boundary { get; set; } = null!;
+   }
+   ```
+
+   ```csharp
+   builder.Services.AddDocumentStore(opts =>
+   {
+       opts.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={dbPath}");
+       opts.ConfigureDocument<Zone>(cfg => cfg.MapSpatialProperty(nameof(Zone.Boundary), z => z.Boundary));
+   });
+   ```
+
+3. Implement the delegate
+
+   ```csharp
+   public class MyGeofenceDelegate(ILogger<MyGeofenceDelegate> logger) : IDocumentGeofenceDelegate
+   {
+       public Task OnRegionChanged(DocumentRegionChange change)
+       {
+           var verb = change.Entered ? "Entered" : "Exited";
+           logger.LogInformation("{Verb} {Region} ({Set})", verb, change.RegionName, change.RegionSet);
+
+           var zone = change.RegionAs<Zone>();   // the region document itself
+           return Task.CompletedTask;
+       }
+   }
+   ```
+
+4. Register the monitor in `MauiProgram.cs`
+
+   ```csharp
+   builder.Services.AddDocumentGeofencing<MyGeofenceDelegate>(cfg =>
+   {
+       cfg.MinimumDistance = Distance.FromMeters(300);
+       cfg.MinimumTime = TimeSpan.FromMinutes(1);
+
+       cfg.AddRegionSet<Zone>("zones", z => z.Id, z => z.Name, filter: z => z.Active);
+   });
+   ```
+
+5. Start monitoring
+
+   ```csharp
+   // inject IDocumentGeofenceManager
+   await geofences.RequestAccess();
+   await geofences.Start();
+   ```
+</Steps>
+
+:::caution[Shiny hosting is required]
+The monitor runs as a Shiny startup task and persists its state in Shiny's key/value store, so the app must
+call `builder.UseShiny()` — see [MAUI hosting](/foundation/hosting/maui). Background location also needs the usual
+platform declarations: `NSLocationAlwaysAndWhenInUseUsageDescription` plus the `location` background mode on
+iOS, and `ACCESS_BACKGROUND_LOCATION` on Android. [Shiny.Locations](/locations/gps) covers both.
+:::
+
+## Runnable sample
+
+`samples/Sample.Maui` in the repo wires all of this up — a **Geofences** tab with start/stop, a live
+transition log fed by the delegate, a "Where am I?" button over `GetCurrent()`, and the seeded region
+documents themselves. It seeds four city boxes (containment) plus four landmark points (proximity), so both
+modes are visible side by side, and it runs under the sample's AOT-strict settings
+(`UseReflectionFallback = false`, source-generated JSON).
+
+## Region sets
+
+A **region set** is one document type, queried one way. Register as many as you like — each is tracked
+independently, so the device can be inside one region of every set at the same time.
+
+```csharp
+cfg.AddRegionSet<GeoRegion>("states", r => r.Id, r => r.Name)
+   .AddRegionSet<GeoCity>("cities", c => c.Id, c => c.Name, withinMeters: 25_000)
+   .AddRegionSet<Zone>("zones", z => z.Id, z => z.Name, filter: z => z.Active);
+```
+
+| Parameter | Description |
+|---|---|
+| `name` | Stable name for the set — echoed on every change and used as the persistence key |
+| `idSelector` | Returns the document's id. Must be the property the store keys the document by |
+| `nameSelector` | Optional display name copied onto each change event |
+| `withinMeters` | Null (default) for **containment**; set it for **proximity** |
+| `filter` | Optional predicate narrowing which documents of the type are monitored |
+
+### Containment vs proximity
+
+**Containment** (the default) asks whether the GPS point falls *inside* the stored geometry — the right
+mode for polygon boundaries like states, cities, or delivery zones.
+
+**Proximity** (`withinMeters:`) asks whether the GPS point is within a radius of the stored geometry.
+
+:::caution[Point regions must use `withinMeters`]
+A GPS point never falls "inside" another point, so a set of `GeoPoint` documents — store locations, city
+centres, pickup spots — will never match in containment mode. Give those sets a radius.
+:::
+
+When several regions in one set match, the **nearest wins** — the store orders by distance from the
+position. In containment mode overlapping polygons all sit at 0m, so keep one logical layer per set.
+
+## Reference geo data as regions
+
+The [reference dataset](/documentdb/geo-reference) is already mapped for spatial queries, so it drops
+straight in as a region source — US states and Canadian provinces by containment, cities by proximity:
+
+```csharp
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={dbPath}");
+    opts.MapGeoReferenceData();
+});
+builder.Services.AddGeoReferenceSeeder();
+
+builder.Services.AddDocumentGeofencing<MyGeofenceDelegate>(cfg => cfg
+    .AddRegionSet<GeoRegion>("regions", r => r.Id, r => r.Name)
+    .AddRegionSet<GeoCity>("cities", c => c.Id, c => c.Name, withinMeters: 25_000)
+);
+```
+
+Driving from Denver to Casper raises four transitions: exit `US-CO-denver`, exit `US-CO`, enter `US-WY`,
+and — once inside 25km of Casper — enter `US-WY-casper`.
+
+## Transitions
+
+Each transition is one enter or one exit of one region. Crossing directly from region A to region B in the
+same set raises **two** events: the exit from A first, then the entry into B. Moving *within* the same
+region raises nothing.
+
+```csharp
+public record DocumentRegionChange(
+    string RegionSet,
+    string RegionId,
+    string? RegionName,
+    object? Region,
+    bool Entered,
+    GeoPoint Position
+);
+```
+
+| Property | Description |
+|---|---|
+| `RegionSet` | The set the region belongs to |
+| `RegionId` | The region document's id |
+| `RegionName` | The display name, when the set was registered with a name selector |
+| `Region` | The region document. Null only when an exit fires for a region since deleted from the store |
+| `Entered` | `true` for entry, `false` for exit |
+| `Position` | The GPS position that produced the transition |
+
+`change.RegionAs<T>()` casts `Region` back to your document type.
+
+:::note[Exceptions are contained]
+If your delegate throws, the exception is logged and the remaining transitions for that reading are still
+delivered. One bad handler can't stall the monitor.
+:::
+
+## The manager
+
+```csharp
+public interface IDocumentGeofenceManager
+{
+    bool IsStarted { get; }
+    Task<AccessState> RequestAccess();
+    Task Start();
+    Task Stop();
+    Task<IReadOnlyList<DocumentCurrentRegion>> GetCurrent(CancellationToken cancellationToken = default);
+}
+```
+
+| Member | Description |
+|---|---|
+| `IsStarted` | Whether monitoring is running. Persisted, so it survives an app restart |
+| `RequestAccess()` | Requests the background GPS permissions |
+| `Start()` | Starts GPS and region detection. Idempotent |
+| `Stop()` | Stops monitoring and forgets which regions the device was in |
+| `GetCurrent()` | Resolves the current region per set from the last GPS reading — no events, no state change |
+
+`GetCurrent()` returns one `DocumentCurrentRegion` per set, with `RegionId` / `Region` null when the device
+is outside every region in that set, and `DistanceMeters` for proximity sets.
+
+```csharp
+foreach (var current in await geofences.GetCurrent())
+    Console.WriteLine($"{current.RegionSet}: {current.RegionName ?? "outside"}");
+```
+
+`Start()` throws `NotSupportedException` when the store's provider can't do spatial queries — see
+[provider support](/documentdb/spatial/#checking-provider-support). LiteDB, IndexedDB, Azure Table, and
+DynamoDB cannot back geofencing.
+
+## Configuration
+
+```csharp
+public class DocumentGeofenceConfig
+{
+    public string? StoreName { get; set; }        // default: the unkeyed store
+    public GpsRequest GpsRequest { get; set; }    // default: realtime background
+    public Distance? MinimumDistance { get; set; } // default: 300m
+    public TimeSpan? MinimumTime { get; set; }     // default: 1 minute
+    public Distance? MaximumDistance { get; set; } // default: unset
+    public TimeSpan? MaximumTime { get; set; }     // default: unset
+}
+```
+
+| Property | Default | Description |
+|---|---|---|
+| `StoreName` | _(unkeyed)_ | Which keyed document store holds the regions |
+| `GpsRequest` | Realtime background | The GPS listener configuration |
+| `MinimumDistance` | 300 meters | Minimum movement before a reading is evaluated |
+| `MinimumTime` | 1 minute | Minimum time between evaluated readings |
+| `MaximumDistance` | _(unset)_ | Safety net — always evaluate once the device has moved this far |
+| `MaximumTime` | _(unset)_ | Safety net — always evaluate after this much time |
+
+Minimums use **AND** logic: when both are set the device must move `MinimumDistance` *and* `MinimumTime`
+must elapse. Maximums use **OR** and override the minimums. Every reading that passes runs one spatial query
+per set, so these thresholds are the battery dial.
+
+## Surviving a restart
+
+The current region of each set is persisted through Shiny's key/value store. When the OS kills and relaunches
+the app, monitoring restores itself and the device's known position with it — so a region you were already
+inside does **not** replay its entry, and an exit raised after the relaunch still describes the region it
+left (re-read by id).
+
+## How it works
+
+1. A GPS reading arrives from [Shiny.Locations](/locations/gps) in the background
+2. The distance/time thresholds decide whether to evaluate it
+3. Each region set runs one spatial query for the position — `GeoIntersects` for containment,
+   `GeoWithinDistance` for proximity, both ordered by distance so the nearest match wins
+4. The matched region id is compared to the persisted one; a difference raises exit then entry
+5. The new id is persisted
+
+On SQLite the query is an R\*Tree bounding-box prune followed by an in-process relate, so it stays cheap
+against large region tables. On a server provider the same reading queries the shared database instead —
+useful when regions are managed centrally, at the cost of needing connectivity for each evaluated reading.
