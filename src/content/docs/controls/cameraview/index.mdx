@@ -39,6 +39,7 @@ Two pluggable pipelines are what set it apart from other camera controls, and th
 - **Torch / flashlight** (`IsTorchOn`, continuous) and **still-capture flash** (`FlashMode` — Off / On / Auto).
 - **Photo capture** → JPEG bytes with the effects chain baked in, plus `CaptureAndStopAsync()` for a "scan then freeze" flow.
 - **Video recording** with optional audio, and session-level **quality, bitrate and frame-rate** control (`VideoQuality` `Lowest`…`Highest`, with fallback to the nearest rung the device supports). Recording audio **shares the audio session** on Apple platforms, so it neither stops the user's music nor gets stopped by it.
+- **Orientation that follows the device** (`Orientation`, default `Device`) across the preview, stills, recorded video and analyzer frames alike — or pinned to a fixed value when several recordings have to agree with one another.
 - **Burn-in video overlays** — composite a watermark, timestamp or telemetry into every *encoded* frame via `VideoRecordingOptions.Overlay`, drawn with `Microsoft.Maui.Graphics` so one implementation covers every platform.
 - **Recording and analyzing at the same time** on every platform — a dash-cam app can read signs off its own live feed while it records.
 
@@ -235,6 +236,45 @@ microphone hears whatever the speakers are playing, and nothing removes that aft
 anything recording continuously — a dash cam, a body cam, a long take — and for anything a driver is using.
 :::
 
+### Orientation
+
+The camera follows the device by default. `CameraView.Orientation` covers the live preview, captured stills, recorded video **and the frames a frame analyzer sees** — on Apple those all hang off connections on a single `AVCaptureSession`, so they cannot be oriented independently of one another.
+
+```xml
+<cam:CameraView x:Name="Camera" Orientation="Device" />
+```
+
+```csharp
+this.Camera.Orientation = CameraOrientation.Device;            // default — follow the display
+this.Camera.Orientation = CameraOrientation.LandscapeTopLeft;  // pin it
+```
+
+| `CameraOrientation` | Device is… | Apple (`AVCaptureVideoOrientation`) | Android (`Surface`) |
+|---|---|---|---|
+| `Device` *(default)* | whatever it is | interface orientation of the window scene | display rotation |
+| `Portrait` | upright, top edge up | `Portrait` | `ROTATION_0` |
+| `PortraitUpsideDown` | inverted, top edge down | `PortraitUpsideDown` | `ROTATION_180` |
+| `LandscapeTopLeft` | on its side, top edge **left** | `LandscapeRight` | `ROTATION_90` |
+| `LandscapeTopRight` | on its side, top edge **right** | `LandscapeLeft` | `ROTATION_270` |
+
+:::caution[The landscape members are named for the hardware, not for either platform's convention]
+Every platform ships a `LandscapeLeft`/`LandscapeRight` pair and they disagree: `UIInterfaceOrientationLandscapeLeft` **is** `UIDeviceOrientationLandscapeRight` (Apple's own headers note the inversion), and `AVCaptureVideoOrientation` follows the *interface* convention while most code reading a rotation is holding a *device* one. Inheriting either name would import the confusion, so `LandscapeTopLeft`/`LandscapeTopRight` describe where the device's **top edge** physically points and the handlers own the mapping — hence the crossed-over pair in the table above, which is correct rather than a typo.
+
+The Android column assumes a portrait-natural device, which is every phone but not every tablet. `Device` reads the display rotation directly and carries no such assumption.
+:::
+
+:::caution[A change is deferred while a recording is in progress]
+Re-orienting a capture connection transposes the pixel buffer, and an encoder is configured with fixed dimensions from its **first frame** — on Apple the owned `AVAssetWriter` path literally reads width and height off frame one and never revisits them. Handing it transposed buffers afterwards does not produce a rotated file, it produces a corrupt one. The pending value is applied once the recording finishes.
+
+It follows that an app doing **segmented** continuous capture — a dash cam, where every segment is its own `StartVideoRecordingAsync` call — should pin an explicit value rather than leaving `Device`. A device rotated between segments otherwise yields a set of files that disagree, and the usual way that surfaces is a later concatenation or trim taking its transform from the first track and rendering every other one sideways.
+:::
+
+:::note[A normalized `ScanWindow` is orientation-dependent]
+Because the analyzer sees the same oriented frame the recording does, a `ScanWindow` calibrated as percentages of a portrait frame lands somewhere else entirely on a landscape one. An app that supports both orientations needs a calibration per orientation rather than one shared set of numbers.
+:::
+
+macOS and Windows ignore this property — neither has a rotating display behind the capture device.
+
 ### Quality, bitrate and frame rate
 
 Recording quality is set on the **control**, not on `VideoRecordingOptions`:
@@ -359,6 +399,7 @@ Set `CameraId` back to `null` to fall back to `Facing`.
 | `VideoBitrate` | `int?` | `null` | Target video encoding bitrate in bits/sec; `null` lets the platform choose for the resolution |
 | `VideoFrameRate` | `int?` | `null` | Target capture frame rate; `null` lets the platform choose. Clamped to what the device's active format supports |
 | `MixWithOtherAudio` | `bool` | `true` | **Apple only.** Recorded audio shares the audio session with other apps rather than interrupting them — and stops their playback from interrupting the capture. See [Sharing audio with other apps](#sharing-audio-with-other-apps) |
+| `Orientation` | `CameraOrientation` | `Device` | How the preview, stills, recorded video and analyzer frames are oriented — see [Orientation](#orientation) |
 | `IsRecording` | `bool` (read-only) | `false` | Whether a recording is in progress |
 | `Overlays` | `IReadOnlyList<OverlayBox>` | empty | Latest aggregated overlay boxes (read-only) |
 
