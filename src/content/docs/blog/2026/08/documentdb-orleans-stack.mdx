@@ -1,0 +1,280 @@
+---
+title: "The Whole Orleans Persistence Stack on One Database"
+date: 2026-08-21
+authors:
+  - allanritchie
+tags:
+  - documentdb
+  - orleans
+  - feature
+excerpt: "Membership, grain storage, reminders, grain directory and — as of 13.2 — durable streams, all on one IDocumentStore and one connection string. Grain state stays queryable JSON you can read without activating a grain, and the stream backlog is a table you can open in the admin tool."
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.DocumentDb.Orleans" showLabel={true} />
+
+Microsoft Orleans is excellent at the part that is hard — virtual actors, placement, transparent
+activation. Persistence is the part it leaves to you, and it leaves it to you *five separate times*:
+cluster membership, grain storage, reminders, the grain directory, and streams are five independent
+provider contracts, historically satisfied by five different packages with five different setup
+conventions, storage layouts and operational stories.
+
+[`Shiny.DocumentDb.Orleans`](/documentdb/orleans) implements all five against a single abstraction —
+`IDocumentStore`. One connection string, one backup, one set of tables, and everything Orleans persists
+is **structured JSON you can query** rather than an opaque serialized blob.
+
+```bash
+dotnet add package Shiny.DocumentDb.Orleans
+```
+
+## Five contracts, one store
+
+```csharp
+siloBuilder
+    .AddDocumentDbGrainStorage("Default", o => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbReminders(o           => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbClustering(o          => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbGrainDirectory("Default", o => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs))
+    .AddDocumentDbStreams("Default",    o => o.DatabaseProvider = new PostgreSqlDatabaseProvider(cs));
+```
+
+Because DocumentDb is schema-free, there are **no setup scripts** — the tables are created on demand at
+silo start. Each store has its own default table (`orleans_default`, `orleans_reminders`,
+`orleans_membership`, `orleans_graindirectory`, `orleans_streams`) and they all share the same
+`OrleansStoreOptions` shape: give it a relational `DatabaseProvider` and it builds and owns its store, or
+give it a `StoreFactory` and it uses one you built — which is the escape hatch for MongoDB, Cosmos, LiteDB
+or anything else.
+
+MongoDB and Cosmos also get first-class companion packages, and it's worth saying plainly that **there is
+no first-party Orleans MongoDB provider**, so this fills a real gap:
+
+```csharp
+siloBuilder.AddMongoDbGrainStorage("Default", connectionString, databaseName: "orleans");   // Shiny.DocumentDb.Orleans.MongoDb
+siloBuilder.AddCosmosDbGrainStorage("Default", connectionString, databaseName: "orleans");  // Shiny.DocumentDb.Orleans.CosmosDb
+```
+
+## Grain state you can query without activating a grain
+
+Orleans grain storage is a point key/value contract — `Read` / `Write` / `Clear` by grain id, with **no
+query surface at all**. "Which shopping carts are over $1,000?" is a question you cannot ask the store.
+Normally you'd have to activate every cart grain to find out — a silo round trip that places the grain,
+deserializes its state and runs `OnActivateAsync` — and because the built-in providers write state as an
+opaque blob, going around them straight to the database isn't an option either.
+
+This provider stores each grain's state as structured JSON under `$.state`, in an ordinary table. So you
+point a read-only store at the same table and ask:
+
+```csharp
+var opts = new DocumentStoreOptions
+{
+    DatabaseProvider      = new PostgreSqlDatabaseProvider(connectionString),
+    JsonSerializerOptions = new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase }
+};
+DocumentDbGrainStorage.ConfigureGrainState(opts, "orleans_default");
+var readStore = new DocumentStore(opts);
+
+// Every ShoppingCart grain over 1000 — no grain activated, no silo involved.
+var bigCarts = await readStore.Query<GrainStateRecord>(
+    "json_extract(Data, '$.state.total') > @min",
+    parameters: new { min = 1000 });
+```
+
+Reporting, dashboards, ops tooling, bulk inspection, analytics — everything that is painful-to-impossible
+when the only door into grain state is activating the grain becomes a plain document query.
+
+:::caution[It's a read model, not the live grain]
+These queries see the **last persisted** state. An activated grain may be holding newer state it hasn't
+flushed (Orleans writes only when the grain calls `WriteStateAsync`), and the queries take no grain locks
+and don't serialize with grain turns. Treat it as an eventually-consistent read model — perfect for
+reporting and ops, not a substitute for calling the grain when you need the authoritative answer.
+:::
+
+## A free audit trail
+
+Grain state is a `GrainStateRecord` document like any other, which means it can opt into DocumentDb's
+[temporal history](/documentdb/temporal/). One line gives you a queryable record of every mutation a grain
+has ever persisted — no event sourcing to design, no extra infrastructure:
+
+```csharp
+opts.ConfigureDocument<GrainStateRecord>(cfg => cfg.MapTemporal(t => t.MaxVersions = 100));
+
+var history = await temporalStore.History<GrainStateRecord>("cart|user-42");
+```
+
+## Streams — the piece that completes the set
+
+[Persistent Orleans streams](/documentdb/orleans-streams) landed in 13.2 and are the newest member of the
+stack. Orleans' in-memory stream provider doesn't survive a restart; every durable alternative means
+running a queue service. This one is durable on the database your cluster already uses.
+
+```csharp
+siloBuilder.AddDocumentDbStreams("Default", o =>
+{
+    o.DatabaseProvider = new PostgreSqlDatabaseProvider(connectionString);
+    // o.TotalQueueCount = 8;                       // default
+    // o.Retention       = TimeSpan.FromHours(1);   // default; null keeps everything
+});
+```
+
+Producing and consuming is the ordinary Orleans stream API — nothing about the grain code is
+provider-specific.
+
+:::caution[Not an Event Hub replacement]
+This is a database-backed queue. Expect **thousands** of events per second on PostgreSQL, not the hundreds
+of thousands an event-streaming platform delivers. It exists so a team already running PostgreSQL or SQL
+Server gets durable streams without a second piece of infrastructure — not to compete with Kafka on scale.
+:::
+
+### Why there's a counter row and not a `BIGSERIAL`
+
+The obvious implementation of "monotonic position per queue" is an identity column. It is a correctness
+trap, and it's worth understanding why. Sequence values are handed out at **insert** time; rows become
+visible at **commit** time, and those two orders are not the same:
+
+1. Transaction A inserts, takes sequence 5.
+2. Transaction B inserts, takes 6, and commits first.
+3. The receiver reads up to 6 and advances its cursor past 5.
+4. Transaction A commits. Event 5 is behind the cursor and is **never delivered**.
+
+Silently, and only under load. So instead each queue owns a counter row, and an enqueue reserves its
+position under a row lock inside the same transaction:
+
+```
+BEGIN
+  counter = Get(queueId, LockMode.Update)   -- SELECT … FOR UPDATE
+  seq     = counter.Next++
+  INSERT the event row with Seq = seq
+COMMIT
+```
+
+The lock does double duty: a second producer blocks until the first *commits*, so assignment order and
+commit order are the same order by construction, and the sequence is gap-free. The trade is explicit —
+enqueue throughput per queue is bounded by the lock hold time on one row — and `TotalQueueCount` is the
+dial, since each queue has its own counter row.
+
+That row lock is also why the backend list is short: PostgreSQL, SQL Server, MySQL, MariaDB, Oracle and
+CockroachDB. It's a **capability check** (`SupportsPessimisticLocking`), not a name list, and it's enforced
+at silo start rather than on the first event — a cluster that boots and then drops events under load is a
+much worse failure than one that refuses to boot.
+
+### Two things a queue-backed provider can't do
+
+**Rewind past the cache.** Behind Azure Queue or SQS the message is gone once it's handed over, so a
+subscriber resuming from an old `StreamSequenceToken` gets `QueueCacheMissException`. Here the row is still
+in the table, so the cache replays it:
+
+```csharp
+await stream.SubscribeAsync(handler, lastToken);   // works across a silo restart
+```
+
+The rewind window is exactly `Retention` — the sweep that bounds table growth is the same thing that
+bounds how far back you can resume. Set it to the replay window you actually want and size the table for
+it.
+
+**Show you the backlog.** Stream events are ordinary documents, so you can look at them.
+`IStreamAdmin` is the in-process view, and [ShinyDocDbMyAdmin](/documentdb/admin) has a Streams screen
+answering the same questions in both the web and terminal front ends:
+
+```csharp
+var admin = services.GetRequiredKeyedService<IStreamAdmin>("Default");
+
+foreach (var stuck in await admin.StuckStreams(TimeSpan.FromMinutes(5)))
+    logger.LogWarning("{Stream}: {Count} undelivered since {Since}",
+        stuck.StreamId, stuck.UndeliveredCount, stuck.OldestUndeliveredAt);
+```
+
+Watch *oldest undelivered* rather than depth — depth alone can't tell a busy queue from a dead pulling
+agent, but age can. `IStreamAdmin` is deliberately read-only: an outbox message is a unit of work someone
+owns, so requeueing it means something, but a stream event is a position in a gap-free sequence that every
+subscriber holds a cursor into. Deleting one tears a hole in that sequence. A stuck stream gets fixed on
+the consumer side.
+
+## Concurrency, properly
+
+Orleans' ETag is the contract that stops two activations clobbering each other during a failover window.
+It maps onto the document version, and each provider honours it with a genuinely atomic compare-and-swap:
+
+| Orleans | Shiny.DocumentDb |
+|---|---|
+| document key | `Id = "{stateName}\|{grainId}"` |
+| ETag | `GrainStateRecord.Version` (via `cfg.MapVersionProperty`) |
+| concurrency conflict | `ConcurrencyException` → `InconsistentStateException` |
+| state blob | nested `JsonElement` (queryable, not opaque) |
+
+Relational providers fold the version check into `UPDATE … WHERE` and verify the row count, MongoDB uses
+an atomic version-predicate filter, and Cosmos uses a native `IfMatchEtag`. A stale write loses the race
+and surfaces as `InconsistentStateException` — exactly what Orleans expects. The PostgreSQL and MongoDB
+paths, including the stale-write conflict, are covered by integration tests.
+
+## Know your backend
+
+| Tier | Backends | Notes |
+|---|---|---|
+| **Recommended** | PostgreSQL, SQL Server, MySQL, Oracle | Atomic CAS folded into `UPDATE … WHERE`; ETag honoured across failover windows |
+| **Supported** | MongoDB | Good key distribution; atomic CAS via version-predicate filter |
+| **Limited / dev** | SQLite, LiteDB, IndexedDB, DuckDB | Single-writer / embedded / analytical — fine for dev, single-silo, or edge |
+| **Use with care** | Cosmos DB | CAS is correct, but it partitions by grain type — weigh the 20 GB / hot-partition trade before large-scale use |
+
+Three limits are worth knowing before production:
+
+- **Membership needs real multi-document transactions.** The per-silo rows and the global table-version row
+  are updated together, each gated on its own version, because that's how Orleans' table-version protocol
+  works. Relational or a MongoDB replica set — **not** Cosmos, whose transactional batches are
+  single-partition. Grain storage, reminders and the grain directory have no such requirement.
+- **Streams need row-level locking** — see above.
+- **The silo host is not an AOT target.** Grain-state and system-store *serialization* goes reflection-free
+  when you assign a `JsonSerializerContext`, but `Microsoft.Orleans.Runtime` is codegen-heavy, so a fully
+  AOT-published silo isn't a goal here.
+
+## Reflection-free serialization when you want it
+
+The provider's own envelope types — grain-state record, reminders, membership, grain-directory rows — are
+**always** source-generated. The one generic piece is your grain state `T`. Point a `JsonSerializerContext`
+at it and that goes reflection-free too:
+
+```csharp
+[JsonSerializable(typeof(CartState))]
+[JsonSerializable(typeof(UserPrefs))]
+public partial class GrainStateContext : JsonSerializerContext;
+
+siloBuilder.AddDocumentDbGrainStorage("Default", o =>
+{
+    o.DatabaseProvider      = new PostgreSqlDatabaseProvider(cs);
+    o.JsonSerializerOptions = new JsonSerializerOptions { TypeInfoResolver = GrainStateContext.Default };
+    o.UseReflectionFallback = false;   // throw on an unregistered state type instead of reflecting
+});
+```
+
+Purely opt-in — leave the defaults and you keep the familiar reflection-based behaviour. The same knobs
+exist on the reminder, clustering, grain-directory and stream options.
+
+## And in Aspire, it's one line
+
+If your silo runs under [.NET Aspire](/documentdb/aspire), the AppHost provisions the store and the silo
+points the whole stack at it:
+
+```csharp
+builder.AddDocumentStore("orleans");
+
+builder.UseOrleans(silo => silo.UseAspireDocumentDb("orleans"));
+```
+
+That's grain storage, reminders, clustering and the grain directory on the Aspire-provisioned store —
+connection, health check and telemetry included. Streams are one flag away and deliberately opt-in.
+The [next post in this pair](/blog/2026/08/documentdb-aspire/) covers the Aspire integration properly.
+
+## Get started
+
+```bash
+dotnet add package Shiny.DocumentDb.Orleans
+
+# optional companions
+dotnet add package Shiny.DocumentDb.Orleans.MongoDb
+dotnet add package Shiny.DocumentDb.Orleans.CosmosDb
+```
+
+- [Orleans provider docs](/documentdb/orleans)
+- [Orleans streams docs](/documentdb/orleans-streams)
+- [Temporal history](/documentdb/temporal/)
+- [GitHub](https://github.com/shinyorg/DocumentDb)

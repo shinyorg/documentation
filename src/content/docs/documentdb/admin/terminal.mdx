@@ -305,6 +305,66 @@ is registered, so the tab cannot appear.
 
 See [AI assistant](/documentdb/admin/assistant/) for what it can read and what that means.
 
+## Aspire AppHost
+
+Aspire 13.5 added interactive terminal sessions, which is what this front end needs to be modelled as a
+resource at all: `Shiny.DocumentDb.Aspire.Hosting` runs the tool next to the stores the AppHost already
+models, and you attach to it from the CLI.
+
+```csharp
+#pragma warning disable ASPIRETERMINAL001
+var pg    = builder.AddPostgres("pg").AddDatabase("ordersdb");
+var store = pg.AsDocumentStore("orders");
+
+builder.AddDocumentDbAdminTerminal()
+       .WithReference(store)
+       .WithStartupProfile(store)
+       .WaitFor(pg);
+```
+
+Then, once per repository:
+
+```bash
+aspire config set features.terminalCommandsEnabled true   # the terminal commands are behind a flag
+aspire terminal ps                                        # sessions, their size and peer count
+aspire terminal attach documentdb-terminal                # Ctrl+B D detaches, Ctrl+B T takes control
+```
+
+`WithReference` is the same call a consuming service makes — the tool reads the `ConnectionStrings:{name}`
++ `Shiny:DocumentDb:{name}:Provider` pair the [hosting integration](/documentdb/aspire) emits, so the store
+arrives as a host-provided connection. `WithStartupProfile` passes `--profile`, so attaching lands you on
+that database rather than on the connection list.
+
+The tool has to be installed: globally (`dotnet tool install -g ShinyDocDbMyAdmin.Tui`), or in the
+repository's local manifest, which is the form worth using for a shared repo —
+`AddDocumentDbAdminTerminal(tool: DocumentDbAdminTerminalTool.Local)` runs it through `dotnet tool run`,
+so a fresh clone gets it at the pinned version from `dotnet tool restore`.
+
+| Call | What it does |
+|---|---|
+| `AddDocumentDbAdminTerminal(name, tool, workingDirectory, configureTerminal)` | Adds the resource. `configureTerminal` sizes the pseudo-terminal — the default is 160x45, up from Aspire's 120x30, which cuts the explorer pane off the document grid. |
+| `WithStartupProfile(name)` / `WithStartupProfile(store)` | Opens straight into a connection instead of the list. |
+| `WithDataDirectory(path)` | Moves the tool's own state for this run. |
+| `WithReadOnly()` | Blocks every write path for every host-provided connection. |
+| `WithoutAi()` | Removes the [assistant](/documentdb/admin/assistant/) entirely. |
+
+### What it does and does not replace
+
+Locally it replaces the [container front end](/documentdb/admin/aspire/) outright, and it is the better
+fit for a file-backed store: the tool is a process on your machine, so a SQLite, SQLCipher or DuckDB file
+at a host path is simply reachable — no bind mount, no rewriting the connection string to a container path.
+
+It is **not** something that deploys. Aspire's terminal sessions are a dev-loop feature — the CLI attaches
+to a live pseudo-terminal on the machine running the AppHost — and a `dotnet tool` on a developer's machine
+is not a deployment target either, so the resource is excluded from the manifest. An admin UI that goes
+wherever the AppHost goes is still `AddDocumentDbAdmin`, which is a container.
+
+:::note[Experimental]
+`WithTerminal` ships under Aspire's own `ASPIRETERMINAL001` diagnostic, and this surface carries the same
+id rather than inventing one — a single suppression covers both. Attaching is a CLI operation in 13.5;
+the dashboard lists the resource but has no terminal view for it.
+:::
+
 ## Configuration
 
 The same keys as the web front end, read from the environment or from an optional
