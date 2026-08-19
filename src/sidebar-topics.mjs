@@ -555,6 +555,9 @@ export const sidebarTopics = [
         label: 'Collections & Grids',
         items:[
           { label: 'DataGrid', link: 'controls/datagrid/', jumpTo: true },
+          { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/#detail-breakdown-rows' },
+          { label: 'Async Detail & IsBusy', link: 'controls/datagrid/#loading-a-breakdown-on-demand' },
+          { label: 'TreeDataGrid', link: 'controls/datagrid/#tree-mode-treedatagrid' },
           { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
           { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
           { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },

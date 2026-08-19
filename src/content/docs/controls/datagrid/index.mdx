@@ -1,6 +1,6 @@
 ---
 title: DataGrid
-description: A feature-rich data grid for .NET MAUI and Blazor modeled on MudBlazor — typed columns, sorting, filtering, grouping, aggregates, selection, inline editing, paging, virtualization, and column resize/reorder
+description: A feature-rich data grid for .NET MAUI and Blazor modeled on MudBlazor — typed columns, sorting, filtering, grouping, aggregates, selection, inline editing, detail rows, a tree/hierarchy mode, paging, virtualization, and column resize/reorder
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
@@ -30,6 +30,8 @@ import AiSkill from '/src/components/AiSkill.astro';
 - **Aggregates** — footer and per-group Count / Sum / Average / Min / Max / Custom
 - **Selection** — single or multiple with checkboxes and select-all
 - **Inline editing** — cell and form edit modes with commit/cancel and edit events
+- **Detail rows** — a full-width "breakdown" row under an expanded row, hosting whatever controls you like, with optional async loading and a spinner on the caret
+- **Tree mode** — nest rows with a `ChildrenSelector`, with optional lazy loading per level (`TreeDataGrid`)
 - **Paging** — built-in pager with page-size selection
 - **Virtualization** — for large datasets (free on MAUI via `CollectionView`)
 - **Column resize & reorder**, **sticky header**, loading + empty states
@@ -167,6 +169,177 @@ Without sideways scrolling there is nothing to pin against, so `Frozen` is a no-
 :::
 
 Blazor needs no extra flag: the table scrolls sideways whenever the columns are wider than the grid. Give the pinned columns an explicit `px` `Width` and their offsets are exact on the very first paint; otherwise a small script measures the rendered columns after render and corrects them (and keeps them right through resizes and column drags).
+
+## Detail (breakdown) rows
+
+Set a `RowDetailTemplate` and the grid grows a caret column at the leading edge. Expanding a row opens a full-width row beneath it, bound to that row's item, and it can host anything — a summary, a chart, a nested grid, a form.
+
+```razor
+@* Blazor - the template's context is the row's item *@
+<DataGrid TItem="Person" Items="people" ExpandMode="DataGridExpandMode.Multiple">
+    <Columns>
+        <PropertyColumn Property="x => x.FirstName" Title="First" />
+        <PropertyColumn Property="x => x.Salary" Format="C0" />
+    </Columns>
+    <RowDetailTemplate>
+        <strong>Breakdown for @context.FirstName @context.LastName</strong>
+        <div>Location: @context.Location</div>
+        <div>Cost centre: @context.CostCentre</div>
+    </RowDetailTemplate>
+</DataGrid>
+```
+
+```xml
+<!-- MAUI - the template's BindingContext is the row's item -->
+<shiny:DataGrid ItemsSource="{Binding People}">
+    <shiny:DataGrid.RowDetailTemplate>
+        <DataTemplate x:DataType="local:Person">
+            <VerticalStackLayout Spacing="4">
+                <Label Text="{Binding FirstName, StringFormat='Breakdown for {0}'}" FontAttributes="Bold" />
+                <Label Text="{Binding Salary, StringFormat='Salary: {0:C0}'}" />
+                <shiny:PillView Text="{Binding StatusText}" HorizontalOptions="Start" />
+            </VerticalStackLayout>
+        </DataTemplate>
+    </shiny:DataGrid.RowDetailTemplate>
+    <shiny:DataGridColumn Title="First" PropertyName="FirstName" />
+    <shiny:DataGridColumn Title="Salary" PropertyName="Salary" StringFormat="{}{0:C0}" />
+</shiny:DataGrid>
+```
+
+- `ExpandMode` — `Multiple` (default) or `Single`, which closes whatever was open before.
+- `IsRowExpandable` — a per-item veto. Return `false` and the row shows no caret and cannot be opened; use it for rows with nothing to break down.
+- `ExpandOnRowTap` (MAUI) / `ExpandOnRowClick` (Blazor) — off by default, so a tap stays free for selection and editing. The caret is the affordance.
+- Drive it from code with `ExpandRow` / `CollapseRow` / `ToggleRow` / `ExpandAll` / `CollapseAll` / `IsRowExpanded` (Blazor's are the `…Async` forms), and react with the `RowExpanded` / `RowCollapsed` events. Blazor also exposes a bindable `ExpandedItems`.
+
+Expansion is keyed on the **data item**, not the row, so it survives the rebuild that sorting, filtering or paging causes — reorder the grid and the same rows are still open. The detail content stays pinned to the leading edge while the columns scroll sideways (MAUI translates the pane the way it does for group headers; Blazor uses `position: sticky`), so a breakdown never slides out of view.
+
+### Loading a breakdown on demand
+
+Set a `RowDetailLoader` and the content is fetched the first time its row opens. The caret becomes a **spinner** while the fetch runs — the caret *is* the button, so that is where the progress belongs — and the detail row shows `RowDetailLoadingTemplate` (a spinner by default). `RowDetailTemplate` is not built until the load completes, so it can assume its data has arrived.
+
+```razor
+@* Blazor *@
+<DataGrid TItem="Order" Items="orders"
+          RowDetailLoader="LoadLinesAsync"
+          IsBusyChanged="b => busy = b">
+    <Columns>
+        <PropertyColumn Property="x => x.Reference" />
+        <PropertyColumn Property="x => x.Total" Format="C0" />
+    </Columns>
+    <RowDetailTemplate>
+        @foreach (var line in lines[context.Id])
+        {
+            <div>@line.Sku — @line.Quantity</div>
+        }
+    </RowDetailTemplate>
+    <RowDetailLoadingTemplate>
+        <span class="shiny-dg-busy"></span> Fetching lines…
+    </RowDetailLoadingTemplate>
+</DataGrid>
+
+@code {
+    bool busy;
+    Dictionary<int, List<Line>> lines = new();
+
+    async Task LoadLinesAsync(Order order) => lines[order.Id] = await api.GetLinesAsync(order.Id);
+}
+```
+
+```xml
+<!-- MAUI - the loader fills an observable property; the template binds to it as usual -->
+<shiny:DataGrid ItemsSource="{Binding Orders}" RowDetailLoader="{Binding LoadLines}">
+    <shiny:DataGrid.RowDetailLoadingTemplate>
+        <DataTemplate x:DataType="local:Order">
+            <HorizontalStackLayout Spacing="8">
+                <ActivityIndicator IsRunning="True" WidthRequest="16" HeightRequest="16" />
+                <Label Text="Fetching lines…" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+        </DataTemplate>
+    </shiny:DataGrid.RowDetailLoadingTemplate>
+    <shiny:DataGrid.RowDetailTemplate>
+        <DataTemplate x:DataType="local:Order">
+            <CollectionView ItemsSource="{Binding Lines}" />
+        </DataTemplate>
+    </shiny:DataGrid.RowDetailTemplate>
+    <shiny:DataGridColumn Title="Reference" PropertyName="Reference" />
+</shiny:DataGrid>
+```
+
+:::tip[The loader returns nothing on purpose]
+Where the fetched data lands is the app's business — fill an observable property on the item, or a lookup keyed by it, and let the template bind to it. That keeps the detail template's context the row's **item** instead of some wrapper object, so the synchronous case stays as simple as it was.
+:::
+
+- Each item loads **once**. `InvalidateRowDetail(item)` forgets it so the next expand refetches — and reloads immediately if that row is open right now. Pass `null` for every row.
+- A throw collapses the row again and raises `RowDetailLoadFailed`, mirroring `ChildrenLoadFailed`.
+- `ExpandAll` *does* start detail loads (one per expanded row, so the work is bounded by what is on screen) — unlike a lazy tree, whose depth is not.
+
+### IsBusy
+
+`IsBusy` is true while **any** row is waiting on `ChildrenLoader` or `RowDetailLoader`. On MAUI it is a read-only `BindableProperty`, so bind a page-level indicator straight to it; on Blazor read the property and subscribe to `IsBusyChanged`. `IsRowBusy(item)` is the per-row form.
+
+```xml
+<!-- MAUI -->
+<ActivityIndicator IsRunning="{Binding Source={x:Reference Grid}, Path=IsBusy}" />
+```
+
+:::note
+`IsBusy` is not `IsLoading` (MAUI) / `Loading` (Blazor). Those you set yourself to cover the whole grid while *its* data loads; `IsBusy` is owned by the grid and reports expansion loads only. The per-row spinners are drawn either way — `IsBusy` is there for when you want a second, page-level indicator too.
+:::
+
+## Tree mode (TreeDataGrid)
+
+Hand the grid a `ChildrenSelector` and rows nest: the first visible column carries the indent and the expand caret, and no extra column is added. `TreeDataGrid` is the same control under a name that says what it is — every other grid feature (columns, sorting, filtering, frozen columns, selection, editing, aggregates) works exactly as it does on a flat grid.
+
+```razor
+@* Blazor *@
+<TreeDataGrid TItem="CostNode" Items="accounts"
+              ChildrenSelector="n => n.Lazy ? null : n.Children"
+              ChildrenLoader="LoadChildrenAsync"
+              HasChildrenSelector="n => n.Lazy || n.Children.Count > 0"
+              TreeIndentSize="18"
+              FilterMode="DataGridFilterMode.Toolbar"
+              Striped="true" Bordered="true">
+    <Columns>
+        <PropertyColumn Property="x => x.Name" Title="Account" />
+        <PropertyColumn Property="x => x.Kind" />
+        <PropertyColumn Property="x => x.Budget" Format="C0" />
+    </Columns>
+</TreeDataGrid>
+```
+
+```xml
+<!-- MAUI - the selectors are BindableProperties, so they bind straight to a view model -->
+<shiny:TreeDataGrid ItemsSource="{Binding Accounts}"
+                    ChildrenSelector="{Binding ChildrenSelector}"
+                    ChildrenLoader="{Binding ChildrenLoader}"
+                    HasChildrenSelector="{Binding HasChildrenSelector}"
+                    TreeIndentSize="18"
+                    Striped="True" Bordered="True">
+    <shiny:DataGridColumn Title="Account" PropertyName="Name" Width="2*" />
+    <shiny:DataGridColumn Title="Kind" PropertyName="Kind" Width="1*" />
+    <shiny:DataGridColumn Title="Budget" PropertyName="Budget" StringFormat="{}{0:C0}" Width="1.2*" />
+</shiny:TreeDataGrid>
+```
+
+### Loading levels
+
+`ChildrenSelector` answers from memory. `ChildrenLoader` fetches a level the first time its row is expanded — a spinner replaces that row's caret meanwhile — and the result is cached until you call `InvalidateChildren`. If the fetch throws, the row collapses again and `ChildrenLoadFailed` reports it.
+
+:::tip[The selector gets first refusal]
+The loader only runs for the items `ChildrenSelector` returns **`null`** for, so one tree can mix in-memory branches with fetched ones — that is what `n => n.Lazy ? null : n.Children` above is doing. An **empty** collection means "this is a leaf", not "ask the loader".
+:::
+
+Give `HasChildrenSelector` when you want leaves to render caret-free before anything has loaded. Without it a row with a loader attached and nothing cached is assumed to have children — better to offer a caret than to hide a branch that turns out to have something in it.
+
+### How the pipeline treats a hierarchy
+
+- **Sorting and filtering apply per level**, so children stay under their parent instead of being scattered into a global order.
+- A row is kept when **a descendant matches** the filter, even if the row itself does not — otherwise the match would sit under a pruned parent and be unreachable. Branches that have not loaded yet are kept for the same reason: they cannot be searched, so they are not pruned on a guess.
+- **Paging pages the roots**, and footer aggregates are computed over the roots too.
+- Tree mode and `Groupable` are mutually exclusive — **grouping wins**, since the two impose competing row orders.
+- `ExpandAll` opens every already-loaded level. It does not fetch: the depth of a lazily loaded tree is unbounded.
+
+A tree row can also carry a detail row — set both `ChildrenSelector` and `RowDetailTemplate` and the caret column drives the breakdown while the inline caret drives the children. Reach for a detail row when the extra content is *about* the row, and for tree mode when the extra rows are more of the same thing one level down.
 
 :::note
 MAUI string-path columns read values via reflection (the same trade-off MAUI's own string bindings make). For full trimming / NativeAOT, set a column's `ValueGetter`/`ValueSetter`/`Comparer` to avoid reflection entirely.
