@@ -1,0 +1,118 @@
+---
+title: Hotspot
+description: Raise a Wi-Fi access point on Android, Windows and Linux with Shiny.Net.Wifi, read back the SSID and passphrase in use, and list connected clients
+---
+
+`IWifiHotspot` raises an access point other devices can join. What that access point *is* differs
+sharply by platform, and the differences matter to your UI.
+
+## What you get where
+
+| | Android | iOS / macOS | Windows | Linux |
+|---|---------|-------------|---------|-------|
+| Hotspot | ✅ local-only | ❌ no API | ✅ full tethering | ✅ AP mode |
+| Internet for clients | ❌ | — | ✅ shares the machine's connection | ✅ NAT via `ipv4.method=shared` |
+| You choose the SSID/passphrase | ❌ OS generates them | — | ✅ | ✅ |
+| Client list | ❌ | — | ✅ | ✅ |
+
+- **Android** raises a *local-only* hotspot. Clients can reach the device but get no route to the
+  internet. Real tethering lives behind `TETHER_PRIVILEGED`, a signature permission that is not
+  reachable from an app-store build at any API level.
+- **iOS and macOS** expose no hotspot API at all — not even a way to read whether Personal Hotspot
+  or Internet Sharing is running. `IsSupported` is false and `Start` throws.
+- **Windows** shares whatever internet connection the machine currently has, so starting one while
+  offline fails.
+- **Linux** runs NetworkManager AP mode with a DHCP server and NAT on the interface.
+
+## Starting one
+
+```csharp
+if (!hotspot.IsSupported)
+    return;   // iOS and macOS
+
+await using var session = await hotspot.Start(
+    new HotspotConfiguration
+    {
+        Ssid = "shiny-setup",
+        Passphrase = "letmein12345",
+        Band = WifiBand.TwoPointFourGhz
+    },
+    ct
+);
+
+// ALWAYS read back what is actually running
+ShowToUser(session.Info.Ssid, session.Info.Passphrase);
+```
+
+:::caution[Read the settings back — do not assume]
+Android ignores the SSID and passphrase you pass and generates its own; `SoftApConfiguration.Builder`
+exposes only the channel to non-system apps. The generated pair is on `session.Info`, and showing it
+to the user is the intended flow — it is how the QR-code and "join this network" screens on Android
+setup wizards work. `WifiCapabilities.HotspotCustomConfiguration` tells you whether your values were
+honoured.
+:::
+
+`HotspotConfiguration` is entirely optional — `await hotspot.Start(ct: ct)` lets the platform choose
+everything. `Band` is honoured on Windows (2.4/5 GHz only) and Linux; 6 GHz falls through to the
+platform default everywhere.
+
+## The session is the lifetime
+
+`IHotspotSession` is not a handle to the hotspot, it *is* the hotspot's lifetime:
+
+```csharp
+await using var session = await hotspot.Start(config, ct);
+// ... access point is up ...
+// disposal brings it down
+```
+
+Android tears its reservation down the moment the owning process drops it, so letting the session go
+out of scope without disposing leaves the hotspot up only until your process exits. `Stop()` is
+equivalent and safe to call more than once.
+
+Only one hotspot runs at a time — calling `Start` again stops the previous one first rather than
+silently handing back a hotspot with settings you did not ask for.
+
+```csharp
+hotspot.Changed += (_, info) =>
+{
+    // info is the running hotspot's settings, or null when it stops
+};
+```
+
+## Connected clients
+
+```csharp
+if (wifi.Capabilities.HasFlag(WifiCapabilities.HotspotClients))
+{
+    foreach (var client in await session.GetClients(ct))
+        Console.WriteLine($"{client.MacAddress}  {client.IpAddress}  {client.HostName}");
+}
+```
+
+`HotspotClient` carries `MacAddress`, `IpAddress` and `HostName`. Which of those are populated
+depends on how the platform learns about the client:
+
+- **Windows** reports the MAC and whatever host names it has resolved.
+- **Linux** reads the kernel neighbour table (`/proc/net/arp`) filtered to the hotspot interface, so
+  it always has a MAC and an address but rarely a name.
+- **Android** throws `WifiNotSupportedException`. It has never exposed a client list for a
+  local-only hotspot, and the ARP table apps used to read instead has been unreadable since
+  Android 10.
+
+:::note[It is a snapshot, and it lags]
+`GetClients()` is not a subscription — poll it if you want a live count. A client appears once it
+has taken a DHCP lease and talked to the gateway, not the instant it associates, and on Linux stale
+entries linger for a minute or so after a device leaves. No OS exposes per-client signal strength to
+an unprivileged app, which is why `HotspotClient` has no RSSI.
+:::
+
+## Raising a hotspot takes the radio
+
+On most adapters, AP mode and station mode are mutually exclusive: bringing the access point up
+drops the device off whatever network it was joined to. Some chipsets support concurrent station/AP
+and some do not, and there is no portable way to ask in advance. Assume the device goes offline, and
+warn the user before you start.
+
+On Linux specifically, a few cheap USB adapters have drivers with no AP mode at all. That fails at
+activation with a `WifiException` carrying NetworkManager's own message, not up front.

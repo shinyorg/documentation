@@ -105,6 +105,18 @@ const MauiProgram = (props: Props) => {
       // MUST be listed in NSBonjourServices (see the Info.plist tab).
       builder.Services.AddMdns();`;
   }
+  if (has('wifi')) {
+    src += `
+      // Registers IWifiManager - scan, connect/disconnect, current network (IP/DNS) & radio.
+      // Platform reach is uneven: check IWifiManager.Capabilities before offering a feature.
+      builder.Services.AddWifi();
+
+      // Optional - IWifiHotspot (Android local-only, Windows tethering; not on Apple platforms)
+      // builder.Services.AddWifiHotspot();
+
+      // Optional - IAirplaneMode (readable on Android/Windows; settable on Windows only)
+      // builder.Services.AddAirplaneMode();`;
+  }
   if (has('push')) {
     src += `
       builder.Services.AddPush<ShinyApp.Delegates.MyPushDelegate>();`;

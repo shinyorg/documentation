@@ -1,0 +1,154 @@
+---
+title: Platform Setup
+description: Manifest entries, entitlements and permissions Shiny.Net.Wifi needs on Android, iOS, Mac Catalyst, macOS, Windows and Linux
+---
+
+Every platform gates Wi-Fi behind something, and most of them fail *quietly* when it is missing — an
+empty scan, a placeholder SSID. This page is what to add, and what happens if you do not.
+
+## Android
+
+```xml
+<uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+<uses-permission android:name="android.permission.CHANGE_WIFI_STATE" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES"
+                 android:usesPermissionFlags="neverForLocation"
+                 tools:targetApi="33" />
+```
+
+| Permission | Needed for |
+|------------|-----------|
+| `ACCESS_WIFI_STATE` | Reading radio state and scan results |
+| `CHANGE_WIFI_STATE` | Scanning, connecting, the local-only hotspot |
+| `ACCESS_FINE_LOCATION` | Scan results **and** the SSID of the joined network |
+| `NEARBY_WIFI_DEVICES` | Scanning on API 33+ without asking for location |
+
+`ACCESS_FINE_LOCATION` is not optional even on API 33+. `NEARBY_WIFI_DEVICES` unlocks *scanning*
+without location, but the SSID of the network you are on still requires location. `RequestAccess()`
+asks for both where they apply.
+
+:::danger[A refused permission looks like an empty neighbourhood]
+Android returns an empty `ScanResults` list and an SSID of `<unknown ssid>` rather than failing.
+Shiny turns the empty scan into `WifiPermissionException` naming the missing permission, and reports
+the placeholder SSID as `null` rather than passing the literal string through — but calling
+`RequestAccess()` first is still the right move.
+:::
+
+### API level behaviour
+
+| API | Change |
+|-----|--------|
+| ≤ 28 | `setWifiEnabled` works; `WifiConfiguration`-based joins persist |
+| 29 | Radio toggle revoked for apps. Joins move to `WifiNetworkSpecifier` — a system dialog, and the profile is never saved |
+| 29 | `startScan` throttled to ~4 calls per 2 minutes in the foreground |
+| 30 | `ScanResultsCallback` replaces the scan-results broadcast |
+| 31 | `WifiInfo` comes off `NetworkCapabilities.TransportInfo` instead of `WifiManager.ConnectionInfo` |
+| 33 | `NEARBY_WIFI_DEVICES` introduced |
+
+All of these are handled internally; the only one visible to you is the radio toggle, which drops out
+of `Capabilities` from API 29.
+
+## iOS & Mac Catalyst
+
+**App ID capabilities** (Apple Developer portal, then in your provisioning profile):
+
+- **Hotspot Configuration** — required for `Connect` / `Disconnect`
+- **Access WiFi Information** — required to read the current SSID
+
+**`Info.plist`:**
+
+```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Used to identify the Wi-Fi network you are connected to.</string>
+```
+
+Since iOS 13, an app without granted location access reads the joined SSID back as a placeholder —
+`"Wi-Fi"` or `"WLAN"` — rather than the real name. Nothing fails. `RequestAccess()` asks for location
+for exactly this reason.
+
+:::note[There is no scanning on iOS, at all]
+`Scan()` throws `WifiNotSupportedException`. The only API that lists nearby networks lives inside a
+`NEHotspotHelper`, and that entitlement is granted case by case by Apple to captive network
+assistant apps. `CNCopyCurrentNetworkInfo` is not a substitute — it reports the network you are
+*on*, not the ones in range.
+:::
+
+There is also no hotspot API and no airplane mode API on Apple's platforms. See
+[Hotspot](/wifi/hotspot/) and [Airplane Mode](/wifi/airplane-mode/).
+
+## macOS
+
+**`Info.plist`:**
+
+```xml
+<key>NSLocationWhenInUseUsageDescription</key>
+<string>Used to read Wi-Fi network names.</string>
+```
+
+macOS 14 (Sonoma) and later gate both scan results and the joined SSID on location authorization,
+the same way iOS does.
+
+**Sandboxed apps** additionally need `com.apple.security.network.client`.
+
+macOS is backed by CoreWLAN, so unlike iOS it can scan, associate, disassociate and power the
+interface. It has no hotspot API and no airplane mode — use `SetRadioEnabled` for the latter.
+
+## Windows
+
+**`Package.appxmanifest`:**
+
+```xml
+<Capabilities>
+  <DeviceCapability Name="wiFiControl" />
+  <DeviceCapability Name="radios" />
+</Capabilities>
+```
+
+| Capability | Needed for |
+|------------|-----------|
+| `wiFiControl` | Scanning and connecting through `WiFiAdapter` |
+| `radios` | Powering the Wi-Fi radio, and airplane mode |
+
+`WiFiAdapter.RequestAccessAsync()` raises a consent prompt the first time; a packaged app missing
+`wiFiControl` gets `DeniedBySystem` back, which surfaces as `WifiPermissionException` rather than an
+empty scan.
+
+Tethering additionally needs an active internet connection to share, and can be vetoed independently
+by group policy, the hardware or the SKU — that comes back as `WifiNotSupportedException` naming the
+`TetheringCapability` value.
+
+## Linux
+
+Install `Shiny.Net.Wifi.Linux` rather than the base package. It registers NetworkManager-backed
+implementations of the same three interfaces.
+
+**Requires a running NetworkManager.** That is the default on Ubuntu, Fedora, Debian desktop and
+Raspberry Pi OS, but *not* on a systemd-networkd or netplan-only server. Without it,
+`RequestAccess()` returns `AccessState.NotSupported`.
+
+Reading state and scanning are unprivileged. The mutating calls go through polkit:
+
+| Operation | polkit action |
+|-----------|---------------|
+| Connect, disconnect, hotspot | `org.freedesktop.NetworkManager.network-control` |
+| Radio toggle, airplane mode (Wi-Fi) | `org.freedesktop.NetworkManager.enable-disable-wifi` |
+| Airplane mode (cellular) | `org.freedesktop.NetworkManager.enable-disable-wwan` |
+
+On a desktop session polkit prompts the user. In a headless session — a daemon, a kiosk, a Pi — add a
+rule granting those actions to the user the process runs as, or every mutating call fails with
+`WifiPermissionException` carrying polkit's refusal.
+
+Hotspot mode additionally needs an adapter whose driver supports AP mode. Most do; a few cheap USB
+dongles do not, and those fail at activation rather than up front.
+
+## Plain .NET (no platform target)
+
+The base package's `net10.0` target is a deliberate stub, not a fallback. `CurrentNetwork` still
+reports the IP, DNS, gateway and mask of the wireless interface and `Changed` still fires off
+`NetworkChange`, because that all comes from the managed network stack. Every Wi-Fi-specific call —
+scan, connect, radio, hotspot — throws `WifiNotSupportedException` pointing at
+`Shiny.Net.Wifi.Linux` where relevant.
+
+`Capabilities` reports `None` and `RequestAccess()` returns `AccessState.Restricted`, which is
+exactly what it describes: granted in a limited fashion.

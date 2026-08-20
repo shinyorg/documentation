@@ -1,0 +1,151 @@
+---
+title: Wi-Fi | Getting Started
+description: Cross-platform Wi-Fi for .NET - scan for access points, join and leave networks, monitor the current network's SSID/signal/IP/DNS, host a hotspot, and read or set airplane mode
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import LibBuilder from '../../../components/Boilerplate/LibBuilder';
+
+Scan for the access points in range, join and leave networks, watch the network the device is
+actually on — SSID, signal, IP, DNS, gateway — raise a hotspot, and read or set airplane mode.
+Built on `Shiny.Core`, so it runs in any Shiny host: MAUI, console, service, or daemon.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Net.Wifi" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["android", "ios", "windows", "linux", "macos"]} />
+
+## Read this first
+
+Wi-Fi is the most unevenly exposed capability across these platforms, and a lot of what people
+reasonably expect is simply not available to a sandboxed app. iOS has no scanning API. No app on
+any phone can toggle airplane mode. Only Android, Windows and Linux can raise a hotspot.
+
+Rather than pretend otherwise, every manager here publishes a **`WifiCapabilities`** flags property,
+and anything unavailable throws **`WifiNotSupportedException`** with a message naming the specific
+limit — an Apple entitlement, an Android API level that revoked the call, a platform with no such
+concept. Check the flag to branch; catch the exception as a backstop.
+
+```csharp
+if (wifi.Capabilities.HasFlag(WifiCapabilities.Scan))
+    networks = await wifi.Scan(ct);
+else
+    ShowJoinByNameField();   // iOS
+```
+
+## What each platform can do
+
+| Operation | Android | iOS / Catalyst | macOS | Windows | Linux |
+|-----------|---------|----------------|-------|---------|-------|
+| Scan | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Connect / disconnect | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Current network (SSID, signal) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Current network (IP, DNS, gateway) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Radio on/off | ⚠️ API ≤ 28 | ❌ | ✅ | ✅ | ✅ |
+| Hotspot | ⚠️ local-only | ❌ | ❌ | ✅ | ✅ |
+| Hotspot client list | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Airplane mode — read | ✅ | ❌ | ❌ | ⚠️ inferred | ✅ |
+| Airplane mode — set | ❌ | ❌ | ❌ | ⚠️ all radios | ✅ |
+
+See [Platform Setup](/wifi/platform/) for what each of those costs in manifest entries and
+entitlements, and why the gaps exist.
+
+## Features
+
+- **Scan** — one `WifiNetwork` per BSSID with SSID, security scheme, dBm and 0-100 signal, frequency, band, and channel.
+- **Connect** — join by name and passphrase; returns once an address has been assigned, not merely on association.
+- **Current network** — SSID, BSSID, security, signal, every IP, DNS resolver, gateway and mask, with a de-duplicated `Changed` event.
+- **Hotspot** — raise an access point, read back the SSID and passphrase actually in use, and list connected clients on Windows and Linux.
+- **Airplane mode** — read it where the OS allows, set it on Windows and Linux, and send the user to the right settings screen everywhere else.
+- **Honest capabilities** — no silent empty results standing in for "this platform cannot do that".
+- **AOT & trimmer compatible**.
+
+<AiSkill skillName="shiny-wifi" />
+
+## Setup
+
+<LibBuilder componentName="wifi" client:load />
+
+Install the package:
+
+```bash
+dotnet add package Shiny.Net.Wifi
+```
+
+On Linux, install the NetworkManager-backed package instead — it registers the same three
+interfaces:
+
+```bash
+dotnet add package Shiny.Net.Wifi.Linux
+```
+
+Register what you need:
+
+```csharp
+using Shiny;
+
+builder.Services.AddWifi();           // IWifiManager
+builder.Services.AddWifiHotspot();    // IWifiHotspot
+builder.Services.AddAirplaneMode();   // IAirplaneMode
+```
+
+:::caution[Ask for access before scanning]
+Android returns an *empty list* rather than an error when location has not been granted, and iOS
+returns a placeholder SSID. Call `RequestAccess()` before `Scan()` or before reading
+`CurrentNetwork.Ssid`. See [Platform Setup](/wifi/platform/).
+:::
+
+## Scan for networks
+
+```csharp
+public class NetworkPicker(IWifiManager wifi)
+{
+    public async Task<IReadOnlyList<WifiNetwork>> Load(CancellationToken ct)
+    {
+        var access = await wifi.RequestAccess(ct);
+        if (access != AccessState.Available)
+            return [];
+
+        var found = await wifi.Scan(ct);
+
+        // one network shows up once per radio on a multi-band or mesh setup, so results are
+        // unique on BSSID - group and take the strongest for a picker
+        return found
+            .GroupBy(x => x.Ssid)
+            .Select(g => g.MaxBy(x => x.SignalStrengthPercent)!)
+            .ToList();
+    }
+}
+```
+
+## Join a network
+
+```csharp
+var joined = await wifi.Connect(
+    new WifiConnectionRequest("Kitchen") { Passphrase = "hunter2hunter2" },
+    ct
+);
+
+Console.WriteLine($"{joined.Ssid} at {joined.IPv4Address}");
+```
+
+## Watch the current network
+
+```csharp
+wifi.Changed += (_, network) =>
+{
+    if (network == null)
+        return;   // dropped off Wi-Fi
+
+    Console.WriteLine($"{network.Ssid} — {network.SignalStrengthPercent}%");
+    Console.WriteLine($"IP  {network.IPv4Address}");
+    Console.WriteLine($"DNS {String.Join(", ", network.DnsAddresses)}");
+};
+```
+
+Read on: [Networks](/wifi/networks/) · [Hotspot](/wifi/hotspot/) ·
+[Airplane Mode](/wifi/airplane-mode/) · [Platform Setup](/wifi/platform/)

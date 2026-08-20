@@ -49,6 +49,19 @@ const WindowsAppxManifest = (props: Props) => {
     );
   }
 
+  if (has('wifi')) {
+    capabilities.push('      <DeviceCapability Name="wiFiControl" />');
+    capabilities.push('      <DeviceCapability Name="radios" />');
+    notes.push(
+      <p key="wifi">
+        <strong>Shiny.Net.Wifi on Windows uses the WiFiAdapter WinRT API.</strong>{' '}
+        <code>wiFiControl</code> is needed to scan and connect, and <code>radios</code> to power the
+        adapter or set airplane mode. A packaged app missing <code>wiFiControl</code> gets{' '}
+        <code>DeniedBySystem</code> back from the consent prompt rather than an empty scan.
+      </p>
+    );
+  }
+
   if (has('push')) {
     notes.push(
       <p key="push">

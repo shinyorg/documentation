@@ -92,6 +92,13 @@ const AppleInfoPlist = (props: Props) => {
   if (has('discovery') || has('httpserver')) {
     addKey('NSLocalNetworkUsageDescription');
   }
+  // iOS 13+ and macOS 14+ return a PLACEHOLDER SSID ("Wi-Fi"/"WLAN") rather than failing when
+  // location has not been granted, so this is what makes the current network readable at all.
+  // Skipped when the location components above already emitted it - a duplicate key makes the
+  // whole plist invalid.
+  if (has('wifi') && !has('gps') && !has('geofencing') && !has('spatial-geofencing')) {
+    addKey('NSLocationWhenInUseUsageDescription');
+  }
   if (has('discovery')) {
     // Browsing silently returns NOTHING if the service type is missing from NSBonjourServices - there
     // is no error.  List every type you browse for AND every type you publish.

@@ -53,6 +53,14 @@ public static class MauiProgram
         // Make sure your firewall allows inbound & outbound UDP 5353.
         builder.Services.AddMdns();`;
   }
+  if (has('wifi')) {
+    src += `
+        // NetworkManager over D-Bus. Reading & scanning are unprivileged; connect, disconnect,
+        // hotspot and radio toggling go through polkit.
+        builder.Services.AddWifi();
+        // builder.Services.AddWifiHotspot();   // AP mode with DHCP + NAT
+        // builder.Services.AddAirplaneMode();  // WirelessEnabled + WwanEnabled kill switches`;
+  }
   if (has('mediator')) {
     src += `
         builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;

@@ -172,6 +172,19 @@ const AndroidManifest = (props: Props) => {
            that is required.  No CHANGE_WIFI_MULTICAST_STATE and no WifiManager.MulticastLock needed. -->`;
   }
 
+  if (has('wifi')) {
+    src += addP('ACCESS_WIFI_STATE');
+    src += addP('CHANGE_WIFI_STATE');
+    // ACCESS_FINE_LOCATION is NOT optional on API 33+.  NEARBY_WIFI_DEVICES unlocks scanning
+    // without location, but the SSID of the joined network still requires location.
+    src += addP('ACCESS_FINE_LOCATION');
+    src += `
+      <uses-permission android:name="android.permission.NEARBY_WIFI_DEVICES" android:usesPermissionFlags="neverForLocation" />`;
+    src += `
+      <!-- Without location granted, a scan returns an EMPTY list and the SSID reads "<unknown ssid>" -
+           neither fails.  Call IWifiManager.RequestAccess() before scanning. -->`;
+  }
+
   if (has('speech') || has('aiconversation')) {
     src += addP('RECORD_AUDIO');
     src += addP('MODIFY_AUDIO_SETTINGS');

@@ -218,6 +218,19 @@ export const sidebarTopics = [
               { label: 'Release Notes', link: 'discovery/release-notes' }
             ]
           },
+          {
+            label: 'Wi-Fi',
+            jumpTo: true,
+            badge: { text: 'New', variant: 'success' },
+            items: [
+              { label: 'Getting Started', link: 'wifi/' },
+              { label: 'Networks', link: 'wifi/networks' },
+              { label: 'Hotspot', link: 'wifi/hotspot' },
+              { label: 'Airplane Mode', link: 'wifi/airplane-mode' },
+              { label: 'Platform Setup', link: 'wifi/platform' },
+              { label: 'Release Notes', link: 'wifi/release-notes' }
+            ]
+          },
         ]
       },
       {
