@@ -1,13 +1,15 @@
 ---
 title: Command Line Tool
-description: shinyhttpserver — serve a directory over HTTP from the terminal, with basic auth and per-operation permissions
+description: shinyhttpserver — serve a directory from the terminal as a browser file manager and a mountable WebDAV drive
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
-`Shiny.Net.HttpServer.CommandLine` is the [file browser](/httpserver/file-browser/) with a command
-around it: point it at a directory and it is served over HTTP. It installs as a .NET tool and runs
-anywhere .NET runs — macOS, Linux and Windows.
+`Shiny.Net.HttpServer.CommandLine` is a [WebDAV mount](/httpserver/webdav/) with a command around it:
+point it at a directory and it is served over HTTP. Open the address in a browser and you get a
+[file manager](#the-file-manager) — browse, upload, rename, delete; open the same address in Finder,
+Explorer or the GNOME and KDE file managers and the directory mounts as a drive. It installs as a
+.NET tool and runs anywhere .NET runs — macOS, Linux and Windows.
 
 ```bash
 dotnet tool install -g Shiny.Net.HttpServer.CommandLine
@@ -17,11 +19,14 @@ dotnet tool install -g Shiny.Net.HttpServer.CommandLine
 shinyhttpserver
 ```
 
+<div class="qr-sample">
+
 ```
   Directory   /Users/ada/projects/notes
   URL         http://localhost:8080/
   URL         http://192.168.1.24:8080/
   Operations  read
+  Mount       WebDAV - Finder, Explorer and any WebDAV client can open the URL as a drive
   Auth        none
 
                                  
@@ -47,12 +52,15 @@ shinyhttpserver
 Ctrl+C to stop
 ```
 
+</div>
+
+
 Reads are allowed, nothing else is, and there is no authentication until you ask for one. Those are
-the same defaults the file browser itself has, for the same reasons.
+the same defaults the mount itself has, for the same reasons.
 
 The tool listens on every interface, because a directory only this machine can reach is not what it
 is for, and the QR code carries the address another device can actually open. Point a phone at it
-and the listing is on the phone.
+and the file manager is on the phone.
 
 ## Usage
 
@@ -65,17 +73,61 @@ shinyhttpserver [<path>] [options]
 | `<path>` | `.` | The directory to serve. Nothing outside it is reachable |
 | `-p, --port <port>` | `8080` | |
 | `-a, --address <address>` | `0.0.0.0` | An IP, `any` for every interface, or `localhost` to keep it on this machine |
-| `--prefix <prefix>` | `/` | Where the browser is mounted; anywhere else, `/` redirects to it |
+| `--prefix <prefix>` | `/` | Where the directory is mounted; anywhere else, `/` redirects to it |
 | `-m, --allow <ops>` | `read` | `read`, `create`, `update`, `delete`, `all` — repeatable or comma separated |
 | `-u, --user <user:password>` | none | Turns on Basic authentication. Repeat for more than one user |
 | `--realm <realm>` | `shinyhttpserver` | The realm in the browser's login prompt |
 | `--auth-changes-only` | off | Leaves reads open, requires a login to change anything |
 | `--allow-insecure-auth` | off | Allows Basic over unencrypted, non-loopback connections |
 | `--https` | off | Serves over TLS with a self-signed certificate generated at startup |
+| `--tunnel` | off | Opens a public pinggy.io tunnel and shares that address instead of the LAN one |
+| `--tunnel-token <token>` | none | A pinggy.io access token, which lifts the 60 minute cap. Implies `--tunnel` |
 | `--hidden` | off | Includes dotfiles in listings and downloads |
 | `--max-upload <size>` | `64mb` | `500k`, `64mb`, `2gb`, or a plain byte count |
 | `--no-qr` | off | Leaves the QR code out of the banner |
 | `-v, --verbose` | off | Logs every request |
+
+## The file manager
+
+The address opens in a browser as a file manager, and it offers exactly what `-m` allows:
+
+| | Needs |
+| --- | --- |
+| Browse, with sizes and modification times | always |
+| Download a file, on a button beside it | always |
+| Upload, by drag and drop or from the file picker — a dropped folder is walked and recreated | `create` or `update` |
+| New folder | `create` |
+| Rename | `update` **and** `delete` |
+| Delete | `delete` |
+
+The default run has none of those buttons, because the default run allows nothing but reading. A
+button that could only ever earn a `403` is worse than no button: it reads as a server that is
+broken rather than one that is read-only.
+
+Every action is a WebDAV verb against the same address — an upload is a `PUT`, a new folder a
+`MKCOL`, a rename a `MOVE`, a delete a `DELETE` — so the page can do nothing the tool would not
+accept from `curl`. It is one self-contained response, with no scripts, styles or fonts fetched from
+anywhere, which is what makes it work on a phone over a tunnel with no other connectivity at all.
+
+## Mounting it as a drive
+
+The same address is a WebDAV mount, so an operating system can open it as a folder with no client to
+install:
+
+- **macOS** — Finder, *Go ▸ Connect to Server*, `http://192.168.1.24:8080/`
+- **Windows** — Explorer, *Map network drive*, `http://192.168.1.24:8080/`, or
+  `net use * http://192.168.1.24:8080/`
+- **Linux** — GNOME Files or Dolphin, `dav://192.168.1.24:8080/`
+- **anything else** — `rclone`, Cyberduck, or any WebDAV client library
+
+Windows and macOS both refuse to mount a WebDAV server read-write over plain HTTP with credentials,
+and Windows wants TLS for Basic at all, so pair a mounted drive with [`--https`](#authentication) or
+[`--tunnel`](#the-tunnel).
+
+<Aside type="note">
+Mounting is read-only unless `-m` allows writing, whatever the drive looks like. A Finder window on a
+default run will let you drag a file in and then report that the server refused it — which it did.
+</Aside>
 
 ## The QR code
 
@@ -83,31 +135,95 @@ The banner ends with a scannable QR code of the first address on the machine tha
 reach — the LAN address, never `localhost`, because a phone cannot go there. The same URL is printed
 underneath it in full, for anyone who would rather type it or paste it somewhere.
 
+With [`--tunnel`](#the-tunnel) the code carries the public tunnel address instead. It is the better
+one to scan by some distance: it opens on a phone that is not on this network at all, which the LAN
+address does not.
+
 It is drawn in half-block characters, two module rows to a text row, so an ordinary code fits a
 terminal window without wrapping. It is always drawn black on white whatever the terminal's own
 colours are, since a reader needs dark modules on a light field and a dark theme would otherwise
 hand it the negative.
 
+<Aside type="tip" title="If the code will not scan">
+Half-blocks only work if each row of text sits flush against the one above it. A terminal
+configured with extra line spacing — iTerm2's *Line Height*, VS Code's
+`terminal.integrated.lineHeight` — puts a sliver of background through every row, which cuts the
+finder and timing patterns into bars and no camera will read it. Set the line height back to `1.0`.
+The module shape is not the problem: a code stretched half again as wide as it is tall still scans,
+but a gap of two pixels does not.
+</Aside>
+
 The code is left out when there is nothing useful to put in it or nowhere useful to draw it:
 
 - `--no-qr`
-- `-a localhost`, or any loopback address — the server is only listening to this machine
+- `-a localhost`, or any loopback address — the server is only listening to this machine, unless
+  `--tunnel` gave it a public address anyway
 - no non-loopback interface is up
 - output is redirected to a file or a pipe, or the window is narrower than the code
 
 `--https` changes nothing about the code beyond the scheme, but the certificate is self-signed, so
 the phone will warn about it before it shows the listing.
 
+## The tunnel
+
+`--tunnel` opens a [quick tunnel](/httpserver/ssh/) through `pinggy.io` and shares the public HTTPS
+address it hands back:
+
+```bash
+shinyhttpserver --tunnel
+```
+
+```
+  Directory   /Users/ada/projects/notes
+  URL         http://localhost:8080/
+  URL         http://192.168.1.24:8080/
+  Tunnel      https://gyjjf-24-6-13-90.free.pinggy.net/
+  Operations  read
+  Auth        none
+
+! The tunnel is public: anyone holding the address can reach this directory, and the traffic passes
+  through pinggy.io. An anonymous tunnel stops after 60 minutes.
+```
+
+Nothing is installed and nothing is signed up for — the tool generates a throwaway key at startup,
+and the address is read back off the tunnel's own session. The QR code carries the tunnel address, so
+a phone on cellular data opens the listing the same way one on the wifi does.
+
+It is the same `QuickTunnel` the library exposes, which means the tunnel hands connections straight
+to `HttpServer.ServeAsync` rather than dialling the local port. Two things follow from that:
+
+- `--tunnel -a localhost` is a real combination. Nothing is bound on the LAN; the directory is
+  reachable through the tunnel and nowhere else.
+- A tunnelled connection counts as encrypted transport, so `-u` works over it without
+  `--allow-insecure-auth` — the hop from the browser to `pinggy.io` is TLS and the hop from there to
+  this machine is the SSH connection.
+
+```bash
+shinyhttpserver -a localhost --tunnel -u ada:s3cret -m all
+```
+
+An anonymous tunnel stops after 60 minutes. `--tunnel-token <token>` passes a
+[pinggy access token](https://pinggy.io) instead, which lifts that, and implies `--tunnel`.
+
+If the tunnel will not open — pinggy unreachable, the SSH connection refused — the tool says so and
+keeps serving on the local network, with the QR code falling back to the LAN address.
+
+<Aside type="caution">
+A tunnel is the public internet, not the office wifi. Anyone holding the address reaches the
+directory, and the traffic passes through someone else's server. With `-m all` and no `--user` that
+includes writing and deleting — the banner says so on startup, but `-u` is what actually stops it.
+</Aside>
+
 ## Operations
 
-`read` is always on. The rest map onto what the browser will accept:
+`read` is always on. The rest map onto what the mount will accept:
 
 | Operation | Allows |
 | --- | --- |
-| `read` | `GET` a directory for a JSON listing, `GET` a file for its bytes |
-| `create` | `PUT` to a path that does not exist, and `PUT` a path ending in `/` to make a directory |
-| `update` | `PUT` over a file that already exists |
-| `delete` | `DELETE` a file or an empty directory |
+| `read` | `GET` a file for its bytes, `GET` a collection for the file manager, `PROPFIND`, `OPTIONS` |
+| `create` | `PUT` to a path that does not exist, `MKCOL`, and a `COPY` or `MOVE` onto a free name |
+| `update` | `PUT` over a file that already exists, and a `COPY` or `MOVE` onto a name that is taken |
+| `delete` | `DELETE`, and the source half of a `MOVE` |
 
 ```bash
 shinyhttpserver                  # read-only, the default
@@ -115,14 +231,18 @@ shinyhttpserver -m create        # accept new files, never overwrite one
 shinyhttpserver -m all           # read, create, update, delete
 ```
 
-The browser has a single `AllowWrite`, so create and update are the same `PUT` to it. The tool tells
-them apart itself: a `PUT` is checked against the file system before the handler runs and refused
-with `403` when the operation it turns out to be was not the one granted — so `-m create` cannot be
-talked into replacing a file, and `-m update` cannot be talked into adding one.
+The mount has a single `AllowWrite`, so create and update are the same `PUT` to it — and the same
+`MKCOL`, `COPY` and `MOVE`. The tool tells them apart itself: a write is checked against the file
+system before the handler runs and refused with `403` when the operation it turns out to be was not
+the one granted — so `-m create` cannot be talked into replacing a file, and `-m update` cannot be
+talked into adding one. `MOVE` is judged by where it lands, since that is the end of it that writes.
+
+Renaming needs `update` **and** `delete`: a `MOVE` writes at the destination and removes the source,
+and the tool will not grant half of it.
 
 ## Authentication
 
-`--user` turns on [Basic authentication](/httpserver/authentication/) and puts the whole browser
+`--user` turns on [Basic authentication](/httpserver/authentication/) and puts the whole mount
 behind it:
 
 ```bash
@@ -145,8 +265,10 @@ shinyhttpserver -a any --https -u ada:s3cret -m all
 ```
 
 The certificate is generated at startup and self-signed, so clients will warn about it — `curl -k`,
-or accept it once in the browser. `--allow-insecure-auth` sends the password in the clear anyway, on
-a network you already trust.
+or accept it once in the browser. [`--tunnel -a localhost`](#the-tunnel) is the other way out, and
+the one with a certificate a phone will accept: nothing is bound on the LAN and every hop to the
+tunnel is encrypted. `--allow-insecure-auth` sends the password in the clear anyway, on a network you
+already trust.
 
 <Aside type="caution">
 The directory is on every interface the machine has by default. Reads are the only thing allowed
@@ -156,17 +278,24 @@ change what is there — the tool says so on startup, and `-a localhost` keeps i
 
 ## Driving it
 
-It is the file browser's API, so anything that speaks HTTP works:
+It is a [WebDAV mount](/httpserver/webdav/), so anything that speaks HTTP works — and `PUT`, `DELETE`
+and `GET` need nothing WebDAV-specific at all:
 
 ```bash
-curl http://localhost:8080                  # JSON listing of the root
-curl http://localhost:8080/sub              # JSON listing of a subdirectory
 curl -O http://localhost:8080/notes.md      # download a file
 curl -X PUT --data-binary @notes.md http://localhost:8080/notes.md
-curl -X PUT http://localhost:8080/archive/  # create a directory
 curl -X DELETE http://localhost:8080/notes.md
+curl -X MKCOL http://localhost:8080/archive
+curl -X MOVE -H 'Destination: /archive/notes.md' -H 'Overwrite: F' \
+     http://localhost:8080/notes.md
 ```
 
-A listing entry carries `name`, `path`, `isDirectory`, `size`, `lastModifiedUtc` and `contentType`.
-Downloads go through the same code as every other [download](/httpserver/files/), so byte ranges and
-conditional GETs work.
+A machine-readable listing is `PROPFIND`, which answers `207` with a `DAV:multistatus` document:
+
+```bash
+curl -X PROPFIND -H 'Depth: 1' http://localhost:8080/
+```
+
+A browser `GET` on a directory gets the [file manager](#the-file-manager) instead, since a person is
+the one asking. Downloads go through the same code as every other
+[download](/httpserver/files/), so byte ranges and conditional GETs work.
