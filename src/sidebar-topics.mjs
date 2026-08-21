@@ -429,6 +429,7 @@ export const sidebarTopics = [
               { label: 'AWS S3', link: 'httptransfers/aws-s3' },
               { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
               { label: 'Monitoring', link: 'httptransfers/monitoring' },
+              { label: 'Transfer Progress', link: 'httptransfers/progress' },
               { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
               { label: 'Release Notes', link: 'httptransfers/release-notes' }
             ]
