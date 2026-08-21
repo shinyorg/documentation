@@ -225,8 +225,8 @@ export const sidebarTopics = [
             items: [
               { label: 'Getting Started', link: 'wifi/' },
               { label: 'Networks', link: 'wifi/networks' },
+              { label: 'Known Networks', link: 'wifi/known-networks' },
               { label: 'Hotspot', link: 'wifi/hotspot' },
-              { label: 'Airplane Mode', link: 'wifi/airplane-mode' },
               { label: 'Platform Setup', link: 'wifi/platform' },
               { label: 'Release Notes', link: 'wifi/release-notes' }
             ]
@@ -1013,6 +1013,7 @@ export const sidebarTopics = [
           { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
           { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
           { label: '.NET MAUI', link: 'httpserver/maui' },
+          { label: 'Command Line Tool', link: 'httpserver/cli' },
           { label: 'Release Notes', link: 'httpserver/release-notes' }
         ]
       },

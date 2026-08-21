@@ -1,0 +1,157 @@
+---
+title: Known Networks
+description: List, forget and rejoin the Wi-Fi networks a device has saved, with Shiny.Net.Wifi — backed by NEHotspotConfigurationManager on iOS, network suggestions on Android, wlanapi on Windows, CoreWLAN on macOS and NetworkManager on Linux
+---
+
+A **known network** is one the device has saved and can rejoin without being handed the passphrase
+again. `IWifiManager` exposes three calls over them:
+
+```csharp
+var known = await wifi.GetKnownNetworks(ct);   // list
+await wifi.Forget(id, ct);                     // delete one
+await wifi.Connect(id, ct);                    // rejoin one
+```
+
+## What comes back
+
+```csharp
+public sealed record KnownWifiNetwork
+{
+    public required string Id { get; init; }
+    public required string Ssid { get; init; }
+    public WifiSecurity Security { get; init; }
+    public bool IsHidden { get; init; }
+    public bool AddedByThisApp { get; init; }
+}
+```
+
+`Id` is **opaque and issued by the platform**. It is a NetworkManager connection UUID on Linux, a
+numeric network id on Android below API 29, and the SSID everywhere else. Round-trip it into
+`Forget` and `Connect`; do not parse it, construct it, or store it somewhere it might be read back
+on a different platform. If you need to find a network by name, match on `Ssid`.
+
+## The scope of "known" is not the same everywhere
+
+This is the part that surprises people, so the API states it rather than papering over it.
+
+| | What `GetKnownNetworks()` returns |
+|---|---|
+| iOS / Mac Catalyst | Only the SSIDs **your app** configured through `NEHotspotConfiguration` |
+| Android | Only **your app's** network suggestions and configurations |
+| Windows | Every profile on the machine |
+| macOS | The machine's whole preferred-network list |
+| Linux | Every Wi-Fi profile NetworkManager holds |
+
+Neither iOS nor Android will show an app the networks the *user* saved — that is a deliberate
+privacy boundary, not a gap here. On a phone this list is empty until your own app has joined
+something with `Remember` left on, so do not build a "manage all my Wi-Fi networks" screen for
+mobile.
+
+`AddedByThisApp` tells the two cases apart. It is always true on iOS, Mac Catalyst and Android, and
+always false on Windows, macOS and Linux — including for profiles your app created, because none of
+those platforms record which app wrote an entry.
+
+## Capability matrix
+
+| Operation | Android | iOS / Catalyst | macOS | Windows | Linux |
+|-----------|---------|----------------|-------|---------|-------|
+| List | ⚠️ own app only | ⚠️ own app only | ✅ | ✅ | ✅ |
+| Forget | ⚠️ own app only | ⚠️ own app only | ⚠️ needs admin auth | ✅ | ✅ (polkit) |
+| Connect by id | ⚠️ API ≤ 28 | ❌ | ✅ | ✅ | ✅ |
+
+```csharp
+if (wifi.Capabilities.HasFlag(WifiCapabilities.KnownNetworks))
+    ShowSavedNetworksList();
+
+if (wifi.Capabilities.HasFlag(WifiCapabilities.ForgetNetwork))
+    ShowForgetButton();
+
+if (wifi.Capabilities.HasFlag(WifiCapabilities.ConnectKnownNetwork))
+    ShowRejoinButton();
+```
+
+## Getting a network into the list
+
+Joining with `Remember = true` — the default — is what saves it:
+
+```csharp
+await wifi.Connect(
+    new WifiConnectionRequest("Kitchen")
+    {
+        Passphrase = "hunter2hunter2",
+        Remember = true
+    },
+    ct
+);
+```
+
+What that writes differs by platform. Windows, macOS and Linux save an ordinary profile. iOS keeps
+the hotspot configuration until the app is deleted or `Forget` removes it. Android 11+ registers a
+`WifiNetworkSuggestion` alongside the join — the join itself is still a `WifiNetworkSpecifier` and
+is never persisted, so the suggestion exists purely to let the OS come back to the network later,
+and it only takes effect once the user approves the notification Android raises.
+
+Setting `Remember = false` leaves nothing behind anywhere.
+
+## Rejoining
+
+```csharp
+var home = (await wifi.GetKnownNetworks(ct))
+    .FirstOrDefault(x => x.Ssid == "Kitchen");
+
+if (home != null && wifi.Capabilities.HasFlag(WifiCapabilities.ConnectKnownNetwork))
+{
+    var joined = await wifi.Connect(home.Id, ct);
+    Console.WriteLine($"Back on {joined.Ssid} at {joined.IPv4Address}");
+}
+```
+
+Like the passphrase-based overload, this returns only once an address has been assigned.
+
+**`Connect(id)` is a desktop feature.** On iOS and Android 10+ a saved network is a standing hint
+the OS acts on when the network is in range and it feels like it — there is no call to force the
+join, so the capability flag is absent and the call throws `WifiNotSupportedException`. Use
+`Connect(WifiConnectionRequest)` with the passphrase there instead.
+
+The network still has to be **in range**. macOS in particular associates to a scanned access point
+rather than to a name, so it scans for the SSID first; the passphrase comes out of the login
+keychain and your app never sees it.
+
+## Forgetting
+
+```csharp
+await wifi.Forget(known.Id, ct);
+```
+
+Forgetting the network you are currently on drops you off it. An id that is already gone is not an
+error — the call is safe to make speculatively.
+
+:::caution[macOS needs an administrator authorization]
+Editing the preferred-network list on macOS means committing a whole `CWConfiguration`, and the OS
+gates that behind an `SFAuthorization` a normal app cannot raise. Expect
+`WifiPermissionException` from `Forget` there and have a fallback — sending the user to
+**System Settings → Wi-Fi → Advanced** is the honest one. *Listing* is unprivileged and works fine.
+:::
+
+On Linux, deleting goes through polkit — interactive on a desktop, and in a headless session
+needing a rule for `org.freedesktop.NetworkManager.settings.modify.system`.
+
+## Performance
+
+`GetKnownNetworks()` is cheap on mobile and not free on desktop: Windows reads one profile's XML
+per entry through `wlanapi.dll`, and Linux makes one D-Bus round trip per profile because
+NetworkManager has no bulk read. Cache the result and refresh it on demand rather than polling it.
+
+## How it is backed
+
+| Platform | API |
+|---|---|
+| iOS / Mac Catalyst | `NEHotspotConfigurationManager.getConfiguredSSIDs` / `removeConfiguration(forSSID:)` |
+| Android 11+ | `WifiManager.getNetworkSuggestions` / `removeNetworkSuggestions` |
+| Android ≤ 9 | `WifiManager.getConfiguredNetworks` / `removeNetwork` / `enableNetwork` |
+| macOS | `CWConfiguration.networkProfiles`, committed back through `CWInterface.commitConfiguration` |
+| Windows | `wlanapi.dll` — `WlanGetProfileList`, `WlanGetProfile`, `WlanDeleteProfile`, `WlanConnect`. WinRT's `WiFiAdapter` has no concept of a saved profile |
+| Linux | NetworkManager `Settings.ListConnections`, `Connection.GetSettings` / `Delete`, `ActivateConnection` |
+
+Read on: [Networks](/wifi/networks/) · [Hotspot](/wifi/hotspot/) ·
+[Platform Setup](/wifi/platform/)

@@ -1,0 +1,122 @@
+---
+title: Command Line Tool
+description: shinyhttpserver — serve a directory over HTTP from the terminal, with basic auth and per-operation permissions
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`Shiny.Net.HttpServer.CommandLine` is the [file browser](/httpserver/file-browser/) with a command
+around it: point it at a directory and it is served over HTTP. It installs as a .NET tool and runs
+anywhere .NET runs — macOS, Linux and Windows.
+
+```bash
+dotnet tool install -g Shiny.Net.HttpServer.CommandLine
+```
+
+```bash
+shinyhttpserver
+```
+
+```
+  Directory   /Users/ada/projects/notes
+  URL         http://127.0.0.1:8080/
+  Operations  read
+  Auth        none
+```
+
+Reads are allowed, nothing else is, and there is no authentication until you ask for one. Those are
+the same defaults the file browser itself has, for the same reasons.
+
+## Usage
+
+```
+shinyhttpserver [<path>] [options]
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `<path>` | `.` | The directory to serve. Nothing outside it is reachable |
+| `-p, --port <port>` | `8080` | |
+| `-a, --address <address>` | `127.0.0.1` | An IP, `any` for every interface, or `localhost` |
+| `--prefix <prefix>` | `/` | Where the browser is mounted; anywhere else, `/` redirects to it |
+| `-m, --allow <ops>` | `read` | `read`, `create`, `update`, `delete`, `all` — repeatable or comma separated |
+| `-u, --user <user:password>` | none | Turns on Basic authentication. Repeat for more than one user |
+| `--realm <realm>` | `shinyhttpserver` | The realm in the browser's login prompt |
+| `--auth-changes-only` | off | Leaves reads open, requires a login to change anything |
+| `--allow-insecure-auth` | off | Allows Basic over unencrypted, non-loopback connections |
+| `--https` | off | Serves over TLS with a self-signed certificate generated at startup |
+| `--hidden` | off | Includes dotfiles in listings and downloads |
+| `--max-upload <size>` | `64mb` | `500k`, `64mb`, `2gb`, or a plain byte count |
+| `-v, --verbose` | off | Logs every request |
+
+## Operations
+
+`read` is always on. The rest map onto what the browser will accept:
+
+| Operation | Allows |
+| --- | --- |
+| `read` | `GET` a directory for a JSON listing, `GET` a file for its bytes |
+| `create` | `PUT` to a path that does not exist, and `PUT` a path ending in `/` to make a directory |
+| `update` | `PUT` over a file that already exists |
+| `delete` | `DELETE` a file or an empty directory |
+
+```bash
+shinyhttpserver                  # read-only, the default
+shinyhttpserver -m create        # accept new files, never overwrite one
+shinyhttpserver -m all           # read, create, update, delete
+```
+
+The browser has a single `AllowWrite`, so create and update are the same `PUT` to it. The tool tells
+them apart itself: a `PUT` is checked against the file system before the handler runs and refused
+with `403` when the operation it turns out to be was not the one granted — so `-m create` cannot be
+talked into replacing a file, and `-m update` cannot be talked into adding one.
+
+## Authentication
+
+`--user` turns on [Basic authentication](/httpserver/authentication/) and puts the whole browser
+behind it:
+
+```bash
+shinyhttpserver -m all -u ada:s3cret -u grace:h0pper
+```
+
+`--auth-changes-only` is `RequireAuthorizationForChanges` from the command line — reads stay open,
+writes and deletes need the login:
+
+```bash
+shinyhttpserver -m all -u ada:s3cret --auth-changes-only
+```
+
+Basic sends the password on every request, so on a non-loopback address over plain HTTP the tool
+refuses to start rather than doing it quietly. Serve it over TLS instead:
+
+```bash
+shinyhttpserver -a any --https -u ada:s3cret -m all
+```
+
+The certificate is generated at startup and self-signed, so clients will warn about it — `curl -k`,
+or accept it once in the browser. `--allow-insecure-auth` sends the password in the clear anyway, on
+a network you already trust.
+
+<Aside type="caution">
+`-a any` puts the directory on every interface the machine has. With writes enabled and no
+authentication, anyone who can reach the port can change what is there — the tool says so on
+startup, but the flag combination is yours to choose.
+</Aside>
+
+## Driving it
+
+It is the file browser's API, so anything that speaks HTTP works:
+
+```bash
+curl http://localhost:8080                  # JSON listing of the root
+curl http://localhost:8080/sub              # JSON listing of a subdirectory
+curl -O http://localhost:8080/notes.md      # download a file
+curl -X PUT --data-binary @notes.md http://localhost:8080/notes.md
+curl -X PUT http://localhost:8080/archive/  # create a directory
+curl -X DELETE http://localhost:8080/notes.md
+```
+
+A listing entry carries `name`, `path`, `isDirectory`, `size`, `lastModifiedUtc` and `contentType`.
+Downloads go through the same code as every other [download](/httpserver/files/), so byte ranges and
+conditional GETs work.
