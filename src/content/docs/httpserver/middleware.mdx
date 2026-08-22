@@ -157,6 +157,93 @@ Use `Headers.Append` rather than the indexer for headers that may legitimately a
 middleware appends.
 </Aside>
 
+## Reading the bodies
+
+Middleware sits between the client and the handler, so it is the only place that can see both bodies
+of an exchange — which is what a traffic recorder, a request logger or an audit trail is made of.
+Each direction has its own seam.
+
+**Inbound**, `Request.Body` is a forward-only stream off the connection, so reading it consumes it.
+Assigning a rewound copy back is what makes it readable twice — once by you, then again by the
+handler, which never knows the difference. Assigning also drops any `BodyReader` already handed out,
+so the stream and the reader cannot disagree about where the body starts.
+
+```csharp
+app.Use(async (ctx, next) =>
+{
+    if (ctx.Request.HasBody)
+    {
+        var buffered = new MemoryStream();
+        await ctx.Request.Body.CopyToAsync(buffered, ctx.RequestAborted);
+        buffered.Position = 0;
+
+        Log(buffered.ToArray());
+        ctx.Request.Body = buffered;   // handed on rewound
+    }
+
+    await next(ctx);
+});
+```
+
+**Outbound**, every write funnels through the response's `IResponseBodyControl`, whichever of `Body`,
+`BodyWriter` or the convenience helpers the handler reached for. Wrap the control the response is
+currently bound to and bind the wrapper, and you see all of them:
+
+```csharp
+sealed class TeeBodyControl(IResponseBodyControl inner, Stream capture) : IResponseBodyControl
+{
+    Stream? stream;
+    PipeWriter? writer;
+
+    public bool HasStarted => inner.HasStarted;
+
+    public Stream Stream => this.stream ??= new TeeStream(inner.Stream, capture);
+
+    // built over Stream, not over inner.Writer, so both write paths meet in one place
+    public PipeWriter Writer => this.writer ??= PipeWriter.Create(
+        this.Stream,
+        new StreamPipeWriterOptions(leaveOpen: true)
+    );
+
+    public ValueTask StartAsync(CancellationToken ct) => inner.StartAsync(ct);
+    public ValueTask CompleteAsync(CancellationToken ct) => inner.CompleteAsync(ct);
+
+    public ValueTask FlushAsync() => this.writer?.FlushAsync().AsValueTask() ?? default;
+}
+
+app.Use(async (ctx, next) =>
+{
+    var capture = new MemoryStream();
+    var tee = new TeeBodyControl(ctx.Response.BodyControl, capture);
+    ctx.Response.Bind(tee);
+
+    try
+    {
+        await next(ctx);
+    }
+    finally
+    {
+        await tee.FlushAsync();
+        Log(ctx.Response.StatusCode, capture.ToArray());
+    }
+});
+```
+
+This is the same seam [response compression](/httpserver/compression/) inserts itself through.
+
+<Aside type="caution">
+Flush whatever your wrapper buffered before the pipeline unwinds. The connection completes **its own**
+producer, not whatever the response ended up bound to, so bytes left sitting in a wrapper's
+`PipeWriter` never reach the wire — every response truncated, and only for handlers that wrote through
+`BodyWriter`. Forward `StartAsync` and `CompleteAsync` to the control you wrapped for the same reason.
+</Aside>
+
+<Aside type="tip">
+On a device, cap what you keep. Decide from the content type whether a body is worth holding at all —
+a wasm file or a video is bytes nothing will read back — and cap the rest, counting every byte but
+storing only the first few hundred kilobytes of it.
+</Aside>
+
 ## Per-request state
 
 `ctx.Items` is a scratch dictionary allocated on first use, for passing state between middleware in
