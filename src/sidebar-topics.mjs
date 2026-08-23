@@ -625,6 +625,7 @@ export const sidebarTopics = [
           },
         ]
       },
+      { label: 'Quick Entry', link: 'controls/quick-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
       { label: 'FrostedGlassView', link: 'controls/frostedglass/', jumpTo: true },
       {
         label: 'ImageEditor',

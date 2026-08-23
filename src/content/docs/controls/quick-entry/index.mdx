@@ -1,0 +1,352 @@
+---
+title: Quick Entry
+description: An assistant-style prompt popup summoned over whatever the user is looking at — an in-app overlay everywhere, or a borderless always-on-top OS window on desktop — plus a Siri-style screen-edge glow
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+{/* TODO: capture screenshots for quick-entry (in-app overlay on iOS + Blazor, desktop window on Windows + macOS AppKit, screen glow) */}
+
+An assistant-style prompt summoned over whatever the user is looking at — `PromptView` in a popup — plus an optional Siri-style glow around the screen edge on the same service.
+
+It ships in the **core** packages on both hosts, so it works everywhere out of the box:
+
+- <NugetDownloads name="Shiny.Maui.Controls" />
+- <NugetDownloads name="Shiny.Blazor.Controls" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} os={["ios", "android", "windows", "macos", "linux"]} />
+
+## Two presentations, one API
+
+| Presentation | What it is | Where |
+|---|---|---|
+| **In-app** | An overlay drawn over the current page | Everywhere — iOS, Android, Mac Catalyst, Windows, macOS, Linux, Blazor |
+| **Desktop** | A borderless, always-on-top OS window that opens over *other applications* | Windows, macOS (AppKit), Linux — with the [`Shiny.Maui.Controls.Desktop`](/controls/trayicon/) add-on |
+
+`QuickEntryOptions.Presentation` picks between them:
+
+- **`Auto`** (the default) — the native window where one is available, the overlay everywhere else. One setting for a shared codebase, with no platform checks at the call site.
+- **`InApp`** — always the overlay, including on desktop. Right for a popup that should stay inside your app rather than float over the whole machine.
+- **`Desktop`** — force the OS window. Where it isn't available it falls back to the overlay and logs why, rather than failing to open.
+
+`IQuickEntryService.ResolvedPresentation` tells you which you actually got.
+
+The in-app presentation is built on the library's own [`Overlay`](/controls/overlay/) control, so it shares the page's `OverlayHost` backdrop with everything else that uses one — a popup opened over a floating panel dims the page once, not twice — and inherits the blur, the close-on-backdrop-tap and the show/hide worker. A page with no host gets one installed automatically.
+
+:::caution[The in-app overlay does not paint on the macOS AppKit head]
+Re-parenting a `ContentPage`'s `Content` at runtime — which every in-app overlay in this library does, Toast and Dialogs included — does not re-render on `net10.0-macos`, so the page goes blank or the layer never appears. It is a pre-existing limitation of that head rather than anything specific to quick entry. `Auto` already picks the desktop window on macOS, so the default path is unaffected; only an explicit `Presentation = InApp` there runs into it.
+:::
+
+:::note[iOS, Android, Mac Catalyst and Blazor are in-app only]
+A phone has no second option, and a browser cannot make an OS-level window. Setting `Presentation = Desktop` there is not an error — it simply resolves to the overlay. The Blazor options class has no `Presentation` member at all.
+:::
+
+## Setup
+
+**MAUI** — registered by `UseShinyControls()`, so this only changes the settings:
+
+```csharp
+using Shiny;
+using Shiny.Maui.Controls.QuickEntry;
+
+builder
+    .UseMauiApp<App>()
+    .UseShinyControls(cfg => cfg.ConfigureQuickEntry(o =>
+    {
+        o.Presentation = QuickEntryPresentation.Auto;
+        o.Placement    = QuickEntryPlacement.TopCenter;
+        o.ScreenGlow   = ScreenGlowTrigger.WhileBusy;
+    }));
+```
+
+For a real desktop window — and [global hotkeys](#global-hotkeys) — add the desktop package and one more call:
+
+```bash
+dotnet add package Shiny.Maui.Controls.Desktop
+```
+
+```csharp
+builder
+    .UseShinyControls(cfg => cfg.ConfigureQuickEntry(o => o.HotKey = "Ctrl+Alt+Space"))
+    .UseDesktopQuickEntry();
+```
+
+Safe to call unconditionally: on Mac Catalyst and anywhere else that isn't a desktop, the presenters report themselves unsupported and the core service quietly stays with the overlay.
+
+**Blazor** — registered by `AddShinyControls()`, plus one host component in the root layout:
+
+```csharp
+services.AddShinyControls(cfg => cfg.ConfigureQuickEntry(o =>
+{
+    o.Placement  = QuickEntryPlacement.TopCenter;
+    o.ScreenGlow = ScreenGlowTrigger.WhileBusy;
+}));
+```
+
+```razor
+{/* MainLayout.razor */}
+<QuickEntryHost />
+```
+
+## Driving the popup
+
+```csharp
+public class QuickEntryHost(IQuickEntryService quickEntry)
+{
+    public async Task StartAsync()
+    {
+        // Optional: builds the native window ahead of time so the first open is instant
+        await quickEntry.PreloadAsync();
+    }
+
+    public void OnTrayIconClicked() => quickEntry.Toggle();
+}
+```
+
+| Member | Notes |
+|---|---|
+| `Show()` / `Hide()` / `Toggle()` | `Toggle` is what a hotkey, tray click or button binds to |
+| `PreloadAsync()` (MAUI) | Builds the popup ahead of first use — also how you reach `Content` before the user opens anything |
+| `Resize(width, height)` (MAUI) | Manual sizing. Height is clamped to `MaxHeight` |
+| `ResolvedPresentation` | Which presentation you actually got, with `Auto` and any fallback applied |
+| `IsOpen` · `Content` | `Content` is the hosted view — cast to `PromptView` to wire it up |
+| `ShowGlow()` · `HideGlow()` · `PulseGlowAsync()` | The screen glow lives on this same service |
+| `Opened` / `Closed` | Raised however the popup was dismissed |
+
+In **desktop** presentation the popup is a real window, so it does not grow to fit its content the way an overlay would — `AutoSize` (on by default) follows the content's height for you, clamped between `CollapsedHeight` and `MaxHeight`. In-app none of that applies: the overlay is laid out by the page and `MaxHeight` is simply a ceiling.
+
+### Options
+
+| Property | Default | Notes |
+|---|---|---|
+| `HotKey` | `null` | **Desktop only.** Accelerator that toggles the popup |
+| `Width` | `720` | Device-independent pixels |
+| `CollapsedHeight` | `76` | Height with just the prompt row |
+| `MaxHeight` | `560` | Ceiling for auto-sizing |
+| `Placement` | `TopCenter` | `TopCenter` · `BottomCenter` · `Center` · `NearCursor` · `Manual`. In-app, `NearCursor` reads as centred — a touch screen has no pointer. Blazor has only the first three |
+| `TopMarginRatio` | `0.18` | Top edge as a fraction of the screen for `TopCenter` |
+| `BottomMarginRatio` | `0.12` | Gap below the popup for `BottomCenter`, as a fraction of the working area |
+| `X` / `Y` | `0` | Screen coordinates for `Manual` |
+| `AutoSize` | `true` | Follow the content's measured height |
+| `DismissOnFocusLost` | `true` | Close when another application takes focus |
+| `DismissOnEscape` | `true` | Content gets first refusal — see [Keyboard](#keyboard) |
+| `ActivateOnShow` | `true` | Take keyboard focus. Turn off for a passive HUD |
+| `ShowInTaskbar` | `false` | Desktop only; applied when the native window is created |
+| `JoinAllSpaces` | `true` | macOS desktop presentation: appear on every Space and over full-screen apps |
+| `ContentFactory` | `null` | Builds the content. Defaults to a new `PromptView` |
+| `RecreateContentOnShow` | `false` | Off, so a half-typed prompt survives an accidental dismiss |
+| `ScreenGlow` | `None` | `None` · `WhileOpen` · `WhileBusy` |
+| `Glow` | — | The glow's appearance: thickness, palette, speed, intensity, layers, frame rate |
+| `ScrimColor` · `DismissOnScrimTap` | 35% black · `true` | In-app only — the backdrop, and the touch equivalent of `DismissOnFocusLost` |
+
+Placement is resolved against the screen under the mouse pointer, so the popup follows the user across a multi-monitor setup rather than pinning itself to the app's window.
+
+## PromptView
+
+The popup's default content: an animated orb, a single-line prompt, and an area beneath it that expands for suggestions and a response.
+
+**It does no AI itself.** It raises `Submitted` and leaves the request to you — which is what keeps it usable with any client, local or hosted.
+
+```csharp
+var prompt = (PromptView)quickEntry.Content!;
+
+prompt.Suggestions = new List<PromptSuggestion>
+{
+    new("Summarise my clipboard", "Reads whatever you last copied", "📋"),
+    new("Explain this error",     "Paste a stack trace",            "🐞"),
+    new("Draft a reply",          "Bullet points in, message out",  "✉️")
+};
+
+prompt.Submitted += async (_, e) =>
+{
+    prompt.ResponseContent = null;
+    prompt.IsBusy = true;
+
+    var answer = await chatClient.GetResponseAsync(e.Text);
+
+    prompt.IsBusy = false;
+    prompt.ResponseContent = new MarkdownView { Markdown = answer.Text };
+};
+
+prompt.Cancelled += (_, _) => cts.Cancel();
+```
+
+It is an ordinary `ContentView`, so it also works inline on a normal page — including on iOS and Android, where the popup itself does not exist:
+
+```xml
+<ContentPage xmlns:qe="clr-namespace:Shiny.Maui.Controls.Desktop.QuickEntry;assembly=Shiny.Maui.Controls.Desktop">
+    <qe:PromptView Placeholder="Ask anything…"
+                     Text="{Binding Prompt}"
+                     IsBusy="{Binding IsThinking}"
+                     SubmitCommand="{Binding AskCommand}"
+                     ShowMicrophone="True"
+                     MicrophoneCommand="{Binding DictateCommand}" />
+</ContentPage>
+```
+
+| Property | Notes |
+|---|---|
+| `Text` | The prompt. Two-way by default |
+| `Placeholder` | Default `"Ask anything…"` |
+| `Icon` | An `ImageSource` in place of the built-in animated orb |
+| `IconContent` | Any view in the leading slot. Wins over `Icon` |
+| `ShowIcon` · `IconSize` | Hide the slot entirely, or resize the orb/image. Default true · 26 |
+| `IsBusy` / `BusyText` | Spins the orb, shows a spinner, swaps submit for a stop button |
+| `Suggestions` | Honours `INotifyCollectionChanged`, so an `ObservableCollection` updated as the user types behaves like autocomplete |
+| `SuggestionTemplate` | Render your own rows; the binding context is the item |
+| `MaxVisibleSuggestions` | Default 6 — it is a HUD, not a list view |
+| `DropdownContent` | Any view for the expanding area under the prompt — a command palette, recent items, your own list. Renders above `Suggestions`, so both can be used together |
+| `DropdownHeight` | Unset (-1) sizes the dropdown to its content and the window follows. Set a value to pin it and scroll instead — right for a list that changes length as the user types |
+| `ResponseContent` | Any `View`. Null collapses the area |
+| `Footer` | Optional bottom strip — a model picker, a keyboard legend |
+| `SubmitCommand` · `SuggestionCommand` · `MicrophoneCommand` | Command equivalents of the events |
+| `ShowMicrophone` | Default false — there is no speech engine in this package |
+| `ShowSubmitButton` · `ClearOnSubmit` | Both default true |
+| `AccentColor`, `SurfaceColor`, `OutlineColor`, `TextColor`, `PlaceholderColor`, `SubtleTextColor`, `HighlightColor`, `CornerRadius`, `PromptFontSize` | The colours default to app-theme bindings, so they follow light/dark until you assign one |
+
+Events: `Submitted` (carrying `Text` and the chosen `Suggestion`, or null for a typed submit), `SuggestionSelected`, `Cancelled`.
+
+### Keyboard
+
+MAUI has no cross-platform key-down event, so the popup host reads keys off the native window and hands them to its content.
+
+- **↑ / ↓** walk the suggestions, wrapping back to the prompt at either end
+- **Enter** submits, or picks the highlighted suggestion
+- **Escape** unwinds one layer of state at a time — cancel the request, drop the highlight, clear the response, clear the prompt — and only then falls through to the host, which closes the popup
+
+Custom content takes part by implementing `IQuickEntryKeyHandler`:
+
+```csharp
+public class MyPopupContent : ContentView, IQuickEntryKeyHandler
+{
+    // return true to swallow the key; false lets the host act on it
+    public bool HandleKey(QuickEntryKey key)
+        => key == QuickEntryKey.Tab && this.CycleSection();
+}
+```
+
+Three more optional hooks: `IQuickEntryPresentationAware` (`OnQuickEntryOpened` / `OnQuickEntryClosed`), `IQuickEntryBusyState` (lets the glow's `WhileBusy` trigger see your content's working state), and `IQuickEntryAutoSize` (`GetDesiredHeight(width)` + `DesiredHeightChanged`). `PromptView` implements all of them.
+
+:::note[Implement `IQuickEntryAutoSize` on content that changes size]
+The host would rather not need it. But the content lives inside the very window whose size it determines, and neither obvious signal survives that: a `ContentView` stretches to whatever space the layout offers, so its arranged height is the window's rather than its content's; and `Measure` keeps handing back a desired size cached from that same constrained pass. A view that knows which of its children is the real content can simply say so. Content that does not implement it is measured instead — fine for a fixed height, unreliable for anything that grows.
+:::
+
+## Blazor
+
+Same control, same service, no OS window. `<PromptView>` takes ordinary parameters:
+
+```razor
+<PromptView Width="640"
+            @bind-Text="prompt"
+            Placeholder="Ask anything…"
+            IsBusy="busy"
+            Suggestions="suggestions"
+            Response="@answer"
+            Submitted="OnSubmitted" />
+```
+
+The popup's *own* prompt is configured through the service instead, because a service cannot hand a component parameters directly — the two meet at `PromptViewState`:
+
+```razor
+@inject IQuickEntryService QuickEntry
+
+@code {
+    protected override void OnInitialized() => QuickEntry.ConfigurePrompt(prompt =>
+    {
+        prompt.Suggestions = suggestions;
+        prompt.Submitted += async (_, e) =>
+        {
+            prompt.IsBusy = true;
+            prompt.Response = await AskAsync(e.Text);
+            prompt.IsBusy = false;
+        };
+    });
+}
+```
+
+`SetContent(RenderFragment)` replaces the built-in prompt with your own markup for every open; `Show(RenderFragment)` does it for one.
+
+:::note[Scoped, not singleton]
+The popup's open state and the live options object are per-user, so a singleton would put one user's popup on every connected user's screen under Blazor Server. Under WebAssembly the two lifetimes are identical.
+:::
+
+## Global hotkeys
+
+**Desktop only**, and registered by `UseDesktopQuickEntry()` — a system-wide key grab does not exist on mobile or in a browser. Useful on its own:
+
+```csharp
+var registration = hotKeys.Register("Ctrl+Shift+K", () => ToggleRecording());
+if (registration == null)
+{
+    // Could not be claimed. A normal outcome, not an exception: unsupported platform,
+    // unparseable string, or another application already owns the combination.
+}
+```
+
+The callback is marshalled to the UI thread, so it is safe to touch MAUI objects directly. Dispose the registration to release the key.
+
+Accelerators use the same grammar as [tray menu accelerators](/controls/trayicon/) — modifiers joined with `+`, then the key: `"Ctrl+Alt+Space"`, `"Cmd+Shift+K"`, `"Ctrl+F12"`. Recognised modifiers are `Ctrl`/`Control`, `Alt`/`Option`/`Opt`, `Shift`, and `Cmd`/`Command`/`Meta`/`Win`/`Super`.
+
+:::note
+At least one modifier is required. A bare key would hijack that key system-wide, and every backend refuses it.
+:::
+
+| Platform | Mechanism | Notes |
+|---|---|---|
+| Windows | `RegisterHotKey` on a message-only window | Reliable. Fails if another process owns the combination |
+| macOS (AppKit) | Carbon `RegisterEventHotKey` | No Accessibility permission prompt, unlike an `NSEvent` global monitor |
+| Linux / X11 | `XGrabKey` on the root window | Grabbed with every lock-modifier combination, so Caps/Num Lock do not break it |
+| Linux / Wayland | `org.freedesktop.portal.GlobalShortcuts` | GNOME 45+, KDE Plasma 6+ |
+| MacCatalyst | — | Not supported |
+
+## Screen glow
+
+An animated colour wash around the edge of the display, click-through and always-on-top, so it never interrupts anything the user is doing.
+
+```csharp
+cfg.ConfigureQuickEntry(o =>
+{
+    o.Glow.Thickness = 130;
+    o.Glow.Palette   = new List<Color> { Colors.DeepSkyBlue, Colors.MediumPurple, Colors.HotPink };
+    o.Glow.Speed     = 0.22;   // laps of the perimeter per second
+    o.Glow.Intensity = 0.9;
+    o.Glow.Layers    = 3;      // inward-falloff passes: more is softer and costs more
+    o.Glow.FrameRate = 30;
+});
+```
+
+The glow is part of `IQuickEntryService` rather than a service of its own: the two are almost always used together, and splitting them meant an app wiring up an assistant had to resolve, configure and keep two objects in step for one visible behaviour. It works with no popup involved — for a listening, recording or long-running-job indicator of your own.
+
+```csharp
+quickEntry.ShowGlow();
+quickEntry.HideGlow();
+await quickEntry.PulseGlowAsync(TimeSpan.FromSeconds(3));   // one-shot acknowledgement
+```
+
+Wire it to the popup with `QuickEntryOptions.ScreenGlow`:
+
+- **`None`** — never (you can still drive it by hand)
+- **`WhileOpen`** — the whole time the popup is up
+- **`WhileBusy`** — only while the content reports itself working. This is the closest match to Siri, which lights the edge while listening and thinking rather than the whole time it is on screen. Works with `PromptView.IsBusy` out of the box; custom content implements `IQuickEntryBusyState`
+
+It rims the **display** in desktop presentation and the **page** in-app — the same thing on a phone, and not the same thing on a desktop with your app in a window. Availability differs from the popup, so check `IsGlowSupported` separately:
+
+| Platform | How it is drawn |
+|---|---|
+| In-app, every platform | An overlay layer on the current page |
+| macOS, Linux / X11 desktop | A transparent, click-through OS window |
+| Windows desktop | A WinUI 3 window has no per-pixel alpha, so the glow is rendered with GDI+ into four layered Win32 windows, one per screen edge — which is also why the Windows glow has square corners rather than following a rounded display |
+| Blazor | A CSS conic gradient masked to a band around the viewport |
+| MacCatalyst, Linux / Wayland desktop | No whole-display glow; the in-app one is used instead |
+
+The glow is a full-screen animation. `FrameRate` is the first thing to turn down on an older GPU, then `Layers`.
+
+## Wayland
+
+Under Wayland a client is not allowed to position its own toplevel, raise itself above other windows, or grab the keyboard — and GTK 4 dropped `gtk_window_move` and `set_keep_above` to match. So on a Wayland session:
+
+- The popup is still undecorated and transparent, but the **compositor decides where it appears** and it is an ordinary window in the stack
+- Hotkeys go through the desktop portal. Binding shows the user a **system confirmation dialog**, so the hotkey starts working asynchronously after startup — and the trigger you pass is a *preference*: the compositor may bind something else, and the user can rebind it. Never present the configured accelerator as fact on Wayland
+- The screen glow is unavailable
+
+Under X11 everything behaves as it does on Windows and macOS. Where `IGlobalHotKeyService.IsSupported` is false, fall back to opening the popup from a [tray icon](/controls/trayicon/).

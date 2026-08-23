@@ -1,0 +1,400 @@
+---
+title: "Shiny HTTP Transfers: Background Transfers, and Knowing What They're Doing"
+date: 2026-08-26
+authors:
+  - allanritchie
+tags:
+  - httptransfers
+  - Feature
+  - MAUI
+  - iOS
+  - Android
+excerpt: "Why is this data still not here? Usually because nothing was carrying it — HttpClient stops the moment the OS suspends your app. Shiny.Net.Http hands the bytes to the platform instead — NSURLSession on iOS, a foreground service on Android, a connectivity-driven managed loop everywhere else, Service Worker Background Sync in the browser — and gives all of them one API. Plus why Azure Blob and S3 get hand-built request signers instead of the vendor SDKs, what the Android foreground service does when the network drops, and how speed, percent and time-remaining are measured consistently on every platform and rendered onto the Lock Screen and the notification shade from one manager."
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+The question this library exists to answer is not "how do I upload a file". It is **"why is this data
+still not here?"** — the photo attached twenty minutes ago, the inspection report the office has been
+refreshing since lunch, the overnight sync that was meant to be finished before anyone looked.
+
+The answer is nearly always that nothing was moving. `HttpClient` is a fine way to carry bytes right up
+until the user leaves your app, and then it stops. On iOS the process is suspended within seconds of the
+app going to the background: threads stop, sockets close. A half-finished 200 MB upload does not pick up
+where it left off when the user returns — it starts over, on their cellular plan. Android reclaims a
+backgrounded process the moment memory gets tight. The user did nothing wrong; they answered a text
+message.
+
+So the data is not late because something broke. It is late because for most of that window nobody was
+carrying it, and no amount of effort inside your process changes that — the OS is doing exactly what it
+said it would do. The only thing that helps is not being the one holding the socket.
+
+This is one of the oldest pieces of code in Shiny — it started life in 2016 as a Xamarin plugin, years
+before Shiny existed, and has been carried forward, rewritten and re-platformed ever since. It is also the
+module that ends up in the most apps, because sooner or later every app has to move a file at a moment
+the user is not watching it happen.
+
+<NugetBadge name="Shiny.Net.Http" showLabel={true} />
+
+**Shiny.Net.Http** hands the transfer to whatever the platform runs on your behalf, and gives you one
+API over the lot of them.
+
+```csharp
+builder.Services.AddHttpTransfers<MyTransferDelegate>();
+```
+
+```csharp
+await transferManager.Queue(new HttpTransferRequest(
+    "receipt-upload",
+    "https://api.example.com/receipts",
+    TransferType.UploadMultipart,
+    filePath
+));
+```
+
+That is the whole thing. Your app can be suspended, backgrounded or terminated a second later and the
+bytes keep moving.
+
+## What is actually carrying the bytes
+
+| Platform | Engine |
+|----------|--------|
+| iOS / Mac Catalyst | A background `NSURLSession` — the transfer is owned by the OS daemon, and iOS **relaunches your app** in the background when it finishes |
+| Android | A managed `HttpClient` loop inside a foreground service, so the process is not a kill candidate while transfers are pending |
+| Windows, Linux, macOS, plain .NET | The same managed loop, gated on `IConnectivity` — every pass re-checks the network and picks transfers back up when it returns |
+| Blazor WASM | Service Worker Background Sync — an IndexedDB queue the SW drains with `fetch()` while the tab is closed |
+
+The differences that leak through are the ones that are real, and they are documented rather than
+smoothed over with a lie:
+
+- **`Cancel` deletes the partial file**; `Pause` does not. Pause leaves the transfer in the queue in
+  `Paused`, and a user-paused transfer stays paused across relaunch and across connectivity coming back.
+  It waits for you to call `Resume`.
+- **`UseMeteredConnection = false`** keeps a large transfer on Wi-Fi. The managed loop parks it in
+  `PausedByCostedNetwork` rather than quietly burning someone's data.
+
+State lives in a Shiny `IRepository`, so the queue survives a process restart. That matters more than it
+sounds: on iOS the process that finishes your transfer is frequently not the process that started it.
+
+### Android: a foreground service, and a connectivity gate
+
+Android has no transfer daemon to hand the work to. What it does have is the foreground service — the one
+contract that says *this process is doing something the user knows about, do not reclaim it* — so that is
+what the queue runs inside.
+
+`HttpTransferService` starts on the first `Queue()`, and again at app start if the repository still holds
+transfers. It promotes itself as `FOREGROUND_SERVICE_TYPE_DATA_SYNC` and hosts the managed loop. When the
+queue empties the loop falls out and the service stops itself, so there is no idle notification left
+sitting in the shade after the last file lands.
+
+Inside, every pass is gated on `IConnectivity` before a request is attempted at all:
+
+```csharp
+if (connectivity.IsInternetAvailable())
+{
+    var full = connectivity.ConnectionTypes.HasFlag(ConnectionTypes.Wifi);
+    // ... run each pending transfer
+}
+```
+
+No connection means nothing is sent — the pass logs and waits, rather than throwing an
+`HttpRequestException` at your delegate for something that is not an error. And when the network dies
+*mid*-transfer, that is not treated as a failure either:
+
+```csharp
+catch (IOException ex)
+{
+    this.PauseTransfer(transfer, "Network Disconnected", ex);
+}
+```
+
+The transfer moves to `PausedByNoNetwork` and stays in the repository. The next pass with connectivity
+picks it straight back up — and because a download re-asks with `Range: bytes=N-` against the bytes
+already on disk, walking into a parking garage costs the length of the outage rather than the whole file.
+
+Four states come out of that gate, and the distinctions between them are the point:
+
+| State | Set by | Cleared by |
+|-------|--------|------------|
+| `PausedByNoNetwork` | The connection dropped | Connectivity returning — automatic |
+| `PausedByCostedNetwork` | Metered network, `UseMeteredConnection = false` | Wi-Fi returning — automatic |
+| `Paused` | The user | `Resume()`, and nothing else |
+| `Error` | The server said no | Your delegate |
+
+Only the third is sticky. A transfer paused by the network resumes itself; a transfer paused by a person
+does not, because a person paused it.
+
+The hard limits here are Android's rather than ours. Android 15 caps `dataSync` at a six-hour daily
+budget, and `shortService` — opt in with `HttpTransferService.UseShortService`, which skips the
+type-specific manifest permission and the Play Store declaration — gets roughly three minutes per
+promotion. Both deliver `onTimeout`, and failing to stop promptly is an ANR. So the service stops, logs a
+warning, and leaves the queue in the repository; the next `Queue()` or app launch re-arms it. A timeout
+defers the work, it does not lose it.
+
+### Why downloads resume and uploads do not
+
+**Downloads resume**, because HTTP standardised the question long before any of us needed it. `Range:
+bytes=N-` is one header, `206 Partial Content` is one status code, and essentially every static host, CDN
+and object store answers both. The managed loop asks, appends when it gets a `206`, and — when a server
+ignores the header and sends the whole body back with a `200` — restarts and says so in the log rather
+than gluing a second copy of the file onto the first. iOS resumes natively inside the `NSURLSession`
+daemon. A 400 MB download that dies at 380 MB in a tunnel therefore costs 20 MB, not 400, and the bytes
+already on disk are counted in the total via `Content-Range` so the progress bar comes back where it left
+off rather than at zero.
+
+**Uploads do not**, and that is mostly not the client's decision. Resuming an upload requires the *server*
+to say how many bytes it already holds and agree to take the rest from there — that is a protocol, not a
+header. [tus](https://tus.io) specifies exactly that, and it remains rare: it is not in ASP.NET Core out
+of the box, nor in Express, FastAPI, Rails or Spring. The object stores come closest, since S3 multipart
+and Azure block-blob commits have the primitives, but those are per-vendor APIs rather than anything a
+generic transfer layer can assume about `POST /receipts` — and the object-store builders below upload in
+a single `PUT` today.
+
+So `Resume` on an upload means "start over", on every platform. Writing that down beats an API that reads
+nicely and lies in production. When resumable upload endpoints become ordinary, this will use them.
+
+## Object stores, without the object-store SDK
+
+Sooner or later the destination is a bucket, so there are builders for the two everybody ends up on:
+
+```csharp
+var request = new AzureBlobStorageUploadRequest(filePath)
+    .WithBlobContainer("myaccount", "receipts")
+    .WithSasToken(sasFromYourApi)
+    .Build();
+
+await transferManager.Queue(request);
+```
+
+```csharp
+var request = new AwsS3UploadRequest(filePath)
+    .WithBucket("receipts", "us-east-1")
+    .WithObjectKey($"2026/08/{Guid.NewGuid()}.pdf")
+    .WithPresignedUrl(urlFromYourApi)          // or .WithCredentials(...) to sign on-device
+    .Build();
+```
+
+Both are pure builders. Each produces an ordinary `HttpTransferRequest` — a `PUT`, a URI and a header
+dictionary — which then goes through the same queue, the same repository, the same `NSURLSession` or
+foreground service and the same Live Activity as any other transfer. Neither is a second transfer path.
+
+### Why not `Azure.Storage.Blobs` or `AWSSDK.S3`
+
+They are good SDKs. They are also built on an assumption that is false on a phone: **that your process is
+still running.**
+
+An SDK upload owns its own `HttpClient` and its own socket, inside your app, which is precisely the
+arrangement this library exists to get out of. `BlobClient.UploadAsync` is an `await` in your process, and
+iOS suspends your process — so it dies along with everything else the moment the user switches apps, and
+there is no seam where a half-finished SDK upload could be handed to `NSURLSession` instead. The SDK's
+retry policy is no help; it stopped running too. You cannot background the thing you are carrying
+yourself.
+
+The credential model is the second problem, and it is the one with consequences. Both SDKs are shaped
+around a client that holds an account key or IAM credentials. An app bundle is not a secret — a storage
+account key shipped inside one has been handed to every user who installs it, and it usually grants far
+more than "write this one file". The mobile shape is the inverse: your backend mints a SAS token or a
+presigned URL, scoped to one blob and expiring shortly, and the device never sees a long-lived
+credential. At which point the upload is a `PUT` to a URL with a couple of headers, and there is nothing
+left for an SDK to do.
+
+What remains is a wire protocol, and the wire protocol is small — which is why the builders *are* the
+whole implementation:
+
+- **Azure** wants `x-ms-blob-type: BlockBlob`, a `Content-Length`, a `Content-Disposition`, and either a
+  SAS query string or a shared-key `Authorization` header.
+- **S3** wants Signature V4 — an HMAC-SHA256 over a canonical request, off a key derived in four chained
+  steps — which is a page of `System.Security.Cryptography` and no dependencies at all.
+
+The S3 signer takes one deliberate shortcut worth knowing about. It signs with
+`x-amz-content-sha256: UNSIGNED-PAYLOAD`:
+
+```csharp
+// S3 allows UNSIGNED-PAYLOAD so we don't need to hash potentially large files
+var payloadHash = "UNSIGNED-PAYLOAD";
+```
+
+A literal SigV4 signature covers the SHA-256 of the body, which for a 400 MB video means reading the
+entire file end to end, on battery, before a single byte leaves the device — and then reading it again to
+send it. S3 explicitly permits `UNSIGNED-PAYLOAD` over HTTPS, so the hash is skipped and the transfer
+starts immediately.
+
+The rest is size and trimming. iOS builds trim aggressively, the vendor SDKs bring wide dependency graphs
+and reflective serialisation with them, and none of that is much fun to keep working for the sake of a
+file `PUT`.
+
+### The part to watch: a signature has a clock
+
+A SigV4 header signature is stamped with `x-amz-date` at `Build()` time, and AWS rejects it outside
+roughly a fifteen-minute skew window. A background transfer, by design, may sit in the queue for hours —
+waiting for Wi-Fi, waiting for the network, waiting for a foreground-service window. Those two facts do
+not get along, and the result is a `403` in your `OnError` rather than anything mysterious.
+
+So for anything that might wait, mint a **presigned URL or SAS on the server with an expiry chosen for
+the wait** — long enough to cover an overnight queue. `WithCredentials` and `WithSharedKeyAuthorization`
+are for transfers you expect to run promptly, and for desktop or server processes, where credentials
+belong in the first place.
+
+## Why not a background job?
+
+Fair question — Shiny ships a perfectly good job scheduler. Use it for work; don't use it for blobs.
+
+A job is a **time window**. A background transfer is a **handoff**. That distinction is the whole answer,
+and on iOS it is not subtle.
+
+`Shiny.Jobs` on iOS is a `BGProcessingTaskRequest` submitted to `BGTaskScheduler`. iOS decides when the
+window opens — usually when the device is idle, often overnight, throttled by how often the user actually
+launches your app — and iOS decides when it closes. When it closes, `ExpirationHandler` fires, the
+`CancellationToken` handed to your job cancels, and the stream you were copying stops wherever it happened
+to be. A 200 MB upload does not fit inside a discretionary window that the OS is entitled to revoke, and
+the user who tapped *Send* thirty seconds ago is not expecting it to go tonight while they sleep.
+
+A background `NSURLSession` has no window. The daemon owns the socket, keeps moving bytes while your app is
+suspended, keeps moving them after your app is terminated, and iOS **relaunches your process in the
+background** to hand you the result. Nothing relaunches a terminated app to run a job.
+
+Downloads reach the same conclusion from the other direction. Expire a job 380 MB into a 400 MB file and
+there is nothing usable to hand back unless the job itself wrote the `Range` bookkeeping and persisted the
+byte counts — at which point it has become a transfer layer, only without the daemon that would have kept
+it moving through the suspension. Handed over instead, the resume, the partial file and the persisted
+counts are simply there for whichever process picks the transfer up next.
+
+Android differs in the mechanics and arrives in the same place. Jobs there are a WorkManager
+`PeriodicWorkRequest` — a fifteen-minute floor on the period and a worker that gets stopped at around ten
+minutes of execution. A large file on a poor connection will not reliably finish inside that, and starting
+over every fifteen minutes is not progress. Transfers run under a foreground service instead, which is the
+contract Android actually offers for *this will take a while and the user knows about it*.
+
+| | Jobs | Transfers |
+|---|---|---|
+| Starts | When the OS feels like it — discretionary, usage-throttled | Immediately |
+| Time limit | iOS expiration handler; ~10 min WorkManager worker | None imposed on the transfer |
+| Survives app termination | No | Yes — iOS relaunches your app to deliver the result |
+| Resume | Whatever you write yourself | `Range` requests, or native on iOS; byte counts persisted |
+| Progress to the user | Nothing to show | Live Activity / foreground notification |
+
+Where jobs are genuinely right is *around* the transfer rather than instead of it: reconciling state after
+the fact, cleaning up finished files, deciding what to queue next. Queue the blob and let the platform
+carry it.
+
+## Metrics
+
+Once a transfer is out of your process, "is it working?" stops being a rhetorical question. Every update
+carries a `TransferProgress`:
+
+```csharp
+manager.UpdateReceived += (_, result) =>
+{
+    var p = result.Progress;
+    Console.WriteLine($"{p.PercentComplete:P0} · {p.BytesPerSecond} B/s · {p.EstimatedTimeRemaining} left");
+};
+```
+
+| Value | How it is arrived at |
+|-------|----------------------|
+| `BytesTransferred` / `BytesToTransfer` | Bytes written so far, and the total — from `Content-Length`, or from `Content-Range` on a resumed download so the total counts the part already on disk |
+| `IsDeterministic` | Whether a total is known at all. A chunked response has no `Content-Length`, and a progress bar that invents one is worse than an indeterminate one |
+| `BytesPerSecond` | Sampled, not averaged over the whole transfer — see below |
+| `PercentComplete` | `transferred / total`, or `-1` when the total is unknown. Not `0` — a caller must be able to tell "nothing yet" from "no idea" |
+| `EstimatedTimeRemaining` | `bytesRemaining / BytesPerSecond`, and `TimeSpan.Zero` when there is no honest answer |
+
+### Throughput is sampled on a rolling window
+
+The managed loop counts bytes into an accumulator and only publishes when the stopwatch passes two
+seconds, then divides and resets both:
+
+```csharp
+else if (stop.Elapsed.TotalSeconds > 2)
+{
+    var bps = Convert.ToInt64(totalSince / stop.Elapsed.TotalSeconds);
+    this.PublishProgress(transfer, new TransferProgress(bps, totalBytes, totalBytesXfer));
+    totalSince = 0;
+    stop.Restart();
+}
+```
+
+Two things fall out of that. The rate is *current* throughput rather than a cumulative average, so a
+transfer that recovers from a slow patch reports the recovery instead of dragging its history along.
+And the update rate is bounded at the source — an 8 KB read loop on a fast connection would otherwise
+fire thousands of events a second at your UI thread.
+
+On iOS and Mac Catalyst the number comes from the platform instead — `NSProgress.Throughput` on the
+task, in `DidSendBodyData` / `DidWriteData` — because the daemon moving the bytes is in a better position
+to measure them than we are.
+
+Every progress tick also writes byte counts back to the repository, which is what lets the app relaunch
+mid-transfer and show a bar that is already in the right place. A late tick for a transfer that has since
+been paused or removed is dropped rather than resurrecting it.
+
+### Three ways to consume it
+
+```csharp
+// 1. the firehose — every transfer, every tick (remember to -= it)
+manager.UpdateReceived += handler;
+
+// 2. one transfer, awaited to a terminal state
+var result = await manager.WatchTransfer("receipt-upload");
+
+// 3. a bindable collection for UI
+await monitor.Start(syncContext: SynchronizationContext.Current);
+// monitor.Transfers -> HttpTransferObject : INotifyPropertyChanged
+```
+
+`HttpTransferMonitor` seeds itself from the repository, follows repository adds and removes as well as
+progress ticks, marshals to a `SynchronizationContext` if you hand it one, and can evict completed,
+cancelled or errored rows on its own. It is the one to reach for when a screen needs to show what is in
+flight; the raw event is for everything else.
+
+### The metrics the user sees
+
+The user is not in your app — that is the entire premise — so the numbers have to land somewhere they
+can see: an iOS **Live Activity** on the Lock Screen and in the Dynamic Island, or the Android
+foreground-service notification, promoted on Android 16 to a live update with a status bar chip.
+
+One call, and nothing in your transfer delegate:
+
+```csharp
+builder.Services.AddTransferProgress(opts =>
+{
+    opts.Scope       = TransferProgressScope.Summary;   // one surface for a batch, or PerTransfer
+    opts.Fields      = TransferProgressFields.Default;  // file, direction, %, bytes, speed, ETA
+    opts.ShortStatus = TransferProgressShortStatus.Percent;
+});
+```
+
+`TransferProgressManager` is deliberately one class for every platform. It subscribes at startup — not
+on first use, because on iOS the surface has to be moved to its final state by a process that was
+relaunched in the background — coalesces the firehose to one update a second and one percent of
+movement, aggregates a batch into a single figure (finished transfers stay in the aggregate so the bar
+never walks backwards when one of five completes), and starts, updates and retires the surface. An
+`ITransferProgressRenderer` owns nothing but the drawing. The aggregation and lifetime rules are exactly
+the things that would silently diverge if each platform kept its own copy.
+
+`Fields` is a flags enum over the human-readable text, so switching off `Speed` removes it from the Lock
+Screen without touching any Swift. The raw culture-invariant values (`bps`, `percent`, `etaSeconds`,
+`bytes`, `total`, …) ride along in `TransferProgressContent.Data` for a custom widget to format itself,
+and `TransferProgressContentBuilder.FormatBytes` / `FormatRate` / `FormatDuration` are public statics you
+can reuse in ordinary in-app UI so the numbers read the same everywhere.
+
+### The measurement problem iOS hands you
+
+A background `NSURLSession` delivers **no** progress callbacks while your app is suspended.
+`DidWriteData` stops firing; iOS wakes you when the transfer completes. A fraction-based bar therefore
+sits frozen for most of a long transfer, which reads as "broken" rather than "backgrounded".
+
+So progress is emitted as a **time range** the system animates by itself, anchored in the *past* — at the
+point a constant-rate transfer would have started — so the bar already sits at the true fraction and
+keeps moving without further updates. Anchoring at "now" would snap it back to zero on every tick. Each
+real callback re-anchors it, and it falls back to a plain fraction when the transfer is stalled, paused,
+of unknown size, or when the projection exceeds an hour and stops being a measurement. Android resolves
+the range straight back to a fraction, since its foreground service is alive the whole time and real
+numbers keep arriving.
+
+For uploads there is an exact answer available: your server knows how many bytes actually landed. Turn on
+`RequestPushToken` and it can push byte-accurate progress through the entire suspended window. It buys
+nothing for downloads — no server knows how far the device got.
+
+## Where to go next
+
+The [HTTP Transfers docs](/httptransfers/) cover the delegate and retry model, [monitoring](/httptransfers/monitoring/),
+[progress surfaces](/httptransfers/progress/), and the [Azure](/httptransfers/azure/) and
+[S3](/httptransfers/aws-s3/) builders.
