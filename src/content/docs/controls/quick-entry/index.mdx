@@ -5,7 +5,6 @@ description: An assistant-style prompt popup summoned over whatever the user is 
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 
-{/* TODO: capture screenshots for quick-entry (in-app overlay on iOS + Blazor, desktop window on Windows + macOS AppKit, screen glow) */}
 
 An assistant-style prompt summoned over whatever the user is looking at — `PromptView` in a popup — plus an optional Siri-style glow around the screen edge on the same service.
 
@@ -15,6 +14,26 @@ It ships in the **core** packages on both hosts, so it works everywhere out of t
 - <NugetDownloads name="Shiny.Blazor.Controls" />
 
 <PlatformSupport frameworks={["maui", "blazor"]} os={["ios", "android", "windows", "macos", "linux"]} />
+
+## Screenshots
+
+### .NET MAUI
+
+| Inline `PromptView` | Popup over the page | Typing a prompt | Screen glow |
+| --- | --- | --- | --- |
+| <img src="/images/quick-entry/s1.png" width="220" alt="PromptView inline on a page with its suggestion list open" /> | <img src="/images/quick-entry/s2.png" width="220" alt="The quick entry popup open over a dimmed page" /> | <img src="/images/quick-entry/s3.png" width="220" alt="A prompt typed into the popup" /> | <img src="/images/quick-entry/s4.png" width="220" alt="The Siri-style screen glow rimming the page" /> |
+
+On desktop the same page resolves to the **Desktop** presentation, which opens a borderless always-on-top OS window instead of an in-app overlay:
+
+| macOS |
+| --- |
+| <img src="/images/quick-entry/s5.png" width="420" alt="The quick entry page on macOS, with the presentation resolving to Desktop" /> |
+
+### Blazor
+
+| Inline `PromptView` | Popup over the page | Busy, with the screen glow | The answer |
+| --- | --- | --- | --- |
+| <img src="/images/quick-entry/blazor-s1.png" width="420" alt="PromptView inline on a Blazor page with its suggestion list open" /> | <img src="/images/quick-entry/blazor-s2.png" width="420" alt="The quick entry popup open over a dimmed Blazor page" /> | <img src="/images/quick-entry/blazor-s3.png" width="420" alt="The popup working, with the screen glow rimming the viewport" /> | <img src="/images/quick-entry/blazor-s4.png" width="420" alt="The popup showing the returned answer" /> |
 
 ## Two presentations, one API
 
@@ -197,14 +216,85 @@ It is an ordinary `ContentView`, so it also works inline on a normal page — in
 | `MaxVisibleSuggestions` | Default 6 — it is a HUD, not a list view |
 | `DropdownContent` | Any view for the expanding area under the prompt — a command palette, recent items, your own list. Renders above `Suggestions`, so both can be used together |
 | `DropdownHeight` | Unset (-1) sizes the dropdown to its content and the window follows. Set a value to pin it and scroll instead — right for a list that changes length as the user types |
-| `ResponseContent` | Any `View`. Null collapses the area |
+| `Response` | The answer as plain text, rendered in a built-in label. This is what a read-aloud tool speaks |
+| `ResponseContent` | Any `View`. Wins over `Response`; null collapses the area |
 | `Footer` | Optional bottom strip — a model picker, a keyboard legend |
+| `LeadingTools` · `TrailingTools` | `IList<PromptTool>`, created for you. Leading sits beside the orb, trailing before the microphone and submit glyphs |
 | `SubmitCommand` · `SuggestionCommand` · `MicrophoneCommand` | Command equivalents of the events |
 | `ShowMicrophone` | Default false — there is no speech engine in this package |
 | `ShowSubmitButton` · `ClearOnSubmit` | Both default true |
 | `AccentColor`, `SurfaceColor`, `OutlineColor`, `TextColor`, `PlaceholderColor`, `SubtleTextColor`, `HighlightColor`, `CornerRadius`, `PromptFontSize` | The colours default to app-theme bindings, so they follow light/dark until you assign one |
 
-Events: `Submitted` (carrying `Text` and the chosen `Suggestion`, or null for a typed submit), `SuggestionSelected`, `Cancelled`.
+Events: `Submitted` (carrying `Text` and the chosen `Suggestion`, or null for a typed submit), `SuggestionSelected`, `Cancelled`, `ResponseChanged`.
+
+### Tools
+
+`LeadingTools` and `TrailingTools` are the prompt-bar equivalent of `TextEntry`'s tool slots. `PromptTool` shares the `IconTextTool` base with `TextEntryTool`, so `Text`, `Icon`, `ToolColor`, `FontSize`, `Command` / `CommandParameter` and `Clicked` behave the same way.
+
+```xml
+<qe:PromptView>
+    <qe:PromptView.TrailingTools>
+        <speech:PromptTextToSpeechTool AutoSpeak="True" />
+        <qe:PromptTool Text="⚙" Command="{Binding SettingsCommand}" />
+    </qe:PromptView.TrailingTools>
+</qe:PromptView>
+```
+
+A tool that needs to read or drive the prompt implements `IPromptAwareTool`:
+
+```csharp
+public class MyTool : PromptTool, IPromptAwareTool
+{
+    PromptView? prompt;
+
+    void IPromptAwareTool.Attach(PromptView view)
+    {
+        this.prompt = view;
+        this.prompt.ResponseChanged += this.OnResponse;
+    }
+
+    void IPromptAwareTool.Detach()
+    {
+        if (this.prompt is not null)
+            this.prompt.ResponseChanged -= this.OnResponse;
+
+        this.prompt = null;
+    }
+}
+```
+
+:::caution[Unsubscribe in `Detach`]
+`Detach` runs when the tool leaves the collection **and** when the whole collection is replaced. The tool object outlives the prompt it was docked to, so anything subscribed in `Attach` has to come off there or the old prompt is kept alive by it.
+:::
+
+#### Read aloud
+
+`PromptTextToSpeechTool`, in **`Shiny.Maui.Controls.SpeechAddins`** and **`Shiny.Blazor.Controls.SpeechAddins`**, speaks the answer through `Shiny.Speech`. It hides itself while there is nothing to read and turns into a stop button while it is speaking.
+
+```csharp
+prompt.TrailingTools!.Add(new PromptTextToSpeechTool { AutoSpeak = true });
+
+prompt.Submitted += async (_, e) =>
+{
+    prompt.IsBusy = true;
+    prompt.Response = await AskAsync(e.Text);   // Response, not ResponseContent
+    prompt.IsBusy = false;
+};
+```
+
+| Property | Notes |
+|---|---|
+| `AutoSpeak` | Read the answer the moment it lands, instead of waiting for a tap. Default false |
+| `HideWhenEmpty` | Hide the tool until there is something to read. Default true |
+| `TextSelector` | `Func<PromptView, string?>`. Needed when the answer only lives in `ResponseContent` |
+| `SpeechRate` · `Pitch` · `Volume` · `VoiceName` · `Culture` | Passed through to `TextToSpeechOptions` |
+| `SpeakingText` · `SpeakingColor` | The stop-state glyph and tint |
+
+:::caution[It speaks `Response`, not `ResponseContent`]
+A rich answer is a `View` (or, on Blazor, markup) — there is no text in it to hand a synthesiser. Set `Response` as well, or give the tool a `TextSelector` that pulls the words out of whatever you rendered.
+:::
+
+Register the engine with `AddSpeechServices()` (or just `AddTextToSpeech()`). See [Speech Add-ons](/controls/speech-addins/).
 
 ### Keyboard
 
@@ -263,6 +353,25 @@ The popup's *own* prompt is configured through the service instead, because a se
     });
 }
 ```
+
+Blazor tools are plain objects rather than components, so a tool can be built in a view model and handed over as a parameter — which is also the only way the popup's own prompt gets one:
+
+```razor
+<PromptView Response="@answer" TrailingTools="tools" />
+
+@code {
+    readonly List<PromptTool> tools = new() { new PromptTextToSpeechTool() };
+
+    protected override void OnInitialized() => QuickEntry.ConfigurePrompt(prompt =>
+        prompt.TrailingTools.Add(new PromptTextToSpeechTool()));
+}
+```
+
+`PromptViewState.LeadingTools` / `TrailingTools` are `ObservableCollection<PromptTool>`, so a tool added after the popup has been built still appears. Override `OnAttached` / `OnDetached` in place of `IPromptAwareTool` — both hand over `Prompt` and the app's `Services`, so a tool can resolve what it needs without the hosting page wiring it — and call `RefreshAsync()` after changing the tool's own glyph.
+
+:::caution[`PromptTextToSpeechTool` is WebAssembly-only on Blazor]
+The synthesiser is the browser's `speechSynthesis`, reached through `Shiny.Speech`'s browser implementation. It needs `AddTextToSpeech()` registered, and there is nothing for it to talk to on a Blazor Server host.
+:::
 
 `SetContent(RenderFragment)` replaces the built-in prompt with your own markup for every open; `Show(RenderFragment)` does it for one.
 
