@@ -566,15 +566,25 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'DataGrid',
+        jumpTo: true,
+        items:[
+          { label: 'Overview', link: 'controls/datagrid/' },
+          { label: 'Getting Started', link: 'controls/datagrid/getting-started' },
+          { label: 'Column Formatting', link: 'controls/datagrid/column-formatting', badge: { text: 'New', variant: 'success' } },
+          { label: 'Conditional Cell Styling', link: 'controls/datagrid/cell-styling', badge: { text: 'New', variant: 'success' } },
+          { label: 'Column Widths', link: 'controls/datagrid/column-widths' },
+          { label: 'Column Ordering', link: 'controls/datagrid/column-ordering' },
+          { label: 'Column Resizing', link: 'controls/datagrid/column-resizing' },
+          { label: 'Frozen Header & Columns', link: 'controls/datagrid/frozen-columns' },
+          { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/detail-rows' },
+          { label: 'Async Detail & IsBusy', link: 'controls/datagrid/async-detail' },
+          { label: 'TreeDataGrid', link: 'controls/datagrid/tree-data-grid' },
+        ]
+      },
+      {
         label: 'Collections & Grids',
         items:[
-          { label: 'DataGrid', link: 'controls/datagrid/', jumpTo: true },
-          { label: 'Column Widths', link: 'controls/datagrid/#column-widths' },
-          { label: 'Column Ordering', link: 'controls/datagrid/#column-ordering' },
-          { label: 'Column Resizing', link: 'controls/datagrid/#column-resizing' },
-          { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/#detail-breakdown-rows' },
-          { label: 'Async Detail & IsBusy', link: 'controls/datagrid/#loading-a-breakdown-on-demand' },
-          { label: 'TreeDataGrid', link: 'controls/datagrid/#tree-mode-treedatagrid' },
           { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
           { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
           { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
@@ -966,12 +976,20 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'httpserver/' },
           { label: 'Hosting & Lifecycle', link: 'httpserver/hosting' },
           { label: 'Configuration', link: 'httpserver/configuration' },
-          { label: 'Routing', link: 'httpserver/routing' },
-          { label: 'Middleware', link: 'httpserver/middleware' },
-          { label: 'Typed Endpoints', link: 'httpserver/endpoints' },
-          { label: 'Results & JSON', link: 'httpserver/results' },
-          { label: 'Serialization & Formats', link: 'httpserver/serialization' },
-          { label: 'Errors & Problem Details', link: 'httpserver/errors' },
+          {
+            label: 'Handling Requests',
+            items:[
+              { label: 'Routing', link: 'httpserver/routing' },
+              { label: 'Middleware', link: 'httpserver/middleware' },
+              { label: 'Typed Endpoints', link: 'httpserver/endpoints' },
+              { label: 'Results & JSON', link: 'httpserver/results' },
+              { label: 'Serialization & Formats', link: 'httpserver/serialization' },
+              { label: 'Errors & Problem Details', link: 'httpserver/errors' },
+              { label: 'Sessions', link: 'httpserver/sessions' },
+              { label: 'Request Timeouts', link: 'httpserver/timeouts' },
+              { label: 'OpenAPI', link: 'httpserver/openapi' }
+            ]
+          },
           {
             label: 'Content',
             items:[
@@ -985,10 +1003,12 @@ export const sidebarTopics = [
             ]
           },
           {
-            label: 'Realtime',
+            label: 'Protocols & Realtime',
             items:[
+              { label: 'Protocols', link: 'httpserver/protocols' },
               { label: 'WebSockets', link: 'httpserver/websockets' },
-              { label: 'Server-Sent Events', link: 'httpserver/sse' }
+              { label: 'Server-Sent Events', link: 'httpserver/sse' },
+              { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc' }
             ]
           },
           {
@@ -1005,29 +1025,34 @@ export const sidebarTopics = [
             ]
           },
           {
-            label: 'Tunnelling',
+            label: 'Connectivity',
             items:[
-              { label: 'Overview', link: 'httpserver/tunneling' },
+              { label: 'Tunnelling', link: 'httpserver/tunneling' },
               { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh' },
               { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents' },
-              { label: 'Azure Relay', link: 'httpserver/azure-relay' }
+              { label: 'Azure Relay', link: 'httpserver/azure-relay' },
+              { label: 'Discovery (mDNS)', link: 'httpserver/discovery' },
+              { label: 'Reverse Proxy', link: 'httpserver/proxy' }
             ]
           },
-          { label: 'Sessions', link: 'httpserver/sessions' },
-          { label: 'Request Timeouts', link: 'httpserver/timeouts' },
-          { label: 'Reverse Proxy', link: 'httpserver/proxy' },
-          { label: 'Health & Telemetry', link: 'httpserver/diagnostics' },
-          { label: 'W3C Access Logs', link: 'httpserver/logging' },
-          { label: 'OpenAPI', link: 'httpserver/openapi' },
-          { label: 'Protocols', link: 'httpserver/protocols' },
-          { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc' },
-          { label: 'Model Context Protocol', link: 'httpserver/mcp' },
-          { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
-          { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
-          { label: '.NET MAUI', link: 'httpserver/maui' },
-          { label: 'Discovery (mDNS)', link: 'httpserver/discovery' },
-          { label: 'Testing', link: 'httpserver/testing' },
-          { label: 'Command Line Tool', link: 'httpserver/cli' },
+          {
+            label: 'Integrations',
+            items:[
+              { label: 'Mobile', link: 'httpserver/maui' },
+              { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
+              { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
+              { label: 'Model Context Protocol', link: 'httpserver/mcp' }
+            ]
+          },
+          {
+            label: 'Operations',
+            items:[
+              { label: 'Health & Telemetry', link: 'httpserver/diagnostics' },
+              { label: 'W3C Access Logs', link: 'httpserver/logging' },
+              { label: 'Testing', link: 'httpserver/testing' },
+              { label: 'Command Line Tool', link: 'httpserver/cli' }
+            ]
+          },
           { label: 'Release Notes', link: 'httpserver/release-notes' }
         ]
       },

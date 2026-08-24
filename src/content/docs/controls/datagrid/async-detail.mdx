@@ -1,0 +1,82 @@
+---
+title: DataGrid | Async Detail & IsBusy
+description: Fetching a breakdown the first time its row opens, the caret spinner, and the grid-level IsBusy
+---
+
+## Loading a breakdown on demand
+
+Set a `RowDetailLoader` and the content is fetched the first time its row opens. The caret becomes a **spinner** while the fetch runs — the caret *is* the button, so that is where the progress belongs — and the detail row shows `RowDetailLoadingTemplate` (a spinner by default). `RowDetailTemplate` is not built until the load completes, so it can assume its data has arrived.
+
+```razor
+@* Blazor *@
+<DataGrid TItem="Order" Items="orders"
+          RowDetailLoader="LoadLinesAsync"
+          IsBusyChanged="b => busy = b">
+    <Columns>
+        <PropertyColumn Property="x => x.Reference" />
+        <PropertyColumn Property="x => x.Total" Format="C0" />
+    </Columns>
+    <RowDetailTemplate>
+        @foreach (var line in lines[context.Id])
+        {
+            <div>@line.Sku — @line.Quantity</div>
+        }
+    </RowDetailTemplate>
+    <RowDetailLoadingTemplate>
+        <span class="shiny-dg-busy"></span> Fetching lines…
+    </RowDetailLoadingTemplate>
+</DataGrid>
+
+@code {
+    bool busy;
+    Dictionary<int, List<Line>> lines = new();
+
+    async Task LoadLinesAsync(Order order) => lines[order.Id] = await api.GetLinesAsync(order.Id);
+}
+```
+
+```xml
+<!-- MAUI - the loader fills an observable property; the template binds to it as usual -->
+<shiny:DataGrid ItemsSource="{Binding Orders}" RowDetailLoader="{Binding LoadLines}">
+    <shiny:DataGrid.RowDetailLoadingTemplate>
+        <DataTemplate x:DataType="local:Order">
+            <HorizontalStackLayout Spacing="8">
+                <ActivityIndicator IsRunning="True" WidthRequest="16" HeightRequest="16" />
+                <Label Text="Fetching lines…" VerticalOptions="Center" />
+            </HorizontalStackLayout>
+        </DataTemplate>
+    </shiny:DataGrid.RowDetailLoadingTemplate>
+    <shiny:DataGrid.RowDetailTemplate>
+        <DataTemplate x:DataType="local:Order">
+            <CollectionView ItemsSource="{Binding Lines}" />
+        </DataTemplate>
+    </shiny:DataGrid.RowDetailTemplate>
+    <shiny:DataGridColumn Title="Reference" PropertyName="Reference" />
+</shiny:DataGrid>
+```
+
+:::tip[The loader returns nothing on purpose]
+Where the fetched data lands is the app's business — fill an observable property on the item, or a lookup keyed by it, and let the template bind to it. That keeps the detail template's context the row's **item** instead of some wrapper object, so the synchronous case stays as simple as it was.
+:::
+
+- Each item loads **once**. `InvalidateRowDetail(item)` forgets it so the next expand refetches — and reloads immediately if that row is open right now. Pass `null` for every row.
+- A throw collapses the row again and raises `RowDetailLoadFailed`, mirroring `ChildrenLoadFailed`.
+- `ExpandAll` *does* start detail loads (one per expanded row, so the work is bounded by what is on screen) — unlike a lazy tree, whose depth is not.
+
+## IsBusy
+
+`IsBusy` is true while **any** row is waiting on `ChildrenLoader` or `RowDetailLoader`. On MAUI it is a read-only `BindableProperty`, so bind a page-level indicator straight to it; on Blazor read the property and subscribe to `IsBusyChanged`. `IsRowBusy(item)` is the per-row form.
+
+```xml
+<!-- MAUI -->
+<ActivityIndicator IsRunning="{Binding Source={x:Reference Grid}, Path=IsBusy}" />
+```
+
+:::note
+`IsBusy` is not `IsLoading` (MAUI) / `Loading` (Blazor). Those you set yourself to cover the whole grid while *its* data loads; `IsBusy` is owned by the grid and reports expansion loads only. The per-row spinners are drawn either way — `IsBusy` is there for when you want a second, page-level indicator too.
+:::
+
+## Next Steps
+
+- **[Detail (Breakdown) Rows](./detail-rows)** — a full-width row under an expanded row
+- **[TreeDataGrid](./tree-data-grid)** — the same grid in hierarchy mode

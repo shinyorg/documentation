@@ -37,12 +37,54 @@ await notifications.Send(new AndroidNotification
 | `ColorResourceName` | `string?` | `null` | Android resource name for the accent color |
 | `Category` | `string?` | `null` | Notification category (e.g. `"alarm"`, `"email"`, `"progress"`) |
 | `Ticker` | `string?` | `null` | Ticker text shown briefly in the status bar |
-| `LaunchActivityType` | `Type?` | `null` | Specific activity to launch when tapped |
-| `LaunchActivityFlags` | `ActivityFlags` | `NewTask \| ClearTask` | Intent flags for the launch activity |
+| `LaunchActivityType` | `Type?` | `null` | Specific activity to launch when tapped. `null` uses the `AndroidConfiguration` value |
+| `LaunchActivityFlags` | `ActivityFlags?` | `null` | Intent flags for the launch activity. `null` uses the `AndroidConfiguration` value |
 
 :::tip
 Use `OnGoing = true` for notifications that represent ongoing tasks like music playback or active downloads. The user won't be able to swipe them away.
 :::
+
+## AndroidConfiguration
+
+Sets app-wide defaults for how a notification tap launches your app. Register it alongside the notification services; any `AndroidNotification` can still override both values for a single send.
+
+```csharp
+#if ANDROID
+services.AddNotifications<MyNotificationDelegate>(new AndroidConfiguration(
+    ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop
+));
+#endif
+```
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `LaunchActivityFlags` | `ActivityFlags` | `NewTask \| ClearTask` | Intent flags applied to the activity launched on tap |
+| `LaunchActivityType` | `Type?` | `null` | Activity to launch on tap; `null` uses the package's launcher activity |
+
+### Tapping opens a new copy of the app
+
+The default `NewTask | ClearTask` routes the tap through a `TaskStackBuilder` that clears the app's existing task and starts the activity fresh. If your app is already running, the live activity is destroyed and the app cold starts - splash screen, lost page state, and a second entry in Recents.
+
+To have the tap resume what is already running instead, declare your activity `LaunchMode.SingleTop`:
+
+```csharp
+[Activity(
+    Theme = "@style/Maui.SplashTheme",
+    MainLauncher = true,
+    LaunchMode = LaunchMode.SingleTop,
+    ConfigurationChanges = ...)]
+public class MainActivity : MauiAppCompatActivity { }
+```
+
+and register these flags:
+
+```csharp
+services.AddNotifications<MyNotificationDelegate>(new AndroidConfiguration(
+    ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop
+));
+```
+
+The tap now brings the existing task forward and the payload arrives through `OnNewIntent`, which `UseShiny()` already forwards to Shiny's notification processor - so `INotificationDelegate.OnEntry` fires exactly as before.
 
 ## AndroidChannel
 
