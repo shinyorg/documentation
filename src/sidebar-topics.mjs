@@ -569,6 +569,9 @@ export const sidebarTopics = [
         label: 'Collections & Grids',
         items:[
           { label: 'DataGrid', link: 'controls/datagrid/', jumpTo: true },
+          { label: 'Column Widths', link: 'controls/datagrid/#column-widths' },
+          { label: 'Column Ordering', link: 'controls/datagrid/#column-ordering' },
+          { label: 'Column Resizing', link: 'controls/datagrid/#column-resizing' },
           { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/#detail-breakdown-rows' },
           { label: 'Async Detail & IsBusy', link: 'controls/datagrid/#loading-a-breakdown-on-demand' },
           { label: 'TreeDataGrid', link: 'controls/datagrid/#tree-mode-treedatagrid' },
