@@ -1,0 +1,160 @@
+---
+title: Antiforgery & Security Headers
+description: CSRF protection for anything reachable with a cookie, the browser-facing headers, and why HSTS is off by default here
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Two things a server that answers a browser needs, and an API-only server mostly does not.
+
+## Antiforgery
+
+```csharp
+builder.AddAntiforgery();
+app.UseAntiforgery();
+```
+
+The page (or the app's bootstrap data) gets the token pair:
+
+```csharp
+app.MapGet("/", ctx =>
+{
+    var tokens = ctx.GetRequiredService<IAntiforgery>().GetTokens(ctx);
+
+    // tokens.CookieToken is already on the response; echo tokens.RequestToken back in the header.
+    return ctx.Response.WriteTextAsync(Render(tokens.RequestToken), "text/html");
+});
+```
+
+and sends it back on unsafe requests:
+
+```js
+fetch('/api/things', {
+    method: 'POST',
+    headers: { 'X-CSRF-TOKEN': token },
+    body: JSON.stringify(thing)
+});
+```
+
+### The rule that decides when the check applies
+
+Unsafe methods — POST, PUT, PATCH, DELETE — are checked **when the request carries cookies**, and
+skipped when it does not.
+
+That is not a shortcut. CSRF is an attack on *ambient* credentials: a cookie the browser attaches
+whether or not the page meant to. A caller holding a bearer token has to attach it deliberately, and
+an attacker's page cannot. Checking those would cost every API client a token exchange to prevent an
+attack that cannot happen to them.
+
+Override it either way:
+
+```csharp
+app.MapPost("/sensitive", Handler).ValidateAntiforgery();   // check it regardless
+app.MapPost("/webhook",  Handler).DisableAntiforgery();     // never check it
+```
+
+or with `[ValidateAntiforgery]` / `[DisableAntiforgery]` on a [typed endpoint](/httpserver/endpoints/).
+
+<Aside type="danger" title="The file browser and WebDAV UI are the reason this exists here">
+This server ships a [file browser](/httpserver/file-browser/) and a
+[WebDAV file manager](/httpserver/webdav/). Putting either behind
+[cookie authentication](/httpserver/authentication/) without antiforgery is a delete button that any
+page on the internet can press on the user's behalf.
+</Aside>
+
+### How the token works
+
+Signed double-submit. The cookie carries a random value; the request token is a timestamp plus an
+HMAC over both. An attacker's page can cause the cookie to be sent — that is what CSRF *is* — but
+cannot read it and cannot forge the HMAC, so it cannot produce a matching request token. Comparison
+is fixed-time.
+
+The cookie is deliberately **not** `HttpOnly`: a single-page app has to read the pair to echo it
+back, and the security comes from the signature rather than from secrecy of the cookie value.
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `CookieName` | `shiny.antiforgery` | |
+| `HeaderName` | `X-CSRF-TOKEN` | Where the request token is read from |
+| `FormFieldName` | `__RequestVerificationToken` | For a posted form — see below |
+| `Key` | generated at startup | Set it to survive a restart, or to share across two servers |
+| `SecureCookie` | `false` | A LAN server is usually cleartext |
+| `Lifetime` | 8 hours | Inside the signature, so an expired token cannot be edited |
+
+The token is read from the **header**, not the form body: reading a form would consume the request
+body before the handler could. For a page that posts a real form, read the form yourself and validate
+what it carried:
+
+```csharp
+var form = await ctx.Request.ReadFormAsync(ctx.RequestAborted);
+
+if (!antiforgery.ValidateToken(ctx, form["__RequestVerificationToken"]))
+{
+    ctx.Response.StatusCode = 400;
+    return;
+}
+```
+
+## Security headers
+
+```csharp
+app.UseSecurityHeaders();
+```
+
+| Header | Default |
+| --- | --- |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `DENY` |
+| `Referrer-Policy` | `no-referrer` |
+| `Cross-Origin-Resource-Policy` | `same-origin` |
+| `Content-Security-Policy` | *not set* |
+| `Permissions-Policy` | *not set* |
+| `Cross-Origin-Opener-Policy` | *not set* |
+| `Strict-Transport-Security` | *not set* |
+
+Register it early: the headers are applied as the response starts, so they cover static files and
+error responses too — exactly the ones no handler sets headers on. A handler that set its own keeps
+it; these are defaults, not overrides.
+
+CSP is not set by default because a wrong one breaks a working page and only the app knows what it
+loads. For a UI that ships with the app there is a starting point:
+
+```csharp
+app.UseSecurityHeaders(o => o.ContentSecurityPolicy = SecurityHeaderOptions.SelfOnlyContentSecurityPolicy);
+// default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'
+```
+
+### HSTS
+
+```csharp
+app.UseSecurityHeaders(o => o.Hsts = new HstsOptions
+{
+    MaxAge = TimeSpan.FromDays(365),
+    IncludeSubDomains = true
+});
+```
+
+<Aside type="danger" title="Not for a LAN or loopback server">
+A browser remembers HSTS for the whole host. A phone that serves `localhost` or a LAN address over
+plain HTTP tomorrow is locked out of itself, and there is no way to reach in and clear it. Turn it on
+for a stable public hostname and nowhere else. `Preload` is effectively permanent — only for a
+hostname that will serve HTTPS forever.
+</Aside>
+
+It is only emitted over HTTPS in any case: a browser is entitled to ignore it on a cleartext
+connection, and a proxy that is not is one downgrade away from doing damage.
+
+## HTTPS redirect
+
+```csharp
+app.UseHttpsRedirection();              // port from the first TLS endpoint configured
+app.UseHttpsRedirection(httpsPort: 8443);
+```
+
+A 307, so the method and body survive. With nothing to redirect to, the request is served rather than
+sent in a circle back to the endpoint it is already on.
+
+<Aside type="caution">
+This belongs in front of an app served to a browser, not in front of an API. A redirected POST has
+already sent its body in the clear.
+</Aside>

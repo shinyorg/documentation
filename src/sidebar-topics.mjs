@@ -977,7 +977,8 @@ export const sidebarTopics = [
               { label: 'Uploads & Downloads', link: 'httpserver/files' },
               { label: 'File Browser', link: 'httpserver/file-browser' },
               { label: 'WebDAV', link: 'httpserver/webdav' },
-              { label: 'Response Compression', link: 'httpserver/compression' }
+              { label: 'Compression', link: 'httpserver/compression' },
+              { label: 'Caching & Conditional Requests', link: 'httpserver/caching' }
             ]
           },
           {
@@ -996,7 +997,8 @@ export const sidebarTopics = [
               { label: 'TLS & Certificates', link: 'httpserver/tls' },
               { label: 'CORS', link: 'httpserver/cors' },
               { label: 'Rate Limiting', link: 'httpserver/rate-limiting' },
-              { label: 'IP Filtering', link: 'httpserver/ip-filtering' }
+              { label: 'IP Filtering', link: 'httpserver/ip-filtering' },
+              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery' }
             ]
           },
           {
@@ -1004,10 +1006,15 @@ export const sidebarTopics = [
             items:[
               { label: 'Overview', link: 'httpserver/tunneling' },
               { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh' },
+              { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents' },
               { label: 'Azure Relay', link: 'httpserver/azure-relay' }
             ]
           },
           { label: 'Sessions', link: 'httpserver/sessions' },
+          { label: 'Request Timeouts', link: 'httpserver/timeouts' },
+          { label: 'Reverse Proxy', link: 'httpserver/proxy' },
+          { label: 'Health & Telemetry', link: 'httpserver/diagnostics' },
+          { label: 'W3C Access Logs', link: 'httpserver/logging' },
           { label: 'OpenAPI', link: 'httpserver/openapi' },
           { label: 'Protocols', link: 'httpserver/protocols' },
           { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc' },
@@ -1015,6 +1022,8 @@ export const sidebarTopics = [
           { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
           { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
           { label: '.NET MAUI', link: 'httpserver/maui' },
+          { label: 'Discovery (mDNS)', link: 'httpserver/discovery' },
+          { label: 'Testing', link: 'httpserver/testing' },
           { label: 'Command Line Tool', link: 'httpserver/cli' },
           { label: 'Release Notes', link: 'httpserver/release-notes' }
         ]

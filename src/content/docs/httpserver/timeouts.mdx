@@ -1,0 +1,88 @@
+---
+title: Request Timeouts
+description: Bounding how long a handler may take — the half of the exchange your own code is responsible for
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+The server already bounds how long a *client* may take: `RequestHeadersTimeout`, `KeepAliveTimeout`
+and `MaxRequestBodySize` are all in [configuration](/httpserver/configuration/). This bounds the
+other half, which is the half your own code is responsible for.
+
+```csharp
+app.UseRequestTimeouts(TimeSpan.FromSeconds(30));
+```
+
+That is the whole setup for a single default. With policies:
+
+```csharp
+builder.AddRequestTimeouts(o =>
+{
+    o.DefaultPolicy = new RequestTimeoutPolicy(TimeSpan.FromSeconds(30));
+    o.AddPolicy("reports", TimeSpan.FromMinutes(2));
+    o.AddPolicy("gentle", new RequestTimeoutPolicy(TimeSpan.FromSeconds(5))
+    {
+        StatusCode = StatusCodes.Status503ServiceUnavailable,
+        OnTimeout = ctx => ctx.Response.WriteTextAsync("try a smaller range")
+    });
+});
+
+app.UseRequestTimeouts();
+```
+
+## Per endpoint
+
+```csharp
+app.MapGet("/report", Handler).WithRequestTimeout(TimeSpan.FromSeconds(10));
+app.MapGet("/export", Handler).WithRequestTimeout("reports");
+app.MapGet("/events", Handler).DisableRequestTimeout();
+```
+
+On [typed endpoints](/httpserver/endpoints/), the same three as attributes:
+
+```csharp
+[Route("/api/reports")]
+public class ReportEndpoints
+{
+    [Get("/{id:int}")] [RequestTimeout(2_000)]      public Task<IActionResult> Get(int id, CancellationToken ct) => …;
+    [Get("/export")]   [RequestTimeout("reports")]  public Task<IActionResult> Export(CancellationToken ct) => …;
+    [Get("/stream")]   [DisableRequestTimeout]      public Task Stream(HttpContext ctx) => …;
+}
+```
+
+A method's attribute replaces the class's, and `[DisableRequestTimeout]` anywhere wins.
+
+<Aside type="caution" title="Exempt anything whose job is to stay open">
+[Server-Sent Events](/httpserver/sse/), a [WebSocket](/httpserver/websockets/) upgrade and a large
+download all outlive any sensible default. That is why `DefaultPolicy` is null out of the box:
+switching timeouts on globally without exempting those breaks them.
+</Aside>
+
+## How a timeout actually arrives
+
+`UseRequestTimeouts` runs **after routing**, because what to allow is a property of the endpoint.
+
+The timeout is delivered as **cancellation on `ctx.RequestAborted`**. It is not a kill: a handler
+that never looks at its token runs to completion regardless — it just does so after the client has
+been answered. Pass the token into the slow thing:
+
+```csharp
+[Get("/{id:int}")]
+[RequestTimeout(2_000)]
+public async Task<IActionResult> Get(int id, CancellationToken ct)
+    => new OkObjectResult(await db.QueryAsync(id, ct));   // ct, not default
+```
+
+When the deadline passes:
+
+- If the handler gave up cooperatively, the `OperationCanceledException` is caught here and answered
+  rather than escaping as a 500.
+- If it returned late but the response has not started, the timeout status is written anyway.
+- If the response **has** started, there is no status left to change and no honest way to finish the
+  body, so the connection is aborted. That is what tells the client not to trust what it received.
+
+The default status is **504**, matching ASP.NET Core: the request was fine, the thing behind it took
+too long. `StatusCode` and `OnTimeout` change what the caller sees.
+
+A client that disconnects is not reported as a timeout: the original token is checked, so only the
+server's own deadline produces a 504.

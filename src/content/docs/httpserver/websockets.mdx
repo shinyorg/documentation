@@ -57,10 +57,86 @@ await using var socket = await ctx.AcceptWebSocketAsync(new WebSocketAcceptOptio
 ```
 
 `MaxMessageLength` (4 MB by default) bounds the message assembled from fragments — a peer that keeps
-sending continuation frames is otherwise an unbounded allocation.
+sending continuation frames is otherwise an unbounded allocation. It bounds the **decompressed** size
+too, which is what a compressed frame inside the frame limit says nothing about.
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `MaxMessageLength` | 4 MB | Assembled from fragments, and after decompression |
+| `SupportedSubProtocols` | empty | Server preference order wins |
+| `EnablePerMessageDeflate` | `true` | See below |
+| `CompressionThreshold` | 256 bytes | Below it, deflate makes a message bigger |
+| `KeepAliveInterval` | 30s | `null` switches the ping loop off |
+| `MissedPingsBeforeClosing` | 2 | Then the socket is torn down |
 
 Sub-protocol negotiation picks by the **server's** preference order, which is the side that actually
 knows what it can do, and echoes the choice back. `socket.SubProtocol` is what was agreed.
+
+## Compression
+
+`permessage-deflate` (RFC 7692) is negotiated when the client offers it, in one specific shape: **no
+context takeover in either direction**, which the server imposes in its answer.
+
+With context takeover both peers keep one deflate stream alive across every message, so each message
+compresses against the history of the ones before it. It compresses better — and it costs a
+persistent zlib window per connection in each direction, roughly 300KB, held for as long as the
+socket lives. On a phone serving a dozen clients that is the whole memory budget, spent on the least
+valuable thing in the room. Here every message compresses on its own; a JSON payload still comes down
+to a fraction of its size and nothing has to remember anything.
+
+A message below `CompressionThreshold`, or one that deflate makes larger, is sent uncompressed —
+`RSV1` says which one the peer got, so it costs nothing to decide per message.
+
+`EnablePerMessageDeflate = false` turns the offer down.
+
+## Keepalive
+
+The server pings an idle peer every `KeepAliveInterval` and tears the socket down after
+`MissedPingsBeforeClosing` unanswered pings.
+
+This is not a nicety on a mobile network. A phone that loses signal, a laptop that sleeps, a NAT that
+drops an idle mapping — none of these close the socket, they go quiet. A server that never asks holds
+the connection object and its buffers open for a peer that has been gone for hours. It is also what
+keeps a [tunnelled](/httpserver/tunneling/) socket alive through an intermediary that reaps idle
+connections.
+
+Any pong resets the counter, whoever asked for it.
+
+## Talking to every socket at once
+
+A handler owns one socket and cannot reach the others, so "tell every connected device the door just
+unlocked" otherwise means the app building its own list, its own locking and its own dead-socket
+cleanup. `IWebSocketRegistry` is those three things.
+
+```csharp
+builder.AddWebSocketRegistry();
+
+app.MapGet("/ws", async ctx =>
+{
+    await using var tracked = await ctx.AcceptTrackedWebSocketAsync(cancellationToken: ctx.RequestAborted);
+    tracked.JoinGroup("kitchen");
+
+    while (await tracked.ReceiveAsync(ctx.RequestAborted) is { } message)
+        await registry.SendToGroupAsync("kitchen", message.Text, ctx.RequestAborted);
+});
+```
+
+```csharp
+await registry.BroadcastAsync("the door unlocked");             // returns how many were reached
+await registry.BroadcastAsync(bytes, x => x.InGroup("kitchen"));
+await registry.SendToGroupAsync("kitchen", "oven is hot");
+await registry.SendToUserAsync("ada", "your build finished");   // their phone and their tablet
+await registry.SendToAsync(id, "just you");
+await registry.CloseAllAsync();                                 // shutting down, or signing someone out
+```
+
+- A broadcast **never throws because one peer is dead**: that socket is dropped from the registry and
+  the returned count is one lower.
+- Sends run **concurrently**, so one stalled client does not hold up the broadcast to everyone
+  behind it.
+- Disposing the `TrackedWebSocket` untracks and closes it, so there is no cleanup pass to write.
+- `AcceptTrackedWebSocketAsync` records `ctx.User.Identity?.Name`, which is what `SendToUserAsync`
+  matches on.
 
 ## The handshake
 
@@ -87,7 +163,7 @@ a browser client, and a [JWT](/httpserver/jwt/) in the query string for anything
 
 ## Limits
 
-- **No `permessage-deflate`**, and no extensions are negotiated at all.
+- `permessage-deflate` is the only extension negotiated.
 - WebSockets need a real connection to take over, so they work over HTTP/1.1 and over a
   [tunnel](/httpserver/tunneling/) that forwards raw connections — but **not** through Azure Relay's
   `Http` mode, which buffers responses. See [Azure Relay](/httpserver/azure-relay/).

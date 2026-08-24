@@ -1,0 +1,130 @@
+---
+title: W3C Access Logs
+description: One line per request in the format every log analyser already reads, written off the request path and bounded so it cannot fill a device
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseW3CLogging(o => o.LogDirectory = FileSystem.AppDataDirectory);
+```
+
+One line per request, in the W3C extended log file format — the one IIS writes, and the one GoAccess,
+AWStats, Log Parser and a spreadsheet all open without being told anything about it.
+
+The argument for a plain text file rather than structured telemetry: an embedded server usually has
+nowhere to ship telemetry *to*. A file someone can pull off the device, mail to you, and open is
+worth more than a log nobody collects. When there **is** somewhere to ship to, the
+[metrics and traces](/httpserver/diagnostics/) are the better answer, and the two coexist happily.
+
+## What it writes
+
+```
+#Version: 1.0
+#Software: Shiny.Net.HttpServer
+#Start-Date: 2026-08-23 09:41:02
+#Fields: date time c-ip cs-username s-ip s-port cs-method cs-uri-stem cs-uri-query sc-status sc-bytes cs-bytes time-taken cs-version cs-host cs(User-Agent) cs(Referer)
+2026-08-23 09:41:07 192.168.1.42 - 192.168.1.40 8080 GET /api/readings - 200 512 - 4.113 HTTP/1.1 phone.local Mozilla/5.0+(iPhone) -
+2026-08-23 09:41:09 192.168.1.42 ada 192.168.1.40 8080 POST /api/readings - 201 - 84 11.902 HTTP/1.1 phone.local Mozilla/5.0+(iPhone) -
+```
+
+The file is self-describing: a reader takes its column meanings from the most recent `#Fields`
+directive, and every file carries one, so a rolled file is readable on its own.
+
+`-` means the value was absent. A value that contains a space would silently become two columns, so
+spaces become `+` and control characters are dropped — the convention every W3C writer uses.
+
+## Fields
+
+| Flag | Field | Notes |
+| --- | --- | --- |
+| `Date`, `Time` | `date`, `time` | UTC |
+| `ClientIpAddress` | `c-ip` | |
+| `UserName` | `cs-username` | The authenticated name, when there is one |
+| `ServerIpAddress`, `ServerPort` | `s-ip`, `s-port` | The local end of the connection |
+| `Method` | `cs-method` | |
+| `UriStem`, `UriQuery` | `cs-uri-stem`, `cs-uri-query` | Captured **before** the pipeline runs |
+| `ProtocolStatus` | `sc-status` | |
+| `BytesSent`, `BytesReceived` | `sc-bytes`, `cs-bytes` | From the content lengths, so `-` for a chunked body |
+| `TimeTaken` | `time-taken` | Milliseconds |
+| `ProtocolVersion` | `cs-version` | HTTP/1.1, HTTP/2, HTTP/3 |
+| `Host` | `cs-host` | |
+| `UserAgent`, `Referer` | `cs(User-Agent)`, `cs(Referer)` | |
+| `Cookie` | `cs(Cookie)` | **Not** in the default set |
+| `Route` | `x-route` | The route template the router matched |
+| `ConnectionId` | `x-connection-id` | Ties the lines from one connection together |
+
+`W3CLoggingFields.Default` is everything except the cookie header, which carries session tokens and
+has no business in a file that gets copied around. `Route` and `ConnectionId` are not W3C fields —
+the format's own rule for an extension is the `x-` prefix — and are worth adding when you are
+reading the log to find a slow endpoint rather than a slow URL:
+
+```csharp
+app.UseW3CLogging(o => o.Fields = W3CLoggingFields.Default | W3CLoggingFields.Route);
+```
+
+Anything else that matters becomes a column of its own:
+
+```csharp
+o.AdditionalRequestHeaders.Add("X-Tenant");     // adds a cs(X-Tenant) field
+```
+
+The URI stem and query are captured before the pipeline runs, so a middleware that rewrites the path
+or consumes the query does not change what the log says the client asked for.
+
+## Where it writes, and how much
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `LogDirectory` | `logs` beside the app | On a device this must be somewhere writable |
+| `FileNamePrefix` | `w3clog-` | The date and a counter follow it |
+| `FileSizeLimit` | 10 MB | Rolls past this |
+| `RetainedFileCountLimit` | 4 | The oldest are deleted |
+| `FlushInterval` | 1 second | |
+| `MaxQueuedLines` | 4096 | See below |
+| `ShouldLog` | `null` | A predicate — the way to keep a health probe out of the file |
+
+<Aside type="caution" title="LogDirectory has to be somewhere the app can write">
+The default is a `logs` folder beside the app, which is right for a console host and wrong for a
+sandboxed one. In MAUI, `FileSystem.AppDataDirectory`.
+</Aside>
+
+Files are named `w3clog-20260823.0000.txt`, and the counter only ever goes up — a new file is never
+given a recycled number, because the next prune would delete it as the oldest while it was being
+written to.
+
+There is no "keep everything" setting. A log that grows forever on a phone is a bug report about
+storage; raise `RetainedFileCountLimit` instead.
+
+## Nothing touches the disk on the request path
+
+The line is formatted and queued; a background task drains the queue on `FlushInterval` and writes
+it. When the queue is full, lines are **dropped and counted** rather than made to wait, because a
+slow or full disk must not become a slow server. What was lost is written into the file when it
+recovers:
+
+```
+#Remark: 214 line(s) dropped; the log queue was full
+```
+
+so a gap is visible rather than silent. `W3CLogFileWriter.DroppedLines` is the same number, and it is
+zero on a healthy server.
+
+The writer is flushed when the server stops, so the last lines of a session reach the file rather
+than dying with the process. A disk that is full, read-only or gone is logged once and the lines are
+lost — access logging is not worth failing requests over.
+
+## Somewhere other than a file
+
+`IW3CLogWriter` is two methods. Implement it to keep the last few hundred lines in a ring buffer for
+the app's own diagnostics screen, to forward them over a socket, or to capture them in a test:
+
+```csharp
+app.UseW3CLogging(options, new MyWriter());
+```
+
+## Ordering
+
+Register it early — a line should describe the whole exchange, including the time spent in the
+middleware below it. `cs-username` is read as the pipeline unwinds, so
+[authentication](/httpserver/authentication/) has run by then wherever it sits.

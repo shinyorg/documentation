@@ -18,7 +18,7 @@ This is worth more here than in a datacentre. An embedded server is reached over
 ## Configuration
 
 ```csharp
-builder.Services.AddResponseCompression(o =>
+builder.AddResponseCompression(o =>
 {
     o.Level = CompressionLevel.Optimal;
     o.MinimumBytes = 512;
@@ -103,3 +103,35 @@ For content published with `.br`/`.gz` sidecars — a Blazor publish does this �
 recompressing per request: they were compressed once at maximum effort, and this middleware runs at a
 level chosen for speed. Turn on `ServePrecompressedFiles` in
 [static files](/httpserver/static-files/) (and [Blazor](/httpserver/blazor/) does it for you).
+
+## Reading compressed request bodies
+
+```csharp
+app.UseRequestDecompression();
+```
+
+The mirror of the above, and on a device the more valuable direction: uplink is the slow, expensive,
+battery-hungry half of a mobile connection, and a sync client posting a batch of JSON is exactly the
+shape that compresses well.
+
+Put it before anything that reads a body — model binding, the multipart reader, a body-logging
+middleware that would otherwise record compressed bytes.
+
+Brotli, gzip and deflate are read by default. The `Content-Encoding` and `Content-Length` headers are
+removed once the body is swapped, because both describe bytes that are no longer there.
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Providers` | br, gzip, deflate | |
+| `MaxDecompressedBytes` | `Limits.MaxRequestBodySize` | See below |
+| `RejectUnsupportedEncodings` | `true` | Otherwise the body is passed through as sent |
+
+<Aside type="danger" title="This is why the limit exists">
+A few hundred kilobytes of gzip expands to gigabytes if it was built to, and the request-body limit
+only ever bounded the *compressed* bytes on the wire. A body that expands past
+`MaxDecompressedBytes` is refused with **413** part-way through reading, before the memory is spent.
+</Aside>
+
+An encoding no provider handles is refused with **415** and an `Accept-Encoding` header saying what
+would have worked. A stack of codings (`gzip, br`) is refused the same way: it is legal, vanishingly
+rare, and half-handling it would be worse than saying so.

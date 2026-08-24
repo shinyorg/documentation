@@ -1,0 +1,125 @@
+---
+title: Cloudflare, ngrok & Tailscale
+description: Publishing a locally bound server by supervising the vendor's own agent — desktop, server and CLI, not mobile
+---
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["net"]} os={["macos", "windows", "linux"]} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Tunnels
+```
+
+```csharp
+await server.StartAsync();
+
+await using var tunnel = new CloudflareTunnel(new CloudflareTunnelOptions());
+var url = await tunnel.StartAsync(server);      // https://raw-fresh-mint-42.trycloudflare.com
+```
+
+## Agents are a different shape from providers
+
+An [`ITunnelProvider`](/httpserver/tunneling/) **is** a listener: it dials out, connections arrive
+over that link, and the server answers them without ever binding a port.
+
+An agent is the other shape. The vendor ships a binary, the binary dials out, and it forwards what
+arrives to a port the server is **already listening on**. Everything about the tunnel lives in the
+agent; this package supervises it and tells you the URL it produced.
+
+That difference decides where each one runs:
+
+| | Provider | Agent |
+| --- | --- | --- |
+| Needs a bound local port | no | **yes** |
+| Runs on iOS / Android | **yes** | no |
+| Needs a binary installed | no | **yes** |
+| Examples | relay, [SSH & quick tunnels](/httpserver/ssh/), [Azure Relay](/httpserver/azure-relay/) | cloudflared, ngrok, tailscale |
+
+<Aside type="caution" title="Not for a phone">
+Starting a process is forbidden outright on iOS and unreliable enough on Android that no app should
+depend on it. On mobile the answer is still the SSH provider or the relay.
+</Aside>
+
+## With a host
+
+```csharp
+builder.Services.AddShinyHttpServer(http => http.Options.Port = 8080);
+builder.AddCloudflareTunnel();      // AddNgrokTunnel() / AddTailscaleFunnel()
+```
+
+Register it after `AddHttpServer`: hosted services start in registration order, which is what
+guarantees the port exists before the agent is told to forward to it.
+
+## Cloudflare
+
+```csharp
+new CloudflareTunnel(new CloudflareTunnelOptions
+{
+    Token = "…",                          // omit for a quick tunnel
+    Hostname = "device.example.com"
+});
+```
+
+With no token this is a **quick tunnel**: nothing to sign up for, a random `trycloudflare.com`
+hostname, TLS terminated by Cloudflare, gone when the process ends. Excellent for showing someone a
+device's UI for ten minutes; not something to build on, because the hostname is new every run and
+Cloudflare rate-limits them.
+
+With a token it runs a named tunnel, whose hostname is the one configured in the dashboard — a named
+tunnel never prints a URL, so `Hostname` is what gets reported back.
+
+The agent is started with `--no-autoupdate`, which is not tidiness: cloudflared restarts itself to
+apply an update, and a tunnel that silently re-dials mid-session is worse than one that stays old.
+
+## ngrok
+
+```csharp
+new NgrokTunnel(new NgrokTunnelOptions { Domain = "device.ngrok.app", Region = "eu" });
+```
+
+`AuthToken` is optional — the usual case on a developer machine is whatever `ngrok config` already
+stored. The agent is started with structured logs on stdout rather than its terminal dashboard,
+because the dashboard redraws in place and there is nothing in it to parse.
+
+## Tailscale
+
+```csharp
+new TailscaleFunnel(new TailscaleFunnelOptions { TailnetOnly = true });
+```
+
+Needs the machine already on a tailnet, with Funnel enabled for the node in the admin console. In
+exchange the hostname is stable, it is yours, and the certificate is issued automatically.
+
+`TailnetOnly` runs `tailscale serve` instead of `tailscale funnel`: the URL works for machines on
+your tailnet and for nobody else, which is usually the whole requirement and the safer default for a
+device.
+
+## Failures
+
+| What happened | What you get |
+| --- | --- |
+| The binary is not installed | `TunnelAgentException` naming what to install and that `ExecutablePath` exists |
+| Bad credentials, port in use, anything fatal | `TunnelAgentException` with the exit code — immediately, not after the timeout |
+| The agent runs but never announces | `TunnelAgentException` after `StartTimeout` (30s) |
+
+Disposing kills the **whole process tree**: cloudflared and ngrok both spawn helpers, and killing
+only the parent leaves the tunnel up and the port claimed.
+
+<Aside type="danger" title="A tunnel is the public internet">
+Whatever these publish is reachable by anyone with the URL. Put
+[authentication](/httpserver/authentication/) and [rate limiting](/httpserver/rate-limiting/) in
+front of it before you start one, not after.
+</Aside>
+
+## Writing your own
+
+`ProcessTunnelAgent` is the base: give it an executable name, the arguments for a port, and a method
+that recognises the URL in a line of the agent's output. The shared machinery — finding the binary,
+starting it, watching both streams, failing fast on an early exit, killing the tree on the way out —
+is already there.
+
+Anchor the pattern to that provider's tunnel domain, never "the first `https://` in the output":
+every one of these prints a welcome banner full of links to its own site before announcing your
+address.

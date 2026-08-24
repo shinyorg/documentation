@@ -1,0 +1,76 @@
+---
+title: Reverse Proxy
+description: Forwarding a route to another server — the device is often the only thing that can reach what the caller wants
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.MapProxy("/api/{*path}", "https://api.example.com");
+```
+
+Every method on that route is forwarded to the destination, and the answer is copied back.
+
+The reason this belongs in an embedded server rather than in a load balancer: the device is often the
+only thing that can reach what the caller wants.
+
+- A phone bridges one of its own loopback services out through a [tunnel](/httpserver/tunneling/).
+- A Raspberry Pi fronts a printer or a camera that speaks HTTP with no TLS and no authentication —
+  and the Pi adds both.
+- A dev server serves the app and forwards `/api` to the real backend, so the browser sees one
+  origin and [CORS](/httpserver/cors/) never enters the picture.
+
+## What is forwarded
+
+The remaining path comes from the route's catch-all parameter, so `/api/{*path}` sends
+`/api/orders/7?full=1` to `{destination}/orders/7?full=1`. A route with no catch-all forwards to the
+destination exactly as written, which is what a one-to-one mapping of a single endpoint wants.
+
+Bodies **stream in both directions** — nothing is buffered, so a large upload through a proxy route
+costs the same memory as a small one.
+
+Headers are copied except the hop-by-hop ones (`Connection`, `Keep-Alive`, `Transfer-Encoding`,
+`Upgrade`, `TE`, `Trailer`, `Proxy-*`), which describe a connection that is not the one being made.
+`X-Forwarded-For`, `-Proto` and `-Host` describe the original caller — without them the upstream sees
+this server and nothing else.
+
+| Status | When |
+| --- | --- |
+| **502** | The upstream is unreachable or answered nonsense. The caller's request was fine; ours was not answered |
+| **504** | The upstream did not answer inside `Timeout` (100s by default) |
+
+## Options
+
+```csharp
+app.MapProxy("/printer/{*path}", "http://192.168.1.50", o =>
+{
+    o.RewriteHost = false;                    // pass the caller's Host through to a virtual host
+    o.Timeout = TimeSpan.FromSeconds(10);
+    o.BeforeSend = (request, ctx) => request.Headers.Add("X-Api-Key", key);
+});
+```
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Client` | a private one | Redirects off, cookies off, no automatic decompression |
+| `Timeout` | 100s | Exceeding it is a 504 |
+| `AddForwardedHeaders` | `true` | `X-Forwarded-For` / `-Proto` / `-Host` |
+| `RewriteHost` | `true` | Sends the destination's host, which is what most upstreams route on |
+| `RewriteUri` | `null` | Replaces the whole "destination + remainder" rule |
+| `BeforeSend` | `null` | Last chance to touch the outbound request |
+| `AfterReceive` | `null` | First look at the upstream response |
+
+The default client does not follow redirects and does not decompress: following a redirect on the
+caller's behalf hides it from them, and decompressing here only to recompress on the way out spends
+the device's battery to change nothing.
+
+<Aside type="caution" title="Upgrades are not forwarded">
+A [WebSocket](/httpserver/websockets/) through a proxy route will not work. The upstream's response
+is passed through as-is, but the connection is not handed over.
+</Aside>
+
+<Aside type="danger" title="A proxy on a tunnel is a proxy for the internet">
+`MapProxy` will forward whatever reaches it. Behind a [tunnel](/httpserver/tunneling/), put
+[authentication](/httpserver/authentication/) and [rate limiting](/httpserver/rate-limiting/) in
+front of it, and keep the destination fixed rather than reading it from the request.
+</Aside>

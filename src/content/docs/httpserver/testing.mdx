@@ -1,0 +1,87 @@
+---
+title: Testing
+description: An HttpClient wired to the server through memory — no port, no listener, and the real parser, router and middleware
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Testing
+```
+
+```csharp
+await using var app = TestHttpServer.Create(server =>
+    server.MapGet("/ping", ctx => ctx.Response.WriteTextAsync("pong")));
+
+Assert.Equal("pong", await app.Client.GetStringAsync("/ping"));
+```
+
+No port to allocate, no listener to bind, no firewall prompt, and nothing left behind when a test
+fails half way through. The server does not even have to be started — nothing is bound, so there is
+nothing to start.
+
+## What is actually being tested
+
+Only the socket is replaced. The request goes through the real HTTP/1.1 parser, the real router, the
+real [middleware](/httpserver/middleware/) pipeline and the real response framing, and the client is
+`HttpClient` — which means chunked bodies, keep-alive, content negotiation and connection reuse are
+all exercised exactly as they are over TCP.
+
+The seam is the one [tunnelling](/httpserver/tunneling/) already uses: the server has never known
+what its bytes arrive on. `SocketsHttpHandler.ConnectCallback` hands the client one end of a pair of
+pipes, and `HttpServer.ServeAsync` gets the other.
+
+## Registering services
+
+The builder is the same one the app uses, so a test substitutes dependencies the ordinary way:
+
+```csharp
+await using var app = TestHttpServer.Create(
+    server => server.MapMyAppEndpoints(),
+    builder =>
+    {
+        builder.Services.AddSingleton<IClock>(new FrozenClock(new DateTime(2026, 8, 23)));
+        builder.Services.AddSingleton<IThermostat, FakeThermostat>();
+    }
+);
+
+var reading = await app.Client.GetFromJsonAsync<Reading>("/api/readings/current");
+```
+
+`app.Services` reaches into the container for anything the assertions need.
+
+`HideExceptionDetails` is off, so a handler that throws produces a 500 whose body says what threw —
+which is the only useful thing for a test.
+
+## Several callers
+
+```csharp
+using var second = app.CreateClient();      // its own connections and its own cookies
+```
+
+Each client is a separate caller as far as the server is concerned, which is what a test of
+[sessions](/httpserver/sessions/), [authentication](/httpserver/authentication/) or a
+[WebSocket registry](/httpserver/websockets/) needs.
+
+## HTTP/2
+
+```csharp
+await using var app = TestHttpServer.Create(configure, useHttp2: true);
+```
+
+Prior knowledge rather than ALPN, since there is no TLS in memory to negotiate with — which is also
+true of a tunnelled connection. `AllowCleartext` is turned on for you.
+
+## For a server built elsewhere
+
+```csharp
+var client = server.CreateInMemoryClient();
+var handler = server.CreateInMemoryHandler();       // for a client the test configures itself
+var app = TestHttpServer.For(server);
+```
+
+<Aside type="caution" title="Use a real socket for what is actually about the socket">
+[TLS](/httpserver/tls/), client certificates, connection limits, `MaxRequestsPerConnection`, and
+anything about how the OS frames bytes belong on a real ephemeral port. This repo's own test suite
+uses real sockets for exactly those and this harness for the rest.
+</Aside>

@@ -1,0 +1,137 @@
+---
+title: Caching & Conditional Requests
+description: ETags and 304s for handlers that are not serving a file, plus an output cache whose real saving on a device is battery
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Static files, [downloads](/httpserver/files/) and the [WebDAV](/httpserver/webdav/) store have
+answered conditional requests since day one. This is the same evaluation for an ordinary handler, and
+an output cache in front of the ones that are expensive to produce.
+
+On a device the arithmetic is different from a datacentre. The expensive part is rarely the network:
+it is the database read, the sensor poll or the serialisation behind the endpoint, and every one of
+those costs battery.
+
+## Conditional requests
+
+```csharp
+app.MapGet("/items/{id}", async ctx =>
+{
+    var item = await store.GetAsync(ctx.Request.RouteValues["id"]!, ctx.RequestAborted);
+
+    if (await ctx.TryCompleteConditionalAsync(EntityTag.FromContent(item.Version), item.Updated))
+        return;
+
+    await ctx.Response.WriteJsonAsync(item, AppJson.Default.Item, ctx.RequestAborted);
+});
+```
+
+`TryCompleteConditionalAsync` writes the validators, evaluates the request's preconditions, answers
+the 304 or the 412 itself, and returns `true` when it did. A 304 saves the serialisation as well as
+the bytes, which is the half that matters here.
+
+The validators go out **whether or not** the request was conditional: a 304 that omits the `ETag`
+leaves the client unable to revalidate next time, so it re-downloads to find out nothing changed.
+
+### The pieces on their own
+
+```csharp
+var result = ctx.CheckPreconditions(etag, lastModified);   // Proceed | NotModified | PreconditionFailed
+await ctx.CompletePreconditionAsync(result);               // writes the 304 or 412; no-op for Proceed
+
+ctx.Response.SetETag("v2");                                // quotes it for you
+ctx.Response.SetLastModified(item.Updated);
+ctx.Response.SetCacheControl(TimeSpan.FromMinutes(5));     // private by default
+ctx.Response.SetNoStore();                                 // an auth reply, a one-time token
+```
+
+`Cache-Control` is `private` by default because a server embedded in an app answers one user, and a
+response marked public is one a proxy between the app and its tunnel may hand to someone else.
+
+### Which header means what
+
+| Header | On | Result when it holds |
+| --- | --- | --- |
+| `If-None-Match` | GET/HEAD | **304** — you already have this version |
+| `If-Modified-Since` | GET/HEAD | **304**, second precision, only consulted when there is no `If-None-Match` |
+| `If-Match` | PUT/PATCH/DELETE | Proceeds; **412** when it fails — the write was against a version that has moved |
+| `If-Unmodified-Since` | PUT/PATCH/DELETE | As above, by date |
+
+The strong preconditions are evaluated before the weak ones, as RFC 9110 requires: answering 304 to a
+caller whose `If-Match` failed would tell it the write succeeded.
+
+Entity tags compare **weakly** — `W/"v1"` and `"v1"` are the same entity for a conditional GET, which
+is what both `If-None-Match` and `If-Match` are asking.
+
+`EntityTag.FromContent(...)` hashes bytes or a string; `EntityTag.FromMetadata(lastModified, length)`
+is the shape a file already uses. Both quote the result.
+
+## Output caching
+
+```csharp
+builder.AddOutputCache(o =>
+{
+    o.AddPolicy("lists", new OutputCachePolicy(TimeSpan.FromSeconds(30)) { VaryByHeaders = ["Accept"] });
+});
+
+app.UseOutputCache();
+
+app.MapGet("/dashboard", Handler).CacheOutput(TimeSpan.FromSeconds(10));
+app.MapGet("/catalog",   Handler).CacheOutput("lists");
+app.MapGet("/live",      Handler).NoOutputCache();
+```
+
+On [typed endpoints](/httpserver/endpoints/) the same things are attributes:
+
+```csharp
+[Get("/")] [OutputCache(Seconds = 30)] public Task<IActionResult> List(CancellationToken ct) => …;
+[Get("/live")] [NoOutputCache]         public Task<IActionResult> Live(CancellationToken ct) => …;
+```
+
+`UseOutputCache()` runs **after routing**, so a cache hit still pays for the middleware above it —
+authentication, rate limiting, CORS. That is deliberate: skipping authentication on a cache hit is
+how a cache turns into an authorization bypass.
+
+### What is never stored
+
+- Anything that is not a **GET or HEAD**. Caching a POST is how a submit button starts returning
+  yesterday's confirmation.
+- Anything that is not a **200**.
+- A response carrying **`Set-Cookie`**, which is per caller by definition.
+- A response marked **`no-store`**, or a request that asked for `no-cache`.
+- A request from an **authenticated caller**, unless the policy sets `AllowAuthenticated`.
+- A **streamed** response — one that flushed its own headers with `StartAsync`. Buffering an event
+  stream is indistinguishable from hanging it, so it is passed through untouched.
+- A body over `MaxBodyBytes` (512KB). It is served, then abandoned rather than stored.
+
+<Aside type="danger" title="AllowAuthenticated needs a key that includes the caller">
+The cache key is method, path, query and whatever `VaryByHeaders` names. Turning on
+`AllowAuthenticated` without adding the identity to `VaryByHeaders` serves one user's data to the
+next one.
+</Aside>
+
+### Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `DefaultPolicy` | `null` | Applies to endpoints that named none. Null caches nothing by default |
+| `MaxBodyBytes` | 512KB | Larger responses are served but not stored |
+| `Duration` | — | Required on a policy |
+| `VaryByQuery` | `true` | The whole query string is part of the key |
+| `VaryByQueryKeys` | empty | Only these keys, so a cache-buster does not miss every time |
+| `VaryByHeaders` | empty | `Accept`, `Accept-Language`, an identity header |
+| `AllowAuthenticated` | `false` | See above |
+| `ShouldCache` | `null` | The last word on a particular response |
+
+A hit carries an `Age` header. If the stored response has an `ETag`, a revalidating client is
+answered **304 straight from the cache** — no handler, no body, a couple of hundred bytes.
+
+### Where entries live
+
+`MemoryOutputCacheStore` holds them in process under a byte budget (8MB by default): expired entries
+go first, then the oldest, until it fits. It is bounded rather than unbounded because the usual host
+is a phone, where a cache that grows until the OS notices is the fastest way to turn a working app
+into a terminated one.
+
+Implement `IOutputCacheStore` and register it to put them somewhere else.

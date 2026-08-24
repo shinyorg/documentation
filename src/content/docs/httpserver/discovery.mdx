@@ -1,0 +1,125 @@
+---
+title: Discovery (mDNS / Bonjour)
+description: Being found on the local network — the half of hosting on a phone that binding a port does not solve
+---
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["maui", "net"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Discovery
+```
+
+Binding a port solves being **reachable**. It does not solve being **found**.
+
+The address is assigned by whatever network the device joined, it changes when the device moves, and
+the ways out of that are: a QR code, someone typing an IP address, or this. mDNS is what every
+printer, speaker and NAS on the link already uses. It needs no server, no account and no internet.
+
+## Advertising
+
+```csharp
+builder.Services.AddShinyHttpServer(
+    http =>
+    {
+        http.Options.Address = IPAddress.Any;
+
+        http.AddHttpServerAdvertisement(o =>
+        {
+            o.ServiceType = "_myapp._tcp";
+            o.TxtRecords["role"] = "controller";
+        });
+    },
+    autoStart: false
+);
+```
+
+The advertisement's hosted service is registered after the server's own, which is the order they
+start in, so the first announcement carries a port that is already bound. (It recovers either way —
+the advertiser watches the server's state — but there is no reason to make it.)
+
+The advertisement follows the server:
+
+- published when it starts listening, on the port it actually bound (including an OS-assigned one),
+- **withdrawn with a goodbye packet** when it stops, so peers drop it immediately rather than waiting
+  out the TTL,
+- re-published on the new port if the server is restarted onto one,
+- re-announced when the device changes network, which is when a stale advertisement is worst.
+
+Without a container:
+
+```csharp
+await server.StartAsync();
+await using var advertisement = await server.AdvertiseAsync(mdns, o => o.ServiceType = "_myapp._tcp");
+```
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `ServiceType` | `_http._tcp` | See below |
+| `InstanceName` | the machine name | What the user already calls this device |
+| `Path` | `/` | Published as the conventional `path` TXT record |
+| `TxtRecords` | `path`, `scheme` | Whatever a peer needs to decide it cares |
+
+<Aside type="tip" title="Use a private service type">
+Browsing `_http._tcp` on a busy network turns up printers, routers and NAS boxes, and telling yours
+apart from those means filtering on a TXT record anyway. `_myapp._tcp` is one line and finds only
+you. Custom types are 1–15 characters, letters, digits and hyphens (RFC 6763 §7).
+</Aside>
+
+Read the final name back from `IHttpServerAdvertiser.Publication`. When the link already has a
+service with that name the responder renames it — typically by appending ` (2)` — and the publication
+carries what it settled on.
+
+## Finding
+
+```csharp
+builder.Services.AddHttpServerLocator();
+
+// one shot — "connect to my other device"
+var found = await locator.FindFirstAsync("_myapp._tcp", TimeSpan.FromSeconds(5));
+using var client = new HttpClient { BaseAddress = found!.BaseAddress };
+
+// everything that answers inside the window
+var all = await locator.FindAllAsync("_myapp._tcp", TimeSpan.FromSeconds(3));
+
+// or bind a list to it: never completes on its own
+await foreach (var change in locator.WatchAsync("_myapp._tcp", ct))
+{
+    if (change.Found) devices.Add(change.Server);
+    else devices.RemoveAll(x => x.InstanceName == change.Server.InstanceName);
+}
+```
+
+A `DiscoveredHttpServer` is already a URL a client can call: the base address is built from the
+service's `scheme` and `path` TXT records and its first IPv4 address, since that is still what a
+person types and what a QR code carries. `BaseAddressFor(address)` builds the same URL through any
+of its other addresses.
+
+Filtering on a TXT record is how an app picks its own instance out of a crowded link:
+
+```csharp
+var controller = await locator.FindFirstAsync(
+    "_myapp._tcp",
+    TimeSpan.FromSeconds(5),
+    x => x.TxtRecords.TryGetValue("role", out var role) && role == "controller"
+);
+```
+
+An instance that has not resolved to an address and port yet is skipped rather than handed over with
+no URL. Finding nothing is an answer — `null`, or an empty list — not a failure.
+
+## Platform requirements
+
+Publishing and browsing go through `NSNetService` on Apple platforms and `NsdManager` on Android, so
+**no multicast entitlement is required**. What is required:
+
+| Platform | Needs |
+| --- | --- |
+| iOS / Mac Catalyst / macOS | `NSLocalNetworkUsageDescription` **and** every browsed service type in `NSBonjourServices` |
+| Android | `INTERNET` and `ACCESS_NETWORK_STATE` |
+| Windows / Linux / server .NET | A managed responder binds UDP 5353 — the firewall has to allow it |
+
+Browsing for a type that is not declared in `NSBonjourServices` returns nothing, with no error. See
+[.NET MAUI](/httpserver/maui/) for the rest of the manifest entries and a runtime check for them.

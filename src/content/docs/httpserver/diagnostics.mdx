@@ -1,0 +1,150 @@
+---
+title: Health Checks & Telemetry
+description: Knowing whether an embedded server is actually working — health endpoints, request metrics and traces, all on in-box primitives
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Two questions about a running server, answered separately: *is it working* — health checks — and
+*what is it doing* — metrics and traces.
+
+Both are built on what is in the box. Health checks are a few types and a `Utf8JsonWriter`; telemetry
+is `System.Diagnostics.Metrics` and `ActivitySource`. Nothing here takes an OpenTelemetry dependency,
+and an app that never configures an exporter pays for an inactive `ActivitySource` and a meter nobody
+listens to.
+
+## Health checks
+
+```csharp
+builder.AddHealthChecks()
+    .AddServerCheck()
+    .AddCheck("database", async ct => await db.CanConnectAsync(ct)
+        ? HealthCheckResult.Healthy()
+        : HealthCheckResult.Unhealthy("no connection"), "ready")
+    .AddCheck<SyncHealthCheck>("sync", tags: ["ready"]);
+
+app.MapHealthChecks();                        // /health
+```
+
+`AddServerCheck()` is worth having on a device for a reason it never is on a server: the process
+being alive says nothing about whether the listener survived the last time the app was backgrounded
+or the Wi-Fi changed underneath it.
+
+A check with dependencies is a class:
+
+```csharp
+public sealed class SyncHealthCheck(ISyncEngine sync) : IHealthCheck
+{
+    public ValueTask<HealthCheckResult> CheckAsync(HealthCheckContext context, CancellationToken ct)
+        => new(sync.PendingCount switch
+        {
+            0        => HealthCheckResult.Healthy(),
+            < 100    => HealthCheckResult.Degraded($"{sync.PendingCount} pending"),
+            _        => HealthCheckResult.Unhealthy("the queue is not draining")
+        });
+}
+```
+
+### Liveness and readiness
+
+The convention is `live` for "the process is up" and `ready` for "it can actually serve". An
+orchestrator that cannot tell them apart restarts a container that was only waiting on a dependency.
+
+```csharp
+app.MapHealthChecks("/health/live", "live");
+app.MapHealthChecks("/health/ready", "ready");
+```
+
+### What comes back
+
+```json
+{
+  "status": "Degraded",
+  "totalDurationMs": 3.418,
+  "entries": {
+    "server":   { "status": "Healthy",  "durationMs": 0.01, "tags": ["live"],  "data": { "state": "Running", "connections": "3" } },
+    "database": { "status": "Healthy",  "durationMs": 2.9,  "tags": ["ready"] },
+    "sync":     { "status": "Degraded", "durationMs": 0.4,  "description": "42 pending", "tags": ["ready"] }
+  }
+}
+```
+
+| Verdict | Status code | Meaning |
+| --- | --- | --- |
+| `Healthy` | 200 | |
+| `Degraded` | 200 | Serving, with a caveat. A balancer that pulls the instance over this turns a caveat into an outage |
+| `Unhealthy` | 503 | |
+
+The aggregate is the worst entry. A report with no checks at all is Healthy: a server with nothing to
+verify is up, not broken.
+
+Checks run **concurrently**, each under a timeout (`DefaultTimeout`, 5 seconds, or per registration).
+A probe that hangs is worse than one that answers Unhealthy, because a monitor cannot tell it apart
+from the server being gone.
+
+<Aside type="caution" title="A health endpoint on a tunnel is an inventory">
+The entry list names your dependencies and how they fail. Behind a [tunnel](/httpserver/tunneling/),
+either put the endpoint behind [authorization](/httpserver/authorization/) or turn the details off:
+`app.MapHealthChecks("/health", o => o.IncludeDetails = false)`.
+</Aside>
+
+Responses are `Cache-Control: no-store`. A cached health check is a health check that tells you about
+a moment that has passed.
+
+## Telemetry
+
+```csharp
+app.UseTelemetry();
+```
+
+Register it **first**. Everything above it is time the client waited that nothing measured.
+
+One span and one duration measurement per request. The names follow the OpenTelemetry HTTP semantic
+conventions, so a dashboard built for ASP.NET Core reads this server without being told about it:
+
+| Instrument | Kind | Attributes |
+| --- | --- | --- |
+| `http.server.request.duration` | histogram (s) | method, scheme, route, status, protocol version, error type |
+| `http.server.active_requests` | up-down counter | method, scheme |
+| `http.server.active_connections` | observable | server address |
+
+Wiring an exporter is the ordinary OpenTelemetry setup:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t.AddSource(HttpServerTelemetry.ActivitySourceName))
+    .WithMetrics(m => m.AddMeter(HttpServerTelemetry.MeterName));
+```
+
+Some details that were decided deliberately:
+
+- The span is named for the **method** until routing has chosen an endpoint, then renamed to
+  `GET /users/{id}`. A span named for the raw path gives the backend one name per user.
+- A **4xx is not an error**. It is the caller's fault, the span stays `Unset`, and no `error.type` is
+  recorded — a wall of red 404s from a scanner tells you nothing about the server's health. A 5xx and
+  a thrown exception both are.
+- An unrecognised method is reported as `_OTHER`. The method is caller-controlled, and a metric with
+  an unbounded attribute is a memory leak in the collector.
+- `http.server.active_connections` counts **connections, not requests**: one keep-alive connection
+  serving a hundred requests counts once, and so does an HTTP/2 connection with a dozen streams.
+
+### Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Metrics` / `Tracing` | `true` | Either can be turned off on its own |
+| `ContinueIncomingTrace` | `true` | Continues the caller's `traceparent` |
+| `EmitResponseTraceHeader` | `false` | Writes the span's `traceparent` onto the response |
+| `RecordExceptionDetails` | `false` | Attaches message and stack trace to the span |
+| `RecordUrl` | `false` | Adds `url.path` and `url.query` |
+| `ShouldRecord` | `null` | Skips a request entirely — a health check polled every second |
+| `EnrichSpan` | `null` | Adds a tenant, a device id, whatever else matters |
+
+<Aside type="caution" title="Turn off ContinueIncomingTrace on a tunnel">
+A caller who chooses the trace id can graft its spans onto someone else's trace. That is a nuisance
+in a dashboard and a data leak in a shared backend. It is on by default because the usual caller is
+the app's own client.
+</Aside>
+
+`RecordUrl` is off for the same reason a path is not a span name: paths routinely carry identifiers
+and query strings routinely carry secrets, and spans are shipped somewhere else by definition.

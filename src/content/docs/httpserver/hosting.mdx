@@ -35,6 +35,12 @@ builder.Configure(o =>
     o.HideExceptionDetails = false;   // development
 });
 
+// The server's own features hang off the builder…
+builder.AddAuthentication().AddJwtBearer(o => o.SigningKey = key);
+builder.AddRateLimiter(o => o.GlobalPolicy = new FixedWindowRateLimitPolicy(100, TimeSpan.FromMinutes(1)));
+builder.AddHealthChecks().AddServerCheck();
+
+// …and everything else goes on the container underneath it.
 builder.Services.AddLogging(l => l.AddSimpleConsole());
 builder.Services.AddSingleton<IWidgetStore, InMemoryWidgetStore>();
 builder.Services.AddScoped<IUnitOfWork, UnitOfWork>();
@@ -47,6 +53,16 @@ await app.RunAsync();
 
 `builder.Options` is the same object `Configure` hands you, so either spelling works. `Build()` can
 only be called once — it builds the provider and hands the server back.
+
+`ShinyHttpServerBuilder` is where **every** registration in this library lives: `AddAuthentication`,
+`AddCors`, `AddRateLimiter`, `AddHealthChecks`, `AddOutputCache`, `AddSessions`, the tunnels, the
+[mDNS advertisement](/httpserver/discovery/), the [mobile lifecycle](/httpserver/maui/) — all of them
+extend the builder rather than `IServiceCollection`. Typing `builder.` lists what this server can do;
+typing `services.` lists what every library in the app has ever registered, and an embedded server's
+features are exactly the ones nobody knows to go looking for.
+
+`builder.Services` is still right there for your own registrations, and for anything the builder does
+not cover.
 
 Logging is optional. An app that never called `AddLogging` gets a no-op factory rather than a
 resolution failure at startup.
@@ -61,24 +77,35 @@ inject it — which is how a route ends up able to restart the server it is runn
 A MAUI app, a generic host, a Shiny host — anything with an existing `IServiceCollection`:
 
 ```csharp
-builder.Services.AddHttpServer(
-    o => o.Port = 8080,
-    server =>
+builder.Services.AddShinyHttpServer(http =>
+{
+    http.Options.Port = 8080;
+
+    http.AddAuthentication().AddBasic(o => o.AddUser("ada", pw));
+    http.AddHealthChecks().AddServerCheck();
+
+    http.Configure(server =>
     {
+        server.UseAuthentication();
         server.MapGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
         server.MapMyAppEndpoints();
-    }
-);
+    });
+});
 ```
 
-The `configureServer` callback runs once, immediately before the server starts, so it can resolve
-anything in the container while registering routes.
+Same builder, same calls as the standalone form above — the only difference is where the container
+comes from. That is the point of it: there is one way to configure this server, not one for a console
+app and another for MAUI.
+
+The callback runs **immediately**; it is registration. The `Configure(server => …)` callbacks inside
+it run once, when the server is first resolved, so they can take anything out of the container while
+registering routes.
 
 By default the server is registered as a singleton and started with the host through an
 `IHostedService`. Pass `autoStart: false` when the app should decide:
 
 ```csharp
-builder.Services.AddHttpServer(o => o.Port = 8080, autoStart: false);
+builder.Services.AddShinyHttpServer(http => http.Options.Port = 8080, autoStart: false);
 ```
 
 The server is still registered and fully configured, just not listening — which is exactly what an
@@ -126,6 +153,8 @@ await app.RestartAsync();   // both, as one operation, re-reading Options
 | `IsRunning` | `State == Running` |
 | `ListenUrl` | The URL being served — the real port when `Port` was `0` |
 | `ListenUrls` | Every URL, when several endpoints are configured |
+| `ActiveConnections` | Connections currently being served, tunnelled ones included — one keep-alive connection counts once however many requests it carries |
+| `NetworkAddressesChanged` | Raised when the machine's addresses change while running. See [configuration](/httpserver/configuration/#network-changes) |
 
 Starting an already-running server does nothing rather than throwing, because the caller is often a
 button and a double tap is not a bug. A failed bind returns to `Stopped` rather than sticking in

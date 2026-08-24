@@ -64,6 +64,48 @@ public sealed class ThermostatTools
 }
 ```
 
+## OAuth discovery for a remote server
+
+An MCP client that meets a bare 401 has no idea where to authenticate. RFC 9728 is the protocol's
+answer: the challenge names a metadata document, and the document names the authorization servers and
+the scopes.
+
+```csharp
+builder.AddMcpProtectedResource(o =>
+{
+    o.AuthorizationServers.Add("https://login.example.com");
+    o.ScopesSupported.Add("mcp:tools");
+    o.ResourceName = "Kitchen thermostat";
+});
+
+app.MapMcp().RequireAuthorization();
+app.MapMcpProtectedResource();
+```
+
+Two paths are mounted — `/.well-known/oauth-protected-resource` and the path-suffixed
+`/.well-known/oauth-protected-resource/mcp` that RFC 9728 §3.1 defines for a resource that is not at
+the root — because a client may ask for either. Both are anonymous and served with
+`Access-Control-Allow-Origin: *`: the document is public by definition, and a browser-based client
+fetches it cross-origin before it holds any credential at all.
+
+A denied request is then answered:
+
+```http
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://device.example.com/.well-known/oauth-protected-resource/mcp"
+```
+
+Validating the tokens themselves is still the [JWT](/httpserver/jwt/) package's job, and the audience
+it validates should be the same `Resource` published here.
+
+Leave `Resource` null for a [tunnelled](/httpserver/tunneling/) server: it is then derived per request
+from the host, which is the only thing that can be right when the public address is decided at runtime
+and is new every run. Set it when the server sits behind a fixed name, because the identifier ends up
+inside issued tokens and has to match what the authorization server was told.
+
+A 403 is left alone — the caller is known and still not allowed, and pointing them at the login they
+already completed would send them round a loop.
+
 ## Trimming, AOT, and MAUI
 
 The package is trim- and AOT-clean, and publishes clean under `PublishAot`. There is one thing the

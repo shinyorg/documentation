@@ -15,25 +15,32 @@ A phone hosting its own API, its own configuration page, its own file access —
 ## Wiring
 
 ```csharp
-builder.Services.AddHttpServer(
-    options =>
+builder.Services.AddShinyHttpServer(
+    http =>
     {
         // Any, not loopback: the point is for another device to reach this one.
         // Port 0 lets the OS pick, so two copies of the app never collide.
-        options.Address = IPAddress.Any;
-        options.Port = 0;
-    },
-    server =>
-    {
-        server.UseAuthentication();
-        server.UseEmbeddedFiles(typeof(MauiProgram).Assembly, "MyApp.wwwroot");
-        server.MapMyAppEndpoints();
+        http.Options.Address = IPAddress.Any;
+        http.Options.Port = 0;
+
+        http.AddAuthentication().AddBasic<CredentialStore>(o => o.Realm = "Device");
+
+        http.Configure(server =>
+        {
+            server.UseAuthentication();
+            server.UseEmbeddedFiles(typeof(MauiProgram).Assembly, "MyApp.wwwroot");
+            server.MapMyAppEndpoints();
+        });
     },
 
     // Started by the UI instead, so the app does not open a port before anyone asked it to.
     autoStart: false
 );
 ```
+
+Everything the server needs is registered on the builder inside that callback — authentication,
+health checks, tunnels, discovery — rather than scattered across `builder.Services`. See
+[Hosting & Lifecycle](/httpserver/hosting/).
 
 Then, from a toggle:
 
@@ -50,6 +57,70 @@ public sealed class ShareViewModel(HttpServer server)
 
 `server.StateChanged` gives the UI its transitions without polling. See
 [Hosting & Lifecycle](/httpserver/hosting/).
+
+## Following the app and the network
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Mobile
+```
+
+```csharp
+builder.Services.AddShinyHttpServer(http =>
+{
+    http.AddHttpServerLifecycle(o =>
+    {
+        o.BackgroundMode = BackgroundServerMode.Stop;      // Stop | KeepAlive | Leave
+        o.RestartOnConnectivityChange = true;              // default
+    });
+});
+```
+
+Needs a Shiny host — `UseShiny()` in `MauiProgram` — because that is what delivers the platform's
+lifecycle callbacks. On a non-mobile target framework it registers nothing and does nothing, so
+shared code can call it unconditionally.
+
+The package is `.Mobile` rather than `.Maui` because none of this is MAUI: it is built on
+Shiny.Core's lifecycle, and an iOS or Android head with no MAUI in it gets the same behaviour. MAUI
+is simply where most of it gets used.
+
+This is the part of running a server in a MAUI app that nothing else can do for you. A server object
+does not know the app was backgrounded, and a socket does not know the phone left the Wi-Fi network
+it was bound to. Both are ordinary events on a device and neither exists on a machine in a rack.
+
+| Mode | Android | Apple |
+| --- | --- | --- |
+| `Stop` (default) | Stops on background, starts on resume | Same |
+| `KeepAlive` | Starts a foreground service and keeps serving | Keeps running until the OS suspends it, which is seconds |
+| `Leave` | Nothing — you manage it | Nothing |
+
+`Stop` is the honest default. On iOS the process is suspended within seconds of backgrounding and the
+listener stops answering whatever you do, so a server that is left "running" is one that looks fine
+in your code and refuses connections in reality. Stopping it makes the state visible:
+`server.IsRunning` is false, the UI can say so, and clients get a refused connection instead of a
+hang. A server the *user* switched off stays off — `AlwaysStartOnForeground` opts into the other
+behaviour.
+
+`KeepAlive` on Android starts a foreground service with an ongoing notification, which is the only
+supported way to hold a socket open with the app in the background. The notification is the deal
+Android offers; `NotificationTitle` and `NotificationMessage` are what the user reads all day.
+
+### When the device moves
+
+A phone's addresses change as a matter of course — a different Wi-Fi network, a hotspot, cellular
+taking over. A listener bound to the address it had at breakfast is the single most common way an
+embedded server "stops working for no reason".
+
+The lifecycle package rebinds on connectivity changes. Without it (or without Shiny.Core), the core
+server does the same from `NetworkChange`:
+
+```csharp
+options.RebindOnNetworkChange = true;
+options.NetworkChangeDebounce = TimeSpan.FromSeconds(2);   // one transition raises several events
+```
+
+Either way `server.NetworkAddressesChanged` fires afterwards, so a QR code, a "reachable at" line or
+an [mDNS advertisement](/httpserver/discovery/) can be refreshed. Binding `IPAddress.Any` survives an
+address change on its own; binding a specific address does not.
 
 ## Platform configuration
 
@@ -82,15 +153,51 @@ is refused and the server simply never appears.
 
 ```xml
 <uses-permission android:name="android.permission.INTERNET" />
+
+<!-- BackgroundServerMode.KeepAlive only -->
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 ```
 
-Already in the MAUI template.
+`INTERNET` is already in the MAUI template; the rest are needed only for background serving.
+`POST_NOTIFICATIONS` is a runtime permission from API 33 — without it the foreground service runs
+and its notification does not appear.
+
+### Checking at runtime
+
+```csharp
+var report = LocalNetworkAccess.Check();
+
+if (!report.CanServe)
+    logger.LogWarning("{Report}", report);
+```
+
+`Shiny.Net.HttpServer.Mobile` reads the bundle or manifest and says which of the entries above are
+missing. It exists because of how these fail: a missing `NSLocalNetworkUsageDescription` does not
+raise an exception with that name in it — the listener binds, the other device cannot reach it, and
+there is nothing in the log. Neither failure is discoverable from the failure, and both are
+discoverable from the bundle.
+
+It does not prompt for anything and cannot tell you whether the user has already granted local
+network access — no platform exposes that. What it tells you is whether the app was built in a way
+that makes granting it possible.
 
 <Aside type="caution" title="iOS suspends the app in the background">
-The server stops answering when the app is not in the foreground. A tunnel or an API that has to
-survive that belongs in a background task, or on a machine that stays awake — no server-side library
-can work around the platform here.
+The server stops answering when the app is not in the foreground, and no background mode legitimately
+keeps a listener open — the ones that exist (audio, location, VoIP) are for apps that do those
+things, and using one to hold a socket open is a rejection at review and a lie to the user.
+`BackgroundServerMode.Stop` above makes the state visible and recovers cleanly on resume; Android's
+`KeepAlive` is the only place a server really does keep serving.
 </Aside>
+
+## Being found
+
+Binding a port solves being reachable. It does not solve being *found* — the address is assigned by
+whatever network the device joined and changes when it moves. See
+[Discovery](/httpserver/discovery/) for advertising the server over mDNS and finding the ones other
+devices are advertising, which is what removes "type this IP address" from the app's first-run
+experience.
 
 ## HTTP or HTTPS?
 
@@ -145,7 +252,7 @@ screen: the server asks the validator on every request rather than copying a lis
 change takes effect immediately with nothing restarted.
 
 ```csharp
-builder.Services.AddAuthentication().AddBasic<CredentialStore>(o => o.Realm = "My device");
+builder.AddAuthentication().AddBasic<CredentialStore>(o => o.Realm = "My device");
 ```
 
 Keep the password in `SecureStorage` — the keychain on Apple platforms, the encrypted preference
@@ -179,7 +286,7 @@ Two packages need a word here:
 ## Going public from a phone
 
 ```csharp
-builder.Services.AddQuickTunnel();      // pinggy: no account, nothing installed
+builder.AddQuickTunnel();      // pinggy: no account, nothing installed
 ```
 
 ```csharp
