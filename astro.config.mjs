@@ -344,6 +344,20 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'controls-11',
+              content: 'Shiny Controls 1.1 - Global/Out of App Prompt Support, DataGrid Enhancements, & More!',
+              variant: 'tip',
+              link: { text: 'Show Me!', href: '/controls/' },
+              dismissable: false
+            },
+                        {
+              id: 'controls-12',
+              content: 'Shiny Controls 1.2 - View & Edit Word, Excel, & PowerPoint Docs!',
+              variant: 'tip',
+              link: { text: 'For Free!?!', href: '/controls/' },
+              dismissable: false
+            },
+            {
               id: 'httpserver-10',
               content: 'Shiny.Net.HttpServer v1 - A lightweight feature rich HTTP Server - Tunnels, Websockets, AOT, ASPNET Featureset, & Works EVERYWHERE!',
               variant: 'tip',
@@ -373,7 +387,7 @@ export default defineConfig({
             },
             {
               id: 'mobilev5-5',
-              content: 'Client v5.5.0: BLE Hosting Easy Mode, SSDP/UPNP Discovery!',
+              content: 'Client v5.5.0: BLE Hosting Easy Mode, SSDP/UPNP Discovery, WIFI Control!',
               variant: 'tip',
               link: { text: 'Discover It!', href: '/client' },
               dismissable: false
@@ -391,7 +405,7 @@ export default defineConfig({
               variant: 'tip',
               link: { text: 'Drive Me There Again', href: '/obd' },
               dismissable: false
-            }        
+            }     
           ]
         }),
         starlightDocSearch({

@@ -1,0 +1,129 @@
+---
+title: Slide Editor
+description: A .pptx editor for .NET MAUI and Blazor WebAssembly in two controls — the lone editing surface, and the same surface wrapped in editing chrome — moving shapes and editing their text surgically in the OOXML
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+- <NugetDownloads name="Shiny.Maui.Controls.Office" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Office" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} />
+
+
+Two controls, on both hosts:
+
+| Control | What it is |
+|---|---|
+| `SlideEditor` | the lone editing surface — canvas, selection, caret, typing. No chrome. |
+| `SlideEditorView` | `SlideEditor` plus an editing toolbar and a status line |
+
+Same packages as the viewers (`Shiny.Maui.Controls.Office` / `Shiny.Blazor.Controls.Office`), same
+constraints: **MAUI needs `UseSkiaSharp()`**, **Blazor is WASM-only**, and on Blazor the container
+needs an **explicit height**.
+
+## Open a deck for editing
+
+```csharp
+using var deck = await SlideDeck.OpenAsync("deck.pptx", editable: true);
+```
+
+Without `editable: true` the deck opens read-only and `Execute` throws — the same shape as the
+document editor.
+
+### Blazor
+
+```razor
+<div style="height:560px">
+    <SlideEditorView Deck="deck" @bind-SlideIndex="index" DeckChanged="OnChanged" />
+</div>
+```
+
+### MAUI
+
+```xml
+<office:SlideEditorView Deck="{Binding Deck}" SlideIndex="{Binding Index}" />
+```
+
+## Two gestures, and the distinction is the whole design
+
+**Shape mode** — a single click (tap) selects a shape and draws a **dashed** frame with eight resize
+handles. Drag the body to move it, a handle to resize it.
+
+**Text mode** — a double-click (double-tap) puts a caret inside that shape's text and the frame turns
+**solid**. That is the same split PowerPoint uses, and the frame is the only cue telling a user where
+their next keystroke will go.
+
+A single click while in text mode moves the caret; a click outside the shape leaves text mode.
+
+## What can be selected
+
+Only shapes the slide itself owns. Shapes painted from the **layout or master** are skipped by hit
+testing, because they belong to every slide using that layout — letting a click grab one would let a
+user drag the company logo off the whole deck at once. Shapes flattened out of a **group** are
+likewise not editable: their position is the group's coordinate space collapsed into the slide's, so
+writing a new one back would put them somewhere else entirely.
+
+## Editing
+
+| | What it does |
+|---|---|
+| Type | inserts at the caret, replacing the text selection |
+| Enter | splits the paragraph, keeping its level and bullet |
+| Backspace at offset 0 | joins the paragraph onto the one above |
+| Tab / Shift+Tab | indents / outdents the bullet's outline level |
+| Ctrl/Cmd+B, I, U | bold, italic, underline over the selection |
+| Delete (shape mode) | removes the selected shape |
+| Ctrl/Cmd+Z | undo — a whole drag is **one** step, not one per pointer sample |
+
+Font family, size, colour and alignment are on the controller and wired into both toolbars.
+`AddTextBox` drops an empty text box onto the slide and selects it.
+
+## Edits are surgical on the runs
+
+A run is split only where an edit genuinely needs a boundary and is never re-created, because an
+`a:rPr` carries language, hyperlinks, effects and theme-derived fills the model does not represent.
+Formatting is expressed as a *mutation* of the run's properties rather than a finished style, so
+turning on bold leaves the font, size, colour and italics exactly as they were.
+
+⚠️ DrawingML is fussier than WordprocessingML about child order: `a:rPr`'s children are a **sequence**,
+not a set, and PowerPoint refuses to open a file whose run properties are out of order rather than
+repairing it. The editor inserts them at their schema position.
+
+## What a save rewrites
+
+**Opening a deck and saving it without editing produces a byte-identical file.** That is the promise,
+and it is asserted by hashing every ZIP entry before and after.
+
+Once an edit happens, the picture is more honest: the SDK's only public flush re-serialises every part
+whose DOM has been materialised, and reading a deck materialises every slide, layout, master, theme and
+notes part it had to walk. Those round-trip through the same object model, so **nothing is lost** — a
+reopened deck reads back identically, including the slides you never touched — but their bytes move.
+Nothing is ever added to or removed from the package.
+
+## Keyboard input
+
+**Blazor**: complete. Typing goes through `beforeinput`, so IME composition, autocorrect, dictation and
+paste all work. Arrows, Home/End, Tab, Escape, Delete and the shortcuts above are wired.
+
+**MAUI**: typing works — a hidden `Entry` gives the platform keyboard and IME somewhere to send text.
+**Physical keys do not**, because MAUI exposes no portable key-down event. Route them yourself:
+
+```csharp
+Editor.HandleKey(EditorKey.Left, shift: true);
+Editor.HandleKey(EditorKey.Undo, control: true);
+```
+
+Tapping, dragging, typing and every toolbar command work without it.
+
+## Not implemented
+
+- **Soft line breaks** (`a:br`). They are read and rendered, but the caret cannot be placed on one and
+  Shift+Enter does not insert one — a break contributes no characters to the offset space.
+- Editing **table cells** and **grouped** shapes; both are rendered but not selectable.
+- Adding, removing or reordering **slides**.
+- **Rotation** handles. A rotated shape renders rotated and can still be moved and resized, but the
+  drag works in unrotated slide coordinates.
+- Everything the viewer does not render is still not rendered — see [Viewers](/controls/document-viewer/).
+
+{/* TODO: capture screenshots for slide-editor */}

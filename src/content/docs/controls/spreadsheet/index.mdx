@@ -1,0 +1,180 @@
+---
+title: Spreadsheet
+description: Open, render and edit real .xlsx workbooks in .NET MAUI and Blazor WebAssembly — a virtualized SkiaSharp grid over a document kernel with transactional undo and a formula engine, editing the OOXML package surgically so untouched content survives a save
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+`SpreadsheetView` opens, renders and edits `.xlsx` workbooks. Both hosts drive the same controller and
+paint with the same SkiaSharp routine, so MAUI and Blazor are not two implementations kept in step by
+hand — they are literally the same renderer.
+
+- <NugetDownloads name="Shiny.Maui.Controls.Office" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Office" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} />
+
+## The design in one paragraph
+
+The package is split so that almost none of it is host-specific. `Shiny.Controls.Office.Shared` owns
+the OOXML package, the sheet model, a transactional undo stack, the grid layout maths, the interaction
+logic and the formula engine — with no UI dependency at all, which is why it is covered by several
+hundred unit tests that never open a window. `Shiny.Controls.Office.Skia` turns that state into pixels.
+The two host packages contribute only a Skia surface, raw input forwarding, and a real text box for
+in-cell editing so the platform's own keyboard and IME do the typing.
+
+## The rule that protects your documents
+
+**Edits are applied surgically to the open package.** The workbook is opened once and held; changes go
+into the live XML DOM. Nothing is ever reconstructed from a parsed model, so parts the editor does not
+understand — macros, tracked changes, custom XML, pivot caches, conditional formatting, charts,
+embedded objects — survive because they are never read in the first place.
+
+Two consequences worth relying on:
+
+- Opening a workbook and saving it **without an edit produces a byte-identical file**.
+- Editing one cell rewrites only the sheet, shared strings, workbook and styles parts. Everything else
+  comes back byte-for-byte.
+
+## Setup
+
+MAUI needs SkiaSharp registered, or the canvas never renders:
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseShinyControls()
+    .UseSkiaSharp();
+```
+
+:::caution[Blazor is WebAssembly only]
+The grid repaints on every keystroke, and a Blazor **Server** round-trip per key makes editing
+unusable. SkiaSharp on WebAssembly also forces native relinking, so the `wasm-tools` workload must be
+installed to publish.
+:::
+
+## Opening a workbook
+
+```csharp
+using var workbook = await Workbook.OpenAsync("/path/to/book.xlsx");
+using var workbook = await Workbook.OpenAsync(stream);
+using var workbook = Workbook.Create("Sheet1");   // start empty
+```
+
+`Workbook` is `IDisposable` and holds the package open — dispose it with the page.
+
+### MAUI
+
+```xml
+<office:SpreadsheetView x:Name="Sheet"
+                        Workbook="{Binding Workbook}"
+                        SheetName="Budget"
+                        CellChanged="OnCellChanged" />
+```
+
+### Blazor
+
+```razor
+<div style="height:420px">
+    <SpreadsheetView Workbook="workbook"
+                     Theme="SpreadsheetTheme.Dark"
+                     CellChanged="OnCellChanged" />
+</div>
+```
+
+:::note
+The Blazor host paints to a canvas that fills its container, so the container needs an **explicit
+height**. Without one it collapses to zero and nothing appears.
+:::
+
+## Editing
+
+Every edit goes through the undo stack; never mutate cells directly.
+
+```csharp
+workbook.Execute(new SetCellValueCommand("Budget", CellRef.Parse("B2"), CellValue.FromNumber(42)));
+workbook.Execute(new SetCellFormulaCommand("Budget", CellRef.Parse("D2"), "B2*C2"));
+workbook.Execute(new ClearRangeCommand("Budget", CellRange.Parse("A1:C3")));
+
+workbook.Undo.Undo();
+workbook.Undo.Redo();
+```
+
+A range clear is **one** undo step, not one per cell, and undoing over a cell that held a formula
+restores the formula — not the value it happened to be showing.
+
+## Formulas
+
+The engine indexes formulas lazily on the first edit or the first read of a calculated value, then
+recalculates incrementally in dependency order.
+
+```csharp
+workbook.GetEffectiveValue("Budget", CellRef.Parse("D5"));         // computed result
+workbook.Evaluate("SUM(A1:A9)", "Budget", CellRef.Parse("Z1"));    // ad-hoc, not stored
+workbook.Calc.CircularCells;                                       // non-empty on a circular reference
+```
+
+Around 80 functions ship across math, statistics, logic, text, lookup, date and information
+categories. An unknown function evaluates to `#NAME?` rather than throwing, and a circular reference
+is reported and left at zero rather than recursing until the stack dies.
+
+:::caution[Read calculated cells with `GetEffectiveValue`]
+`Worksheet.GetValue` returns what is *stored in the file*, which for a formula cell is the cached
+result — stale the moment anything upstream changes. Use `GetEffectiveValue` or
+`Worksheet.GetDisplayValue` to get the computed value.
+:::
+
+## Saving
+
+```csharp
+await workbook.SaveAsync();                      // over the path it was opened from
+await workbook.SaveAsAsync("/new/path.xlsx");
+await workbook.SaveToAsync(stream);
+var bytes = workbook.ToArray();
+```
+
+Saving writes atomically — to a sibling temporary file, then a move — so an interrupted save never
+leaves a half-written document. It also refreshes the cached result of every formula (readers other
+than Excel show that cached value, so leaving it stale means the file displays wrong numbers) and sets
+`fullCalcOnLoad` so Excel re-verifies on open.
+
+## Finding out what a document contains
+
+```csharp
+var collector = new UnsupportedFeatureCollector();
+using var workbook = await Workbook.OpenAsync(path, collector);
+
+foreach (var feature in collector.Features)
+    Console.WriteLine($"{feature.Part}: {feature.Feature} ({feature.Severity})");
+```
+
+Severities are `NotRendered` (preserved, not shown), `NotEditable` (preserved, shown, but edits nearby
+may not behave) and `Lossy` (cannot be preserved). Nothing currently reports `Lossy`, and a document
+that would should not be saved over its original without asking.
+
+## Driving the grid yourself
+
+Both hosts expose the same controller, so a toolbar or formula bar drives identical state:
+
+```csharp
+var controller = view.Controller;
+controller.Selection.Active;      // CellRef
+controller.ActiveCellText;        // what a formula bar should show
+controller.BeginEdit();
+controller.Move(MoveDirection.Down, extend: false, toEdge: true);   // Ctrl+Down
+controller.ClearSelection();
+controller.Undo();
+```
+
+## Not implemented
+
+- **Inserting and deleting rows and columns.** Deliberately deferred: it is the hardest edit in the
+  format, because references must be rewritten across formulas, merged cells, conditional formatting,
+  defined names, data validation, charts and tables.
+- Adding or removing merged cells — existing merges render but cannot be changed.
+- Editing charts, pivot tables or conditional formatting.
+- Multi-range (Ctrl-click) selection, copy/paste, and drag-to-fill (the fill handle is drawn but inert).
+- Physical-key navigation on MAUI. MAUI has no portable key-down event, so arrow keys work on Blazor
+  only; on MAUI call `Move`, `BeginEdit` and `ClearSelection` from your own platform key hook.
+
+{/* TODO: capture screenshots for spreadsheet */}

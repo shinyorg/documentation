@@ -583,6 +583,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Office',
+        jumpTo: true,
+        items:[
+          { label: 'Spreadsheet', link: 'controls/spreadsheet/' },
+          { label: 'Viewers', link: 'controls/document-viewer/' },
+          { label: 'Document Editor', link: 'controls/document-editor/' },
+          { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
+        ]
+      },
+      {
         label: 'Collections & Grids',
         items:[
           { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },

@@ -1,0 +1,170 @@
+---
+title: Document & Slide Viewers
+description: Read-only .docx and .pptx viewers for .NET MAUI and Blazor WebAssembly — Word reflowed to the control's width with the full style chain resolved, PowerPoint scaled as fixed artboards with placeholders inherited from layout and master
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+`DocumentView` renders `.docx`. `SlideView` renders `.pptx`. Both are **read-only** — editing those
+two formats is a later phase — and both ship in the same packages as the [Spreadsheet](/controls/spreadsheet/).
+
+- <NugetDownloads name="Shiny.Maui.Controls.Office" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Office" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} />
+
+:::caution[Same two constraints as the Spreadsheet]
+**MAUI requires `UseSkiaSharp()`** in `MauiProgram`, or the canvas never renders. **Blazor is
+WebAssembly only**, and the container needs an **explicit height** or the canvas collapses to zero.
+:::
+
+## Fonts
+
+`Shiny.Blazor.Controls.Office` bundles **Carlito** and **Caladea** — metric-compatible with Calibri
+and Cambria respectively — as eight faces under SIL OFL 1.1, about 1 MB compressed. They load
+automatically on the first render of any Office view, once per browser session, and are HTTP-cached
+afterwards.
+
+This is not cosmetic. **SkiaSharp on WebAssembly has no access to system fonts at all** — there is no
+fontconfig and no CoreText in the browser — and `SKTypeface.FromFamilyName` returns a
+wrong-but-non-null fallback rather than failing. Without the bundle, every document renders in one
+monospace face and any glyph outside that face's coverage draws as a tofu box, with no error anywhere.
+
+*Metric-compatible* means the glyph advance widths match the original, so a document laid out against
+Calibri breaks its lines in exactly the same places against Carlito. A merely similar-looking font
+would render legibly and paginate differently.
+
+To add a face the bundle does not cover:
+
+```csharp
+OfficeFonts.Register(await http.GetByteArrayAsync("fonts/MyFont.ttf"));
+```
+
+On **MAUI** no bundle is needed: the platform's own fonts are available, with the same substitution
+table layered on top.
+
+## Word — reflow, not pagination
+
+```csharp
+using var document = await WordDocument.OpenAsync("/path/report.docx");
+```
+
+```xml
+<office:DocumentView Document="{Binding Document}" Zoom="1.0" />
+```
+
+```razor
+<div style="height:520px">
+    <DocumentView Document="document" Theme="DocumentTheme.Dark" />
+</div>
+```
+
+Content is laid out as **one continuous column** at the control's width. There are no page breaks, no
+headers and no footers.
+
+That is a deliberate choice rather than an omission. Pagination needs widow and orphan control,
+footnote placement, floating-object collision and repeating table headers; a partial implementation
+puts page boundaries in the wrong places, and a page break in the wrong place reads as a rendering bug
+rather than a missing feature. `WordDocument.Page` reports the *authored* page size and margins so the
+view can pick a sensible measure — it is not a promise of pages.
+
+### What it resolves
+
+The full style chain: document defaults, then the named style **with its entire `basedOn` ancestry
+applied outermost-first**, then direct formatting on the paragraph and run. Skipping the ancestry is
+the usual shortcut, and it is why documents built on custom styles render in the wrong font — a style
+that only overrides colour inherits everything else from its parent.
+
+Beyond that: bold, italic, underline, strike, colour, highlight, superscript and subscript; alignment
+and justification; indents and hanging indents; line and paragraph spacing; numbered and bulleted
+lists with running counters resolved from `numbering.xml`; tables with column spans, vertical merges
+and cell shading; inline images; and hyperlink colouring.
+
+### Outline and navigation
+
+```csharp
+foreach (var (level, text) in document.Outline())
+    Console.WriteLine(new string(' ', level * 2) + text);
+
+view.Controller?.ScrollToHeading(index);   // index into Outline()
+view.Controller!.Zoom = 1.25;
+document.PlainText;
+```
+
+## PowerPoint — scale, not reflow
+
+```csharp
+using var deck = await SlideDeck.OpenAsync("/path/deck.pptx");
+```
+
+```xml
+<office:SlideView Deck="{Binding Deck}" Mode="Single" SlideChanged="OnSlideChanged" />
+```
+
+```razor
+<div style="height:460px">
+    <SlideView Deck="deck" @bind-SlideIndex="index" @bind-Mode="mode" />
+</div>
+```
+
+A slide is a fixed-size artboard, so the view **fits and letterboxes** it rather than re-laying it
+out. Text keeps exactly the proportions it was authored at, at any size.
+
+`SlideViewMode.Single` fits one slide. `SlideViewMode.Grid` is a scrolling thumbnail wall where
+clicking a thumbnail opens that slide.
+
+### Placeholders are resolved for you
+
+Shapes come back already resolved through **slide → layout → master**. This matters more than it
+sounds: a title placeholder on a slide routinely carries text and nothing else — no position, no size,
+no font — because all of that lives on the layout it came from, and on the master behind that. Reading
+only the slide produces a deck of correctly-worded shapes stacked in the top-left corner.
+
+Decorative (non-placeholder) shapes from the layout and master *are* included, because they are
+content every slide inherits. Their placeholders are *not*, because those are templates the slide
+fills in rather than things to draw.
+
+### What it draws
+
+Preset geometry for around twenty common shapes — rectangle, rounded rectangle, ellipse, triangle,
+diamond, line, the four arrows, pentagon, hexagon, star, chevron, parallelogram, trapezoid, plus, can
+and cloud. Anything else falls back to its bounding rectangle and is reported.
+
+Solid and linear-gradient fills; outlines including dashes; **theme colours with their `lumMod`,
+`lumOff`, `shade`, `tint` and `alpha` modifiers applied** — "Accent 1, Lighter 40%" is a modifier, not
+a colour, and ignoring it renders every themed shape at full saturation; text bodies with per-level
+formatting from the layout's list style; bullets; alignment and vertical anchoring; PowerPoint's
+recorded autofit shrink; pictures; and tables.
+
+```csharp
+deck.SlideWidth;          // 1280 for a 16:9 deck at 96dpi
+deck.AspectRatio;
+deck.Slides[0].Title;
+deck.Slides[0].Notes;
+```
+
+## Finding out what was skipped
+
+Both viewers preserve the whole package and report what they could not draw:
+
+```csharp
+var collector = new UnsupportedFeatureCollector();
+using var document = await WordDocument.OpenAsync(path, collector);
+
+foreach (var feature in collector.Features)
+    Console.WriteLine($"{feature.Part}: {feature.Feature} ({feature.Severity})");
+```
+
+A viewer never reports `Lossy` — it does not write. Opening and saving produces a byte-identical file.
+
+## Not implemented
+
+- **Editing.** Both formats are read-only for now.
+- Pagination, headers, footers, footnotes, endnotes and comments in Word. Tracked *insertions* render
+  as normal text; deletions are hidden.
+- Text wrapping around floating images, and tab stops — a tab becomes four spaces.
+- Charts, SmartArt, embedded OLE objects and animations in PowerPoint: reported, not drawn.
+- Custom and freeform geometry, drawn as the bounding rectangle.
+- Group shapes are flattened, which is wrong if a group has been scaled relative to its children.
+
+{/* TODO: capture screenshots for document-viewer */}
