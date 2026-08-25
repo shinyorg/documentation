@@ -90,7 +90,7 @@ it was bound to. Both are ordinary events on a device and neither exists on a ma
 | Mode | Android | Apple |
 | --- | --- | --- |
 | `Stop` (default) | Stops on background, starts on resume | Same |
-| `KeepAlive` | Starts a foreground service and keeps serving | Keeps running until the OS suspends it, which is seconds |
+| `KeepAlive` | Starts a foreground service and keeps serving | Keeps running until the OS suspends it (seconds), then **restarts on resume** |
 | `Leave` | Nothing — you manage it | Nothing |
 
 `Stop` is the honest default. On iOS the process is suspended within seconds of backgrounding and the
@@ -103,6 +103,45 @@ behaviour.
 `KeepAlive` on Android starts a foreground service with an ongoing notification, which is the only
 supported way to hold a socket open with the app in the background. The notification is the deal
 Android offers; `NotificationTitle` and `NotificationMessage` are what the user reads all day.
+
+The service follows the **server**, not just the app's background and foreground transitions. Stop
+the server while the app is in the background and the service stops with it, so the notification
+goes away rather than sitting there claiming to serve something that is no longer running; start the
+server while backgrounded and the service comes up, so Android does not reclaim the process a few
+minutes later and take the listener with it. Both cases are ordinary in an app whose server is a
+toggle — a notification action, a scheduled task, a rebind that failed — and neither is visible from
+the lifecycle transition alone.
+
+Only the settled states move it. A bind that fails goes `Starting` then `Stopped`, which would
+otherwise flash a notification for a server that never came up, and a stop waits in `Stopping` for
+in-flight requests — precisely when the process still needs holding up.
+
+### `KeepAlive` on iOS — restored on resume
+
+There is no foreground service on iOS and there is not going to be one, so `KeepAlive` there means
+the other half of the promise: the server is left running as the app goes away — a few seconds of
+background execution is sometimes exactly enough to finish the request in flight — and it is
+**restarted when the app comes back**.
+
+That restart is the part worth having. The suspension takes the socket, but nothing on the platform
+tells the `HttpServer` object about it, so it goes on reporting `IsRunning` as `true`. An app that
+checked `IsRunning` on resume would find nothing wrong and serve nothing, and the user would be
+looking at a screen that says the server is on while the other device cannot connect — with a toggle
+that cannot fix it, because the toggle is already in the position it should be in. Calling
+`StartAsync()` yourself does not help either: it is idempotent, so it agrees with the stale state and
+returns having done nothing. `RestartAsync()` is what fixes it, and this is what calls it.
+
+It only restores a server that *was* running when the app was backgrounded. Stop the server while the
+app is in the background and it stays stopped on resume, the same way Android's notification goes
+away. If you want the server on at every resume whatever the user did, that is
+`AlwaysStartOnForeground` — a different and more opinionated promise, since it overrides a toggle the
+user deliberately switched off.
+
+So on Apple, `Stop` and `KeepAlive` end up in the same place — a server that was on before is on
+again — and differ in how they get there. `Stop` stops it on the way out, which makes `IsRunning`
+honest the whole time and lets the UI say "not serving" while the app is in the background.
+`KeepAlive` leaves it up for the seconds the platform grants, and pays for that with an `IsRunning`
+that is stale until the resume repairs it.
 
 ### When the device moves
 
@@ -187,7 +226,8 @@ that makes granting it possible.
 The server stops answering when the app is not in the foreground, and no background mode legitimately
 keeps a listener open — the ones that exist (audio, location, VoIP) are for apps that do those
 things, and using one to hold a socket open is a rejection at review and a lie to the user.
-`BackgroundServerMode.Stop` above makes the state visible and recovers cleanly on resume; Android's
+`BackgroundServerMode.Stop` above makes the state visible and recovers cleanly on resume, and
+`KeepAlive` restarts on resume a server that was running when the app was backgrounded — but Android's
 `KeepAlive` is the only place a server really does keep serving.
 </Aside>
 
