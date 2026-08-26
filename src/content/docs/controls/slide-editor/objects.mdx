@@ -1,0 +1,116 @@
+---
+title: Slide Editor | Shapes, Pictures & Tables
+description: Add preset shapes, pictures and tables to a .pptx slide, drop image files in from the desktop, and highlight text
+---
+
+The slide editor adds three kinds of object, and highlights text. All of it is on the shared
+`SlideEditorController`, and all of it is already wired into `SlideEditorView`'s toolbar on both hosts.
+
+```csharp
+var c = editor.Controller!;
+
+c.AddShape(ShapeGeometry.Hexagon, slideX, slideY, width: 240, height: 180);
+c.AddPicture(bytes, "image/png", slideX, slideY, width: 400);
+c.AddTable(rows: 3, columns: 4, slideX, slideY, width: 480, height: 200);
+c.AddTextBox(slideX, slideY);
+```
+
+All four place in **slide** coordinates and **select what they added**, so the next gesture is a drag
+of the new object rather than a hunt for it. The toolbar centres them on the slide: an object inserted
+at the origin lands under the title placeholder, where it is both invisible and awkward to grab.
+
+## Shapes
+
+Twenty preset geometries, in `Shiny.Controls.Office.Shapes`:
+
+`Rectangle`, `RoundedRectangle`, `Ellipse`, `Triangle`, `RightTriangle`, `Diamond`, `Line`,
+`RightArrow`, `LeftArrow`, `UpArrow`, `DownArrow`, `Pentagon`, `Hexagon`, `Star5`, `Chevron`,
+`Parallelogram`, `Trapezoid`, `Plus`, `Can`, `Cloud`.
+
+The **same enum and the same path builder** the document editor uses — the shape you draw in a deck
+and the one you drop into a document are the same shape.
+
+`AddShape` writes a real drawn shape, not a text box: `TextBox` is deliberately left off the non-visual
+properties, which is what makes PowerPoint give it the theme's fill by default, let it be recoloured
+from the shape gallery, and report itself as a rectangle rather than as text. It still gets an empty
+text body, so double-clicking it puts a caret inside exactly as a shape drawn in PowerPoint does.
+
+Once added, a shape is an ordinary editable shape: select it to move or resize it with its eight
+handles, double-click to type in it.
+
+## Pictures
+
+```csharp
+c.AddPicture(bytes, "image/png", slideX, slideY, width: 400);
+```
+
+The bytes go in as they arrived — never re-encoded. Re-encoding would mean choosing a quality on the
+user's behalf, and a deck is where people put screenshots they intend to stay legible.
+
+The image part is added to the **slide**, not the presentation: that is where a picture's `r:embed` is
+resolved from, and a relationship on the presentation part is invisible to the slide that needs it.
+Every insertion gets its own part, even for bytes already in the package — de-duplicating would mean
+hashing every existing image on every drop, and two references to one part is a lifetime rule nothing
+else here needs.
+
+## Tables
+
+```csharp
+c.AddTable(rows: 3, columns: 4, slideX, slideY, width: 480, height: 200);
+```
+
+A table on a slide is **not a shape**. It is a `p:graphicFrame` whose `a:graphicData` holds an
+`a:tbl`, with its position on the frame and its size split between the frame's extent and the grid
+inside. Both have to agree: a frame sized differently from its grid renders at the frame's size with
+the columns still laid out for the grid's, so the table overhangs its own border.
+
+It comes out with a built-in table style applied. Without one PowerPoint draws no fill and no rules at
+all, which reads as a failed insert rather than as a plain table.
+
+⚠️ A table can be **added**, and moved or resized as a whole. Typing into its cells is not supported
+yet — table cells are rendered but not selectable.
+
+## Dropping image files in
+
+Dragging an image file onto a slide inserts it **centred on the point it landed**, sized to at most
+half the slide so a photograph dropped at full resolution does not arrive many times larger than the
+deck it is in. On by default.
+
+```razor
+<SlideEditorView Deck="deck"
+                 AllowFileDrop="true"
+                 DropRejected="OnRejected" />
+```
+
+```csharp
+Editor.DropRejected += (_, e) => Toast(e.Reason);   // MAUI
+```
+
+Where it works, what is accepted, and what `DropRejected` reports are identical to the document editor
+— see [Shapes, Pictures & Tables](/controls/document-editor/objects/) there for the platform table and
+the format list. In short: Blazor everywhere; on MAUI, Windows, iOS/iPadOS and Mac Catalyst, with the
+toolbar's picture button as the gesture elsewhere.
+
+## Highlighting
+
+```csharp
+c.SetHighlight(new ArgbColor(255, 255, 255, 0));   // null clears it
+c.ToggleHighlight(color);
+c.CaretFormat.Highlight;
+```
+
+DrawingML's `a:highlight` wraps a real `a:srgbClr`, so unlike Word's closed list of names **nothing is
+approximated here** — the colour goes in exactly as asked.
+
+The picker still offers `HighlightPalette.Swatches`, the same sixteen the document editor uses.
+Offering two different palettes would be the honest reading of the two formats and the wrong thing for
+a user, who sees one highlight button and expects the same swatches behind it in a document and in a
+deck.
+
+:::note
+`a:rPr`'s children are a **sequence**, not a set. `a:highlight` has a fixed slot — after the effect
+list, before the underline fills — and appending it after `a:latin` produces a file PowerPoint refuses
+to open rather than offering to repair.
+:::
+
+Strikethrough (`c.ToggleStrikethrough()`) is likewise read, painted and editable on both sides.

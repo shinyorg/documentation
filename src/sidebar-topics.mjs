@@ -589,7 +589,9 @@ export const sidebarTopics = [
           { label: 'Spreadsheet', link: 'controls/spreadsheet/' },
           { label: 'Viewers', link: 'controls/document-viewer/' },
           { label: 'Document Editor', link: 'controls/document-editor/' },
+          { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
@@ -686,6 +688,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/imageeditor/' },
           { label: 'Zoom & Pan', link: 'controls/imageeditor/zoom', badge: { text: 'New', variant: 'success' } },
+          { label: 'Shapes', link: 'controls/imageeditor/shapes', badge: { text: 'New', variant: 'success' } },
           { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
           { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
         ]
