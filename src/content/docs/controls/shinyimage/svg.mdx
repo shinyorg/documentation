@@ -1,0 +1,88 @@
+---
+title: ShinyImage | SVG
+description: Vector SVG rendering on .NET MAUI with per-placement tinting and a shared parse cache
+---
+
+On MAUI, SVG is **drawn** rather than rasterized. One file stays sharp at every size, and a single-colour icon can be tinted differently in every placement without shipping a second file. Bind `Uri` exactly as you would for a photo — the control works out from the payload that it is looking at markup.
+
+:::note[MAUI only]
+Blazor needs none of this: the browser renders SVG natively through `<img>`, including everything below that MAUI's renderer does not support. This whole page is about the MAUI side.
+:::
+
+```xml
+<!-- an embedded resource, tinted from the theme -->
+<shiny:ShinyImage Uri="resource://MyApp.Assets.logo.svg"
+                  SvgTintColor="{StaticResource Primary}"
+                  HeightRequest="48" />
+
+<!-- the same property for a file, a bundled asset, an inline data URI, or a URL -->
+<shiny:ShinyImage Uri="art/logo.svg" />
+<shiny:ShinyImage Uri="https://cdn.example.com/logo.svg" />
+```
+
+## Tinting with `currentColor`
+
+`SvgTintColor` is what `currentColor` resolves to. This is the mechanism every icon set is built on — the artwork declares no colours of its own, and each placement decides:
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+     fill="none" stroke="currentColor" stroke-width="1.8">
+  <path d="M12 2 L15.1 8.3 L22 9.3 L17 14.1 L18.2 21 L12 17.8 L5.8 21 L7 14.1 L2 9.3 L8.9 8.3 Z" />
+</svg>
+```
+
+```xml
+<shiny:ShinyImage Uri="resource://MyApp.Assets.star.svg" SvgTintColor="#7C3AED" WidthRequest="32" HeightRequest="32" />
+<shiny:ShinyImage Uri="resource://MyApp.Assets.star.svg" SvgTintColor="#F59E0B" WidthRequest="96" HeightRequest="96" />
+```
+
+Note that the presentation attributes on the **root** `<svg>` element count — that is exactly where icon sets like Lucide and Feather put `stroke="currentColor"`, with nothing at all on the individual paths.
+
+The tint is applied at draw time rather than baked into the parsed artwork, which is what lets those two placements share a single parse. It has no effect on a drawing that names its own colours; `fill="red"` draws red on every theme pack, because that is content the file declared rather than chrome.
+
+## Parsing is cached, not just the bytes
+
+`IImageService` already stops the same URL being downloaded twice. But the bytes are only half the cost of a vector: turning them into geometry means an XML parse, a path-data parse per shape, and a bounds measurement per shape — all of it pure CPU, all of it on the UI thread's critical path, and all of it repeated for every cell in a list showing the same icon.
+
+Parsed documents are immutable, so one parse can serve every control on screen. They are shared through an LRU `SvgCache`:
+
+```csharp
+builder.UseShinyControls(cfg => cfg
+    .ConfigureImages(o => o.SvgCacheEntryLimit = 32)   // 0 disables the parse cache entirely
+);
+```
+
+The cache is bounded by **entry count** rather than bytes. A parsed document is a graph of small objects that no cheap measurement describes honestly, and the count is the number that actually matters — a screen shows tens of distinct drawings, not thousands.
+
+Cache keys are per source. A file on disk includes its write time and length in the key, so an edited file is never served from a stale parse. `ReloadAsync()` drops the parse as well as the bytes.
+
+## Sizing
+
+`Aspect` wins over the file's own `preserveAspectRatio` scaling, so a vector and a raster in the same layout behave identically. The file's *alignment* — which corner the leftover space goes to — is still honoured, so `preserveAspectRatio="xMinYMid"` still pins the drawing to the left inside a wider box.
+
+The drawing is always clipped to the control's bounds. A vector has no frame of its own to stop at, so `AspectFill` would otherwise bleed over whatever sits next to it.
+
+## What is drawn
+
+`path`, `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `text`, `g`, `use`, `symbol`, `defs`, `switch`, `clipPath`, linear and radial gradients, presentation attributes, the `style` attribute, and the type, class and id rules inside a `<style>` element.
+
+That last one matters more than it looks: Illustrator, Figma and Sketch all export shared appearance as CSS classes rather than as per-element attributes, so an SVG renderer that ignores `<style>` shows a large share of real-world files as flat black silhouettes.
+
+`.svgz` (gzipped SVG) is decompressed transparently, as are UTF-16 and byte-order-marked files.
+
+## What is not
+
+Filters, masks, patterns, markers, embedded raster `<image>`, SMIL and CSS animation, and external references of any kind. An element the renderer does not know is **skipped rather than approximated**, so an unsupported feature costs that element and nothing else.
+
+Two approximations are worth knowing about:
+
+- **Gradient strokes fall back to their first stop.** `ICanvas` fills with a paint but strokes with a colour, so there is no way to keep the ramp. Losing it is a smaller lie than losing the outline.
+- **`gradientTransform` is applied to the gradient's control points** rather than to the ramp itself — exact for translation, rotation and uniform scale, and a close approximation for the shears that almost never appear in real artwork. `spreadMethod` is not represented; a `reflect` or `repeat` gradient renders as its padded equivalent.
+
+:::caution[External references are never followed]
+An `href` pointing at another file, a `<style>` that `@import`s, an `<image>` with a remote URL — none of these are fetched. An image file must never become a network request or a file read, so same-document references are the only ones resolved. DTD processing and external entities are off for the same reason.
+:::
+
+## Sample
+
+The sample app's ShinyImage page shows all four source kinds side by side, including one icon rendered at three sizes and three tints off a single parse.

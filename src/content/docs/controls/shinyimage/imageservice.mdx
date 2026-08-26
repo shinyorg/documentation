@@ -1,0 +1,104 @@
+---
+title: ShinyImage | Caching & ImageService
+description: The MAUI memory and disk cache tiers, the bounded download queue, request de-duplication, and replacing the downloader for authenticated images
+---
+
+On MAUI every remote image goes through `IImageService`. Most apps never touch it directly — the control resolves it — but it is worth understanding, because it is the difference between a scrolling list issuing one request per unique image and one per visible cell.
+
+:::note[MAUI only]
+Blazor deliberately has no cache layer; the browser already has a good one. See [Blazor](/controls/shinyimage/blazor/).
+:::
+
+## Configuration
+
+```csharp
+builder.UseShinyControls(cfg => cfg
+    .ConfigureImages(o =>
+    {
+        o.MaxConcurrentDownloads = 4;                 // past this, requests report Queued
+        o.DiskCacheDuration      = TimeSpan.FromDays(7);
+        o.CacheDirectory         = null;              // null => <platform cache>/shinyimage
+        o.MaxDiskCacheBytes      = 100 * 1024 * 1024; // LRU-trimmed to 80% when exceeded
+        o.MemoryCacheEnabled     = true;
+        o.MaxMemoryCacheBytes    = 32 * 1024 * 1024;
+        o.MaxMemoryItemBytes     = 2 * 1024 * 1024;   // larger images stay disk-only
+        o.Timeout                = TimeSpan.FromSeconds(60);
+        o.SvgCacheEntryLimit     = 32;                // parsed SVG documents kept
+    })
+);
+```
+
+`MaxConcurrentDownloads` defaults to **four**, which is a deliberate compromise rather than a round number: mobile radios do badly with a dozen parallel connections, and a long list would otherwise open one per visible cell. Four keeps the pipe busy without the head-of-line stalls that come from oversubscribing it.
+
+`MaxMemoryItemBytes` is the per-item ceiling, and it exists so one full-resolution photo cannot evict every thumbnail in the cache to hold the single thing least likely to be asked for again. Images over it stay on disk only.
+
+Per image, `CacheEnabled` opts out of both tiers and `CacheDuration` overrides the expiry. A server-supplied `Cache-Control: max-age` or `Expires` beats both.
+
+## Cache management
+
+```csharp
+await imageService.ClearCacheAsync();              // both tiers
+await imageService.ClearCacheAsync(oneUrl);        // one entry
+var bytes = await imageService.GetCacheSizeAsync();
+await imageService.PrefetchAsync(nextPageUrls);    // warm the next page of a list
+```
+
+`PrefetchAsync` runs **sequentially** on purpose. The download gate already caps real concurrency, and firing a whole page at once would fill every slot with speculative work, starving the images the user is actually looking at.
+
+`GetAsync` returns an `ImageResult` carrying `Success`, `Bytes`, `FilePath`, `ContentLength`, `Origin` (`Memory` / `Disk` / `Network`) and `Error`. Failures come back as `Success == false` rather than as a throw — a broken image URL in a list is an ordinary event that should render error artwork, not unwind the caller.
+
+Nothing re-requests an image just because the cache went away, so an app with a "free up space" button has to nudge the controls itself — rebind the `Uri` or call `ReloadAsync()`.
+
+## De-duplication is the point
+
+Bind the same avatar URL into a dozen visible cells and, without de-duplication, a dozen requests go out for one image — each holding one of the four download slots, so the rest of the list stalls behind duplicates of a picture already being fetched.
+
+`ImageService` collapses them: the first caller starts the download and the rest attach a progress sink to it, so every one of them animates correctly off a single response. A late joiner is handed the current snapshot immediately rather than sitting at "None" until the next chunk arrives — which, on a nearly-finished download, can be never.
+
+The owning caller's cancellation does not kill a download others are still waiting on. Scroll a cell off screen and its own request is abandoned; the shared download keeps going for whoever else asked.
+
+## Bring your own HttpClient
+
+For authenticated images — the one thing a plain `Image` genuinely cannot do — replace `IImageDownloader`, **not** the whole service. Caching, queueing and de-duplication stay where they are.
+
+```csharp
+class AuthenticatedDownloader(HttpClient client, ITokenStore tokens) : IImageDownloader
+{
+    public async Task<ImageDownloadResult> DownloadAsync(ImageRequest request, CancellationToken ct)
+    {
+        var msg = new HttpRequestMessage(HttpMethod.Get, request.Uri);
+        msg.Headers.Authorization = new("Bearer", await tokens.GetAsync(ct));
+
+        var response = await client.SendAsync(msg, HttpCompletionOption.ResponseHeadersRead, ct);
+        response.EnsureSuccessStatusCode();
+
+        return new ImageDownloadResult(
+            await response.Content.ReadAsStreamAsync(ct),
+            response.Content.Headers.ContentLength,   // this is what makes the ring determinate
+            response.Content.Headers.ContentType?.MediaType
+        );
+    }
+}
+
+// builder.UseShinyControls(cfg => cfg.SetCustomImageDownloader<AuthenticatedDownloader>());
+```
+
+Return the body stream **unread** — the service pumps it and reports progress. `HttpCompletionOption.ResponseHeadersRead` is what makes `Content-Length` available before the body arrives, and therefore what makes the ring determinate rather than a spinner.
+
+`cfg.SetCustomImageService<T>()` replaces the whole pipeline, caching included. Prefer the downloader hook unless you genuinely need your own cache.
+
+:::note[Why the memory cache holds bytes, not ImageSource]
+A stream-backed `ImageSource` is consumed the first time a handler reads it, and the platform image handle a realized source holds belongs to the view that realized it. Hand the same instance to two cells of a `CollectionView` and one renders blank. The memory tier therefore caches the **encoded bytes**; each control builds its own `ImageSource.FromStream(() => new MemoryStream(bytes))`, which is cheap. The expensive part — the network — is what actually got skipped.
+
+Parsed SVG documents are the exception, and for the opposite reason: they are immutable and hold no platform state, so one instance really can be drawn by every control at once. That is what the [SVG parse cache](/controls/shinyimage/svg/) exploits.
+:::
+
+## Per-instance overrides
+
+`ImageService` and `SvgCache` are ordinary CLR properties on the control. Assigning either overrides the resolved one for that instance — useful in tests, and for a screen that needs its own cache policy.
+
+```csharp
+this.image.ImageService = new ImageService(new ImageOptions { MemoryCacheEnabled = false });
+```
+
+A control built outside a running app — a headless test host, a design-time preview — has no `MauiContext` to resolve from, so both fall back to a shared default rather than throwing.

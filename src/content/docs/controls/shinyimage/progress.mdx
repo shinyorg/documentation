@@ -1,0 +1,93 @@
+---
+title: ShinyImage | Progress & Templates
+description: The ImageLoadProgress model, and replacing the loading ring or the error artwork on MAUI and Blazor
+---
+
+## `ImageLoadProgress`
+
+Every state the control passes through is described by one record, and it is the binding context of any template you supply.
+
+| Member | Type | Description |
+|---|---|---|
+| `State` | `ImageLoadState` | `None`, `Queued`, `Downloading`, `Loaded` or `Failed` |
+| `BytesRead` | long | How much has arrived |
+| `TotalBytes` | long? | The expected size, when the response said |
+| `Percent` | double? | `0`–`1`, or **null** when a percentage would be a lie |
+| `PercentDisplay` | double | `0`–`100`, for binding straight to a progress bar |
+| `IsIndeterminate` | bool | True exactly when `Percent` is null |
+
+`Percent` being nullable is the whole design. There is no `IsIndeterminate` to set, because the two cases are not a choice an app should have to make: a queued request has measured nothing, and a chunked response has nothing to measure.
+
+The control also surfaces the current snapshot on itself — `State`, `Progress`, `IsLoading` and `LoadError` are all read-only bindable properties, so a trigger on a surrounding container does not need a template at all.
+
+## Replacing the ring
+
+The default ring is a drawn control with `RingSize`, `RingColor`, `RingTrackColor`, `ProgressTextColor` and `ShowProgressText`. When that is not enough, replace it outright.
+
+**MAUI**
+
+```xml
+<shiny:ShinyImage Uri="{Binding PhotoUrl}" Aspect="AspectFill" HeightRequest="180">
+    <shiny:ShinyImage.LoadingTemplate>
+        <DataTemplate x:DataType="shiny:ImageLoadProgress">
+            <VerticalStackLayout Spacing="6" HorizontalOptions="Center" VerticalOptions="Center">
+                <Label Text="{Binding State}" FontAttributes="Bold" />
+                <shiny:ProgressBar Value="{Binding PercentDisplay}"
+                                   IsIndeterminate="{Binding IsIndeterminate}"
+                                   WidthRequest="160" />
+                <Label Text="{Binding BytesRead, StringFormat='{0:N0} bytes'}" FontSize="11" />
+            </VerticalStackLayout>
+        </DataTemplate>
+    </shiny:ShinyImage.LoadingTemplate>
+</shiny:ShinyImage>
+```
+
+**Blazor**
+
+```razor
+<ShinyImage Uri="@PhotoUrl" ObjectFit="cover">
+    <LoadingContent>
+        <strong>@context.State</strong>
+        <ProgressBar Value="@context.PercentDisplay" IsIndeterminate="@context.IsIndeterminate" />
+    </LoadingContent>
+</ShinyImage>
+```
+
+The record is **replaced** rather than mutated on each update, which is why the template's binding context is re-pointed for you — bind to it normally and it tracks.
+
+## Replacing the error artwork
+
+`ErrorImage` / `ErrorUri` covers most cases. `ErrorTemplate` / `ErrorContent` replaces the whole thing, again with the progress record as its context; the exception itself is on `LoadError`.
+
+```xml
+<shiny:ShinyImage Uri="{Binding PhotoUrl}">
+    <shiny:ShinyImage.ErrorTemplate>
+        <DataTemplate>
+            <VerticalStackLayout HorizontalOptions="Center" VerticalOptions="Center" Spacing="4">
+                <Label Text="Could not load" FontAttributes="Bold" />
+                <Button Text="Retry" Clicked="OnRetry" />
+            </VerticalStackLayout>
+        </DataTemplate>
+    </shiny:ShinyImage.ErrorTemplate>
+</shiny:ShinyImage>
+```
+
+```csharp
+async void OnRetry(object sender, EventArgs e) => await this.photo.ReloadAsync();
+```
+
+A failed load is **never** retried on its own. A broken URL in a list would otherwise re-request itself on every scroll-back; retrying is a decision the app makes.
+
+## Completion callbacks
+
+```csharp
+// MAUI
+void OnImageLoaded(object sender, ImageLoadedEventArgs e)
+    => this.status.Text = $"{e.Origin} · {e.ContentLength} bytes";
+```
+
+`ImageLoadedEventArgs` carries `Uri`, `Origin` (`Memory`, `Disk` or `Network`) and `ContentLength`. `Origin` is the honest way to verify caching actually works in a demo or a test. `ImageFailedEventArgs` carries `Uri` and `Error`. Both have `ICommand` mirrors — `ImageLoadedCommand` and `ImageFailedCommand`.
+
+:::caution[Not `Loaded`]
+The events are `ImageLoaded` and `ImageFailed`, not `Loaded` / `Failed`. `VisualElement` already declares a `Loaded` event, and shadowing it would silently break anything relying on the base member.
+:::

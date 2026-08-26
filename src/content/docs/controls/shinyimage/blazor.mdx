@@ -1,0 +1,54 @@
+---
+title: ShinyImage | Blazor
+description: How ShinyImage works on Blazor - streamed progress through fetch, the CORS fallback, and authenticated images
+---
+
+The Blazor component mirrors the MAUI control's states — placeholder, ring, image, error artwork — but the machinery underneath is deliberately different.
+
+## There is no cache layer
+
+The browser already has one: a well-tuned HTTP cache with correct revalidation, shared across tabs and persisted between sessions. Reimplementing that in C# would be slower, would not be shared, and would fight the one the browser is going to use anyway.
+
+So `CacheEnabled`, `CacheDuration` and `IImageService` have no Blazor counterparts. Set cache headers on the server.
+
+## What Blazor adds is progress
+
+Remote images are streamed through `fetch` and a `ReadableStream` reader, so the ring can show a genuine percentage. No `<img>` element can report this — the DOM has no progress event for images. That is the whole reason the component does anything more than emit an `<img>` tag.
+
+The mode selection is the same as on MAUI: `Percent` is null when the response carried no `Content-Length`, and the ring spins instead of counting.
+
+:::caution[CORS]
+A plain `<img>` may load a cross-origin image with no server cooperation; `fetch` may not. When the streamed load is blocked — almost always a cross-origin server sending no CORS headers — `ShinyImage` falls back to letting the browser load the URL directly. The image still appears; the ring just stays indeterminate.
+
+Set `DisableProgress="true"` to take that path deliberately. It skips the streamed fetch, avoids the CORS exposure and saves one copy of the bytes, which is the right trade for same-origin thumbnails.
+:::
+
+## SVG
+
+Nothing to configure. The browser renders SVG natively through `<img>`, including the filters, masks, patterns and animation that [MAUI's vector renderer](/controls/shinyimage/svg/) does not draw. `SvgTintColor` has no Blazor counterpart — use CSS on the wrapper, or an inline `<svg>` if you need to restyle its internals.
+
+## Authenticated images
+
+Register a downloader so the bytes come through C# instead of the browser:
+
+```csharp
+builder.Services.AddShinyImages();                          // routes through the registered HttpClient
+builder.Services.AddShinyImages<AuthenticatedDownloader>(); // or your own IImageDownloader
+```
+
+The Blazor `IImageDownloader` returns `ImageDownloadResult(byte[] Bytes, string? ContentType)` — a different shape from the MAUI one, because the bytes end up in a blob URL rather than in a file.
+
+## Styling
+
+The wrapper takes `CssClass`, and `ObjectFit` maps to CSS `object-fit` (`contain` by default; `cover` is the other one most pages want). The ring colours are CSS colour strings rather than `Color` objects, and default to theme custom properties:
+
+```razor
+<ShinyImage Uri="@PhotoUrl"
+            ObjectFit="cover"
+            CssClass="rounded shadow"
+            RingColor="var(--shiny-color-primary)" />
+```
+
+:::caution[Do not pass `style` through splatting]
+A `style` attribute arriving through `@attributes` **replaces** the component's own rather than merging with it, which would drop the internal `--shiny-img-fit` variable and letterbox every image. The component strips `style` out of the splatted attributes and appends it to its own instead, so `style="height:100%"` on a `ShinyImage` is safe — but it is worth knowing why.
+:::

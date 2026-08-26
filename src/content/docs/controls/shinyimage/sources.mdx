@@ -1,0 +1,99 @@
+---
+title: ShinyImage | Image Sources
+description: Every kind of image source ShinyImage accepts - remote URLs, files, bundled assets, embedded resources and data URIs
+---
+
+`Uri` is a single string property that covers five genuinely different places an image can come from. Only one of them involves any download machinery, so binding a local file costs nothing more than a plain `Image` would.
+
+| Form | Example | What happens |
+|---|---|---|
+| Remote | `https://cdn.example.com/photo.jpg` | Goes through [`IImageService`](/controls/shinyimage/imageservice/) — memory cache, disk cache, download queue, de-duplication |
+| Embedded resource | `resource://MyApp.Assets.logo.svg` | Read out of an assembly's manifest resources |
+| Bundled asset | `art/logo.svg` | Read from the app package (`MauiAsset` on MAUI) |
+| File on disk | `/var/mobile/.../chart.svg` | Read straight from the filesystem |
+| Inline data | `data:image/svg+xml;base64,…` | Decoded in place, no I/O at all |
+
+## The format is decided by the payload
+
+Whether a source is a raster or a vector is worked out by looking at the bytes, not at the file extension. That matters more than it sounds: plenty of endpoints serve `/avatar/1234` and pick a format by content negotiation, and plenty of CDNs put a cache-busting query string on the end of a name. Either would defeat an extension check.
+
+The extension is still used as a *hint* on the local path — a `.png` on disk goes straight to the platform loader without ever being read into managed memory — but where the two disagree, the payload wins.
+
+## Remote
+
+The only form that involves a download. Everything on [Caching & ImageService](/controls/shinyimage/imageservice/) applies, and it is the only form where the ring can show a real percentage.
+
+```xml
+<shiny:ShinyImage Uri="{Binding AvatarUrl}" Aspect="AspectFill" HeightRequest="120" />
+```
+
+## Embedded resources — `resource://`
+
+```xml
+<shiny:ShinyImage Uri="resource://MyApp.Assets.logo.svg" />
+<shiny:ShinyImage Uri="resource://MyLib/MyLib.Assets.logo.svg" />
+```
+
+Declare the file as an `EmbeddedResource` and, ideally, give it an explicit name so the URI does not depend on how MSBuild derives one from the folder:
+
+```xml
+<ItemGroup>
+    <EmbeddedResource Include="Assets\logo.svg" LogicalName="MyApp.Assets.logo.svg" />
+</ItemGroup>
+```
+
+Resolution order for an unqualified name:
+
+1. the application's own assembly
+2. the entry assembly
+3. every other loaded assembly
+
+Within each, the manifest resource name is matched **exactly**, then by suffix — so `resource://Assets.logo.svg` finds `MyApp.Assets.logo.svg`. The suffix match is anchored on a dot, which is what stops `logo.svg` matching `MyApp.Assets.company_logo.svg`. Add an assembly name before a slash to skip the search entirely.
+
+Resolutions are cached per URI, so the assembly walk happens once and not once per cell.
+
+:::caution[The name is not a URI authority]
+Everything after `resource://` is taken **verbatim**. It is deliberately not parsed as a host, because a URI host is lower-cased and manifest resource names are case-sensitive — `resource://MyApp.Assets.Logo.svg` would silently become `myapp.assets.logo.svg` and never resolve.
+:::
+
+## Bundled assets and files
+
+The same string covers both, and both are ordinary:
+
+```xml
+<shiny:ShinyImage Uri="art/logo.svg" />
+<shiny:ShinyImage Uri="{Binding PickedFilePath}" />
+```
+
+A path that exists on disk is read from disk. Anything else is looked for in the app package — which on Android lives inside the APK and has no filesystem path at all, so it must be read through the asset manager rather than opened.
+
+:::note[MauiImage vs MauiAsset for SVG]
+MAUI's own `MauiImage` build step **converts** an SVG to PNG at build time and renames it, so `logo.svg` becomes `logo.png` in the package and is no longer a vector. To keep a real SVG for `ShinyImage` to draw, ship it as a `MauiAsset` (or an embedded resource) instead.
+:::
+
+## Data URIs
+
+```csharp
+public string InlineSvgUri { get; } =
+    "data:image/svg+xml," + Uri.EscapeDataString(
+        """
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+          <circle cx="32" cy="32" r="30" fill="#10B981" />
+        </svg>
+        """
+    );
+```
+
+Both `;base64,` and plain percent-encoded payloads are accepted. Percent-encoding is worth preferring for SVG — the markup stays readable in the source that carries it.
+
+## The explicit `Source` (MAUI)
+
+`Source` takes a real `ImageSource` and, when set, wins over `Uri` and skips the service entirely. Use it for a stream you already hold, a font image, or anything else you have already resolved yourself. The loading and error states still work; they just resolve immediately.
+
+```xml
+<shiny:ShinyImage Source="{Binding AlreadyResolvedImage}" />
+```
+
+## Blazor
+
+Blazor takes a URL string and hands it to the browser, so `resource://` has no meaning there — publish the file as a static web asset and reference it by path. `data:` URIs work as they do in any `<img>`.

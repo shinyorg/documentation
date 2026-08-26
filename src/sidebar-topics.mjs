@@ -576,6 +576,7 @@ export const sidebarTopics = [
           { label: 'Column Widths', link: 'controls/datagrid/column-widths' },
           { label: 'Column Ordering', link: 'controls/datagrid/column-ordering' },
           { label: 'Column Resizing', link: 'controls/datagrid/column-resizing' },
+          { label: 'Grouping & Summary Rows', link: 'controls/datagrid/grouping', badge: { text: 'New', variant: 'success' } },
           { label: 'Frozen Header & Columns', link: 'controls/datagrid/frozen-columns' },
           { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/detail-rows' },
           { label: 'Async Detail & IsBusy', link: 'controls/datagrid/async-detail' },
@@ -592,6 +593,16 @@ export const sidebarTopics = [
           { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
+        ]
+      },
+      {
+        label: 'Expander & Accordion',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/expander/' },
+          { label: 'Accordion', link: 'controls/expander/accordion' },
+          { label: 'Blazor Usage', link: 'controls/expander/blazor' },
         ]
       },
       {
@@ -683,20 +694,36 @@ export const sidebarTopics = [
       { label: 'Quick Entry', link: 'controls/quick-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
       { label: 'FrostedGlassView', link: 'controls/frostedglass/', jumpTo: true },
       {
-        label: 'ImageEditor',
-        jumpTo: true,
+        label: 'Images',
         items:[
-          { label: 'Getting Started', link: 'controls/imageeditor/' },
-          { label: 'Zoom & Pan', link: 'controls/imageeditor/zoom', badge: { text: 'New', variant: 'success' } },
-          { label: 'Shapes', link: 'controls/imageeditor/shapes', badge: { text: 'New', variant: 'success' } },
-          { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
-          { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
+          {
+            label: 'ShinyImage',
+            jumpTo: true,
+            badge: { text: 'New', variant: 'success' },
+            items:[
+              { label: 'Getting Started', link: 'controls/shinyimage/' },
+              { label: 'Image Sources', link: 'controls/shinyimage/sources', badge: { text: 'New', variant: 'success' } },
+              { label: 'SVG', link: 'controls/shinyimage/svg', badge: { text: 'New', variant: 'success' } },
+              { label: 'Progress & Templates', link: 'controls/shinyimage/progress' },
+              { label: 'Caching & ImageService', link: 'controls/shinyimage/imageservice' },
+              { label: 'Blazor', link: 'controls/shinyimage/blazor' },
+              { label: 'Properties & Events', link: 'controls/shinyimage/properties' },
+            ]
+          },
+          { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
+          {
+            label: 'ImageEditor',
+            jumpTo: true,
+            items:[
+              { label: 'Getting Started', link: 'controls/imageeditor/' },
+              { label: 'Zoom & Pan', link: 'controls/imageeditor/zoom', badge: { text: 'New', variant: 'success' } },
+              { label: 'Shapes', link: 'controls/imageeditor/shapes', badge: { text: 'New', variant: 'success' } },
+              { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
+              { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
+            ]
+          },
+          { label: 'MediaPickerButton', link: 'controls/media-picker-button/', jumpTo: true },
         ]
-      },
-      {
-        label: 'MediaPickerButton',
-        link: 'controls/media-picker-button/',
-        jumpTo: true,
       },
       {
         label: 'Input Controls',
@@ -825,15 +852,15 @@ export const sidebarTopics = [
           { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
           { label: 'Slider', link: 'controls/slider/', jumpTo: true },
           { label: 'RangeSlider', link: 'controls/rangeslider/', jumpTo: true },
-          { label: 'ShinyImage', link: 'controls/shinyimage/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
           { label: 'Splash Screen (Blazor Only)', link: 'controls/splashscreen/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
+          { label: 'ProgressLine', link: 'controls/progressline/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
+          { label: 'PasswordStrength', link: 'controls/passwordstrength/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
           { label: 'Dialogs', link: 'controls/dialogs/', jumpTo: true },
         ]
