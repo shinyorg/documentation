@@ -1,0 +1,178 @@
+---
+title: TabbedPage
+description: An improved TabbedPage for .NET MAUI — motion icons, per-tab badges, an animated transition between tabs, lazily built content, and a raised centre button that presents the current page's actions. The same bar drops onto a Shell.
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+An improved `TabbedPage`: **motion icons** in the tabs, per-tab **badges**, an animated **transition** between tabs, tab content that is **built the first time you reach it**, and a raised **centre button** that presents the current page's actions. The same bar drops onto a `Shell` without changing a line of its structure.
+
+- <NugetDownloads name="Shiny.Maui.Controls" />
+
+<PlatformSupport frameworks={["maui"]} />
+
+:::note[No Blazor equivalent]
+`Shiny.Blazor.Controls` has a component *called* `ShinyTabBar`, but it is a different, simpler control with its own API — see [Toolbar & TabBar](/controls/toolbar-tabbar/). There is no Blazor `ShinyTabbedPage`.
+:::
+
+Nothing in it touches a platform SDK — the icons are drawn `GraphicsView`s and the transitions are MAUI animations — so it renders on **every** MAUI head, including macOS AppKit (`net10.0-macos`) and Linux GTK4, where MAUI's own `TabbedPage` does not go.
+
+{/* TODO: capture screenshots for tabbedpage */}
+
+## Which host
+
+|  | Use when | Navigation is owned by |
+|---|---|---|
+| `ShinyTabbedPage` | tabs are screens, with no stack inside them | the tabbed page — one screen per tab |
+| `ShinyTabBarBehavior` on a `Shell` | tabs have their own stacks, routes and deep links | Shell |
+
+Reach for the [Shell form](/controls/tabbedpage/shell) whenever the app already has a Shell. It keeps routing, `ShellContent`'s own lazy loading and each tab's navigation stack, and replaces only the chrome.
+
+## The page
+
+```xml
+<shiny:ShinyTabbedPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+                       xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+                       xmlns:shiny="http://shiny.net/maui/controls"
+                       x:Class="MyApp.MainTabs"
+                       Transition="Slide"
+                       IndicatorStyle="Pill">
+
+    <shiny:ShinyTabbedPage.CenterButton>
+        <shiny:TabCenterButton Icon="plus" Mode="Menu" />
+    </shiny:ShinyTabbedPage.CenterButton>
+
+    <shiny:ShinyTabItem Title="Home" Icon="home" Route="home">
+        <views:HomeView />
+    </shiny:ShinyTabItem>
+
+    <shiny:ShinyTabItem Title="Chat" Icon="message" Route="chat" Badge="3">
+        <shiny:ShinyTabItem.ContentTemplate>
+            <DataTemplate><views:ChatView /></DataTemplate>
+        </shiny:ShinyTabItem.ContentTemplate>
+    </shiny:ShinyTabItem>
+</shiny:ShinyTabbedPage>
+```
+
+```csharp
+public partial class MainTabs : ShinyTabbedPage
+{
+    public MainTabs() => this.InitializeComponent();
+}
+```
+
+`Tabs` is the content property, so the `ShinyTabItem`s need no wrapper element.
+
+`Icon` is a [motion icon](/controls/motion-icons/) name — it animates when its tab is selected. `IconImage` takes an ordinary `ImageSource` instead for artwork that is not one.
+
+## Lazy content
+
+Inline `Content` is built with the markup. A `ContentTemplate` is built the **first time its tab is selected** and then kept, so four tabs behind templates cost one view tree on launch rather than four.
+
+`CacheTabContent` (default `true`) turns the caching off, which rebuilds — and therefore resets — the tab every time it is entered.
+
+## A ContentPage in a template
+
+A template may inflate a plain `View` **or a whole `ContentPage`**, which is the shape MAUI's own `TabbedPage` takes. A page is *adopted*: its `Content` is hosted, its `Title` fills in a tab that has none, its `BindingContext` is mirrored onto the hosted view, and its `ShinyTabs` attached values are read straight off it. `ShinyTabItem.AdoptedPage` hands it back.
+
+Two things an adopted page does **not** get:
+
+**A place on a navigation stack.** The page object is not the page on screen — the `ShinyTabbedPage` is. `this.Navigation` in its code-behind resolves, because the adopted page is parented to the tabbed page, but it pushes onto the tabbed page's stack.
+
+**`OnAppearing`.** MAUI raises page lifecycle from the platform, for the page the platform actually presented — and an adopted page never is, so `IPageController.SendAppearing()` on it does nothing at all. Rather than call a method that silently does nothing, the contract is declared:
+
+```csharp
+public class InboxViewModel : ITabAware
+{
+    public void OnTabAppearing() => this.StartPolling();
+    public void OnTabDisappearing() => this.StopPolling();
+}
+```
+
+`ITabAware` is called on the tab's content, on the adopted page, and on either one's `BindingContext` — each object once, even when it is reachable both ways. `OnTabAppearing` runs as soon as the tab becomes selected (for the first tab, while the page is still being built) and again when the page itself is returned to; `OnTabDisappearing` runs when another tab is chosen and when the page leaves the screen. Neither ever fires twice in a row. `ShinyTabItem.Appearing`/`Disappearing` are the event form.
+
+## Transitions
+
+`Transition` takes the same `StateTransition` as [StateView](/controls/stateview/) and Wizard: `None`, `Fade`, `Slide`, `SlideLeft`, `SlideRight`, `SlideUp`, `SlideDown`, `Scale`.
+
+`Slide` is the default and is **direction-aware** — a tab later in `Tabs` enters from the right, an earlier one from the left. That direction is the only cue telling a user which way they just moved, which is why it is the default rather than a cross-fade.
+
+`TransitionDuration` is milliseconds (zero swaps instantly) and `TransitionEasing` defaults to `CubicOut`.
+
+## The centre button
+
+```xml
+<shiny:ShinyTabbedPage.CenterButton>
+    <shiny:TabCenterButton Icon="plus" Mode="Menu" Size="60" RotateOnOpen="45" />
+</shiny:ShinyTabbedPage.CenterButton>
+```
+
+It is **not a tab** — it never becomes the selection.
+
+- `Mode="Action"` runs `Command` and raises `CenterClicked`. Nothing is presented.
+- `Mode="Menu"` (the default) presents the current page's actions above it, and **falls back to `Action` when neither the page nor the button declares anything** — so a centre button that is only ever a button behaves like one, without being reconfigured.
+
+`Overhang` is how far the circle rises above the bar. Left at `-1` it is half of `Size`, which centres the circle on the bar's top edge.
+
+An **odd** number of tabs is handled: the halves either side of the button are padded with an empty column so the button stays truly centred. Without that, a five-tab bar puts more star weight on one side and the "centre" button drifts by half a tab.
+
+## What it presents — the page decides
+
+This is the half owned by the page rather than the bar, and it is deliberately the same shape as `ToolbarItems`. Set it on whatever the tab is showing: the adopted `ContentPage`, the content view, or the `ShellContent`.
+
+```xml
+<ContentPage xmlns:shiny="http://shiny.net/maui/controls"
+             shiny:ShinyTabs.Badge="{Binding UnreadText}">
+
+    <shiny:ShinyTabs.Actions>
+        <shiny:TabActionCollection>
+            <shiny:TabAction Text="New message" Icon="edit" Command="{Binding ComposeCommand}" />
+            <shiny:TabAction Text="Mark all read" Icon="check" Command="{Binding MarkReadCommand}" />
+            <shiny:TabAction IsSeparator="True" />
+            <shiny:TabAction Text="Empty inbox" Icon="trash" IsDestructive="True" Command="{Binding EmptyCommand}" />
+        </shiny:TabActionCollection>
+    </shiny:ShinyTabs.Actions>
+</ContentPage>
+```
+
+:::caution[The `TabActionCollection` wrapper is required]
+An attached property whose value is a collection needs a type the markup can name — the same reason `VisualStateManager.VisualStateGroups` needs `VisualStateGroupList`.
+:::
+
+For a menu that is not a list of rows, hand the bar a view instead. It wins over `Actions`:
+
+```xml
+<shiny:ShinyTabs.MenuContent>
+    <VerticalStackLayout Padding="20" Spacing="10" WidthRequest="260">
+        <Label Text="Saved searches" FontAttributes="Bold" />
+    </VerticalStackLayout>
+</shiny:ShinyTabs.MenuContent>
+```
+
+`ShinyTabs.MenuContentTemplate` is the same thing built fresh on every open, which is what shows current data rather than whatever it captured the first time.
+
+Precedence, highest first: the page's `MenuContentTemplate`, the page's `MenuContent`, the button's `MenuContentTemplate`, the button's `MenuContent`, the page's `Actions`, the button's `Actions`.
+
+## Badges
+
+`Badge` takes a string. **An empty string draws a dot; `null` draws nothing** — an empty string is not "no badge".
+
+Where to put it depends on who knows the count:
+
+- On the **`ShinyTabItem`** (or the `ShellContent`) when it must show on a tab the user has never opened. There is no page to ask yet.
+- On the **page**, with `ShinyTabs.Badge`, when the page computes it.
+
+The page's value wins — but only for the tab that page is showing, so the two never fight and one page's count never lands on every tab in the bar.
+
+## Colours
+
+Every colour follows the [theme](/controls/theming/) when unset: `SelectedColor` → primary, `UnselectedColor` → on-surface-variant, `IndicatorColor` → secondary-container, `BarBackgroundColor` → surface-container. Only set them to override.
+
+:::note[An image icon is never recoloured]
+Applying the on-surface token to a full-colour PNG would flatten it to a silhouette, which is never what supplying a bitmap meant. `IconImage` tabs show the selected state as opacity instead. Use a motion icon if you want the tab to take the theme's colours.
+:::
+
+`IndicatorStyle` is `Pill` (the Material 3 default), `Line` (top edge), `Underline` (bottom edge), `Dot`, or `None`. `LabelMode` is `Always`, `SelectedOnly` or `Never`.
+
+<AiSkill skillName="shiny-controls" />

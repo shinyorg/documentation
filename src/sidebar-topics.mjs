@@ -631,6 +631,26 @@ export const sidebarTopics = [
       },
       { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
       {
+        label: 'Flyout',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/flyout/' },
+          { label: 'Shell & App-Wide', link: 'controls/flyout/shell' },
+          { label: 'Properties & Events', link: 'controls/flyout/properties' },
+        ]
+      },
+      {
+        label: 'TabbedPage',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/tabbedpage/' },
+          { label: 'Shell', link: 'controls/tabbedpage/shell' },
+          { label: 'Properties & Events', link: 'controls/tabbedpage/properties' },
+        ]
+      },
+      {
         label: 'Floating Panels',
         jumpTo: true,
         items:[
