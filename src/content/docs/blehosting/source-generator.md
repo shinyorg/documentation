@@ -120,8 +120,9 @@ public partial class HeartRateServiceContext
 }
 ```
 
-The generated half gives you `Peripheral`, `ConnectionId`, `Mtu`, `ServiceUuid`, `Service`, and a
-loosely typed `Items` bag. Handlers opt in by declaring it as a parameter — no `AsyncLocal`, nothing
+The generated half gives you `Peripheral`, `ConnectionId`, `Mtu` (the usable payload per GATT
+operation - the negotiated ATT MTU minus the 3-byte ATT header, so cap notifications at it directly
+rather than subtracting the header again), `ServiceUuid`, `Service`, and a loosely typed `Items` bag. Handlers opt in by declaring it as a parameter — no `AsyncLocal`, nothing
 reflective. You do not have to declare your own half for the parameter to bind.
 
 ## L2CAP listeners

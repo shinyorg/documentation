@@ -80,7 +80,8 @@ await peripheral.WriteCharacteristicAsync("service-uuid", "char-uuid", data);
 
 ### BLOB Writes
 
-For writing data larger than the MTU, use blob writes which automatically chunk the data.
+For writing data larger than a single GATT operation, use blob writes, which automatically chunk the
+stream to `peripheral.Mtu` (the usable payload). Do not pre-chunk the data yourself.
 
 ```csharp
 using var stream = File.OpenRead("data.bin");
