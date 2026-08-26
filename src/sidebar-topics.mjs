@@ -651,6 +651,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'NavigationPage',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'controls/navigationpage/' },
+          { label: 'Items & Overflow', link: 'controls/navigationpage/items' },
+          { label: 'Properties & Events', link: 'controls/navigationpage/properties' },
+        ]
+      },
+      {
         label: 'Floating Panels',
         jumpTo: true,
         items:[
