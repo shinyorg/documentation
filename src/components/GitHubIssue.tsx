@@ -10,7 +10,7 @@ interface Props {
 const GitHubIssue = (props: Props) => {
     const isPr = props.pr || false;
     const repo = props.repo || 'shiny';
-    const baseUri = isPr ? `https://github.com/shinyorg/${repo}/pull/` : `https://github.com/shinyorg/${repo}/issues`;
+    const baseUri = isPr ? `https://github.com/shinyorg/${repo}/pull` : `https://github.com/shinyorg/${repo}/issues`;
     return (
         <div>
             <a href={`${baseUri}/${props.number}`} target="_blank">[GitHub #{props.number}]</a>
