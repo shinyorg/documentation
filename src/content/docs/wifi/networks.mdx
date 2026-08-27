@@ -125,7 +125,7 @@ What this means varies more than the name suggests:
 ## The current network
 
 ```csharp
-var current = wifi.CurrentNetwork;
+var current = await wifi.GetCurrentNetwork(ct);
 if (current != null)
 {
     Console.WriteLine(current.Ssid);
@@ -145,10 +145,26 @@ IP, DNS, gateway and mask come from the managed network stack and work on every 
 null otherwise. That is why they are separate concerns.
 :::
 
-`CurrentNetwork` is read live off the OS on every access, so it is always current but is not free —
-hold the result rather than re-reading it in a loop. The one exception is Linux, where D-Bus is
-asynchronous: the value is cached and refreshed from the NetworkManager watcher, and only the first
-read pays for a blocking round trip.
+`GetCurrentNetwork` reads live off the OS on every call, so it is always current but is not free —
+hold the result rather than re-reading it in a loop.
+
+### Why this is asynchronous
+
+Both phone platforms removed the synchronous answer, and both fail *silently* when you ask the old
+way: the call succeeds and the SSID is simply missing.
+
+- **iOS 14** deprecated `CNCopyCurrentNetworkInfo`, which since that release returns nothing unless
+  your own app configured the network being asked about. Its replacement,
+  `NEHotspotNetwork.fetchCurrent`, is asynchronous only. It is also richer — iOS now reports
+  `Security` and `SignalStrengthPercent` too, which CaptiveNetwork never did.
+- **Android 12 (API 31)** began redacting the SSID and BSSID out of every pull-style read —
+  `getConnectionInfo`, and the `WifiInfo` hanging off `getNetworkCapabilities` alike — no matter
+  what permissions the app holds. The only source that still discloses them is a `NetworkCallback`
+  registered with `FLAG_INCLUDE_LOCATION_INFO`, which is push-based.
+
+Shiny registers that callback on Android and calls `fetchCurrent` on iOS, so a `Task` is what the
+API can honestly return. Everywhere else — macOS, Windows, Linux, plain .NET — the read is
+synchronous underneath and the `Task` completes immediately.
 
 ## Watching for changes
 
@@ -167,6 +183,11 @@ public sealed class NetworkWatcher(IWifiManager wifi) : IDisposable
 
 `Changed` fires with the new network, or `null` when the device drops off Wi-Fi entirely.
 
+- **Subscribing delivers the current network once**, before any change happens, so a fresh
+  subscriber does not sit blind until the network next moves. You do not need a separate
+  `GetCurrentNetwork` call to seed the handler.
+- **The handler already has the network.** It arrives in the event argument, fully populated — a
+  handler that turns round and calls `GetCurrentNetwork` is paying for the read twice.
 - **It is de-duplicated.** The native watchers behind it — Android's `NetworkCallback`, Apple's
   `NWPathMonitor`, NetworkManager's `PropertiesChanged` — all fire several times for one real
   change. Only genuine differences are raised.
