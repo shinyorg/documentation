@@ -150,6 +150,8 @@ await app.RestartAsync();   // both, as one operation, re-reading Options
 | --- | --- |
 | `State` | `Stopped`, `Starting`, `Running` or `Stopping` |
 | `StateChanged` | Raised on every transition, on the thread that caused it |
+| `StateTransitioned` | The same transitions, each carrying **why** and the exception behind it |
+| `LastStateChange` | The transition that produced the current `State`, for whoever was not subscribed at the time |
 | `IsRunning` | `State == Running` |
 | `ListenUrl` | The URL being served — the real port when `Port` was `0` |
 | `ListenUrls` | Every URL, when several endpoints are configured |
@@ -168,10 +170,71 @@ await app.StartAsync();
 Console.WriteLine($"Serving on {app.ListenUrl}");
 ```
 
+A handler that throws is caught and logged, and every other subscriber is still told. A UI binding
+raising on the wrong thread is not allowed to be the reason a server that started successfully goes
+back down.
+
+### Why the server stopped
+
+`State` answers "is it up", which is enough to draw a toggle and nothing else. The question an app
+actually gets asked — *it stopped, why?* — is `StateTransitioned`:
+
+```csharp
+app.StateTransitioned += (_, change) =>
+{
+    if (change is { State: HttpServerState.Stopped, Reason: not HttpServerStateReason.Requested })
+        logger.LogError(change.Exception, "The server went down: {Reason}", change.Reason);
+};
+```
+
+| `HttpServerStateReason` | What happened |
+| --- | --- |
+| `Requested` | The app called `StartAsync` / `StopAsync`. The only reason that is never a fault |
+| `Restarting` | Part of a `RestartAsync` — present on the **stop** half too, so a handler knows a start is coming |
+| `NetworkChanged` | A rebind driven by the machine's addresses changing |
+| `BindFailed` | The bind was refused and the retries are spent. `Exception` carries the failure |
+| `ListenerFaulted` | The listener stopped accepting while the server believed it was running. `Exception` carries the cause |
+| `Disposed` | The server was disposed. Nothing follows it |
+
+`Restarting` is the one worth acting on even when nothing is wrong: a subscriber that tears down a
+notification, an mDNS advertisement or a "reachable at" line on every `Stopped` will rebuild it a
+moment later for every rebind. `Reason == Restarting` means *down for a moment*, not *down*.
+
+`LastStateChange` holds the same record for code that arrived late — a crash reporter assembling
+context, a diagnostics screen the user opens after the fact, a background task that woke up to find
+the server down.
+
+### When the listener dies underneath it
+
+A listening socket can go away without the server being told: the OS reclaims it, an interface is
+torn down mid-accept, a platform suspends the process and takes the descriptor with it. Left alone,
+that produces the worst possible failure — a server that goes on reporting `Running` with nothing
+behind it, refusing every connection, which the user cannot fix by toggling it off and on because it
+already thinks it is on.
+
+The accept loop no longer ends quietly for any reason other than a stop:
+
+- A **transient** accept failure is retried with a bounded backoff. The counter resets on every
+  connection accepted, so a flaky minute costs nothing.
+- Failures that keep coming, or a listener that stops accepting outright, are a **fault**: logged at
+  error level, reported as `ListenerFaulted` with the cause attached, and — by default — rebound.
+
+Both are tuned by [resilience options](/httpserver/configuration/#resilience). Set
+`RecoverFromListenerFaults = false` to have the fault stop the server instead; it is still reported
+either way. What that setting chooses is whether the server tries to come back, not whether anyone
+finds out.
+
 `RestartAsync` re-reads `Options`, so a changed port or TLS configured after the fact takes effect.
 **Routes and middleware are not re-read** — the middleware pipeline is composed once and stays
 composed. Routes, however, can be changed at any time without a restart; see
 [Routing](/httpserver/routing/).
+
+The start half of a restart **retries**. A restart is the one operation where failing leaves the
+server worse off than not having tried: it was running a moment ago, and a bind refused because the
+network is half up or the old port is still in `TIME_WAIT` would otherwise leave it stopped for good.
+If the retries are spent, `RestartAsync` still throws and the transition to `Stopped` carries
+`BindFailed` with the exception. A start the app asked for — plain `StartAsync` — is never retried:
+the caller gets the failure immediately and decides, which is louder than a button that looks stuck.
 
 <Aside type="caution" title="Restarting from inside a request">
 Restarting tears down the connection the request arrived on. Kick it off rather than awaiting it

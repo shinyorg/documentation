@@ -46,7 +46,51 @@ The advertisement follows the server:
 - **withdrawn with a goodbye packet** when it stops, so peers drop it immediately rather than waiting
   out the TTL,
 - re-published on the new port if the server is restarted onto one,
-- re-announced when the device changes network, which is when a stale advertisement is worst.
+- re-announced when the device changes network, which is when a stale advertisement is worst,
+- **held** through a stop that is only one half of a restart or a rebind — see below.
+
+### It follows the reason, not just the state
+
+A restart is a `Stopped` and a `Running` milliseconds apart, and a rebind after the phone moved
+networks is the same. Withdrawing on that `Stopped` is wrong twice over: peers get a goodbye and then
+a fresh announcement for a service that never actually went away, and anything holding a resolved
+address drops it and has to find the device again over a gap that was never real.
+
+The advertiser subscribes to `server.StateTransitioned` rather than `StateChanged`, so it can tell a
+stop from a pause. A `Stopped` carrying `Restarting` or `NetworkChanged` leaves the record standing;
+the `Running` that follows either finds the same port and does nothing at all, or finds a new one and
+moves the record onto it. If the start half never lands, the core reports `Stopped` a second time with
+`BindFailed`, and *that* one is a real stop and does withdraw. `ListenerFaulted` withdraws too —
+recovering from it is optional and it is not instant, and a listener that died underneath the server
+is exactly the outage the peers watching it should be told about.
+
+### When the responder will not take the registration
+
+The moment the advertiser publishes is the moment a responder is least likely to answer: the server
+has just bound after a network change, and the platform's mDNS stack is coming back at its own pace.
+One refused registration used to be the end of it, and the failure it left behind is the hard kind —
+a server running perfectly, answering everything, findable by nobody, and looking completely healthy
+from inside the app.
+
+Publishing is retried on a bounded backoff:
+
+| Property | Default | |
+| --- | --- | --- |
+| `PublishAttempts` | `3` | `1` restores the old single-attempt behaviour |
+| `PublishRetryDelay` | 1 second | Doubles per attempt |
+| `MaxPublishRetryDelay` | 15 seconds | Ceiling for the doubling |
+
+When the attempts are spent it is logged at **`Error`** with the exception — not `Warning`, because a
+crash reporter's `Microsoft.Extensions.Logging` bridge files an event for the first and only a
+breadcrumb for the second. A server that says it is running but reports no listen URL is logged too,
+rather than silently publishing nothing; that is expected only for a server served entirely through a
+[tunnel](/httpserver/tunneling/), which has no local port to advertise.
+
+State changes are also applied in the order the server actually moved in. The mDNS work has to come
+off the server's lifecycle thread — it talks to a platform responder and it is slow — and once it is
+off, two transitions milliseconds apart are free to land in either order. A withdrawal applied on top
+of the publication that followed it would leave the server running and unfindable, with nothing coming
+to correct it.
 
 Without a container:
 
@@ -61,6 +105,9 @@ await using var advertisement = await server.AdvertiseAsync(mdns, o => o.Service
 | `InstanceName` | the machine name | What the user already calls this device |
 | `Path` | `/` | Published as the conventional `path` TXT record |
 | `TxtRecords` | `path`, `scheme` | Whatever a peer needs to decide it cares |
+| `PublishAttempts` | `3` | See [above](#when-the-responder-will-not-take-the-registration) |
+| `PublishRetryDelay` | 1 second | Doubles per attempt |
+| `MaxPublishRetryDelay` | 15 seconds | Ceiling for the doubling |
 
 <Aside type="tip" title="Use a private service type">
 Browsing `_http._tcp` on a busy network turns up printers, routers and NAS boxes, and telling yours

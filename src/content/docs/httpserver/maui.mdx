@@ -71,6 +71,10 @@ builder.Services.AddShinyHttpServer(http =>
     {
         o.BackgroundMode = BackgroundServerMode.Stop;      // Stop | KeepAlive | Leave
         o.RestartOnConnectivityChange = true;              // default
+
+        o.RestartAttempts = 3;                             // default
+        o.RestartRetryDelay = TimeSpan.FromSeconds(5);     // default, doubling
+        o.MaxRestartRetryDelay = TimeSpan.FromSeconds(30); // default
     });
 });
 ```
@@ -160,6 +164,62 @@ options.NetworkChangeDebounce = TimeSpan.FromSeconds(2);   // one transition rai
 Either way `server.NetworkAddressesChanged` fires afterwards, so a QR code, a "reachable at" line or
 an [mDNS advertisement](/httpserver/discovery/) can be refreshed. Binding `IPAddress.Any` survives an
 address change on its own; binding a specific address does not.
+
+### When the rebind is refused
+
+A rebind is the riskiest thing this package does. It unbinds a listener that was working and then
+binds a new one, and the moment it runs is the worst moment to ask for a socket: the interface the
+new route runs over may not be up yet, and the port the old listener held may still be sitting in
+`TIME_WAIT`. A single attempt that loses that race leaves the server stopped, the app still showing a
+toggle that is already switched on, and nothing scheduled to try again — which is what "the server
+shut down randomly" turns out to be nearly every time it is reported.
+
+So every start and restart this package drives is retried on a bounded backoff — three attempts, five
+seconds apart and doubling to thirty:
+
+| Property | Default | |
+| --- | --- | --- |
+| `RestartAttempts` | `3` | `1` restores the old single-attempt behaviour |
+| `RestartRetryDelay` | 5 seconds | Doubles per attempt |
+| `MaxRestartRetryDelay` | 30 seconds | Ceiling for the doubling |
+
+If it still will not come up, the last line is logged at **`Error`** with the exception that refused
+the bind attached. That level is deliberate rather than cosmetic: the `Microsoft.Extensions.Logging`
+bridges crash reporters ship — Sentry's among them — file an event at `Error` and leave only a
+breadcrumb at `Warning`, so a warning here is a server that stopped and told nobody.
+
+This sits *outside* the core's own [`StartRetryAttempts`](/httpserver/hosting/), which retries the
+bind within a single `RestartAsync`, so the two multiply — which is why the count here is small. It
+is not redundant with it:
+
+- The core never retries a start the caller asked for, on the grounds that the caller is a button and
+  should be told. On this path the caller is a lifecycle callback with nobody to tell, and that is
+  exactly the case that used to end in silence.
+- It covers a restart that failed before it ever reached the bind — an unbind that threw.
+- It keeps trying past the core's window, which is spent in about fifteen seconds, while a phone
+  changing networks indoors is often not done in fifteen seconds.
+
+A newer change supersedes the one still retrying rather than queueing behind it: two connectivity
+changes a second apart are one event as far as the listener is concerned, and the later one knows
+more about the network. A stop the app asked for cancels the retry outright, so a rebind cannot bring
+a listener back up for an app that has just decided it does not want one.
+
+### When the foreground service does not start
+
+`Host.Platform.StartService` posts an intent and returns; the service comes up — or is refused — on
+the main looper afterwards. Android refuses it outright when the app is not entitled to a foreground
+service at that moment: a background start without an exemption on API 31+, a missing
+`FOREGROUND_SERVICE_DATA_SYNC`, a revoked notification permission. The refusal is thrown inside the
+service, where the caller cannot see it, and unchecked the first anyone knows is the process being
+reclaimed some minutes later with the listener inside it.
+
+The lifecycle task now checks, five seconds after asking, that the service actually came up, and logs
+at `Error` when it did not — naming the manifest entries to look at. The service logs at `Error` on
+the other side of it too: if Android stops it while the server is still listening (the user swiped the
+task away, the notification permission was revoked), that is the moment the process stopped being
+held up, and it is written down rather than left to be inferred from a listener that dies minutes
+later. Nothing here tries to restart a service the OS just stopped — that is fighting the user — but
+the log line exists.
 
 ## Platform configuration
 
