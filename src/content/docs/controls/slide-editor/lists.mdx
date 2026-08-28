@@ -1,0 +1,75 @@
+---
+title: Slide Editor | Bullets & Numbering
+description: Bulleted and auto-numbered paragraphs inside a slide's shapes, outline levels moved with Tab, and the same typed-marker autoformat the document editor uses
+---
+
+The same two toggle buttons as the document editor, over PowerPoint's own mechanism. Everything is on
+the shared `SlideEditorController` and already wired into `SlideEditorView`'s toolbar on both hosts.
+
+```csharp
+var c = editor.Controller!;
+
+c.ToggleBulletList();
+c.ToggleNumberedList();
+c.SetListStyle(ListStyle.None);   // explicit — see below
+
+c.ShiftLevel(1);                  // nest; -1 un-nests
+c.HandleTab(shift: false);
+
+c.CaretFormat.List;               // ListStyle.None / Bullet / Numbered
+c.CaretFormat.Level;              // 0-8
+```
+
+## The mark lives in the paragraph, not in a shared part
+
+Unlike Word, a DrawingML paragraph carries its own bullet: `a:buChar` for a glyph, `a:buAutoNum` for a
+number, `a:buNone` for neither. There is no numbering part to create, so nothing has to be added to the
+package to turn a paragraph into a list item.
+
+**`ListStyle.None` writes `a:buNone` rather than removing the element**, and that is the part to get
+right. A body placeholder inherits its bullet from the master's list style, so leaving the properties
+alone puts the inherited bullet straight back — and the button looks like it did nothing at all.
+
+`a:pPr`'s children are a sequence, not a set: the bullet slot sits between `a:buFont` and `a:tabLst`.
+A `a:buChar` appended after a `a:defRPr` that was already there saves without complaint and produces a
+file PowerPoint reports as corrupt and refuses to repair, which is why this goes through the editor
+rather than being built by hand.
+
+## Auto-numbered paragraphs show a real number
+
+The number is a function of the paragraph's position at its own outline level **within the shape**,
+counted per text body — two bulleted placeholders on one slide each start at 1 — and returning to an
+outer level restarts everything nested inside it.
+
+It renders in whatever scheme the file asks for: arabic, alphabetic or roman, with a period, a
+trailing paren or both. A scheme this does not model falls back to a plain number rather than to
+nothing.
+
+`ShapeParagraph.Bullet` is the mark to draw, already resolved. `ShapeParagraph.List` is the *kind*,
+which `Bullet` cannot tell you — `"1."` is a perfectly good literal bullet glyph.
+
+## Tab always changes level
+
+Unlike the document editor there is no "not in a list" case: every paragraph in a shape carries an
+outline level whether or not it draws a mark, and a slide has no tab stops to speak of. So
+<kbd>Tab</kbd> nests, <kbd>Shift</kbd>+<kbd>Tab</kbd> un-nests, and that is all it does.
+
+A selection spanning two levels moves each paragraph relative to its own. Nine levels, 0 to 8, and no
+more — a tenth is a file PowerPoint will not open, so the level is clamped rather than written.
+
+## Typing `- ` or `1. ` starts a list
+
+The same detector as the Word side, deliberately shared so the two file types cannot drift: `-`, `*`,
+`+` or `•` then a space gives a bullet, a run of digits closed by `.` or `)` gives a number, the
+marker and the space both go, and a paragraph that already carries a mark is left alone.
+
+```csharp
+c.IsAutoFormatListEnabled = false;
+```
+
+## Not implemented
+
+- Choosing the glyph, the number scheme or a start value — the toggles write Arial `•` and
+  arabic-with-a-period. A deck that already carries its own is read in full and only ever overridden
+  where a button is pressed.
+- Picture bullets (`a:buBlip`) — read as no bullet.

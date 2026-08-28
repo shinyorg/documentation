@@ -1,0 +1,124 @@
+---
+title: Document Editor | Bulleted & Numbered Lists
+description: Turn paragraphs into bulleted or numbered lists in a .docx, nest them with Tab, and start one by typing a dash or a number — creating the numbering.xml definitions on demand
+---
+
+Two toggle buttons on `DocumentEditorView`'s toolbar, plus indent and outdent, plus <kbd>Tab</kbd> and
+autoformat. Everything below is on the shared `DocumentEditorController`, identical on both hosts.
+
+```csharp
+var c = editor.Controller!;
+
+c.ToggleBulletList();               // press again to take the paragraphs out
+c.ToggleNumberedList();
+c.SetListStyle(ListStyle.Numbered); // None / Bullet / Numbered, explicit rather than a toggle
+
+c.ChangeListLevel(1);               // nest a list item; -1 un-nests
+c.HandleTab(shift: false);          // what the Tab key does, wherever the caret is
+
+c.CaretFormat.List;                 // which button a toolbar should light
+c.CaretFormat.ListLevel;            // 0-8
+```
+
+## A Word paragraph does not carry its own bullet
+
+It carries a `numId` pointing into `numbering.xml`, which points at an abstract definition, which
+defines up to nine levels — so "make this a bulleted list" really means "find or create a definition,
+then point at it", and a document that has never had a list in it has no numbering part at all.
+
+`SetListStyle` does all of that: it adds the part if it is missing, writes a nine-level definition and
+the instance behind it, and only then points the paragraphs at it. The definition is stamped with a
+fixed `w:nsid`, which is how a second press finds the first one's work rather than adding a
+near-identical abstract list every time the button is pressed — and, more importantly, rather than
+starting a second numbering sequence that would make every numbered item restart at 1.
+
+Because the definitions live in their own part, they are saved by name alongside the main document. A
+list created in a session that only flushed `document.xml` would come back from disk as paragraphs
+pointing at a `numbering.xml` the file does not contain, and the bullets would simply be gone.
+
+Undo restores the paragraphs, not the definitions. That is deliberate and is what Word does: an unused
+abstract list costs nothing, and removing one that another paragraph might still reference is how a
+document loses its numbering.
+
+## Tab nests, Shift+Tab un-nests
+
+<kbd>Tab</kbd> with the caret in a list item moves it in one level and <kbd>Shift</kbd>+<kbd>Tab</kbd>
+moves it out. It is the only gesture there is for creating a second level, which is why hosts route
+the key into `HandleTab` rather than letting the platform have it — on Blazor the browser would
+otherwise move focus off the editor entirely.
+
+A selection spanning several items moves **each one relative to its own level**, so a Tab over a mixed
+selection nests the shape of the list rather than flattening it onto one depth. Paragraphs in the
+selection that are not list items are skipped, so a Tab that catches a heading along with three items
+nests the items and leaves the heading where it was.
+
+Outside a list <kbd>Tab</kbd> is still a tab character — a real `w:tab`, four characters wide in the
+offset space, matching what the reader projects — so the key is never silently swallowed.
+<kbd>Shift</kbd>+<kbd>Tab</kbd> outside a list does nothing, matching Word: there is no character to
+remove. The toolbar's indent and outdent buttons are enabled **only inside a list**, because that is
+the only thing they move; repurposing them as paragraph indent would make one button mean two things
+depending on where the caret happens to be.
+
+## The numbered levels compound
+
+Level 1's `lvlText` is `%1%2.`, so the second level reads `1a`, `1b` under item 1 and restarts at `1a`
+under item 2 — the label says which item it belongs to, which a bare `a` does not. Level 2 compounds
+again as `1ai`, and the formats cycle decimal → lower-letter → lower-roman down the nine levels.
+
+Each `%n` renders in the format of the level it **refers to**, not the format of the paragraph being
+labelled. That is what makes `%1%2.` come out as `1a.` rather than `11.`, and it applies to whatever
+templates a document already had as much as to the ones created here.
+
+Bullets cycle `•`, `◦`, `▪` by level, written as the Symbol and Wingdings code points Word itself
+writes and mapped back to drawable characters on the way in — so a document saved here opens in Word
+with the bullets it had on screen.
+
+Every level carries its own hanging indent, and the label is drawn **in** it. A level definition
+without one leaves the item un-indented and paints its bullet on top of the first letter.
+
+## Typing `- ` or `1. ` starts a list
+
+Autoformat fires on the space after the marker. It removes both the marker and the space, and does it
+in a single undo step, so one <kbd>Ctrl</kbd>+<kbd>Z</kbd> puts the typed characters back rather than
+leaving a bulleted empty paragraph behind.
+
+| Typed | Result |
+|---|---|
+| `-`, `*`, `+`, `•` then space | bulleted list |
+| a run of digits closed by `.` or `)` then space | numbered list |
+
+It is deliberately narrow. The marker has to be **everything before the caret**, so a hyphen part-way
+through a sentence is a hyphen; a lone letter never numbers a list, because `a.` is far too easy to
+type on purpose; and a paragraph that is already a list item is left alone, since what was typed is
+text the user meant to keep. The digits themselves are ignored — a list started at `7.` still begins
+at 1, as it does in Word, because honouring it would mean renumbering the whole sequence around it.
+
+```csharp
+c.IsAutoFormatListEnabled = false;   // for a document of shell transcripts
+```
+
+## Enter on an empty item ends the list
+
+Rather than making another empty one. A nested item comes out one level first, so repeated
+<kbd>Enter</kbd> walks back up the nesting and then leaves the list. <kbd>Enter</kbd> on an item that
+has text still splits it into another item at the same level.
+
+## The number is a function of position
+
+A list number is not stored on the paragraph that carries it — it is worked out in a pass over the
+whole block list, in document order, after every edit. So splitting an item, deleting one or dropping
+a block into the middle of a list renumbers the rest of it on its own, and formatting, typing in or
+undoing an edit inside an item leaves its number exactly where it was.
+
+`ListLabel.Text` is the label to draw, `ListLabel.IsBullet` says which of the two toolbar buttons the
+paragraph belongs to, and `ListLabel.Numbering` is the `numId` and level it came from.
+
+## Not implemented
+
+- **Restarting a numbered list** part-way through a document. Every list of a given style created here
+  shares one sequence, which is what makes a second numbered list continue looking like the first; a
+  restart needs a `w:lvlOverride` and a second instance.
+- **Choosing the glyph or number format.** The nine levels created here are fixed. A document that
+  already carries its own definitions keeps them in full — formats, `lvlText` templates, start values
+  and indents — and is only ever pointed at, never rewritten.
+- **List styles** (`w:numStyleLink`), picture bullets, and per-item start values.

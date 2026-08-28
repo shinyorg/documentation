@@ -591,8 +591,10 @@ export const sidebarTopics = [
           { label: 'Viewers', link: 'controls/document-viewer/' },
           { label: 'Document Editor', link: 'controls/document-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document Lists', link: 'controls/document-editor/lists', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
@@ -620,6 +622,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
           { label: 'Docking', link: 'controls/docking/', jumpTo: true },
+          { label: 'Ribbon', link: 'controls/ribbon/', jumpTo: true },
           { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true, badge: { text: 'Blazor', variant: 'note' } },
         ]
       },
