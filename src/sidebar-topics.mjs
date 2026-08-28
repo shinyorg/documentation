@@ -863,6 +863,7 @@ export const sidebarTopics = [
           { label: 'PasswordStrength', link: 'controls/passwordstrength/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
           { label: 'Dialogs', link: 'controls/dialogs/', jumpTo: true },
+          { label: 'Modal (Blazor Only)', link: 'controls/modal/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
         ]
       },
       { label: 'Blazor Playground', link: 'https://shinyorg.github.io/controls/', attrs: { target: '_blank' } },
