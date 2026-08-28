@@ -52,15 +52,62 @@ using var document = await WordDocument.OpenAsync("report.docx", editable: true)
 
 ## The toolbar is composed from what each host has
 
-This is deliberate and asymmetric, because the two hosts own different halves of the chrome:
+Both hosts fill the same slots with the same core controls — `FontPickerButton`,
+`FontSizePickerButton` and `ColorPickerButton` exist on MAUI *and* Blazor. Only the bar around them
+differs:
 
-- **MAUI** has `FontPickerButton` / `FontSizePickerButton` but **no toolbar** — so `DocumentEditorView`
-  builds a scrolling row of MAUI primitives and drops those two pickers into it.
-- **Blazor** has `ShinyToolbar` but **no font picker** — so it composes `ShinyToolbar` and uses plain
-  `<select>` elements for family and size.
+- **MAUI** has **no toolbar control**, so `DocumentEditorView` builds a scrolling row of MAUI
+  primitives and drops the pickers into it. Do not emit `shiny:ShinyToolbar` in XAML.
+- **Blazor** composes `ShinyToolbar`, with the row inside it as its own flex container.
 
-The API and behaviour match on both; only the internals differ. Do not emit `shiny:ShinyToolbar` in
-XAML, and do not expect a `FontPicker` component in Blazor.
+The API and behaviour match on both; only the internals differ.
+
+## One icon set, no colour
+
+Every plain button on the Word **and** PowerPoint toolbars, on **both** hosts, draws from a single
+monochrome stroked icon set defined once in `Shiny.Controls.Office.Shared` — a 24x24 grid at one
+weight. MAUI paints it onto a `GraphicsView`; Blazor writes it out as inline SVG stroked in
+`currentColor`. There is one definition of each mark, so the two hosts cannot drift.
+
+What that replaced was a mixture: styled letters for bold and italic, geometric unicode for the
+alignment and undo controls, and emoji for the picture and delete buttons. The emoji are the reason it
+had to change rather than a matter of taste — a font paints them in its own colour, size and weight,
+so those two buttons could not be tinted, did not dim with a disabled button and looked different on
+every platform. Geometric unicode has the milder form of the same problem, plus tofu on Android fonts
+that lack the character.
+
+The geometry is stored as **drawing commands, not an SVG path string**. MAUI's `PathBuilder` has real
+gaps parsing a `d` attribute — implicit line-tos become move-tos, run-together decimals truncate — and
+it throws nothing, so artwork authored as a path string can look perfect in a browser and draw a stump
+on a device. Neither host parses anything here.
+
+The **pickers are the deliberate exception**: font, font size, text colour and the highlight swatch
+have to show what they are currently set to, which is the one thing a monochrome icon cannot do. The
+highlight split button keeps the shared `A`-over-a-bar mark and tints only the bar with the colour it
+would apply.
+
+## Icon-only buttons get a tooltip on desktop and web
+
+Every button on these bars is icon only, so each is wrapped in Shiny's own
+[Tooltip](/controls/tooltip/) naming what it does — the browser's `title` is slow to appear, cannot be
+themed and is unreachable from a keyboard.
+
+- **Blazor** — on by default. `ShowToolbarTooltips="false"` falls back to the native `title`.
+- **MAUI** — on for **desktop only**: Windows, Mac Catalyst, macOS and the GTK/plain-.NET head. Off on
+  iOS and Android, because the tooltip opens on hover and there is no hover on a touch screen; a
+  long-press tooltip would compete with the tap the button exists for.
+
+```razor
+<DocumentEditorView Document="document" ShowToolbarTooltips="false" />
+```
+
+```xml
+<office:DocumentEditorView Document="{Binding Document}" ShowToolbarTooltips="True" />
+```
+
+Both hosts always set an accessible name on the button — `aria-label` on Blazor,
+`SemanticProperties.Description` on MAUI — whatever the tooltip setting is. A tooltip is not what a
+screen reader reads.
 
 ## Driving it
 
@@ -91,6 +138,36 @@ Saving is the same as everywhere else — and an unedited document still saves b
 ```csharp
 await document.SaveAsAsync("edited.docx");
 ```
+
+## Page margins
+
+The document's own margins, set for the whole document and undoable in one step:
+
+```csharp
+c.PageMargins;                                                // what it is set to now, pixels at 96dpi
+c.SetPageMargins(PageMargins.Narrow);                         // Normal / Narrow / Moderate / Wide
+c.SetPageMargins(PageMargins.FromInches(1, 1.25, 1, 1.25));   // left, top, right, bottom
+c.SetPageMargins(left: 96, top: 96, right: 96, bottom: 96);   // pixels; header/footer distances kept
+```
+
+**Both toolbars carry a page-margins button** — an action sheet on MAUI, a popover on Blazor — offering
+Word's four presets, with the one the document already matches marked. That gallery is
+`PageMarginPresets.All` (name, description, margins) in `Shiny.Controls.Office.Shared`, so the two
+hosts cannot drift; use it rather than a list of your own.
+
+`PageMargins` also carries `Header` and `Footer`: the distance from the page edge to the header and
+footer, which sit **inside** the top and bottom margins rather than adding to them — which is why a
+header can appear without moving the body text at all. `PageSetup.Margins` reads them off an open
+document and `PageSetup.WithMargins` writes them onto a copy.
+
+Two things worth knowing:
+
+- **Only `DocumentPageLayout.Print` can show it.** A reflowed column has no paper to inset content
+  from, so it keeps its cosmetic gutter. The change is still written to the document and still saved,
+  exactly as a page break is — it simply has nowhere to appear until the view is showing pages.
+- **Undo is total.** The whole `w:pgMar` element is captured before the write, so a document that never
+  had one goes back to not having one, and anything else it carried — a binding gutter above all —
+  survives.
 
 ## Keyboard input
 
@@ -187,6 +264,9 @@ addresses and paths — the things every dictionary flags and no reader wants un
 - **Grammar** checking. Android reports grammar errors and they are deliberately ignored, so all four
   platforms behave the same.
 - Inserting new paragraph styles, images or tables.
+- Setting the **paper size or orientation** — the margins can be set, the sheet they sit on cannot.
+- **Per-section** page setup. One geometry is read for the document and one is written back, so the
+  margins are the last section's.
 - Everything the viewer does not render is still not rendered — see `document-viewer.md`.
 
 ## Screenshots

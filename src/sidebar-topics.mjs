@@ -589,7 +589,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Spreadsheet', link: 'controls/spreadsheet/' },
           { label: 'Viewers', link: 'controls/document-viewer/' },
-          { label: 'Document Editor', link: 'controls/document-editor/' },
+          { label: 'Document Editor', link: 'controls/document-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
@@ -692,6 +692,7 @@ export const sidebarTopics = [
         ]
       },
       { label: 'Quick Entry', link: 'controls/quick-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+      { label: 'File Drop', link: 'controls/file-drop/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
       { label: 'FrostedGlassView', link: 'controls/frostedglass/', jumpTo: true },
       {
         label: 'Images',
@@ -740,6 +741,7 @@ export const sidebarTopics = [
             ]
           },
           { label: 'Speech Add-ins', link: 'controls/speech-addins/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'Captcha (Blazor Only)', link: 'controls/captcha/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
