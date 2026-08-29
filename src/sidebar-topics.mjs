@@ -508,6 +508,7 @@ export const sidebarTopics = [
           { label: 'Overview', link: 'controls/theming/' },
           { label: 'Theme Packs', link: 'controls/theming/packs', badge: { text: 'New', variant: 'success' } },
           { label: 'Theme Creator', link: 'controls/theming/creator', badge: { text: 'New', variant: 'success' } },
+          { label: 'Dark Mode', link: 'controls/theming/dark-mode', badge: { text: 'New', variant: 'success' } },
         ],
       },
       {
@@ -618,11 +619,15 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Ribbon',
+        link: 'controls/ribbon/',
+        jumpTo: true,
+      },
+      {
         label: 'Desktop',
         items:[
           { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
           { label: 'Docking', link: 'controls/docking/', jumpTo: true },
-          { label: 'Ribbon', link: 'controls/ribbon/', jumpTo: true },
           { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true, badge: { text: 'Blazor', variant: 'note' } },
         ]
       },

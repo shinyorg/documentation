@@ -1,0 +1,151 @@
+---
+title: "Dark Mode"
+description: "How every control follows the app's light/dark scheme, and the three mechanisms that carry it."
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every colour a control paints by default comes from the theme, so the whole control set follows the
+app's light/dark scheme with nothing wired up per control. There is no `IsDarkMode` flag to set and
+no per-control opt-in.
+
+Three mechanisms carry that, one per kind of surface. You rarely need to know which is which — but
+knowing the shape of them explains why a colour you pass behaves the way it does.
+
+## 1. CSS surfaces (Blazor)
+
+Most Blazor controls are styled from the `--shiny-color-*` custom properties, and follow the scheme
+because those properties change.
+
+Where a colour is exposed as a `[Parameter]` — a toolbar's `BackgroundColor`, a sheet's
+`SheetBackgroundColor`, a calendar's `CalendarCellColor` — its default is a `var()` reference rather
+than a literal. That distinction matters more than it looks: those parameters are emitted as
+**inline styles**, and an inline literal beats every stylesheet, so a literal default is not a
+starting point a theme can override. It is a permanent white toolbar.
+
+Passing your own value still pins it, exactly as before.
+
+<Aside type="caution" title="Pin the ink with the fill">
+If you set a literal background on a control, set its text colour too. The theme's `on-surface` goes
+light in dark mode, so a pinned pale background left with the default ink ends up light-on-light.
+This is the single most common way a customised control breaks in dark mode.
+</Aside>
+
+## 2. Native widgets (Blazor)
+
+`<select>`, checkboxes, date inputs, scrollbars and the popover backdrop are painted by the browser
+and ignore your tokens entirely. A themed dark toolbar hosting a stark white font-size dropdown is
+the visible symptom.
+
+The generated theme declares `color-scheme` alongside the colour tokens, on the same scope, so those
+follow too. Because `color-scheme` inherits, this works whether the theme class sits on `<html>` or
+on a container div — which matters, because a Blazor app rarely owns `<html>`:
+
+```html
+<div class="shiny-theme-dark">
+    <!-- tokens *and* native widget colours are dark in here -->
+</div>
+```
+
+A matching `.shiny-theme-light` scope is emitted, so a deliberately-light region inside a dark app
+resolves correctly rather than inheriting the dark tokens from above it.
+
+## 3. Drawn surfaces (both hosts)
+
+The Skia-backed `SpreadsheetView`, `DocumentView`, `DocumentEditor`, `SlideView` and `SlideEditor`
+paint their own pixels. A canvas cannot inherit a CSS colour, so the scheme has to reach them as a
+value — their `Theme` property — and **unset means follow the host**:
+
+| `Theme`  | Result                                                              |
+| -------- | ------------------------------------------------------------------- |
+| unset    | Follows the app (MAUI) or the page's `color-scheme` (Blazor), live.  |
+| `.Light` | Pinned light — a document preview that must stay paper-white.        |
+| `.Dark`  | Pinned dark.                                                         |
+
+```razor
+@* follows the page *@
+<SpreadsheetView Workbook="workbook" />
+
+@* pinned, whatever the app is doing *@
+<SpreadsheetView Workbook="workbook" Theme="SpreadsheetTheme.Light" />
+```
+
+```xml
+<!-- follows the app -->
+<office:SpreadsheetView Workbook="{Binding Workbook}" />
+```
+
+On Blazor the scheme is read from the element's computed `color-scheme` rather than from
+`matchMedia`. That is deliberate: an app that flips its theme with a class on a container never
+changes the OS preference, so a media query would report the wrong answer forever.
+
+`MarkdownView` and `MarkdownEditor` work the same way, with a third value — `MarkdownTheme.Themed`,
+the unset default — whose every colour is a token, so markdown follows the theme *pack* as well as
+the scheme. `MarkdownTheme.Light` and `.Dark` stay literal palettes.
+
+<Aside type="note" title="A slide is not inverted">
+`SlideTheme.Dark` darkens only the surround. A slide is a fixed artboard with authored colours, like
+a photograph; inverting it would show the deck's own black text on a dark background and
+misrepresent what the author made. PowerPoint's own dark mode leaves slides alone for the same
+reason.
+</Aside>
+
+## Colours that deliberately do not follow
+
+Not every colour is chrome, and a few are pinned on purpose:
+
+- **Barcodes and QR codes** stay dark-on-light. A themed barcode does not scan.
+- **Semantic colours** — a validation red, a "listening" red on the speech button, a slider's
+  cold-to-hot ramp — carry meaning rather than surface.
+- **Event chips** in the scheduler carry a colour the app picks per event. No single ink works for
+  all of them, so the label colour is derived from each chip's own luminance instead. Do not set a
+  text colour on them.
+- **The document page** in the Word editor is paper, and `DocumentTheme.Dark` darkens it rather than
+  leaving it white — but a host that wants a true print preview pins `.Light`.
+
+## MAUI: implicit styles no longer leak into control internals
+
+Controls are built from primitives, and the .NET MAUI project template's
+`<Style TargetType="Button">` applies to every one of them — including the flat glyph buttons inside
+a `DataGrid` pager or a sheet tab strip. Its `Disabled` visual state sets `BackgroundColor` to
+`Gray600` in dark mode, so the buttons you *cannot* press were the only ones with a background, and
+its base setter painted internal chrome in the app's brand colour.
+
+Internal parts now carry their own `CommonStates` group — a locally-set attached property beats one
+arriving through a style — and express disabled as opacity, which works against whatever background
+the control chose.
+
+Implicit styles targeting the Shiny control types themselves are unaffected:
+
+```xml
+<!-- still applies, exactly as before -->
+<Style TargetType="shiny:PillView">
+    <Setter Property="CornerRadius" Value="10" />
+</Style>
+```
+
+This only stops the app's `Button` and `Entry` styles reaching parts you never declared.
+
+<Aside type="tip" title="The same trap, with BoxView">
+The MAUI template also ships `<Style TargetType="BoxView">` with a **`BackgroundColor`** setter,
+which paints an opaque rectangle behind the shape rather than setting the `BoxView`'s own `Color`.
+It turns `<BoxView Color="Transparent" />` spacers into solid bars and hides gradient backgrounds.
+Prefer an empty `<Grid HeightRequest="..." />` for spacers, and set `Color`, not `BackgroundColor`,
+for a default separator colour.
+</Aside>
+
+## Token names
+
+The colour tokens are `--shiny-color-*`, **not** `--shiny-*`:
+
+```css
+/* correct */
+color: var(--shiny-color-on-surface);
+
+/* silently falls back to #1a1a1a and never follows the theme */
+color: var(--shiny-on-surface, #1a1a1a);
+```
+
+A misspelt custom property is not an error. It falls through to the literal fallback beside it, and
+the result looks identical to a control with no theme support at all — which is exactly how several
+of these bugs survived as long as they did.
