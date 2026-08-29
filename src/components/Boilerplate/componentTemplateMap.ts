@@ -90,7 +90,7 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     // Shiny.Blazor.Controls package on Blazor (there is no Blazor add-on).
     docking: [
         { kind: 'shinyapp', paramId: 'shinydesktopcontrols' },
-        { kind: 'shinyblazor', paramId: 'shinydocking' },
+        { kind: 'shinyblazor', paramId: 'shinycontrols' },
     ],
     markdown: [
         { kind: 'shinyapp', paramId: 'markdown' },

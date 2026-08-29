@@ -9,25 +9,29 @@ export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.8.0',
     shinyShell: '6.3.2',
-    shinyControls: '1.0.1-beta-0175',
+    shinyControls: '1.2.0',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '5.4.0',
-    shinyConfiguration: '5.4.0',
+    shinyClient: '5.5.0',
+    shinyConfiguration: '5.5.0',
     shinyLocalization: '2.0.1',
     shinyStores: '5.1.5',
     shinyReflector: '5.1.5',
     shinyDI: '5.1.5',
     shinySpatial: '2.0.0',
-    shinyContactStore: '5.4.0',
-    shinyCalendar: '5.4.0',
-    shinySpeech: '3.0.0-beta-0028',
-    shinyAiConversation: '3.0.0-beta-0028',
+    shinyContactStore: '5.5.0',
+    shinyCalendar: '5.5.0',
+    shinySpeech: '3.0.0-beta-0030',
+    shinyAiConversation: '3.0.0-beta-0030',
     shinyMusic: '4.1.0',
     shinyHealth: '2.0.1',
-    shinyDocumentDb: '13.1.2',
-    shinyHttpServer: '1.0.0-beta.9',
+    shinyDocumentDb: '13.4.0',
+    shinyHttpServer: '1.0.4',
+    shinyDataSync: '5.5.0',
+    shinyObd: '1.1.0',
+    /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
+    shinyRecognition: '1.0.0-beta-0006',
     shinyMauiHosting: '5.1.5',
     shinyWebHosting: '5.1.5',
     shinyBlazorHosting: '5.1.5',
@@ -37,7 +41,6 @@ export const VERSIONS = {
 
     // Microsoft + third-party
     ctMvvm: '8.4.2',
-    ctMediaElement: '10.0.0',
     sentry: '6.8.0',
     biometric: '2.5.1',
     screenrecord: '1.0.0-preview5',
@@ -45,7 +48,6 @@ export const VERSIONS = {
     skia: '4.151.1',
     skiaExtended: '3.0.0',
     userDialogs: '9.2.2',
-    debugRainbows: '1.2.2',
     mudblazor: '9.8.0',
     radzen: '11.2.2',
     fluentUI: '4.14.4',
@@ -122,6 +124,7 @@ const MAUI_CATEGORIES: readonly TemplateCategory[] = [
     { id: 'blazor', title: 'Blazor Components', span: 12 },
     { id: 'storage', title: 'Data & Storage', span: 6 },
     { id: 'ai', title: 'AI', span: 6 },
+    { id: 'extensions', title: 'Shiny Extensions', span: 6 },
     { id: 'platform', title: 'Platform', span: 6 },
     { id: 'utility', title: 'Utilities', span: 6 },
 ];
@@ -233,6 +236,19 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'httptransfers', label: 'HTTP Transfers', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Background HTTP uploads & downloads https://shinylib.net/client/httptransfers/' },
+    { id: 'datasync', label: 'Data Sync', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyDataSync,
+        description: 'Bidirectional JSON sync \u2014 outbox/inbox over HTTP with platform-tier background transports https://shinylib.net/datasync/' },
+    { id: 'wifi', label: 'Wi-Fi', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Wi-Fi scan, connect, hotspot & airplane mode https://shinylib.net/wifi/' },
+    { id: 'discovery', label: 'Network Discovery', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'mDNS/Bonjour, SSDP and WS-Discovery browsing & publishing https://shinylib.net/discovery/' },
+    { id: 'obd', label: 'OBD (Bluetooth LE)', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyObd,
+        description: 'Vehicle OBD-II diagnostics over Bluetooth LE https://shinylib.net/obd/',
+        visibleWhen: noDesktop },
     { id: 'httpserver', label: 'HTTP Server', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyHttpServer,
         description: 'Host HTTP/1.1, HTTP/2 & HTTP/3, WebSockets and SSE inside the app, where ASP.NET Core cannot run https://shinylib.net/httpserver/maui/' },
@@ -253,9 +269,27 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinySpeech,
         description: 'Speech-to-text, text-to-speech, and audio playback https://shinylib.net/speech/' },
+    { id: 'speechazure', label: 'Azure AI Speech', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'Azure AI Speech provider for Shiny.Speech (pulls in Speech) https://shinylib.net/speech/microsoft-ai/' },
+    { id: 'speechelevenlabs', label: 'ElevenLabs Speech', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'ElevenLabs STT/TTS provider for Shiny.Speech (pulls in Speech) https://shinylib.net/speech/elevenlabs/' },
+    { id: 'speechtypecast', label: 'Typecast Speech', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'Typecast text-to-speech provider for Shiny.Speech (pulls in Speech) https://shinylib.net/speech/' },
     { id: 'aiconversation', label: 'AI Conversation', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyAiConversation,
         description: 'AI Conversation with speech recognition and text-to-speech https://shinylib.net/aiconversation/' },
+    { id: 'faceintelligence', label: 'Face Intelligence', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyRecognition,
+        description: 'On-device face recognition & enrollment (Recognition IQ, ONNX) https://shinylib.net/faceintelligence/' },
+    { id: 'voiceintelligence', label: 'Voice Intelligence', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyRecognition,
+        description: 'On-device speaker recognition & enrollment (Recognition IQ, ONNX) https://shinylib.net/voiceintelligence/' },
+    { id: 'documentintelligence', label: 'Document Intelligence', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyRecognition,
+        description: 'On-device ID document scanning & extraction (Recognition IQ) https://shinylib.net/documentintelligence/' },
     { id: 'fingerprint', label: 'Biometric Auth', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.biometric,
         description: 'Fingerprint & face recognition by Oscore (Oscore.Maui.Biometric) https://github.com/oscoreio/Maui.Biometric',
@@ -290,9 +324,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'shinycontrols', label: 'Shiny Controls', type: 'bool', defaultValue: true, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Scheduler, BottomSheet, ImageViewer, PillView, SecurityPin, Fab https://shinylib.net/controls/' },
-    { id: 'mediaelement', label: 'CT Media Element', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.ctMediaElement,
-        description: 'Cross-platform media playback control by Microsoft https://learn.microsoft.com/en-us/dotnet/communitytoolkit/maui/views/mediaelement' },
     { id: 'livecharts', label: 'Live Charts', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.liveCharts,
         description: 'Animated, flexible charts by Alberto Rodriguez https://livecharts.dev/' },
@@ -305,9 +336,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'userdialogs', label: 'ACR User Dialogs', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.userDialogs,
         description: 'Alerts, confirmations, loading indicators & toasts by Allan Ritchie https://github.com/aritchie/userdialogs' },
-    { id: 'debugrainbows', label: 'Debug Rainbows', type: 'bool', defaultValue: false, category: 'ui',
-        version: VERSIONS.debugRainbows,
-        description: 'Visual layout debugging overlay (debug only) by Steven Thewissen https://github.com/sthewissen/Plugin.Maui.DebugRainbows' },
     { id: 'markdown', label: 'Shiny Markdown', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Native markdown renderer and editor (no WebView) https://shinylib.net/controls/markdown/' },
@@ -320,9 +348,60 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'shinycameraview', label: 'Shiny CameraView', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Cross-platform camera preview with photo/video capture, live filters & a pluggable frame-analysis pipeline (barcode, face, motion, OCR) https://shinylib.net/controls/cameraview/' },
+    { id: 'camerabarcode', label: 'CameraView Barcode Analyzer', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Barcode & QR frame analyzer for CameraView https://shinylib.net/controls/cameraview/analyzers/',
+        visibleWhen: (s) => !!s.shinycameraview },
+    { id: 'cameraface', label: 'CameraView Face Analyzer', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Face detection frame analyzer & face masks for CameraView https://shinylib.net/controls/cameraview/face-masks/',
+        visibleWhen: (s) => !!s.shinycameraview },
+    { id: 'cameramotion', label: 'CameraView Motion Analyzer', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Motion / presence frame analyzer for CameraView https://shinylib.net/controls/cameraview/analyzers/',
+        visibleWhen: (s) => !!s.shinycameraview },
+    { id: 'cameraocr', label: 'CameraView OCR Analyzer', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'On-device text recognition frame analyzer for CameraView https://shinylib.net/controls/cameraview/analyzers/',
+        visibleWhen: (s) => !!s.shinycameraview },
+    { id: 'cameradocuments', label: 'CameraView Document Analyzer', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Document edge detection frame analyzer for CameraView https://shinylib.net/controls/cameraview/analyzers/',
+        visibleWhen: (s) => !!s.shinycameraview },
+    { id: 'cameraai', label: 'CameraView AI', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'AI document scanner & photo stylizer for CameraView https://shinylib.net/controls/cameraview/ai/',
+        visibleWhen: (s) => !!s.shinycameraview },
     { id: 'shinydesktopcontrols', label: 'Shiny Desktop Controls', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Shiny.Maui.Controls.Desktop — Tray Icon, Visual-Studio-style window Docking, and Touch / Kiosk On-Screen Keyboard for Windows, macOS, MacCatalyst, and Linux. https://shinylib.net/controls/' },
+    { id: 'shinymediaelement', label: 'Shiny MediaElement', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Local & remote audio/video with a themed transport bar, background audio with OS lock-screen controls, and Picture-in-Picture https://shinylib.net/controls/mediaelement/' },
+    { id: 'shinyoffice', label: 'Shiny Office Documents', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Word, Excel & PowerPoint document viewers and editors (Shiny.Maui.Controls.Office) https://shinylib.net/controls/document-viewer/' },
+    { id: 'shinykeyframe', label: 'Shiny Keyframe Animation', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Declarative XAML timelines with seekable, reversible playback https://shinylib.net/controls/keyframe/' },
+    { id: 'shinykeyframeexport', label: 'Shiny Keyframe Export', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Export keyframe timelines to GIF / video (requires Keyframe Animation) https://shinylib.net/controls/keyframe/',
+        visibleWhen: (s) => !!s.shinykeyframe },
+    { id: 'shinyspeechaddins', label: 'Shiny Speech Add-ins', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Speech-to-text add-ins for the Shiny entry controls https://shinylib.net/controls/speech-addins/' },
+    { id: 'shinytheme', label: 'Shiny Theme Pack', type: 'choice', defaultValue: 'None', category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'A Shiny Controls theme pack (Shiny.Maui.Controls.Themes.*) https://shinylib.net/controls/theming/packs/',
+        choices: [
+            { value: 'None', label: 'None', description: 'Use the default Shiny theme' },
+            { value: 'Aurora', label: 'Aurora', description: 'Vivid violet & cyan with glow elevation' },
+            { value: 'Material', label: 'Material', description: 'Material Design palette & shape scale' },
+            { value: 'Ocean', label: 'Ocean', description: 'Cool blues and teals' },
+            { value: 'Terminal', label: 'Terminal', description: 'Monospace, high-contrast terminal look' },
+        ],
+    },
     { id: 'uxdivers', label: 'UX Divers Dialogs', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyShell,
         description: 'Popups IDialogs implementation for Shiny MAUI Shell https://github.com/shinyorg/mauishell',
@@ -348,9 +427,9 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'documentdb', label: 'Document DB', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.shinyDocumentDb,
         description: 'Document-oriented database on SQLite https://shinylib.net/documentdb/' },
-    { id: 'documentdbdiagnostics', label: 'DocumentDB Telemetry', type: 'bool', defaultValue: false, category: 'storage',
+    { id: 'documentdbsqlcipher', label: 'Document DB Encryption (SqlCipher)', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.shinyDocumentDb,
-        description: 'OpenTelemetry-native metrics & distributed tracing for the document store (Shiny.DocumentDb.Diagnostics) https://shinylib.net/documentdb/diagnostics/',
+        description: 'Encrypted SQLite document store (Shiny.DocumentDb.Sqlite.SqlCipher) https://shinylib.net/documentdb/sqlcipher/',
         visibleWhen: (s) => !!s.documentdb },
     { id: 'sqlite', label: 'SQLite-net-pcl', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.sqliteNetPcl,
@@ -366,6 +445,13 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'aihealth', label: 'Health AI Tools', type: 'bool', defaultValue: false, category: 'ai',
         version: VERSIONS.shinyHealth,
         description: 'Exposes health data as Microsoft.Extensions.AI tools (requires Health Data) https://shinylib.net/health/ai-tools/',
+        visibleWhen: noDesktop },
+    { id: 'aicalendar', label: 'Calendar AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyCalendar,
+        description: 'Exposes device calendars & events as Microsoft.Extensions.AI tools (requires Calendar Store) https://shinylib.net/calendarstore/ai-tools/' },
+    { id: 'aimusic', label: 'Music AI Tools', type: 'bool', defaultValue: false, category: 'ai',
+        version: VERSIONS.shinyMusic,
+        description: 'Exposes the music library & player as Microsoft.Extensions.AI tools (requires Music Library) https://shinylib.net/music/ai-tools/',
         visibleWhen: noDesktop },
     { id: 'aicontacts', label: 'Contacts AI Tools', type: 'bool', defaultValue: false, category: 'ai',
         version: VERSIONS.shinyClient,
@@ -390,6 +476,17 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'aidocumentdb', label: 'DocumentDB AI Tools', type: 'bool', defaultValue: false, category: 'ai',
         version: VERSIONS.shinyDocumentDb,
         description: 'Exposes document store operations as AI tools https://shinylib.net/documentdb/ai-tools/' },
+
+    // Shiny Extensions
+    { id: 'stores', label: 'Stores', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyStores,
+        description: 'Key/value store abstractions with persistent, bindable settings objects https://shinylib.net/extensions/stores/' },
+    { id: 'reflector', label: 'Reflector', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyReflector,
+        description: 'AOT-compatible source-generated reflection https://shinylib.net/extensions/reflector/' },
+    { id: 'di', label: 'Shiny DI', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyDI,
+        description: 'Attribute-driven, source-generated DI registration https://shinylib.net/extensions/di/' },
 
     // Platform
     { id: 'androidauto', label: 'Android Auto', type: 'bool', defaultValue: false, category: 'platform',
@@ -436,17 +533,19 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.usedeeplinks = s.deeplinks !== '';
     s.usehttp = !!(s.authservice && s.refit);
     s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui || s.shinyblazorcontrols);
-    s.usemauicontrols = !!s.shinycontrols;
+    s.usemauicontrols = !!(s.shinycontrols || s.shinyspeechaddins || s.shinycameraview || s.shinymediaelement || s.shinyoffice || s.shinykeyframe || s.shinytheme !== 'None');
+    s.themeaurora = s.shinytheme === 'Aurora';
+    s.themematerial = s.shinytheme === 'Material';
+    s.themeocean = s.shinytheme === 'Ocean';
+    s.themeterminal = s.shinytheme === 'Terminal';
+    s.useshinyspeech = !!(s.shinyspeech || s.aiconversation || s.speechazure || s.speechelevenlabs || s.speechtypecast);
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
-    s.usedocumentdb = !!(s.documentdb || s.aidocumentdb);
+    s.usedocumentdb = !!(s.documentdb || s.aidocumentdb || s.documentdbsqlcipher);
     // AI tool packages are added on top of their base module - the base is selected
     // independently (no auto-enable), so Health AI Tools requires Health Data, etc.
     s.usehealth = !!s.health;
-    // Telemetry only emitted when a store is actually present.
-    s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
-    s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation || s.aicontacts || s.ainotifications || s.ailocations);
-    s.communitytoolkit = !!s.mediaelement;
+    s.usemsextai = !!(s.msextai || s.aimediator || s.aishinyshell || s.aidocumentdb || s.aihealth || s.aiconversation || s.aicontacts || s.aicalendar || s.ainotifications || s.ailocations || s.aimusic);
     return s;
 }
 
@@ -496,19 +595,24 @@ const ASPNET_PARAMS: TemplateParam[] = [
             { value: 'mongodb', label: 'MongoDB', description: 'Shiny.DocumentDb.MongoDb' },
             { value: 'litedb', label: 'LiteDB', description: 'Shiny.DocumentDb.LiteDb' },
             { value: 'duckdb', label: 'DuckDB', description: 'Shiny.DocumentDb.DuckDb' },
+            { value: 'oracle', label: 'Oracle', description: 'Shiny.DocumentDb.Oracle' },
+            { value: 'mariadb', label: 'MariaDB', description: 'Shiny.DocumentDb.MariaDb' },
+            { value: 'cockroachdb', label: 'CockroachDB', description: 'Shiny.DocumentDb.CockroachDb' },
+            { value: 'azuretable', label: 'Azure Table Storage', description: 'Shiny.DocumentDb.AzureTable' },
+            { value: 'dynamodb', label: 'Amazon DynamoDB', description: 'Shiny.DocumentDb.DynamoDb' },
+            { value: 'amazondocumentdb', label: 'Amazon DocumentDB', description: 'Shiny.DocumentDb.DocumentDb' },
+            { value: 'redis', label: 'Redis', description: 'Shiny.DocumentDb.Redis' },
+            { value: 'ravendb', label: 'RavenDB', description: 'Shiny.DocumentDb.RavenDb' },
+            { value: 'firestore', label: 'Google Firestore', description: 'Shiny.DocumentDb.Firestore' },
         ],
     },
     { id: 'aidocumentdb', label: 'DocumentDB AI Tools', type: 'bool', defaultValue: false, category: 'data',
         version: VERSIONS.shinyDocumentDb,
         description: 'Exposes document store operations as AI tools https://shinylib.net/documentdb/ai-tools/',
         visibleWhen: (s) => s.documentdb !== 'none' },
-    { id: 'documentdbdiagnostics', label: 'DocumentDB Telemetry', type: 'bool', defaultValue: false, category: 'data',
-        version: VERSIONS.shinyDocumentDb,
-        description: 'OpenTelemetry-native metrics & distributed tracing for the document store (Shiny.DocumentDb.Diagnostics) https://shinylib.net/documentdb/diagnostics/',
-        visibleWhen: (s) => s.documentdb !== 'none' },
     { id: 'connectionstring', label: 'Connection String', type: 'string', defaultValue: '', category: 'data',
         description: 'The database connection string',
-        visibleWhen: (s) => s.ef !== 'none' || (s.documentdb !== 'none' && s.documentdb !== 'litedb') },
+        visibleWhen: (s) => s.ef !== 'none' || (s.documentdb !== 'none' && s.documentdb !== 'litedb' && s.documentdb !== 'firestore' && s.documentdb !== 'dynamodb') },
 
     // Auth
     { id: 'jwtauth', label: 'JWT Authentication', type: 'bool', defaultValue: true, category: 'auth',
@@ -542,6 +646,9 @@ const ASPNET_PARAMS: TemplateParam[] = [
     { id: 'reflector', label: 'Reflector', type: 'bool', defaultValue: false, category: 'extensions',
         version: VERSIONS.shinyReflector,
         description: 'AOT-compatible source-generated reflection https://shinylib.net/extensions/reflector/' },
+    { id: 'stores', label: 'Stores', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyStores,
+        description: 'Key/value store abstractions with persistent, bindable settings objects https://shinylib.net/extensions/stores/' },
 ];
 
 function computeAspNetSymbols(state: TemplateState): Record<string, boolean | string> {
@@ -562,8 +669,15 @@ function computeAspNetSymbols(state: TemplateState): Record<string, boolean | st
     s.docdbmongo = s.documentdb === 'mongodb';
     s.docdblitedb = s.documentdb === 'litedb';
     s.docdbduckdb = s.documentdb === 'duckdb';
-    // Telemetry only emitted when a store provider is actually selected.
-    s.documentdbdiagnostics = !!(state.documentdb !== 'none' && state.documentdbdiagnostics);
+    s.docdboracle = s.documentdb === 'oracle';
+    s.docdbmariadb = s.documentdb === 'mariadb';
+    s.docdbcockroach = s.documentdb === 'cockroachdb';
+    s.docdbazuretable = s.documentdb === 'azuretable';
+    s.docdbdynamo = s.documentdb === 'dynamodb';
+    s.docdbamazondocdb = s.documentdb === 'amazondocumentdb';
+    s.docdbredis = s.documentdb === 'redis';
+    s.docdbravendb = s.documentdb === 'ravendb';
+    s.docdbfirestore = s.documentdb === 'firestore';
     // Any data layer active (EF or DocumentDB) — used by auth handlers
     s.useanydata = s.ef !== 'none' || s.documentdb !== 'none';
     // Auth handlers (Handlers/Auth/*) use Shiny.Mediator — force it on when jwtauth is enabled.
@@ -632,17 +746,32 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'push', label: 'Push Notifications', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Web Push notifications https://shinylib.net/client/push/' },
+    { id: 'httptransfers', label: 'HTTP Transfers', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Background uploads & downloads over Service Worker Background Sync + IndexedDB https://shinylib.net/httptransfers/' },
+    { id: 'datasync', label: 'Data Sync', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyDataSync,
+        description: 'Bidirectional JSON sync with the outbox & cursors persisted to LocalStorage https://shinylib.net/datasync/' },
     { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinySpeech,
         description: 'Speech-to-text and text-to-speech (Web Speech API) https://shinylib.net/speech/' },
+    { id: 'speechazure', label: 'Azure AI Speech', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'Azure AI Speech provider for Shiny.Speech (pulls in Speech) https://shinylib.net/speech/microsoft-ai/' },
+    { id: 'speechelevenlabs', label: 'ElevenLabs Speech', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'ElevenLabs STT/TTS provider for Shiny.Speech (pulls in Speech) https://shinylib.net/speech/elevenlabs/' },
+    { id: 'speechtypecast', label: 'Typecast Speech', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinySpeech,
+        description: 'Typecast text-to-speech provider for Shiny.Speech (pulls in Speech) https://shinylib.net/speech/' },
 
     // Storage
     { id: 'documentdb', label: 'Document DB (IndexedDB)', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.shinyDocumentDb,
         description: 'Document-oriented store backed by browser IndexedDB https://shinylib.net/documentdb/' },
-    { id: 'documentdbdiagnostics', label: 'DocumentDB Telemetry', type: 'bool', defaultValue: false, category: 'storage',
+    { id: 'aidocumentdb', label: 'DocumentDB AI Tools', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.shinyDocumentDb,
-        description: 'OpenTelemetry-native metrics & distributed tracing for the document store (Shiny.DocumentDb.Diagnostics) https://shinylib.net/documentdb/diagnostics/',
+        description: 'Exposes document store operations as AI tools https://shinylib.net/documentdb/ai-tools/',
         visibleWhen: (s) => !!s.documentdb },
 
     // AI
@@ -666,9 +795,30 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'shinycameraview', label: 'Shiny CameraView', type: 'bool', defaultValue: false, category: 'components',
         version: VERSIONS.shinyControls,
         description: 'getUserMedia camera preview, capture & in-browser barcode scanning https://shinylib.net/controls/cameraview/' },
-    { id: 'shinydocking', label: 'Shiny Blazor Docking', type: 'bool', defaultValue: false, category: 'components',
+    { id: 'cameraai', label: 'CameraView AI', type: 'bool', defaultValue: false, category: 'components',
         version: VERSIONS.shinyControls,
-        description: 'Visual-Studio-style window docking for Blazor WebAssembly - ships inside Shiny.Blazor.Controls (requires Shiny Blazor Controls). https://shinylib.net/controls/docking/' },
+        description: 'AI document scanner & photo stylizer for CameraView https://shinylib.net/controls/cameraview/ai/',
+        visibleWhen: (s) => !!s.shinycameraview },
+    { id: 'shinymediaelement', label: 'Shiny MediaElement', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'HTML5 audio/video with a drawn transport bar, Fullscreen, Picture-in-Picture and navigator.mediaSession https://shinylib.net/controls/mediaelement/blazor/' },
+    { id: 'shinyoffice', label: 'Shiny Office Documents', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Word, Excel & PowerPoint document viewers and editors (Shiny.Blazor.Controls.Office) https://shinylib.net/controls/document-viewer/' },
+    { id: 'shinyspeechaddins', label: 'Shiny Speech Add-ins', type: 'bool', defaultValue: false, category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'Web Speech API speech-to-text add-ins for the Shiny entry controls https://shinylib.net/controls/speech-addins/' },
+    { id: 'shinytheme', label: 'Shiny Theme Pack', type: 'choice', defaultValue: 'None', category: 'components',
+        version: VERSIONS.shinyControls,
+        description: 'A Shiny Controls theme pack (Shiny.Blazor.Controls.Themes.*) - linked after the core theme in index.html https://shinylib.net/controls/theming/packs/',
+        choices: [
+            { value: 'None', label: 'None', description: 'Use the default Shiny theme' },
+            { value: 'Aurora', label: 'Aurora', description: 'Vivid violet & cyan with glow elevation' },
+            { value: 'Material', label: 'Material', description: 'Material Design palette & shape scale' },
+            { value: 'Ocean', label: 'Ocean', description: 'Cool blues and teals' },
+            { value: 'Terminal', label: 'Terminal', description: 'Monospace, high-contrast terminal look' },
+        ],
+    },
 ];
 
 function computeBlazorSymbols(state: TemplateState): Record<string, boolean | string> {
@@ -677,10 +827,14 @@ function computeBlazorSymbols(state: TemplateState): Record<string, boolean | st
     s.radzen = s.uilibrary === 'Radzen';
     s.fluentui = s.uilibrary === 'FluentUI';
     s.useui = s.uilibrary !== 'None';
-    // AI Conversation pulls in Speech automatically.
-    s.shinyspeech = !!(s.shinyspeech || s.aiconversation);
-    // Telemetry only emitted when the IndexedDB store is enabled.
-    s.documentdbdiagnostics = !!(state.documentdb && state.documentdbdiagnostics);
+    // AI Conversation and the cloud providers pull in Speech automatically.
+    s.useshinyspeech = !!(s.shinyspeech || s.aiconversation || s.speechazure || s.speechelevenlabs || s.speechtypecast);
+    s.shinyspeech = !!s.useshinyspeech;
+    s.themeaurora = s.shinytheme === 'Aurora';
+    s.themematerial = s.shinytheme === 'Material';
+    s.themeocean = s.shinytheme === 'Ocean';
+    s.themeterminal = s.shinytheme === 'Terminal';
+    s.usetheme = s.shinytheme !== 'None';
     return s;
 }
 
