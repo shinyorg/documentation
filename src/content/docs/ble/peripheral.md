@@ -25,16 +25,41 @@ peripheral.Connect();
 await peripheral.ConnectAsync(cancelToken: cts.Token, timeout: TimeSpan.FromSeconds(10));
 ```
 
-### Auto Connect (Android)
+### Auto Connect
 
-On Android, `AutoConnect` controls whether the system should automatically connect when the peripheral comes into range.
+`AutoConnect` (on by default) keeps the peripheral connected for you - the connection is re-established when the
+peripheral comes back into range or is power-cycled, without you having to watch `WhenDisconnected()` and call
+`Connect()` again.
 
 ```csharp
 peripheral.Connect(new ConnectionConfig(AutoConnect: true));
+
+// opt out - faster initial connection, but you own reconnecting
+peripheral.Connect(new ConnectionConfig(AutoConnect: false));
 ```
 
-:::note
-On iOS, `AutoConnect` controls whether the system will attempt to reconnect if the connection drops.
+Setting `false` speeds up the initial connection (the OS connects to the peripheral it can see right now instead of
+arming a background connect), at the cost of reconnecting yourself.
+
+An explicit `CancelConnection()` is final - it tears the auto-reconnect down, so a deliberate disconnect never
+reconnects behind your back. Call `Connect()` again to arm it once more.
+
+:::note[Platform behaviour]
+- **Android** - the OS holds a pending background connect that completes whenever the peripheral reappears. Because the
+  platform only keeps that pending while the underlying GATT client is open - and the client has to be closed on every
+  disconnect to release Android's 7-client limit - Shiny re-issues the connect after a dropped link, throttled to one
+  attempt per second so a peripheral that rejects the reconnect cannot spin.
+- **Apple (iOS, Mac Catalyst, macOS)** - Shiny retries the connect on a disconnect and on a failed connect attempt,
+  cancelling the previous pending connection first (iOS otherwise holds onto its connection slot).
+- **Windows** - the connection is held by a `GattSession` with `MaintainConnection` set, so the OS keeps the link up and
+  re-establishes it itself.
+:::
+
+:::caution
+Auto-reconnect restores the *link*, not your GATT state. Characteristic notifications set up through
+`NotifyCharacteristic()` re-subscribe themselves as long as the observable subscription is still alive, but anything you
+did once at connect time - MTU requests, an authentication handshake, reading a configuration characteristic - has to be
+redone. Hook `WhenConnected()` and do that work there rather than after the first `ConnectAsync()`.
 :::
 
 ## Disconnecting
