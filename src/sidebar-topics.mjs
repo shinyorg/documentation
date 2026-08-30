@@ -596,6 +596,7 @@ export const sidebarTopics = [
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', badge: { text: 'New', variant: 'success' } },
+          { label: 'Find', link: 'controls/office-find', badge: { text: 'New', variant: 'success' } },
         ]
       },
       {

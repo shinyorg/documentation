@@ -1,0 +1,118 @@
+---
+title: Find in Office Documents
+description: A find box, a match count and previous/next arrows on the Word, PowerPoint and Excel toolbars — one controller shared by all three, stepping the view onto each hit and selecting it
+---
+
+**Home ▸ Find** on all three Office toolbars: a box to type in, a `3/12` readout, and a pair of arrows
+that step the view onto each hit. Type into the box and the editor moves to the first match at or after
+the caret and **selects** it; the arrows walk the rest.
+
+| | |
+|---|---|
+| **Typing** | Searches as you type. The first hit is the one at or after the caret, not the top of the content — a find that always restarted at the beginning takes the user away from what they were reading |
+| **Next / Previous** | Step through the hits, wrapping at either end. A "next" that stopped at the last one looks identical to one that has finished the document |
+| **`3/12`** | Which hit you are on, one-based, out of how many there are. `0/0` means the query found nothing; an empty readout means nothing is being searched for |
+| **<kbd>Enter</kbd> / <kbd>Shift</kbd>+<kbd>Enter</kbd>** | Next and previous from the keyboard, without reaching for the arrow. <kbd>Esc</kbd> clears the search (Blazor) |
+
+Every hit is washed amber and the one you are on is drawn as the **selection** instead, so the current
+match is the one that looks different rather than the one that looks the same. A hit is selected rather
+than merely scrolled to, because everything a person does after finding a word — restyle it, delete it,
+type over it — operates on the word.
+
+Finding changes nothing, so it stays live in a read-only editor, where it matters more rather than
+less.
+
+## One controller behind three toolbars
+
+The state lives on each editor's controller, and all three implement the same `IFindController` — which
+is why one find bar per host (`OfficeFindBar` on MAUI and Blazor) serves the document, slide and
+spreadsheet editors. The bar has no idea whether "the next one" is a paragraph below the fold, a shape
+on slide nine or a cell three sheets over.
+
+```csharp
+var find = editor.Controller!.Find;
+
+find.Options = new FindOptions { MatchCase = true, WholeWord = true };
+find.Query = "revenue";      // searches AND steps onto the first hit
+
+find.Count;                  // how many
+find.ActiveIndex;            // zero-based, -1 when none
+find.Status;                 // "1/4"; "0/0" for no hits; "" when not searching
+find.Matches;                // every hit, in reading order
+
+find.FindNext();             // wraps at the end
+find.FindPrevious();         // wraps at the start
+find.Clear();                // drops the query, leaves the selection where it was
+find.Changed += (_, _) => { };
+```
+
+Setting `Query` already steps onto the first hit — following it with a `FindNext()` skips to the
+second.
+
+`MatchCase` and `WholeWord` are on the controller rather than on the bar, since a toolbar with two more
+toggles on it is a toolbar with two fewer commands. Whole-word uses `WordBoundaries.IsWordChar`, the
+same rule double-click selection uses, so searching `don` does not match `don't`. `TextSearch.Matches`
+is public if the same matcher is wanted elsewhere.
+
+Editing re-counts but **never moves the view**. Invalidating the match list is not the same as
+re-running the search: jumping somebody somewhere because the paragraph they are typing in gained a hit
+is the last thing a find should do.
+
+## What each editor searches
+
+### Word
+
+Paragraphs only — the same content the caret can reach and the same content the spelling pass walks.
+Text inside a table's cells is not counted: a document position is a block and an offset, and a table
+has neither, so a count that included those hits would promise something the arrows could never step
+to.
+
+### PowerPoint
+
+The whole deck, not the slide being shown. Stepping onto a match opens its slide, selects the shape,
+puts the caret in its text and selects the matched word — without all four the arrows look like they
+did nothing. A hit found while the deck is showing as a thumbnail grid switches back to the
+single-slide view first, because a thumbnail has no caret to move.
+
+Only shapes a person could edit are searched. The rest come from the slide's layout and master and are
+template decoration shared by every slide using them, so a hit inside one would count the company name
+once per slide and step the user into something they cannot select. Table cells and speaker notes are
+out for the same reason Word skips table cells.
+
+The amber wash is drawn on the showing slide only — a match three slides away has no rectangle on
+screen — and the readout is what says how many there are elsewhere.
+
+### Excel
+
+What is searched is the cell's text **as the formula bar shows it**: the formula when the cell has one,
+otherwise the literal. That is Excel's own default — *look in: formulas* — and the only choice under
+which searching for `SUM` finds the cells that total something. A cell's *formatted* value is
+deliberately not searched, or `1234` would miss a cell showing `1,234.00` and `1,234` would find one
+that holds no comma.
+
+The active sheet only, again matching Excel: a workbook-wide search moves the user between sheets on
+every press of "next", which is rarely what they meant when they typed into a box on the sheet they
+were looking at. `SearchAllSheets` opts in, and stepping then switches sheets on its own.
+
+```csharp
+var find = view.Controller!.Find;
+
+find.SearchAllSheets = true;
+find.Query = "Q1";
+find.FindNext();          // switches to the sheet the hit is on
+```
+
+Matches are collected in **book order**, never with the active sheet first. Ordering the list around
+whichever sheet is showing re-orders it every time "next" crosses a sheet boundary, and stepping then
+resumes from the moved match's new index — which walks two sheets forever and never reaches the third.
+Hidden sheets stay out either way: they are not on screen, and stepping onto one would show the user a
+sheet the workbook has deliberately put away.
+
+The wash covers **whole cells** rather than the matched characters. A cell is the smallest thing a
+selection can address, so highlighting three characters inside one would mark something the arrows
+cannot land on — and the cell's own formatting can right-align, indent or reformat the text out from
+under a character range measured against the raw value.
+
+## Not implemented
+
+**Replace.** Finding is implemented on all three controls; replacing what it finds is not.
