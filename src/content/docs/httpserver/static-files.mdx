@@ -47,10 +47,52 @@ separators are ambiguous — `site.min.css` is indistinguishable from a `site` d
 `EmbeddedFileSource.Paths` lists what it can serve, which is the first thing to check when a file
 404s.
 
+### From a zip
+
+An archive, on disk or embedded in the assembly:
+
+```csharp
+app.UseStaticFiles(new ZipFileSource("./content/site.zip"));
+app.UseStaticFiles(new ZipFileSource(typeof(App).Assembly, "MyApp.wwwroot.zip"));
+```
+
+This is the better answer than loose embedded resources once the content is a **publish output**
+rather than a handful of files. A published Blazor app is a few thousand files; as embedded resources
+that is a few thousand manifest entries whose paths have been flattened into dotted names that have
+to be guessed back apart, and the assets are inflated into the binary. Zipped it is one entry, the
+paths survive intact, and the content stays compressed.
+
+```xml
+<ItemGroup>
+  <EmbeddedResource Include="wwwroot.zip" LogicalName="MyApp.wwwroot.zip" />
+</ItemGroup>
+```
+
+For an archive that was zipped along with its parent folder, name the directory to serve from:
+
+```csharp
+new ZipFileSource("./site.zip", "wwwroot");     // wwwroot/css/site.css is served as /css/site.css
+```
+
+The archive is never held open. The entry index — path, length, CRC and timestamp — is read once at
+construction, and each response opens its own reader over its own stream, so one source serves any
+number of requests at once. Reopening an embedded archive costs nothing: the resource stream is a
+window onto the already-mapped assembly image rather than a copy of it.
+
+The `ETag` comes from the entry's CRC, so it follows the content and survives a rebuild that produced
+identical bytes. `ZipFileSource.Paths` lists what an archive can serve.
+
+<Aside type="note">
+A deflated entry cannot seek, so a byte range over one is served by reading up to the start of the
+range and discarding. Correct, and cheap for the ranges a browser actually asks for — but a source
+that expects to serve large ranges out of very large files is better off on disk, where the seek is
+free.
+</Aside>
+
 ### Both, in order
 
 The useful arrangement during development: a physical directory in front so an edited file is picked
-up without a rebuild, embedded resources behind it so the packaged app still works.
+up without a rebuild, the packaged copy behind it so the shipped app still works.
 
 ```csharp
 app.UseStaticFiles(new CompositeFileSource(
@@ -115,6 +157,12 @@ an encoding of a file it is not. On for a build that publishes precompressed ass
 better: those were compressed once at maximum effort, and
 [recompressing them per request](/httpserver/compression/) spends CPU to produce a larger result.
 The content type still describes the file underneath.
+
+The source has to offer them as well as the middleware asking. `PhysicalFileSource` and
+`ZipFileSource` both take `PrecompressedEncodings` (`UseBlazorWebAssembly` sets it for you when it
+builds the source), and `CompositeFileSource` passes the question through to whichever source
+answers. A source that has no notion of sidecars — `EmbeddedFileSource`, or your own — is simply
+asked for the file that was requested.
 
 ## Security
 
