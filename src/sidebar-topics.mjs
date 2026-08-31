@@ -231,6 +231,16 @@ export const sidebarTopics = [
               { label: 'Release Notes', link: 'wifi/release-notes' }
             ]
           },
+          {
+            label: 'Screen Recording',
+            jumpTo: true,
+            badge: { text: 'New', variant: 'success' },
+            items: [
+              { label: 'Getting Started', link: 'screenrecorder/' },
+              { label: 'Platform Setup', link: 'screenrecorder/platform' },
+              { label: 'Release Notes', link: 'screenrecorder/release-notes' }
+            ]
+          },
         ]
       },
       {

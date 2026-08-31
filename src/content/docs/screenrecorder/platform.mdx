@@ -1,0 +1,138 @@
+---
+title: Screen Recording | Platform Setup
+description: Manifest entries, entitlements, permissions and packages each platform needs before Shiny.ScreenRecorder will record
+---
+
+Everything below is required *before* a recording will start. Where a piece is missing, the library
+reports it through `ScreenRecorderCapabilities` or throws `ScreenRecorderPermissionException` naming
+what to add — it does not fail silently.
+
+## Android
+
+`AndroidManifest.xml`:
+
+```xml
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+<!-- only if capturing the microphone or app audio -->
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+```
+
+The foreground service and the consent activity ship inside the package and merge into your manifest
+automatically — you do not declare them.
+
+**The ordering is fixed by the OS and the library does it for you.** From Android 14 (API 34),
+`MediaProjectionManager.getMediaProjection` throws unless a foreground service of type
+`mediaProjection` is *already* running. So the sequence is consent → service → projection, not the
+more natural projection-then-service.
+
+**Consent is per recording and cannot be pre-granted.** The token that authorises a capture *is* the
+activity result, and it is single-use. `RequestAccess` therefore only answers for the microphone and
+reports `AccessState.Unknown` for the screen itself.
+
+**System audio needs API 29+** and only captures apps that permit it — an app whose audio usage is
+not media or game, or that sets `allowAudioPlaybackCapture="false"`, is silently absent from the mix.
+That is Android's design, not a library limitation.
+
+The OS cast indicator cannot be suppressed, and neither can the service's ongoing notification.
+
+## iOS and Mac Catalyst
+
+No entitlement is needed to record your own app. For the microphone, `Info.plist`:
+
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>Recording your screen with narration</string>
+```
+
+**The app must be in the foreground.** ReplayKit stops the capture when the app is backgrounded, on
+an incoming call, and when the screen locks — all of which arrive as
+`IScreenRecording.Faulted` rather than as a silent truncation.
+
+`RPScreenRecorder.Available` is a runtime state, not a static capability: it goes false during a
+call, under Guided Access, and on some managed devices. `Capabilities` reads it, so check the flags
+rather than caching them at startup.
+
+## macOS
+
+Recording needs the **Screen Recording** grant in System Settings → Privacy & Security.
+`RequestAccess` raises the prompt, but there is a wrinkle worth handling in your UI:
+
+> macOS only applies a newly granted Screen Recording permission on the **next launch**. The first
+> `RequestAccess` after the user approves still reports `Denied`. Tell them to restart the app.
+
+For the microphone (macOS 15+ only), add `NSMicrophoneUsageDescription`, and
+`com.apple.security.device.audio-input` when sandboxed.
+
+**macOS 12.3 is the floor.** Below it, `Capabilities` is `None` — ScreenCaptureKit does not exist and
+the older `CGDisplayStream` path is deprecated and not implemented here.
+
+## Windows
+
+Windows 10 version 1903 or later. Packaged (MSIX) apps declare:
+
+```xml
+<Capability Name="graphicsCapture" />
+```
+
+Unpackaged apps need nothing — there is no runtime permission prompt for graphics capture.
+
+**There is no audio.** `Capabilities` reports neither `Microphone` nor `SystemAudio`, and requesting
+either throws `ScreenRecorderNotSupportedException`.
+
+Windows 11 draws a yellow border around whatever is being captured. From 11 24H2 an app may turn it
+off; this library does not, because a recording indicator the user can see is the right default.
+
+## Linux
+
+Reference `Shiny.ScreenRecorder.Linux` instead of the base package.
+
+Needs a desktop session with a running `xdg-desktop-portal` implementing ScreenCast — GNOME, KDE
+Plasma and the wlroots portal all do — plus an encoder:
+
+```bash
+# Debian / Ubuntu — works on both Wayland and X11
+sudo apt install gstreamer1.0-tools gstreamer1.0-plugins-good \
+                 gstreamer1.0-plugins-bad gstreamer1.0-pipewire
+
+# Fedora
+sudo dnf install gstreamer1-plugins-good gstreamer1-plugins-bad-free
+```
+
+`ffmpeg` is used as a fallback on **X11 only**, and it captures the whole display with no picker —
+which is why it is the fallback and not the default.
+
+Audio needs a reachable PulseAudio or PipeWire-Pulse server and the `pactl` tool, which is what
+resolves the monitor source for system audio.
+
+**Flatpak sandboxes are not supported.** Reaching PipeWire from inside one requires passing the
+portal's file descriptor to the encoder process, which a .NET child process cannot inherit.
+
+Everything above is probed at runtime. A machine missing the pieces reports
+`ScreenRecorderCapabilities.None` rather than failing when the user presses record.
+
+## Blazor WebAssembly
+
+Reference `Shiny.ScreenRecorder.Blazor` instead of the base package.
+
+**Two hard browser requirements:**
+
+1. A **secure context** — HTTPS, or localhost during development.
+2. A **user gesture**. `getDisplayMedia` is refused outside one, so `Start` must be reached from a
+   button click. Calling it from `OnInitializedAsync` will not work.
+
+In an iframe, the frame needs `allow="display-capture; microphone"` or the picker never appears.
+
+Feature detection needs a JavaScript round trip, and `Capabilities` is synchronous by contract — so
+call `Probe()` once at startup:
+
+```csharp
+protected override async Task OnInitializedAsync()
+    => await ((BlazorScreenRecorder)this.Recorder).Probe();
+```
+
+Until it has run, `Capabilities` reports `None`.
+
+System audio is Chromium-only and covers the audio of the surface the user picked — usually a tab —
+rather than the whole machine. Firefox and Safari return a video-only stream when audio is requested.

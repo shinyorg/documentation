@@ -1,0 +1,216 @@
+---
+title: Screen Recording | Getting Started
+description: Cross-platform screen recording for .NET - capture the screen to an MP4 with optional microphone and system audio on Android, iOS, Mac Catalyst, macOS, Windows, Linux and Blazor WebAssembly
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+Record the screen to a video file, with the microphone and the device's own audio mixed in where the
+platform allows it. Built on `Shiny.Core`, so it runs in any Shiny host.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.ScreenRecorder" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet", "blazor"]} os={["android", "ios", "windows", "linux", "macos"]} />
+
+## Read this first
+
+Three things decide most of what you build with this, and none of them are obvious from the API:
+
+**iOS and Mac Catalyst record your own app's UI — nothing else.** ReplayKit's in-app path is all a
+NuGet package can offer. System-wide capture on Apple's mobile platforms requires a *Broadcast Upload
+Extension*, which is a second app target the consuming app has to create and which no library can
+deliver. Android, macOS, Windows and Linux all record the system screen, so other apps end up in
+those files.
+
+**Windows has no audio.** `Windows.Graphics.Capture` captures pixels and nothing else. Asking for
+the microphone or system audio there throws.
+
+**Capabilities differ *within* a platform, not just between them.** macOS 15 gains microphone
+capture and loses pause — `SCRecordingOutput` writes the file itself and cannot be detached
+mid-recording — while macOS 12.3–14 has it the other way round. Read the flags off the instance at
+runtime; never infer them from the target framework.
+
+So every recorder publishes a **`ScreenRecorderCapabilities`** flags property, and anything
+unavailable throws **`ScreenRecorderNotSupportedException`** naming the specific limit. A request
+asking for something outside `Capabilities` throws *before any native call happens* — deliberately,
+because a recording that silently came out without the microphone is worse than one that refused to
+start.
+
+```csharp
+if (recorder.Capabilities.HasFlag(ScreenRecorderCapabilities.SystemAudio))
+    request = request with { IncludeSystemAudio = true };
+```
+
+## Capability matrix
+
+| | Android | iOS / Catalyst | macOS 15+ | macOS 12.3–14 | Windows | Linux | Blazor WASM |
+|---|---|---|---|---|---|---|---|
+| What is recorded | system screen | **this app only** | system screen | system screen | system screen | system screen | user's pick |
+| Pause / Resume | ✅ | ✅ synth | ❌ | ✅ synth | ✅ synth | ❌ | ✅ **native** |
+| Microphone | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
+| System audio | ✅ API 29+ | ✅ app audio | ✅ | ✅ | ❌ | ✅ | ⚠️ Chromium, tab only |
+| Pick display / window | ❌ | ❌ | ✅ | ✅ | ✅ | portal picker | browser picker |
+| Hide the cursor | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ |
+| Frame rate | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Result has a file path | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ **null** |
+
+## Installation
+
+```bash
+dotnet add package Shiny.ScreenRecorder
+```
+
+On Linux reference `Shiny.ScreenRecorder.Linux` and in a Blazor WebAssembly app reference
+`Shiny.ScreenRecorder.Blazor` **instead of** the base package — each registers its own
+implementation of the same interface.
+
+```csharp
+builder.Services.AddScreenRecorder();
+```
+
+Same call everywhere. See [Platform Setup](/screenrecorder/platform/) for the manifest entries,
+entitlements and Linux packages each one needs.
+
+On a plain .NET host — a server, console or test project with no screen — the base package offers
+`AddNotSupportedScreenRecorder()` instead, registering a recorder that reports
+`ScreenRecorderCapabilities.None` and throws on every call. It is named differently on purpose: the
+Linux and Blazor packages register a *real* implementation under `AddScreenRecorder` on that same
+target framework, so sharing the name would make every call ambiguous in a project referencing one
+of them.
+
+## Recording
+
+```csharp
+public class RecordingService(IScreenRecorder recorder)
+{
+    IScreenRecording? session;
+
+    public async Task Start(CancellationToken ct)
+    {
+        var request = new ScreenRecordingRequest
+        {
+            IncludeMicrophone = recorder.Capabilities.HasFlag(ScreenRecorderCapabilities.Microphone),
+            MaxWidth = 1280,
+            MaxDuration = TimeSpan.FromMinutes(5)
+        };
+
+        var access = await recorder.RequestAccess(request, ct);
+        if (access is AccessState.Denied or AccessState.NotSupported)
+            throw new InvalidOperationException("Screen recording is not available");
+
+        this.session = await recorder.Start(request, ct);
+        this.session.Faulted += (_, e) => this.OnEndedByItself(e);
+    }
+
+    public async Task<ScreenRecordingResult> Stop(CancellationToken ct)
+        => await this.session!.Stop(ct);
+}
+```
+
+`Start` does not return until frames are genuinely being written — the Android consent dialog, the
+Linux portal picker and the browser picker all complete first, which can take seconds of wall clock
+while the user decides.
+
+**`MaxWidth` is worth setting on almost every recording.** A modern phone or Retina display at native
+resolution produces very large files for very little visible gain.
+
+**`RequestAccess` cannot always answer.** Android's consent dialog is bound to the projection it
+authorises and cannot be pre-granted; the Linux portal and the browser grant per call. All three
+report `AccessState.Unknown`. Treat anything other than `Denied`/`NotSupported` as "worth trying".
+
+## The result
+
+```csharp
+var result = await session.Stop(ct);
+
+// portable — works on every platform including the browser, where there is no file
+await using var stream = await result.OpenRead(ct);
+await UploadAsync(stream, result.MimeType, ct);
+```
+
+`ScreenRecordingResult` carries `FilePath`, `Duration`, `ByteSize`, `Width`, `Height` and
+`MimeType`. Two of those need care:
+
+- **`FilePath` is null in the browser.** There is no filesystem. `OpenRead()` is the portable
+  accessor and works everywhere.
+- **`MimeType` genuinely varies.** Native platforms all produce `video/mp4`, but Firefox produces
+  `video/webm;codecs=vp9`. Do not hardcode `.mp4` when uploading or naming a download.
+
+On Android the file is in app-private cache — move or share it before the OS reclaims it. On Apple
+platforms it is inside the app container and is **not** in Photos until you put it there.
+
+## Pausing
+
+```csharp
+await session.Pause(ct);
+await session.Resume(ct);
+```
+
+Both are idempotent, and both throw where `ScreenRecorderCapabilities.PauseResume` is missing. Only
+the browser pauses natively; elsewhere the capture keeps running, frames are dropped, and later
+timestamps are shifted back so the output has **no frozen stretch** — which also means a long pause
+still costs battery. `Elapsed` excludes the paused span and matches the finished file's duration.
+
+## When the OS ends it for you
+
+This is not an edge case. It is the normal way a screen recording ends on several platforms.
+
+```csharp
+session.Faulted += (_, e) =>
+{
+    // by now the session is finished; Stop() returns what was salvaged rather than continuing
+    if (e.Result != null)
+        Save(e.Result);
+};
+```
+
+`ScreenRecordingFaultReason` says which of these happened:
+
+| Reason | When |
+|---|---|
+| `RevokedByUser` | Android's cast notification, the browser's "Stop sharing" bar, the macOS menu-bar stop |
+| `InterruptedBySystem` | An incoming call on iOS, an Android foreground-service timeout, the screen locking |
+| `MaxDurationReached` | `MaxDuration` elapsed — stopped cleanly, and `Result` always carries a complete file |
+| `TargetLost` | A monitor unplugged, a recorded window closed |
+| `EncoderFailed` | `Result` is usually null and the file is unusable |
+
+`Faulted` fires on a **native callback thread**, as does `IScreenRecorder.StateChanged`. Marshal
+before touching UI.
+
+## Lifecycle rules
+
+- **One recording at a time.** `Start` throws while another is in flight — every platform underneath
+  has the same restriction, so failing here is simply earlier and clearer.
+- **Stop or dispose, never just drop it.** Disposing without `Stop` cancels and **deletes the partial
+  file**.
+- `Stop` twice returns the same result; `Stop` after `Cancel` throws, because there is no output.
+- Stopping is not instant — flushing the encoder and writing the container index takes a moment on a
+  long recording, and killing the process during it leaves a file with no index that will not play.
+
+## How each platform is backed
+
+| Platform | Capture | Encoder |
+|---|---|---|
+| Android | `MediaProjection` → `VirtualDisplay` | `MediaCodec` → `MediaMuxer` |
+| iOS / Mac Catalyst | `RPScreenRecorder.startCapture` | `AVAssetWriter` |
+| macOS 15+ | `SCStream` | `SCRecordingOutput` |
+| macOS 12.3–14 | `SCStream` + `ISCStreamOutput` | `AVAssetWriter` |
+| Windows | `Direct3D11CaptureFramePool` | `MediaStreamSource` → `MediaTranscoder` |
+| Linux | xdg-desktop-portal ScreenCast → PipeWire | `gst-launch-1.0` or `ffmpeg` |
+| Blazor WASM | `getDisplayMedia` | `MediaRecorder` |
+| plain .NET | none — every call throws | none |
+
+Two of those choices are worth explaining, because the obvious alternative is wrong:
+
+**Android uses MediaCodec rather than MediaRecorder**, which would be a fraction of the code.
+`MediaRecorder.setAudioSource` takes a single source and playback capture is not one of them, so app
+audio is only reachable through `AudioRecord` + `AudioPlaybackCaptureConfiguration` — wanting it at
+all forces the whole pipeline down.
+
+**Apple uses `startCapture`, not `startRecording`.** `startRecording` keeps the movie inside
+ReplayKit and only surrenders it through `RPPreviewViewController`, a user-facing share sheet — no
+use to a library that promises a file path.
