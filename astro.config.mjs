@@ -322,6 +322,8 @@ export default defineConfig({
         },
       ],
       components: {
+        // Adds a mobile-only dropdown for the header links Starlight hides below 50rem.
+        Header: './src/components/Header.astro',
         // Override the default `Sidebar` component with a custom one.
         Sidebar: './src/components/Sidebar.astro',
         // Inject giscus comments under page content (blog posts + opt-in via `comments: true` frontmatter).
