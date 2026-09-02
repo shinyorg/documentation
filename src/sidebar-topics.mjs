@@ -537,6 +537,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'controls/cameraview/' },
+          { label: 'Media Service', link: 'controls/cameraview/media-service', badge: { text: 'New', variant: 'success' } },
           { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
           { label: 'Effects & Filters', link: 'controls/cameraview/effects' },
           { label: 'Face Masks', link: 'controls/cameraview/face-masks' },

@@ -1,0 +1,292 @@
+---
+title: IMediaService
+description: A MAUI service over Shiny's own modal CameraView page - camera and gallery permissions, photo and video capture with programmatic compression, gallery picking, zoom limits, and one-line scanning verbs for barcodes, OCR, credit cards, driver's licenses, passports and faces
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+{/* TODO: capture screenshots for the media service modal (photo, review, scan) */}
+
+Most apps that reach for a camera do not want a camera *screen* — they want a **result**. A photo of a
+receipt. A barcode. The number off a credit card. `IMediaService` is that: one injectable service that
+presents Shiny's own modal `CameraView` page, hands back what the user captured, and returns `null` when
+they change their mind.
+
+The point of difference against MAUI's `IMediaPicker` is the modal itself. It is a page built from
+[`CameraView`](/controls/cameraview/), so it can carry a scan reticle, live bounding boxes, an effect strip,
+your title and your instructions — none of which the system camera UI can do. That is precisely why apps
+needing any of it end up hand-rolling a camera page, and that page is what this service is.
+
+:::note[MAUI only]
+There is no Blazor `IMediaService`. The modal is a MAUI page, and the browser's own file input already
+covers gallery picking — on Blazor, use [`<CameraView>`](/controls/cameraview/blazor) directly.
+:::
+
+## Install
+
+- <NugetDownloads name="Shiny.Maui.Controls.Camera" />
+
+It ships in the camera package itself, so `UseShinyCamera()` is all the registration there is. The optional
+overload sets the house style every call inherits:
+
+```csharp
+builder
+    .UseShinyControls()
+    .UseShinyCamera(media =>
+    {
+        media.CompressionQuality = 85;
+        media.MaxDimension = 2048;
+        media.OutputFormat = MediaImageFormat.Jpeg;
+    });
+```
+
+```csharp
+public class DeliveryViewModel(IMediaService media)
+{
+    public async Task CapturePod()
+    {
+        var photo = await media.TakePhotoAsync(new PhotoCaptureOptions
+        {
+            Title = "Proof of delivery",
+            Instructions = "Fit the whole label in frame"
+        });
+
+        if (photo is not null)
+            await photo.SaveAsync(Path.Combine(FileSystem.AppDataDirectory, "pod.jpg"));
+    }
+}
+```
+
+## The modal ships no strings of its own
+
+Every control on it is a **drawn vector icon** — close, torch, flip, flash, retake, accept — rather than a
+font glyph or an emoji. A glyph needs a font the package cannot assume, and an emoji renders at a different
+size, weight and colour on every head, so the same modal would look like three different products across
+iOS, Android and Windows.
+
+The practical consequence matters more than the aesthetic one: there is nothing on the modal to localize.
+The only text it shows is the `Title` and `Instructions` your app supplies, already in the user's language.
+There are no `CancelText` / `DoneText` / `ConfirmText` properties because there is nothing for them to name.
+
+| Chrome | Photo | Video | Scan |
+|---|:-:|:-:|:-:|
+| Close ✕ | ● | ● (hidden while recording) | ● |
+| Torch | ● | ● | ● |
+| Flip camera | ● | ● | ● |
+| Flash auto / on / off | ● | — | — |
+| Shutter / record | ● | ● | **absent** |
+| Accept ✓ | review only | — | ● |
+| Effect strip | opt-in | opt-in | opt-in |
+| Readout | — | elapsed time | result count |
+
+A scan modal has **no capture button at all**, and not merely a hidden one. The camera is simply on and
+streaming results; a shutter would invite a tap with nothing for a still to be the result of. Close is
+hidden for the length of a recording for the same class of reason — dismissing mid-capture strands a
+half-written file.
+
+## Permissions
+
+```csharp
+var status = await media.RequestCameraPermissionAsync(includeMicrophone: true);
+if (status == MediaPermissionStatus.Denied)
+    await media.OpenSettingsAsync();
+```
+
+Every method that presents UI asks for what it needs first, so an app that never calls these still behaves
+correctly — they exist for the case where you want to explain *why* before the system prompt appears.
+Asking for the microphone alongside the camera returns the **weakest** of the two, because "granted" has to
+mean every permission the call needs or a caller that checks it still gets a silent movie.
+
+`MediaPermissionStatus` is `Granted` / `Denied` / `Restricted` / `Unsupported`. iOS's *limited* photo
+selection counts as `Granted` — the user chose what you may see, and you may proceed.
+
+There is deliberately **no `PermanentlyDenied`**. Whether a second request re-prompts is not knowable the
+same way on both platforms — iOS silently returns the previous refusal while Android answers through
+`ShouldShowRationale` — so a value claiming to mean it would be right on one head and a guess on the other.
+Treat `Denied` as "offer them `OpenSettingsAsync`", which is correct either way.
+
+`RequestGalleryPermissionAsync(forWrite: true)` asks for the add-to-library grant rather than the read one.
+On iOS those are separate grants, and asking for read when you only mean to save asks for more than you
+need.
+
+**Nothing here throws for a cancel or a refusal.** A cancelled camera is an ordinary outcome, so it comes
+back as `null`.
+
+## Capture and gallery
+
+| Method | Returns |
+|---|---|
+| `TakePhotoAsync(PhotoCaptureOptions?)` | `MediaPhoto?` |
+| `RecordVideoAsync(VideoCaptureOptions?)` | `MediaVideo?` |
+| `PickPhotoAsync(MediaPickOptions?)` | `MediaPhoto?` |
+| `PickPhotosAsync(maxCount, MediaPickOptions?)` | `IReadOnlyList<MediaPhoto>` |
+| `PickVideoAsync(MediaPickOptions?)` | `MediaVideo?` |
+| `GetAvailableCamerasAsync()` | `IReadOnlyList<CameraInfo>` |
+
+`MediaPhoto` carries encoded bytes plus `Width`/`Height`/`ContentType`, with `OpenRead()`,
+`AsImageSource()` and `SaveAsync(path)`. `MediaVideo` stays a **file**: a minute of 1080p is hundreds of
+megabytes and nothing good comes of holding that in memory.
+
+### Compression is a property, not a post-processing step
+
+`CompressionQuality` (1–100), `MaxDimension` and `OutputFormat` are set on the options and applied before
+the photo reaches you. `MaxDimension` is the one that actually shrinks a file — a 12MP capture stays
+multi-megabyte at any compression rate, because compression trades detail and a downscale removes pixels.
+
+All three are **nullable**, and that is the whole point of them being nullable: `null` means "use the
+service default", so there is no way to tell "the caller wants 92" from "the caller said nothing" unless the
+unset state is representable. Without it an app-wide `CompressionQuality = 70` would silently never apply,
+because every options object would arrive carrying its own literal 92.
+
+Nothing is re-encoded when nothing was asked for — a full-size JPEG capture at quality 100 is handed
+straight through rather than being decoded and recompressed for no reason.
+
+### Photo options
+
+| Property | Default | Notes |
+|---|---|---|
+| `Quality` | `PhotoQuality.Highest` | Full sensor resolution; drop to `Session` when the picture is an input to something else |
+| `CompressionQuality` | service default (92) | Ignored for PNG, which is lossless |
+| `MaxDimension` | service default (0) | 0 keeps the captured size |
+| `OutputFormat` | service default (Jpeg) | |
+| `FlashMode` / `AllowFlashToggle` | `Auto` / `true` | |
+| `ShowConfirmation` | `true` | Review with retake ✕ / accept ✓ before returning |
+
+`ShowConfirmation` defaults on because without it a blurred shot is only discovered after the modal has
+gone, and the retake is then a whole new flow instead of one tap.
+
+### Video options
+
+`Quality` (`High`, 1080p), `IncludeAudio` (`true` — which is why the service also asks for the microphone),
+`MaxDuration` (the modal stops itself), `Bitrate`, `FrameRate`, `FilePath`, `ShowElapsed`, and `Overlay` —
+an `IVideoOverlayRenderer` burned into every recorded frame, exactly as on
+[`CameraView`](/controls/cameraview/).
+
+## Zoom
+
+```csharp
+// a document scan: no zoom at all, because a zoomed frame is a cropped one
+await media.ScanReceiptAsync(new MediaScanOptions { AllowZoom = false });
+
+// a photo that can reach 4x and no further
+await media.TakePhotoAsync(new PhotoCaptureOptions { MaxZoom = 4, Zoom = 2 });
+```
+
+All three settings are applied against the range the **handler** reports rather than guessed up front,
+because `CameraView.MaxZoom` is 1 until the lens has actually been opened and interrogated — assigning a
+zoom in the constructor clamps it to 1 and loses it silently. So a `Zoom` beyond the device's reach lands at
+its maximum instead of being dropped, a `MaxZoom` ceiling never raises a weaker lens above what it can do
+and never falls below its minimum, and both are re-applied when a lens switch republishes the range.
+
+`AllowZoom = false` pins the usable range shut rather than only disabling the pinch gesture. Otherwise a
+`ConfigureCamera` hook or a binding could still zoom past 1× and the option would be a UI hint rather than a
+rule. Worth reaching for on document and OCR scans: the far end of a phone's range is digital crop, so the
+picture gets bigger and no better, and the detector loses the edges it needs.
+
+## Scanning
+
+Each analyzer package hangs its own verbs off the service — install the ones you need and they appear.
+Every document type gets the same pair: a **singular** verb returning `Task<T?>` that closes the modal on
+the first result, and a **plural** one returning `IAsyncEnumerable<T>` that keeps the modal up and streams.
+
+```csharp
+// one code, then the modal closes
+var code = await media.ScanBarcodeAsync();
+
+// stream until the user taps ✓
+await foreach (var code in media.ScanBarcodesAsync())
+    this.Codes.Add(code.Value);
+
+// symbologies plus an aiming band
+var qr = await media.ScanBarcodeAsync(
+    [BarcodeFormat.QrCode],
+    new MediaScanOptions { ScanWindow = new RectF(0.1f, 0.38f, 0.8f, 0.24f) }
+);
+
+var card     = await media.ScanCreditCardAsync();
+var licence  = await media.ScanDriversLicenseAsync();   // the PDF417 on the BACK of the card
+var passport = await media.ScanPassportAsync();
+var contact  = await media.ScanBusinessCardAsync();
+var text     = await media.ScanTextStringAsync();
+```
+
+| Package | Verbs |
+|---|---|
+| `.Camera.Barcode` | `ScanBarcodeAsync`, `ScanBarcodesAsync` |
+| `.Camera.Ocr` | `ScanTextAsync`, `ScanTextStringAsync`, `ScanTextBlocksAsync` |
+| `.Camera.Documents` | `ScanCreditCard(s)Async`, `ScanDriversLicense(s)Async`, `ScanPassport(s)Async`, `ScanHealthCard(s)Async`, `ScanReceipt(s)Async`, `ScanInvoice(s)Async`, `ScanBusinessCard(s)Async`, plus generic `ScanDocumentsAsync<TDocument>` |
+| `.Camera.Face` | `DetectFaceAsync`, `DetectFacesAsync` |
+
+The plural form is not sugar over the singular one — it is the other way round. The modal opens when
+enumeration **starts** and closes when it ends, including when the caller `break`s out of the
+`await foreach`, which is exactly how the singular overloads are built. It also ends when the user
+dismisses the modal, when `MaxResults` or `Timeout` is reached, or on cancellation.
+
+### Duplicate filtering
+
+`filterDuplicates` defaults to `true` (and to `false` for faces, which move). A code sitting in front of the
+lens is otherwise re-read every time it drifts out of view and back, so a "scan the shelf" flow fills up
+with the same value.
+
+Keys are chosen per type rather than being a generic equality check: symbology **plus** value for a barcode,
+because the same digits as an EAN-13 and as a QR code are two different scans; the card number for a credit
+card; the license number for a license; merchant plus date plus total for a receipt, which has no identifier
+reliably present on it at all.
+
+The explicit argument **wins** over `MediaScanOptions.FilterDuplicates` when both are supplied — otherwise
+the shorter spelling would be the one that silently does nothing.
+
+### Scan options
+
+`ScanWindow` (a normalized rect that restricts detection *and* draws the viewfinder reticle),
+`ShowBoundingBox`, `MaxResults`, `Timeout`, `ShowResultCount`, `ShowDoneButton`, `VibrateOnResult`.
+
+### Your own analyzer
+
+The service knows nothing about symbologies or documents; every verb above is one call to `ScanAsync<T>`.
+That is what makes it usable with an analyzer Shiny does not ship a verb for:
+
+```csharp
+var analyzer = new MyAnalyzer();
+
+await foreach (var hit in media.ScanAsync(new MediaScanRequest<MyResult>
+{
+    Analyzer = analyzer,
+    Subscribe = emit => analyzer.OnDetected = args =>
+    {
+        emit(args.Result);
+        return Task.FromResult(true);
+    },
+    DuplicateKey = r => r.Id,
+    Describe = r => r.Name
+}))
+    …
+```
+
+`Subscribe` exists because analyzers deliver through their own strongly-typed `OnDetected`, which the
+service cannot see without knowing the analyzer's type — so the code that *does* know it does the wiring,
+and everything else (permissions, presentation, arming, duplicate filtering, cancellation, teardown) is
+written once rather than once per result type. Return `true` from `OnDetected`; the service decides when to
+stop.
+
+## Effects
+
+`ShowEffectPicker` puts a strip of looks over the preview — `MediaEffectChoices.Default` is "None", the
+eleven colour grades, then Comic / Sketch / Poster / Pixelate / Blur — or supply your own `EffectChoices`.
+`Filter` and `Effects` set the opening look without offering the picker. Whatever is chosen is baked into
+the capture, not merely shown on the preview.
+
+Leave the picker off for scanning. A stylized frame is actively unhelpful to a detector: a barcode reader
+handed a Noir grade is being asked to work against the effect rather than with it.
+
+## Escape hatches
+
+`ConfigureCamera` receives the modal's `CameraView` after it is configured and before it starts;
+`ConfigurePage` receives the page itself before presentation. They exist so a property these option classes
+do not surface is never a dead end.
+
+## Platform notes
+
+Frames, analyzers and capture all come from `CameraView`, so every platform note there applies —
+including that barcode and OCR are a no-op on Windows and the bare `net10.0` head, where there is no native
+scanner. `IsCameraSupported` reports `false` wherever there is no camera to present, which includes the
+window in the app's life before it has one.
