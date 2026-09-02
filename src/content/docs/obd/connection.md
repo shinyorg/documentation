@@ -66,9 +66,41 @@ var pids = await connection.SendRaw("0100");         // supported PIDs [01-20]
 
 | Command | Description |
 |---------|-------------|
-| *(all ELM327 commands)* | Standard initialization |
 | `STFAC` | Reset to STN factory defaults |
+| *(all ELM327 commands)* | Standard initialization |
 | `ATCAF1` | CAN auto formatting on |
+
+`STFAC` restores factory defaults, so it runs *before* the ELM327 configuration rather than after it —
+sending it last would wipe the echo, spacing, header and protocol settings in the same breath as
+setting them.
+
+## Protocol Pinning
+
+`ATSP0` does not choose a protocol. It defers the choice to the first command that needs the bus, and
+that command then pays the whole ELM search — seconds of it, routinely longer than a command timeout.
+`ATZ` discards the result, so an adapter left to search pays it again on **every** reconnect.
+
+Read the number a session settled on and hand it back to the next one:
+
+```csharp
+var connection = new ObdConnection(transport);
+await connection.Connect();
+
+// ATSP0 has not chosen anything yet, so ask again once something has needed the bus
+await connection.Execute(new SupportedPidsCommand(0x00));
+var protocol = await connection.RefreshNegotiatedProtocol();   // "6"
+
+// Next session — no search at all
+var next = new ObdConnection(transport) { Protocol = protocol };
+await next.Connect();
+```
+
+A stale pin is safe. The protocol is verified with mode 01 during initialization and dropped for a
+search when nothing answers, so a number learned against a different vehicle costs one round trip
+rather than a session that can never read a PID.
+
+`Protocol` is ignored when you supply your own profile — construct the profile with it instead
+(`new Elm327AdapterProfile("6")`).
 
 ### Custom Profiles
 

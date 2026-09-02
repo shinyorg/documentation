@@ -27,9 +27,38 @@ var config = new BleObdConfiguration
     DeviceNameFilter = "OBDLink",
 
     // Timeout for a single command response
-    CommandTimeout = TimeSpan.FromSeconds(10)
+    CommandTimeout = TimeSpan.FromSeconds(10),
+
+    // How long to wait for the BLE link itself, before any OBD initialization
+    ConnectTimeout = TimeSpan.FromSeconds(30),
+
+    // Hand the platform a standing reconnect for this adapter. Off by default — see below.
+    AutoConnect = false
 };
 ```
+
+### AutoConnect
+
+`AutoConnect` is off by default, and that default matters more than it looks.
+
+On Android it selects `ConnectGatt(autoConnect: true)`, the **background** connection path: the
+controller only attempts during widely spaced scan windows, so an in-range adapter a direct connect
+reaches in a few hundred milliseconds takes tens of seconds this way. It also arms the platform's own
+reconnect, which races any caller that supervises the session itself — each side's teardown cancels
+the other's attempt in flight.
+
+Leave it off for an adapter somebody is actively waiting on, which is the normal case for OBD. Turn it
+on only when you want the platform to re-establish a peripheral whenever it happens to reappear and
+nothing in your app is doing that job.
+
+### Write mode
+
+The transport reads the write characteristic's own properties on connect and writes with a GATT
+response unless the adapter advertises write-without-response. Write-without-response is preferred
+where it is offered — the ELM327 exchange is request/response over a serial emulation, so the
+notification is already the acknowledgement — but it has to be *offered*: a clone whose TX
+characteristic is write-with-response only silently drops the write, nothing ever answers, and the
+caller sits out the full `CommandTimeout` for a reply that was never coming.
 
 ### Common Adapter UUIDs
 
