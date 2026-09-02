@@ -42,7 +42,11 @@ export type ShinyComponent = {
 /** Mirrors the top-level documentation sections in `src/sidebar-topics.mjs`. */
 export type ShinyCategoryId =
     | 'foundation'
-    | 'device'
+    | 'hardware'
+    | 'devicedata'
+    | 'intelligence'
+    | 'background'
+    | 'mauiapp'
     | 'controls'
     | 'storage'
     | 'server';
@@ -63,7 +67,11 @@ export type ShinyCategory = {
 /** One row per documentation section, in the same order as the sidebar topics. */
 export const ShinyCategories: ShinyCategory[] = [
     { id: 'foundation',    title: 'Foundation',                  span: 12, color: '#9A81EA', tint: '#F1EDFC', tintDark: '#2A2547' },
-    { id: 'device',        title: 'Mobile & Device',             span: 12, color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
+    { id: 'hardware',      title: 'Hardware & Connectivity',     span: 12, color: '#22C55E', tint: '#DEFCE9', tintDark: '#10381F' },
+    { id: 'devicedata',    title: 'Device Data',                 span: 12, color: '#06B6D4', tint: '#CFFAFE', tintDark: '#0B3B43' },
+    { id: 'intelligence',  title: 'AI & Intelligence',           span: 12, color: '#EC4899', tint: '#FCE7F3', tintDark: '#4A1030' },
+    { id: 'background',    title: 'Background & Delivery',       span: 12, color: '#F97316', tint: '#FFEDD5', tintDark: '#45250A' },
+    { id: 'mauiapp',       title: 'MAUI App',                    span: 12, color: '#6366F1', tint: '#E0E7FF', tintDark: '#1E2352' },
     { id: 'controls',      title: 'UI Controls',                 span: 12, color: '#0EA5E9', tint: '#E0F2FE', tintDark: '#0B3A52' },
     { id: 'storage',       title: 'Data & Storage',              span: 12, color: '#F59E0B', tint: '#FEF3C7', tintDark: '#3E2E0F' },
     { id: 'server',        title: 'Server & Cloud',              span: 12, color: '#14B8A6', tint: '#CCFBF1', tintDark: '#0C3B36' },
@@ -122,7 +130,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE",
-        "category": "device",
+        "category": "hardware",
         "version": DEFAULT_VERSION
     },
     {
@@ -131,14 +139,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.BluetoothLE.Hosting.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE Hosting",
-        "category": "device",
+        "category": "hardware",
         "version": DEFAULT_VERSION
     },
     {
         "id": "obd",
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
-        "category": "device",
+        "category": "hardware",
         "version": "1.1.0",
         "additionalNugets": [
             { "nuget": "Shiny.Obd", "version": "1.1.0" },
@@ -150,7 +158,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "jobs",
         "nuget": "Shiny.Jobs",
         "description": "Periodic Jobs",
-        "category": "device",
+        "category": "background",
         "version": DEFAULT_VERSION
     },
     {
@@ -158,7 +166,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Locations",
         "blazorNuget": "Shiny.Locations.Blazor",
         "description": "GPS",
-        "category": "device",
+        "category": "hardware",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -166,14 +174,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "geofencing",
         "nuget": "Shiny.Locations",
         "description": "Geofencing",
-        "category": "device",
+        "category": "hardware",
         "version": DEFAULT_VERSION
     },
     {
         "id": "locations-ai",
         "nuget": "Shiny.Locations.Extensions.AI",
         "description": "Locations - AI Tools",
-        "category": "device",
+        "category": "hardware",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -182,7 +190,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Net.Http",
         "blazorNuget": "Shiny.Net.Http.Blazor",
         "description": "HTTP file uploads and downloads",
-        "category": "device",
+        "category": "background",
         "foregroundService": true,
         "version": DEFAULT_VERSION
     },
@@ -192,7 +200,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Net.Discovery",
         "macOsSupported": true,
         "description": "Network Discovery (mDNS/Bonjour)",
-        "category": "device",
+        "category": "hardware",
         "version": DEFAULT_VERSION
     },
     {
@@ -201,7 +209,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Net.Wifi.Linux",
         "macOsSupported": true,
         "description": "Wi-Fi (scan, connect, hotspot, airplane mode)",
-        "category": "device",
+        "category": "hardware",
         "version": DEFAULT_VERSION
     },
     {
@@ -210,7 +218,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "linuxNuget": "Shiny.Notifications.Linux",
         "macOsSupported": true,
         "description": "Local Notifications",
-        "category": "device",
+        "category": "background",
         "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -218,7 +226,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "notifications-ai",
         "nuget": "Shiny.Notifications.Extensions.AI",
         "description": "Local Notifications - AI Tools",
-        "category": "device",
+        "category": "background",
         "androidIntent": "Shiny.ShinyNotificationIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -228,7 +236,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Push.Blazor",
         "macOsSupported": true,
         "description": "Push Notifications (Native)",
-        "category": "device",
+        "category": "background",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -236,7 +244,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushfirebase",
         "nuget": "Shiny.Push.FirebaseMessaging",
         "description": "Push Notifications - Firebase (iOS)",
-        "category": "device",
+        "category": "background",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": "5.1.0"
     },
@@ -244,7 +252,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "pushazure",
         "nuget": "Shiny.Push.AzureNotificationHubs",
         "description": "Push Notifications - Azure Notification Hubs",
-        "category": "device",
+        "category": "background",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
         "version": DEFAULT_VERSION
     },
@@ -252,42 +260,42 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
-        "category": "device",
+        "category": "devicedata",
         "version": "4.1.0"
     },
     {
         "id": "music-ai",
         "nuget": "Shiny.Music.Extensions.AI",
         "description": "Music Library - AI Tools",
-        "category": "device",
+        "category": "devicedata",
         "version": "4.1.0"
     },
     {
         "id": "health",
         "nuget": "Shiny.Health",
         "description": "Health Data",
-        "category": "device",
+        "category": "devicedata",
         "version": "2.0.1"
     },
     {
         "id": "health-ai",
         "nuget": "Shiny.Health.Extensions.AI",
         "description": "Health Data - AI Tools",
-        "category": "device",
+        "category": "devicedata",
         "version": "2.0.1"
     },
     {
         "id": "config",
         "nuget": "Shiny.Extensions.Configuration",
         "description": "Configuration",
-        "category": "device",
+        "category": "mauiapp",
         "version": DEFAULT_VERSION
     },
     {
         "id": "shell",
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
-        "category": "device",
+        "category": "mauiapp",
         "version": "6.3.2"
     },
     {
@@ -1225,7 +1233,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "spatial-geofencing",
         "nuget": "Shiny.Spatial.Geofencing",
         "description": "Spatial Geofencing",
-        "category": "device",
+        "category": "hardware",
         "foregroundService": true,
         "version": "2.0.0"
     },
@@ -1233,21 +1241,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "contactstore",
         "nuget": "Shiny.Contacts",
         "description": "Contact Store",
-        "category": "device",
+        "category": "devicedata",
         "version": "5.5.0"
     },
     {
         "id": "contactstore-ai",
         "nuget": "Shiny.Contacts.Extensions.AI",
         "description": "Contact Store - AI Tools",
-        "category": "device",
+        "category": "devicedata",
         "version": "5.5.0"
     },
     {
         "id": "calendarstore",
         "nuget": "Shiny.Calendar",
         "description": "Calendar Store",
-        "category": "device",
+        "category": "devicedata",
         "macOsSupported": true,
         "version": "5.5.0"
     },
@@ -1255,7 +1263,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "calendarstore-ai",
         "nuget": "Shiny.Calendar.Extensions.AI",
         "description": "Calendar Store - AI Tools",
-        "category": "device",
+        "category": "devicedata",
         "macOsSupported": true,
         "version": "5.5.0"
     },
@@ -1263,14 +1271,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "aiconversation",
         "nuget": "Shiny.AiConversation",
         "description": "AI Conversations",
-        "category": "device",
+        "category": "intelligence",
         "version": "3.0.0-beta-0030"
     },
     {
         "id": "faceintelligence",
         "nuget": "Shiny.FaceIntelligence.Onnx",
         "description": "Face Recognition",
-        "category": "device",
+        "category": "intelligence",
         "version": RECOGNITION_VERSION,
         "additionalNugets": [
             { "nuget": "Shiny.FaceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
@@ -1281,7 +1289,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "voiceintelligence",
         "nuget": "Shiny.VoiceIntelligence.Onnx",
         "description": "Voice / Speaker Recognition",
-        "category": "device",
+        "category": "intelligence",
         "version": RECOGNITION_VERSION,
         "additionalNugets": [
             { "nuget": "Shiny.VoiceIntelligence.DocumentDb.Sqlite", "version": RECOGNITION_VERSION },
@@ -1292,7 +1300,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "documentintelligence",
         "nuget": "Shiny.DocumentIntelligence",
         "description": "Document Scanning & Extraction",
-        "category": "device",
+        "category": "intelligence",
         "macOsSupported": true,
         "version": RECOGNITION_VERSION
     },
@@ -1300,28 +1308,28 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "speech",
         "nuget": "Shiny.Speech",
         "description": "Speech (STT/TTS)",
-        "category": "device",
+        "category": "intelligence",
         "version": "3.0.0-beta-0030"
     },
     {
         "id": "speechazure",
         "nuget": "Shiny.Speech.Azure",
         "description": "Speech - Azure AI Speech",
-        "category": "device",
+        "category": "intelligence",
         "version": "3.0.0-beta-0030"
     },
     {
         "id": "speechelevenlabs",
         "nuget": "Shiny.Speech.ElevenLabs",
         "description": "Speech - ElevenLabs TTS",
-        "category": "device",
+        "category": "intelligence",
         "version": "3.0.0-beta-0030"
     },
     {
         "id": "speechtypecast",
         "nuget": "Shiny.Speech.Typecast",
         "description": "Speech - Typecast TTS",
-        "category": "device",
+        "category": "intelligence",
         "version": "3.0.0-beta-0030"
     },
     {
@@ -1336,7 +1344,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "mauihost",
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
-        "category": "device",
+        "category": "mauiapp",
         "version": "5.1.5"
     },
     {

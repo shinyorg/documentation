@@ -5,7 +5,7 @@
  * Add `jumpTo: true` to any item that should appear in the homepage "Jump to a library…" dropdown.
  * The item's `label` is used as the display text, and its `link` (or first child link) is used as the URL.
  *
- * Add `expandInHomenav: true` to a grouping node (e.g. "Sensors & Hardware") so the homepage nav
+ * Add `expandInHomenav: true` to a grouping node (e.g. "Aspire") so the homepage nav
  * panel lists its child libraries instead of the group itself.
  */
 export const sidebarTopics = [
@@ -140,367 +140,365 @@ export const sidebarTopics = [
     ],
   },
   {
-    label: 'Mobile & Device',
+    label: 'Hardware & Connectivity',
     link: '/ble/',
+    icon: 'link',
+    items: [
+      {
+        label: 'BluetoothLE',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'ble/' },
+          { label: 'BLE Manager', link: 'ble/manager' },
+          { label: 'Peripheral', link: 'ble/peripheral' },
+          { label: 'Services/Characteristics/Descriptors', link: 'ble/gatt' },
+          { label: 'L2CAP', link: 'ble/l2cap' },
+          { label: 'Background Operations', link: 'ble/background' },
+          { label: 'Best Practice/FAQ', link: 'ble/best-practices' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'ble/release-notes' }
+        ]
+      },
+      {
+        label: 'BluetoothLE Hosting',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'blehosting/' },
+          { label: 'GATT Service', link: 'blehosting/gatt' },
+          { label: 'Source Generator', link: 'blehosting/source-generator' },
+          { label: 'L2CAP', link: 'blehosting/l2cap' },
+          { label: 'Release Notes', link: 'blehosting/release-notes' }
+        ]
+      },
+      {
+        label: 'OBD',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'obd/' },
+          { label: 'Commands', link: 'obd/commands' },
+          { label: 'Mode 06 Test Results', link: 'obd/mode06' },
+          { label: 'VIN Decoding', link: 'obd/vin' },
+          { label: 'Connection & Adapters', link: 'obd/connection' },
+          { label: 'BLE Transport', link: 'obd/ble' },
+          { label: 'WiFi Transport', link: 'obd/wifi' },
+          { label: 'Serial Transport', link: 'obd/serial' },
+          { label: 'Custom Transports', link: 'obd/transports' },
+          { label: 'Adapter Emulator', link: 'obd/emulator', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'obd/release-notes' }
+        ]
+      },
+      {
+        label: 'Locations',
+        jumpTo: true,
+        items:[
+          { label: 'Architecture', link: 'locations/architecture' },
+          { label: 'GPS', link: 'locations/gps' },
+          { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
+          { label: 'Geofencing', link: 'locations/geofencing' },
+          { label: 'Motion Activity', link: 'locations/motionactivity' },
+          { label: 'AI Tools', link: 'locations/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'locations/release-notes' }
+        ]
+      },
+      {
+        label: 'Network Discovery',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'discovery/' },
+          { label: 'Browsing & Resolving', link: 'discovery/browsing' },
+          { label: 'Publishing', link: 'discovery/publishing' },
+          { label: 'SSDP & UPnP', link: 'discovery/ssdp' },
+          { label: 'WS-Discovery & ONVIF', link: 'discovery/wsdiscovery' },
+          { label: 'Platform Setup', link: 'discovery/platform' },
+          { label: 'Release Notes', link: 'discovery/release-notes' }
+        ]
+      },
+      {
+        label: 'Wi-Fi',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'wifi/' },
+          { label: 'Networks', link: 'wifi/networks' },
+          { label: 'Known Networks', link: 'wifi/known-networks' },
+          { label: 'Hotspot', link: 'wifi/hotspot' },
+          { label: 'Platform Setup', link: 'wifi/platform' },
+          { label: 'Release Notes', link: 'wifi/release-notes' }
+        ]
+      },
+      {
+        label: 'Screen Recording',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'screenrecorder/' },
+          { label: 'Platform Setup', link: 'screenrecorder/platform' },
+          { label: 'Release Notes', link: 'screenrecorder/release-notes' }
+        ]
+      },
+    ]
+  },
+  {
+    label: 'Device Data',
+    link: '/music/',
+    icon: 'mobile-android',
+    items: [
+      {
+        label: 'Music',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'music/' },
+          { label: 'Permissions', link: 'music/permissions' },
+          { label: 'Querying Music', link: 'music/querying' },
+          { label: 'Playback', link: 'music/playback' },
+          { label: 'Audio Output', link: 'music/output-devices', badge: { text: 'New', variant: 'success' } },
+          { label: 'Lyrics', link: 'music/lyrics' },
+          { label: 'Album Art', link: 'music/album-art' },
+          { label: 'Copying Tracks', link: 'music/copying' },
+          { label: 'Audio Analysis', link: 'music/analysis' },
+          { label: 'AI Tools', link: 'music/ai-tools' },
+          { label: 'Release Notes', link: 'music/release-notes' }
+        ]
+      },
+      {
+        label: 'Health',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'health/' },
+          { label: 'Reading Data', link: 'health/reading' },
+          { label: 'Writing Data', link: 'health/writing' },
+          { label: 'Observing Data', link: 'health/observing' },
+          { label: 'AI Tools', link: 'health/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Platform Notes', link: 'health/platform-notes' },
+          { label: 'Release Notes', link: 'health/release-notes' }
+        ]
+      },
+      {
+        label: 'Contact Store',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'contactstore/' },
+          { label: 'Permissions', link: 'contactstore/permissions' },
+          { label: 'Querying', link: 'contactstore/querying' },
+          { label: 'AI Tools', link: 'contactstore/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'contactstore/release-notes' }
+        ]
+      },
+      {
+        label: 'Calendar Store',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'calendarstore/' },
+          { label: 'Permissions', link: 'calendarstore/permissions' },
+          { label: 'Querying', link: 'calendarstore/querying' },
+          { label: 'AI Tools', link: 'calendarstore/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'calendarstore/release-notes' }
+        ]
+      },
+    ]
+  },
+  {
+    label: 'AI & Intelligence',
+    link: '/aiconversation/',
+    icon: 'star',
+    items: [
+      {
+        label: 'AI Conversations',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'aiconversation/' },
+          { label: 'Architecture', link: 'aiconversation/architecture' },
+          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
+          { label: 'Message Store', link: 'aiconversation/message-store' },
+          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
+          { label: 'Structured Turns & Questions', link: 'aiconversation/structured-turns' },
+          { label: 'Wake Word', link: 'aiconversation/wake-word' },
+          { label: 'AI Tools', link: 'aiconversation/ai-tools' },
+          { label: 'MAUI Chat UI', link: 'aiconversation/chat-view' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
+        ]
+      },
+      {
+        label: 'Speech',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'speech/' },
+          { label: 'Architecture', link: 'speech/architecture' },
+          { label: 'Audio (Monitor & Devices)', link: 'speech/audio' },
+          { label: 'Effects & Recording', link: 'speech/audio-effects' },
+          { label: 'Emotion & Tone', link: 'speech/emotion' },
+          { label: 'Azure AI Speech', link: 'speech/azure' },
+          { label: 'ElevenLabs', link: 'speech/elevenlabs' },
+          { label: 'OpenAI', link: 'speech/openai' },
+          { label: 'Typecast', link: 'speech/typecast' },
+          { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
+          { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper' },
+          { label: 'Custom Provider', link: 'speech/custom-provider' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'speech/release-notes' }
+        ]
+      },
+      {
+        label: 'Face Intelligence',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'faceintelligence/' },
+          { label: 'Architecture', link: 'faceintelligence/architecture' },
+          { label: 'Enrollment', link: 'faceintelligence/enrollment' },
+          { label: 'Recognition & Tuning', link: 'faceintelligence/recognition' },
+          { label: 'MAUI Controls', link: 'faceintelligence/controls' },
+          { label: 'ONNX Models', link: 'faceintelligence/models' },
+          { label: 'Stores', link: 'faceintelligence/stores' },
+          { label: 'Release Notes', link: 'faceintelligence/release-notes' }
+        ]
+      },
+      {
+        label: 'Voice Intelligence',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'voiceintelligence/' },
+          { label: 'Guided Enrollment', link: 'voiceintelligence/enrollment' },
+          { label: 'Recognition & Tuning', link: 'voiceintelligence/recognition' },
+          { label: 'Audio Capture', link: 'voiceintelligence/capture' },
+          { label: 'MAUI Control', link: 'voiceintelligence/controls' },
+          { label: 'ONNX Models', link: 'voiceintelligence/models' },
+          { label: 'Release Notes', link: 'voiceintelligence/release-notes' }
+        ]
+      },
+      {
+        label: 'Document Intelligence',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'documentintelligence/' },
+          { label: 'Scanning', link: 'documentintelligence/scanning' },
+          { label: 'Extraction', link: 'documentintelligence/extraction' },
+          { label: 'Release Notes', link: 'documentintelligence/release-notes' }
+        ]
+      },
+    ]
+  },
+  {
+    label: 'Background & Delivery',
+    link: '/jobs/',
+    icon: 'clock',
+    items: [
+      {
+        label: 'Jobs',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'jobs/' },
+          { label: 'Architecture', link: 'jobs/architecture' },
+          { label: 'Create a Job', link: 'jobs/create' },
+          { label: 'Managing Jobs', link: 'jobs/managing' },
+          { label: 'FAQ', link: 'jobs/faq' },
+          { label: 'Release Notes', link: 'jobs/release-notes' }
+        ]
+      },
+      {
+        label: 'Local Notifications',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'notifications/' },
+          { label: 'Sending Notifications', link: 'notifications/sending' },
+          { label: 'Channels', link: 'notifications/channels' },
+          { label: 'Platform Specific', link: 'notifications/platform' },
+          { label: 'Scheduling & Triggers', link: 'notifications/scheduling' },
+          { label: 'AI Tools', link: 'notifications/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'notifications/release-notes' }
+        ]
+      },
+      {
+        label: 'Push Notifications',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'push/' },
+          { label: 'Architecture', link: 'push/architecture' },
+          { label: 'Native', link: 'push/native' },
+          { label: 'Platform Specific', link: 'push/platform' },
+          { label: 'Azure Push Notifications', link: 'push/azure' },
+          { label: 'Firebase (iOS)', link: 'push/firebase-ios' },
+          { label: 'FAQ', link: 'push/faq' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'push/release-notes' }
+        ]
+      },
+      {
+        label: 'HTTP Transfers',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'httptransfers/' },
+          { label: 'Architecture', link: 'httptransfers/architecture' },
+          { label: 'Transfers', link: 'httptransfers/transfers' },
+          { label: 'Azure Blob Storage', link: 'httptransfers/azure' },
+          { label: 'AWS S3', link: 'httptransfers/aws-s3' },
+          { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
+          { label: 'Monitoring', link: 'httptransfers/monitoring' },
+          { label: 'Transfer Progress', link: 'httptransfers/progress' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'httptransfers/release-notes' }
+        ]
+      },
+    ]
+  },
+  {
+    label: 'MAUI App',
+    link: '/mauishell/',
     icon: 'rocket',
     items: [
       {
-        label: 'Sensors & Hardware',
-        expandInHomenav: true,
-        items: [
-          {
-            label: 'BluetoothLE',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'ble/' },
-              { label: 'BLE Manager', link: 'ble/manager' },
-              { label: 'Peripheral', link: 'ble/peripheral' },
-              { label: 'Services/Characteristics/Descriptors', link: 'ble/gatt' },
-              { label: 'L2CAP', link: 'ble/l2cap' },
-              { label: 'Background Operations', link: 'ble/background' },
-              { label: 'Best Practice/FAQ', link: 'ble/best-practices' },
-              { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-              { label: 'Release Notes', link: 'ble/release-notes' }
-            ]
-          },
-          {
-            label: 'BluetoothLE Hosting',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'blehosting/' },
-              { label: 'GATT Service', link: 'blehosting/gatt' },
-              { label: 'Source Generator', link: 'blehosting/source-generator' },
-              { label: 'L2CAP', link: 'blehosting/l2cap' },
-              { label: 'Release Notes', link: 'blehosting/release-notes' }
-            ]
-          },
-          {
-            label: 'OBD',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'obd/' },
-              { label: 'Commands', link: 'obd/commands' },
-              { label: 'Mode 06 Test Results', link: 'obd/mode06' },
-              { label: 'VIN Decoding', link: 'obd/vin' },
-              { label: 'Connection & Adapters', link: 'obd/connection' },
-              { label: 'BLE Transport', link: 'obd/ble' },
-              { label: 'WiFi Transport', link: 'obd/wifi' },
-              { label: 'Serial Transport', link: 'obd/serial' },
-              { label: 'Custom Transports', link: 'obd/transports' },
-              { label: 'Adapter Emulator', link: 'obd/emulator', badge: { text: 'New', variant: 'success' } },
-              { label: 'Release Notes', link: 'obd/release-notes' }
-            ]
-          },
-          {
-            label: 'Locations',
-            jumpTo: true,
-            items:[
-              { label: 'Architecture', link: 'locations/architecture' },
-              { label: 'GPS', link: 'locations/gps' },
-              { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
-              { label: 'Geofencing', link: 'locations/geofencing' },
-              { label: 'Motion Activity', link: 'locations/motionactivity' },
-              { label: 'AI Tools', link: 'locations/ai-tools', badge: { text: 'New', variant: 'success' } },
-              { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-              { label: 'Release Notes', link: 'locations/release-notes' }
-            ]
-          },
-          {
-            label: 'Network Discovery',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'discovery/' },
-              { label: 'Browsing & Resolving', link: 'discovery/browsing' },
-              { label: 'Publishing', link: 'discovery/publishing' },
-              { label: 'SSDP & UPnP', link: 'discovery/ssdp' },
-              { label: 'WS-Discovery & ONVIF', link: 'discovery/wsdiscovery' },
-              { label: 'Platform Setup', link: 'discovery/platform' },
-              { label: 'Release Notes', link: 'discovery/release-notes' }
-            ]
-          },
-          {
-            label: 'Wi-Fi',
-            jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
-            items: [
-              { label: 'Getting Started', link: 'wifi/' },
-              { label: 'Networks', link: 'wifi/networks' },
-              { label: 'Known Networks', link: 'wifi/known-networks' },
-              { label: 'Hotspot', link: 'wifi/hotspot' },
-              { label: 'Platform Setup', link: 'wifi/platform' },
-              { label: 'Release Notes', link: 'wifi/release-notes' }
-            ]
-          },
-          {
-            label: 'Screen Recording',
-            jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
-            items: [
-              { label: 'Getting Started', link: 'screenrecorder/' },
-              { label: 'Platform Setup', link: 'screenrecorder/platform' },
-              { label: 'Release Notes', link: 'screenrecorder/release-notes' }
-            ]
-          },
+        label: 'MAUI Shell',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'mauishell/' },
+          { label: 'Navigation', link: 'mauishell/navigation' },
+          { label: 'Dialogs', link: 'mauishell/dialogs' },
+          { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
+          { label: 'Source Generation', link: 'mauishell/sourcegen' },
+          { label: 'AI Integration', link: 'mauishell/ai' },
+          { label: 'Release Notes', link: 'mauishell/release-notes' }
         ]
       },
       {
-        label: 'Platform Data',
-        expandInHomenav: true,
-        items: [
-          {
-            label: 'Music',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'music/' },
-              { label: 'Permissions', link: 'music/permissions' },
-              { label: 'Querying Music', link: 'music/querying' },
-              { label: 'Playback', link: 'music/playback' },
-              { label: 'Audio Output', link: 'music/output-devices', badge: { text: 'New', variant: 'success' } },
-              { label: 'Lyrics', link: 'music/lyrics' },
-              { label: 'Album Art', link: 'music/album-art' },
-              { label: 'Copying Tracks', link: 'music/copying' },
-              { label: 'Audio Analysis', link: 'music/analysis' },
-              { label: 'AI Tools', link: 'music/ai-tools' },
-              { label: 'Release Notes', link: 'music/release-notes' }
-            ]
-          },
-          {
-            label: 'Health',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'health/' },
-              { label: 'Reading Data', link: 'health/reading' },
-              { label: 'Writing Data', link: 'health/writing' },
-              { label: 'Observing Data', link: 'health/observing' },
-              { label: 'AI Tools', link: 'health/ai-tools', badge: { text: 'New', variant: 'success' } },
-              { label: 'Platform Notes', link: 'health/platform-notes' },
-              { label: 'Release Notes', link: 'health/release-notes' }
-            ]
-          },
-          {
-            label: 'Contact Store',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'contactstore/' },
-              { label: 'Permissions', link: 'contactstore/permissions' },
-              { label: 'Querying', link: 'contactstore/querying' },
-              { label: 'AI Tools', link: 'contactstore/ai-tools', badge: { text: 'New', variant: 'success' } },
-              { label: 'Release Notes', link: 'contactstore/release-notes' }
-            ]
-          },
-          {
-            label: 'Calendar Store',
-            jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
-            items:[
-              { label: 'Getting Started', link: 'calendarstore/' },
-              { label: 'Permissions', link: 'calendarstore/permissions' },
-              { label: 'Querying', link: 'calendarstore/querying' },
-              { label: 'AI Tools', link: 'calendarstore/ai-tools', badge: { text: 'New', variant: 'success' } },
-              { label: 'Release Notes', link: 'calendarstore/release-notes' }
-            ]
-          },
+        label: 'MAUI Hosting',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'mauihost/' },
+          { label: 'App Support', link: 'mauihost/appsupport' },
+          { label: 'App Store', link: 'mauihost/appstore' },
+          { label: 'Release Notes', link: 'mauihost/release-notes' }
         ]
       },
       {
-        label: 'Intelligence',
-        expandInHomenav: true,
+        label: 'Configuration',
+        jumpTo: true,
         items: [
-          {
-            label: 'AI Conversations',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'aiconversation/' },
-              { label: 'Architecture', link: 'aiconversation/architecture' },
-              { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
-              { label: 'Message Store', link: 'aiconversation/message-store' },
-              { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
-              { label: 'Structured Turns & Questions', link: 'aiconversation/structured-turns' },
-              { label: 'Wake Word', link: 'aiconversation/wake-word' },
-              { label: 'AI Tools', link: 'aiconversation/ai-tools' },
-              { label: 'MAUI Chat UI', link: 'aiconversation/chat-view' },
-              { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
-            ]
-          },
-          {
-            label: 'Speech',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'speech/' },
-              { label: 'Architecture', link: 'speech/architecture' },
-              { label: 'Audio (Monitor & Devices)', link: 'speech/audio' },
-              { label: 'Effects & Recording', link: 'speech/audio-effects' },
-              { label: 'Emotion & Tone', link: 'speech/emotion' },
-              { label: 'Azure AI Speech', link: 'speech/azure' },
-              { label: 'ElevenLabs', link: 'speech/elevenlabs' },
-              { label: 'OpenAI', link: 'speech/openai' },
-              { label: 'Typecast', link: 'speech/typecast' },
-              { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
-              { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper' },
-              { label: 'Custom Provider', link: 'speech/custom-provider' },
-              { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
-              { label: 'Release Notes', link: 'speech/release-notes' }
-            ]
-          },
-          {
-            label: 'Face Intelligence',
-            jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
-            items: [
-              { label: 'Getting Started', link: 'faceintelligence/' },
-              { label: 'Architecture', link: 'faceintelligence/architecture' },
-              { label: 'Enrollment', link: 'faceintelligence/enrollment' },
-              { label: 'Recognition & Tuning', link: 'faceintelligence/recognition' },
-              { label: 'MAUI Controls', link: 'faceintelligence/controls' },
-              { label: 'ONNX Models', link: 'faceintelligence/models' },
-              { label: 'Stores', link: 'faceintelligence/stores' },
-              { label: 'Release Notes', link: 'faceintelligence/release-notes' }
-            ]
-          },
-          {
-            label: 'Voice Intelligence',
-            jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
-            items: [
-              { label: 'Getting Started', link: 'voiceintelligence/' },
-              { label: 'Guided Enrollment', link: 'voiceintelligence/enrollment' },
-              { label: 'Recognition & Tuning', link: 'voiceintelligence/recognition' },
-              { label: 'Audio Capture', link: 'voiceintelligence/capture' },
-              { label: 'MAUI Control', link: 'voiceintelligence/controls' },
-              { label: 'ONNX Models', link: 'voiceintelligence/models' },
-              { label: 'Release Notes', link: 'voiceintelligence/release-notes' }
-            ]
-          },
-          {
-            label: 'Document Intelligence',
-            jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
-            items: [
-              { label: 'Getting Started', link: 'documentintelligence/' },
-              { label: 'Scanning', link: 'documentintelligence/scanning' },
-              { label: 'Extraction', link: 'documentintelligence/extraction' },
-              { label: 'Release Notes', link: 'documentintelligence/release-notes' }
-            ]
-          },
+          { label: 'Getting Started', link: 'configuration/' },
+          { label: 'JSON Platform Bundle', link: 'configuration/json' },
+          { label: 'Platform Preferences', link: 'configuration/preferences' },
+          { label: 'Remote Configuration', link: 'configuration/remote' },
+          { label: 'Release Notes', link: 'configuration/release-notes' }
         ]
       },
       {
-        label: 'Background & Engagement',
-        expandInHomenav: true,
+        label: 'MSBuild Permissions',
+        jumpTo: true,
         items: [
-          {
-            label: 'Jobs',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'jobs/' },
-              { label: 'Architecture', link: 'jobs/architecture' },
-              { label: 'Create a Job', link: 'jobs/create' },
-              { label: 'Managing Jobs', link: 'jobs/managing' },
-              { label: 'FAQ', link: 'jobs/faq' },
-              { label: 'Release Notes', link: 'jobs/release-notes' }
-            ]
-          },
-          {
-            label: 'Local Notifications',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'notifications/' },
-              { label: 'Sending Notifications', link: 'notifications/sending' },
-              { label: 'Channels', link: 'notifications/channels' },
-              { label: 'Platform Specific', link: 'notifications/platform' },
-              { label: 'Scheduling & Triggers', link: 'notifications/scheduling' },
-              { label: 'AI Tools', link: 'notifications/ai-tools', badge: { text: 'New', variant: 'success' } },
-              { label: 'Release Notes', link: 'notifications/release-notes' }
-            ]
-          },
-          {
-            label: 'Push Notifications',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'push/' },
-              { label: 'Architecture', link: 'push/architecture' },
-              { label: 'Native', link: 'push/native' },
-              { label: 'Platform Specific', link: 'push/platform' },
-              { label: 'Azure Push Notifications', link: 'push/azure' },
-              { label: 'Firebase (iOS)', link: 'push/firebase-ios' },
-              { label: 'FAQ', link: 'push/faq' },
-              { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-              { label: 'Release Notes', link: 'push/release-notes' }
-            ]
-          },
-          {
-            label: 'HTTP Transfers',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'httptransfers/' },
-              { label: 'Architecture', link: 'httptransfers/architecture' },
-              { label: 'Transfers', link: 'httptransfers/transfers' },
-              { label: 'Azure Blob Storage', link: 'httptransfers/azure' },
-              { label: 'AWS S3', link: 'httptransfers/aws-s3' },
-              { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
-              { label: 'Monitoring', link: 'httptransfers/monitoring' },
-              { label: 'Transfer Progress', link: 'httptransfers/progress' },
-              { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-              { label: 'Release Notes', link: 'httptransfers/release-notes' }
-            ]
-          },
+          { label: 'Getting Started', link: 'permissions/' },
+          { label: 'Android', link: 'permissions/android' },
+          { label: 'iOS', link: 'permissions/ios' }
         ]
       },
       {
-        label: 'App Plumbing',
-        expandInHomenav: true,
+        label: 'Other',
         items: [
-          {
-            label: 'MAUI Shell',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'mauishell/' },
-              { label: 'Navigation', link: 'mauishell/navigation' },
-              { label: 'Dialogs', link: 'mauishell/dialogs' },
-              { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
-              { label: 'Source Generation', link: 'mauishell/sourcegen' },
-              { label: 'AI Integration', link: 'mauishell/ai' },
-              { label: 'Release Notes', link: 'mauishell/release-notes' }
-            ]
-          },
-          {
-            label: 'MAUI Hosting',
-            jumpTo: true,
-            items:[
-              { label: 'Getting Started', link: 'mauihost/' },
-              { label: 'App Support', link: 'mauihost/appsupport' },
-              { label: 'App Store', link: 'mauihost/appstore' },
-              { label: 'Release Notes', link: 'mauihost/release-notes' }
-            ]
-          },
-          {
-            label: 'Configuration',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'configuration/' },
-              { label: 'JSON Platform Bundle', link: 'configuration/json' },
-              { label: 'Platform Preferences', link: 'configuration/preferences' },
-              { label: 'Remote Configuration', link: 'configuration/remote' },
-              { label: 'Release Notes', link: 'configuration/release-notes' }
-            ]
-          },
-          {
-            label: 'MSBuild Permissions',
-            jumpTo: true,
-            items: [
-              { label: 'Getting Started', link: 'permissions/' },
-              { label: 'Android', link: 'permissions/android' },
-              { label: 'iOS', link: 'permissions/ios' }
-            ]
-          },
-          {
-            label: 'Other',
-            items: [
-              { label: 'Startup Services', link: 'other/startupservices' },
-              { label: 'Lifecycle Hooks', link: 'other/lifecyclehooks' },
-              { label: 'Android Foreground Service', link: 'other/androidforeground' },
-            ]
-          },
+          { label: 'Startup Services', link: 'other/startupservices' },
+          { label: 'Lifecycle Hooks', link: 'other/lifecyclehooks' },
+          { label: 'Android Foreground Service', link: 'other/androidforeground' },
         ]
       },
     ]
