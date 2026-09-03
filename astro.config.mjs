@@ -322,8 +322,11 @@ export default defineConfig({
         },
       ],
       components: {
-        // Adds a mobile-only dropdown for the header links Starlight hides below 50rem.
+        // Adds a mobile-only dropdown for the header links Starlight hides below 50rem,
+        // and mounts the site-wide finder overlay.
         Header: './src/components/Header.astro',
+        // Adds the "Browse docs" mega-menu trigger beside the logo.
+        SiteTitle: './src/components/SiteTitle.astro',
         // Override the default `Sidebar` component with a custom one.
         Sidebar: './src/components/Sidebar.astro',
         // Inject giscus comments under page content (blog posts + opt-in via `comments: true` frontmatter).

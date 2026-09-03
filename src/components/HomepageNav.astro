@@ -1,5 +1,29 @@
 ---
+/**
+ * Homepage navigation — "the finder".
+ *
+ * Replaces the old left drawer with a command palette. Browsing shows the
+ * topic columns (each keeping its sidebar accent hue, which is real
+ * information, not decoration); typing filters the full ~600-page index.
+ *
+ * Rendered globally by `Header.astro`, so every page can open it. Triggers:
+ * the header's "Browse docs" button, the hero button, the floating pill
+ * (homepage only), or `/`. ⌘K stays with Algolia DocSearch — the header
+ * already advertises that shortcut on the search box, and two controls
+ * claiming one chord is worse than two chords.
+ *
+ * A trigger carrying `data-finder-anchor="header"` opens the panel docked
+ * under the site header (mega-menu); anything else opens it centred.
+ */
+import { Icon } from '@astrojs/starlight/components';
 import { sidebarTopics } from '../sidebar-topics.mjs';
+
+interface Props {
+  /** Show the floating bottom-right trigger. Homepage only — elsewhere the header button carries it. */
+  pill?: boolean;
+}
+
+const { pill = false } = Astro.props;
 
 function resolveLink(item) {
   if (item.link) {
@@ -11,35 +35,27 @@ function resolveLink(item) {
   return '#';
 }
 
+/** Headline entries per topic — what the browse view shows. */
 function collectTopItems(items) {
   const results = [];
   for (const item of items) {
     if (item.expandInHomenav && item.items?.length) {
       for (const child of item.items) {
         if (!child.label) continue;
-        results.push({
-          label: child.label,
-          link: resolveLink(child),
-          attrs: child.attrs,
-        });
+        results.push({ label: child.label, link: resolveLink(child), attrs: child.attrs });
       }
       continue;
     }
-    if (item.label) {
-      results.push({
-        label: item.label,
-        link: resolveLink(item),
-      });
-    }
+    if (item.label) results.push({ label: item.label, link: resolveLink(item) });
   }
   return results;
 }
 
-// Fully flatten a topic into every individual control (used for the long
-// Controls panel). Any node marked `jumpTo` is a standalone control — emit it,
-// but keep recursing so controls nested inside a control's own group (e.g. the
-// Floating Panels "Derived Controls") still surface. Sub-pages of a control
-// have no `jumpTo`, so they're skipped.
+/**
+ * Fully flatten a topic into every individual control (the Controls topic).
+ * A node marked `jumpTo` is a standalone control — emit it, but keep recursing
+ * so controls nested inside a control's own group still surface.
+ */
 function collectControls(items, out = []) {
   for (const item of items) {
     if (item.jumpTo === true && item.label) {
@@ -50,344 +66,805 @@ function collectControls(items, out = []) {
   return out;
 }
 
-let topics = sidebarTopics.map(topic => ({
-  label: topic.label,
-  icon: topic.icon,
-  link: resolveLink(topic),
-  flatten: topic.flattenInHomenav === true,
-  items: topic.flattenInHomenav
-    ? collectControls(topic.items || []).sort((a, b) => a.label.localeCompare(b.label))
-    : collectTopItems(topic.items || []),
-}));
+/** Every linkable page, with the trail that tells two "Getting Started"s apart. */
+function collectAll(items, trail, out) {
+  for (const item of items) {
+    if (!item.label) continue;
+    if (item.link) {
+      out.push({ l: item.label, h: resolveLink(item), t: trail.join(' › ') });
+    }
+    if (item.items?.length) collectAll(item.items, [...trail, item.label], out);
+  }
+  return out;
+}
 
-// Push flattened (long) panels to the bottom — they'd otherwise bury the
-// shorter topic panels above them.
-topics = [...topics.filter(t => !t.flatten), ...topics.filter(t => t.flatten)];
+/** A column past this length becomes a wall — the rest lives behind search. */
+const COLUMN_MAX = 18;
+
+let topics = sidebarTopics.map((topic) => {
+  const all = topic.flattenInHomenav
+    ? collectControls(topic.items || []).sort((a, b) => a.label.localeCompare(b.label))
+    : collectTopItems(topic.items || []);
+
+  return {
+    label: topic.label,
+    icon: topic.icon,
+    link: resolveLink(topic),
+    flatten: topic.flattenInHomenav === true,
+    count: collectAll(topic.items || [], [], []).length,
+    items: all.slice(0, COLUMN_MAX),
+    more: Math.max(0, all.length - COLUMN_MAX),
+  };
+});
+
+// Push flattened (long) columns last so they don't bury the shorter ones.
+topics = [...topics.filter((t) => !t.flatten), ...topics.filter((t) => t.flatten)];
+
+// Search index, tagged with its topic so results can carry the right accent.
+const index = sidebarTopics.flatMap((topic, ti) =>
+  collectAll(topic.items || [], [topic.label], []).map((e) => ({ ...e, c: ti % 10 }))
+);
 ---
 
-<button class="homenav-toggle" id="homenav-toggle" aria-label="Browse all sections">
-  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-  <span>Menu</span>
-</button>
+{pill && (
+  <button class="finder-pill not-content" data-open-finder type="button" aria-label="Find a library or control">
+    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+    <span>Find</span>
+  </button>
+)}
 
-<div class="homenav-backdrop" id="homenav-backdrop"></div>
+<div class="finder not-content" id="finder" hidden>
+  <div class="finder-scrim" data-close-finder></div>
 
-<nav class="homenav-panel" id="homenav-panel" aria-label="Site navigation">
-  <div class="homenav-body">
-    {topics.map((topic, i) => (
-      <section class="homenav-topic" data-topic={i % 10}>
-        <div class="homenav-topic-header">
-          <span class="homenav-topic-label">{topic.label}</span>
-        </div>
-        <ul class="homenav-items">
-          {topic.items.map(item => (
-            <li><a href={item.link} {...(item.attrs || {})}>{item.label}</a></li>
-          ))}
-        </ul>
-      </section>
-    ))}
+  <div class="finder-panel" role="dialog" aria-modal="true" aria-label="Find a page">
+    <div class="finder-search">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+      <input
+        id="finder-input"
+        type="search"
+        autocomplete="off"
+        spellcheck="false"
+        placeholder="Search 600 pages — try “geofence”, “datagrid”, “background job”"
+        aria-label="Search the documentation"
+      />
+      <button class="finder-esc" data-close-finder type="button">Esc</button>
+    </div>
+
+    <div class="finder-body">
+      <!-- Browse: topic columns -->
+      <div class="finder-browse" id="finder-browse">
+        {topics.map((topic, i) => (
+          <section class="topic" data-c={i % 10} style={`--n:${i}`}>
+            <a class="topic-head" href={topic.link}>
+              <span class="topic-icon"><Icon name={topic.icon} /></span>
+              <span class="topic-name">{topic.label}</span>
+              <span class="topic-count">{topic.count}</span>
+            </a>
+            <ul class="topic-items">
+              {topic.items.map((item) => (
+                <li><a href={item.link} {...(item.attrs || {})}>{item.label}</a></li>
+              ))}
+              {topic.more > 0 && (
+                <li><a class="topic-more" href={topic.link}>{topic.more} more &rarr;</a></li>
+              )}
+            </ul>
+          </section>
+        ))}
+      </div>
+
+      <!-- Search: flat result list -->
+      <ul class="finder-results" id="finder-results" hidden></ul>
+      <p class="finder-empty" id="finder-empty" hidden>
+        Nothing matches that. Try a shorter word, or browse the topics.
+      </p>
+    </div>
+
+    <div class="finder-foot">
+      <span class="hint"><kbd>&uarr;</kbd><kbd>&darr;</kbd> move</span>
+      <span class="hint"><kbd>&crarr;</kbd> open</span>
+      <span class="hint"><kbd>Esc</kbd> close</span>
+      <button class="foot-search" type="button" data-open-fulltext>
+        <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><line x1="16.5" y1="16.5" x2="21" y2="21"/></svg>
+        Full-text search
+      </button>
+      <a class="foot-cta" href="/foundation/appbuilder/">
+        Build a starter project
+        <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+      </a>
+    </div>
   </div>
+</div>
 
-  <div class="homenav-footer">
-    <a href="/foundation/appbuilder/" class="homenav-appbuilder">
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></svg>
-      App Builder
-    </a>
-  </div>
-</nav>
+<script type="application/json" id="finder-index" set:html={JSON.stringify(index)}></script>
 
 <style>
-  /* ── Toggle Button ─────────────────────────────────────── */
-  .homenav-toggle {
+  /* ─────────────────────────────────────────────────────────────
+     Floating trigger
+     ───────────────────────────────────────────────────────────── */
+  .finder-pill {
     position: fixed;
-    left: 1rem;
-    top: calc(var(--sl-nav-height, 3.5rem) + 1rem);
+    right: 1.25rem;
+    bottom: calc(1.25rem + env(safe-area-inset-bottom, 0px));
     z-index: 100;
     display: inline-flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.5rem 1.1rem 0.5rem 0.95rem;
+    gap: 0.45rem;
+    padding: 0.62rem 1.15rem 0.62rem 1rem;
+    border: none;
     border-radius: 999px;
-    border: 1px solid transparent;
-    background: linear-gradient(135deg, var(--shiny-purple-vivid, #6A3DF0), var(--shiny-green-vivid, #0FBF7A));
+    background: linear-gradient(118deg, #6A3DF0, #0FBF7A);
     color: #fff;
-    font-size: 0.8rem;
+    font: inherit;
+    font-size: 0.85rem;
     font-weight: 700;
-    letter-spacing: 0.01em;
     cursor: pointer;
-    font-family: inherit;
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.12),
-      0 6px 18px rgba(106, 61, 240, 0.35);
-    transition: all 0.2s ease;
+    box-shadow: 0 4px 14px rgba(12, 10, 26, 0.2), 0 12px 34px rgba(106, 61, 240, 0.42);
+    transition: transform 0.2s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.2s ease;
   }
 
-  .homenav-toggle svg {
-    color: #fff;
+  .finder-pill:hover {
+    transform: translateY(-3px) scale(1.03);
+    box-shadow: 0 6px 18px rgba(12, 10, 26, 0.24), 0 16px 44px rgba(106, 61, 240, 0.6);
   }
 
-  .homenav-toggle:hover {
-    box-shadow:
-      0 3px 10px rgba(0, 0, 0, 0.16),
-      0 10px 30px rgba(106, 61, 240, 0.55);
-    transform: translateY(-1px);
-  }
+  .finder-pill:active { transform: translateY(-1px) scale(0.99); }
 
-  .homenav-toggle:active {
-    transform: translateY(0);
-  }
-
-  /* On mobile, anchor to bottom-right so it can't overlap the
-     starlight-announcement banner at the top of the page. */
-  @media (max-width: 50rem) {
-    .homenav-toggle {
-      top: auto;
-      left: auto;
-      right: 1rem;
-      bottom: calc(1rem + env(safe-area-inset-bottom, 0px));
-      padding: 0.65rem 1.2rem 0.65rem 1.1rem;
-      box-shadow:
-        0 2px 6px rgba(0, 0, 0, 0.18),
-        0 8px 26px rgba(106, 61, 240, 0.5);
-    }
-  }
-
-  /* ── Backdrop ──────────────────────────────────────────── */
-  .homenav-backdrop {
+  /* ─────────────────────────────────────────────────────────────
+     Overlay
+     ───────────────────────────────────────────────────────────── */
+  .finder {
     position: fixed;
-    margin: 0;
     inset: 0;
     z-index: 200;
-    background: rgba(0, 0, 0, 0.5);
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.3s ease, visibility 0.3s ease;
-  }
-
-  .homenav-backdrop.open {
-    opacity: 1;
-    visibility: visible;
-  }
-
-  /* ── Panel ─────────────────────────────────────────────── */
-  .homenav-panel {
-    position: fixed;
-    /* Zero the prose top-margin Starlight applies to children of
-       .sl-markdown-content — it offsets even a fixed element and opens a
-       gap below the toolbar. */
     margin: 0;
-    top: var(--sl-nav-height, 3.5rem);
-    left: 0;
-    bottom: 0;
-    z-index: 201;
-    width: min(24rem, 88vw);
+    display: grid;
+    align-items: start;
+    justify-items: center;
+    padding: clamp(1rem, 7vh, 5rem) 1rem 1rem;
+  }
+
+  .finder[hidden] { display: none; }
+
+  .finder-scrim {
+    position: absolute;
+    inset: 0;
+    background: rgba(10, 8, 22, 0.55);
+    backdrop-filter: blur(6px) saturate(1.1);
+    -webkit-backdrop-filter: blur(6px) saturate(1.1);
+    animation: scrim-in 0.25s ease both;
+  }
+
+  @keyframes scrim-in { from { opacity: 0; } to { opacity: 1; } }
+
+  .finder-panel {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    width: min(60rem, 100%);
+    max-height: min(78vh, 46rem);
+    margin: 0;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 1rem;
     background: var(--sl-color-bg);
-    border-right: 1px solid var(--sl-color-gray-6);
-    box-shadow: 8px 0 30px rgba(0, 0, 0, 0.15);
-    transform: translateX(-100%);
-    transition: transform 0.3s cubic-bezier(0.32, 0.72, 0, 1);
-    display: flex;
-    flex-direction: column;
+    box-shadow: 0 24px 70px rgba(10, 8, 22, 0.45);
     overflow: hidden;
+    animation: panel-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
   }
 
-  :global(:root[data-theme='dark']) .homenav-panel {
-    border-right-color: var(--sl-color-gray-5);
-    box-shadow: 8px 0 30px rgba(0, 0, 0, 0.35);
+  @keyframes panel-in {
+    from { opacity: 0; transform: translateY(-14px) scale(0.975); }
+    to   { opacity: 1; transform: none; }
   }
 
-  .homenav-panel.open {
-    transform: translateX(0);
-  }
+  /* Closing plays in reverse so dismissal reads as an action, not a cut. */
+  .finder.closing .finder-panel { animation: panel-out 0.18s ease both; }
+  .finder.closing .finder-scrim { animation: scrim-out 0.18s ease both; }
 
-  /* ── Body ──────────────────────────────────────────────── */
-  .homenav-body {
-    flex: 1;
-    overflow-y: auto;
-    /* No vertical padding: the topic banners run edge-to-edge against the
-       toolbar above and the footer below. */
-    padding: 0;
-  }
+  @keyframes panel-out { to { opacity: 0; transform: translateY(-8px) scale(0.985); } }
+  @keyframes scrim-out { to { opacity: 0; } }
 
-  .homenav-body::-webkit-scrollbar {
-    width: 5px;
-  }
-
-  .homenav-body::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
-  .homenav-body::-webkit-scrollbar-thumb {
-    background: var(--sl-color-gray-5);
-    border-radius: 5px;
-  }
-
-  .homenav-body::-webkit-scrollbar-thumb:hover {
-    background: var(--shiny-purple-vivid, #6A3DF0);
-  }
-
-  /* ── Topic (collapsible) ───────────────────────────────── */
-  .homenav-topic {
-    margin: 0;
-    border-bottom: 1px solid var(--sl-color-gray-6);
-  }
-
-  :global(:root[data-theme='dark']) .homenav-topic {
-    border-bottom-color: var(--sl-color-gray-5);
-  }
-
-  .homenav-topic:last-child {
-    border-bottom: none;
-  }
-
-  .homenav-topic-header {
-    padding: 0.6rem 1.25rem;
-    font-size: 0.82rem;
-    font-weight: 800;
-    color: #fff;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-    text-align: left;
-    background: var(--topic-color);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
-  }
-
-  /* ── Per-section accent colour ─────────────────────────── */
-  .homenav-topic[data-topic='0'] { --topic-color: #6A3DF0; }
-  .homenav-topic[data-topic='1'] { --topic-color: #0FBF7A; }
-  .homenav-topic[data-topic='2'] { --topic-color: #0091EA; }
-  .homenav-topic[data-topic='3'] { --topic-color: #F57C00; }
-  .homenav-topic[data-topic='4'] { --topic-color: #E91E63; }
-  .homenav-topic[data-topic='5'] { --topic-color: #7CB342; }
-  .homenav-topic[data-topic='6'] { --topic-color: #00ACC1; }
-  .homenav-topic[data-topic='7'] { --topic-color: #9C27B0; }
-  .homenav-topic[data-topic='8'] { --topic-color: #F4511E; }
-  .homenav-topic[data-topic='9'] { --topic-color: #3949AB; }
-
-  /* ── Items ─────────────────────────────────────────────── */
-  /* Items area = a light wash of the banner colour. */
-  .homenav-items {
-    list-style: none;
-    margin: 0;
-    padding: 0.4rem 0 0.6rem;
-    background: color-mix(in srgb, var(--topic-color) 9%, var(--sl-color-bg));
-  }
-
-  :global(:root[data-theme='dark']) .homenav-items {
-    background: color-mix(in srgb, var(--topic-color) 16%, var(--sl-color-bg));
-  }
-
-  .homenav-items li {
-    margin: 0;
-    padding: 0;
-  }
-
-  /* Vibrant, on-hue link text tuned for contrast in each mode. */
-  .homenav-items a {
-    display: block;
-    padding: 0.4rem 1.25rem 0.4rem 1.5rem;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: color-mix(in srgb, var(--topic-color), black 24%);
-    text-decoration: none;
-    text-align: left;
-    transition: all 0.12s ease;
-  }
-
-  :global(:root[data-theme='dark']) .homenav-items a {
-    color: color-mix(in srgb, var(--topic-color), white 48%);
-  }
-
-  .homenav-items a:hover {
-    color: #fff;
-    background: var(--topic-color);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.28);
-  }
-
-  :global(:root[data-theme='dark']) .homenav-items a:hover {
-    color: #fff;
-  }
-
-  /* ── Footer ────────────────────────────────────────────── */
-  .homenav-footer {
-    /* Zero the prose top-margin Starlight applies to any sibling-preceded
-       descendant of .sl-markdown-content — without this the footer floats
-       1rem below the scroll body, leaving a gap above the App Builder button. */
-    margin: 0;
-    flex-shrink: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-    padding: 0.75rem 1.25rem;
-    border-top: 1px solid var(--sl-color-gray-6);
-    background: linear-gradient(135deg, rgba(106, 61, 240, 0.12), rgba(166, 217, 0, 0.08));
-  }
-
-  :global(:root[data-theme='dark']) .homenav-footer {
-    border-top-color: var(--sl-color-gray-5);
-    background: linear-gradient(135deg, rgba(155, 123, 255, 0.16), rgba(207, 250, 18, 0.07));
-  }
-
-  .homenav-appbuilder {
+  /* ── Search row ──────────────────────────────────────────── */
+  .finder-search {
     display: flex;
     align-items: center;
-    justify-content: center;
+    gap: 0.7rem;
+    flex-shrink: 0;
+    padding: 0.9rem 1rem;
+    border-bottom: 1px solid var(--sl-color-gray-6);
+    background: linear-gradient(100deg,
+      rgba(106, 61, 240, 0.07),
+      transparent 45%,
+      rgba(15, 191, 122, 0.07));
+  }
+
+  .finder-search > svg { color: var(--shiny-purple-vivid); flex-shrink: 0; }
+
+  #finder-input {
+    flex: 1;
+    min-width: 0;
+    border: 0;
+    background: none;
+    color: var(--sl-color-white);
+    font: inherit;
+    font-size: 1.02rem;
+    font-weight: 500;
+    outline: none;
+  }
+
+  #finder-input::placeholder { color: var(--sl-color-gray-3); }
+  #finder-input::-webkit-search-cancel-button { display: none; }
+
+  .finder-esc {
+    flex-shrink: 0;
+    padding: 0.2rem 0.5rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 0.35rem;
+    background: none;
+    color: var(--sl-color-gray-3);
+    font: inherit;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+  }
+
+  .finder-esc:hover { color: var(--sl-color-white); border-color: var(--sl-color-gray-4); }
+
+  /* ── Scrolling body ──────────────────────────────────────── */
+  .finder-body {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+  }
+
+  .finder-body::-webkit-scrollbar { width: 6px; }
+  .finder-body::-webkit-scrollbar-thumb {
+    background: var(--sl-color-gray-5);
+    border-radius: 6px;
+  }
+
+  /* ── Browse view ─────────────────────────────────────────── */
+  .finder-browse {
+    columns: 3;
+    column-gap: 0;
+    padding: 0.25rem 0 0.5rem;
+  }
+
+  .topic {
+    break-inside: avoid;
+    margin: 0;
+    padding: 0.55rem 0.85rem;
+    /* Columns stagger in behind the panel — one wave, not per-card fades. */
+    animation: topic-in 0.4s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation-delay: calc(0.1s + var(--n) * 0.035s);
+  }
+
+  @keyframes topic-in {
+    from { opacity: 0; transform: translateY(10px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .topic-head {
+    display: flex;
+    align-items: center;
     gap: 0.5rem;
-    padding: 0.6rem 1rem;
-    border-radius: 0.5rem;
+    padding: 0.4rem 0.55rem;
+    border-radius: 0.45rem;
+    color: var(--accent);
+    font-size: 0.82rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    text-decoration: none;
+    transition: background 0.15s ease;
+  }
+
+  .topic-head:hover { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+
+  .topic-icon {
+    display: grid;
+    place-items: center;
+    width: 1.4rem;
+    height: 1.4rem;
+    flex-shrink: 0;
+    border-radius: 0.35rem;
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
     font-size: 0.85rem;
+  }
+
+  .topic-name { flex: 1; min-width: 0; }
+
+  .topic-count {
+    flex-shrink: 0;
+    padding: 0.05rem 0.35rem;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+    font-size: 0.68rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
+  }
+
+  .topic-items {
+    list-style: none;
+    margin: 0.15rem 0 0;
+    padding: 0;
+  }
+
+  .topic-items li { margin: 0; }
+
+  .topic-items a {
+    display: block;
+    padding: 0.235rem 0.55rem;
+    border-radius: 0.35rem;
+    color: var(--sl-color-gray-2);
+    font-size: 0.83rem;
+    font-weight: 500;
+    text-decoration: none;
+    /* Left rule grows on hover: shows which topic the row belongs to. */
+    box-shadow: inset 0 0 0 0 var(--accent);
+    transition: color 0.14s ease, background 0.14s ease, box-shadow 0.14s ease;
+  }
+
+  .topic-items a:hover {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+    box-shadow: inset 2px 0 0 0 var(--accent);
+  }
+
+  :global(:root[data-theme='dark']) .topic-items a { color: var(--sl-color-gray-3); }
+
+  .topic-items .topic-more {
+    margin-top: 0.1rem;
+    color: var(--accent);
+    font-size: 0.78rem;
+    font-weight: 700;
+    opacity: 0.85;
+  }
+
+  /* Per-topic accent — matches the sidebar's topic hues. */
+  .topic[data-c='0'] { --accent: #6A3DF0; }
+  .topic[data-c='1'] { --accent: #0E9F68; }
+  .topic[data-c='2'] { --accent: #0077C2; }
+  .topic[data-c='3'] { --accent: #D96A00; }
+  .topic[data-c='4'] { --accent: #D81B60; }
+  .topic[data-c='5'] { --accent: #5E9B26; }
+  .topic[data-c='6'] { --accent: #00838F; }
+  .topic[data-c='7'] { --accent: #8E24AA; }
+  .topic[data-c='8'] { --accent: #E04416; }
+  .topic[data-c='9'] { --accent: #3949AB; }
+
+  :global(:root[data-theme='dark']) .topic[data-c='0'] { --accent: #A98CFF; }
+  :global(:root[data-theme='dark']) .topic[data-c='1'] { --accent: #45E8AB; }
+  :global(:root[data-theme='dark']) .topic[data-c='2'] { --accent: #57BCFF; }
+  :global(:root[data-theme='dark']) .topic[data-c='3'] { --accent: #FFAE52; }
+  :global(:root[data-theme='dark']) .topic[data-c='4'] { --accent: #FF7BA8; }
+  :global(:root[data-theme='dark']) .topic[data-c='5'] { --accent: #AEDC6C; }
+  :global(:root[data-theme='dark']) .topic[data-c='6'] { --accent: #4FD6E4; }
+  :global(:root[data-theme='dark']) .topic[data-c='7'] { --accent: #DB8CF0; }
+  :global(:root[data-theme='dark']) .topic[data-c='8'] { --accent: #FF9270; }
+  :global(:root[data-theme='dark']) .topic[data-c='9'] { --accent: #93A0F0; }
+
+  /* ── Search results ──────────────────────────────────────── */
+  .finder-results {
+    list-style: none;
+    margin: 0;
+    padding: 0.4rem;
+  }
+
+  .finder-results[hidden] { display: none; }
+
+  .finder-empty {
+    margin: 0;
+    padding: 2.5rem 1rem;
+    text-align: center;
+    color: var(--sl-color-gray-3);
+    font-size: 0.9rem;
+  }
+
+  .finder-empty[hidden] { display: none; }
+
+  /* ── Footer ──────────────────────────────────────────────── */
+  .finder-foot {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    flex-shrink: 0;
+    margin: 0;
+    padding: 0.6rem 1rem;
+    border-top: 1px solid var(--sl-color-gray-6);
+    background: var(--sl-color-gray-7, var(--sl-color-bg));
+    font-size: 0.75rem;
+    color: var(--sl-color-gray-3);
+  }
+
+  .hint { display: inline-flex; align-items: center; gap: 0.3rem; white-space: nowrap; flex-shrink: 0; }
+
+  .hint kbd {
+    display: inline-grid;
+    place-items: center;
+    min-width: 1.25rem;
+    height: 1.3rem;
+    line-height: 1;
+    padding: 0.1rem 0.3rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-bottom-width: 2px;
+    border-radius: 0.3rem;
+    background: var(--sl-color-bg);
+    font: inherit;
+    font-size: 0.7rem;
+  }
+
+  .foot-search {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    margin-left: auto;
+    padding: 0.24rem 0.6rem;
+    border: 1px solid var(--sl-color-gray-5);
+    border-radius: 999px;
+    background: none;
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: 0.74rem;
+    font-weight: 650;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  }
+
+  .foot-search:hover {
+    color: var(--sl-color-white);
+    border-color: var(--sl-color-gray-4);
+    background: var(--sl-color-gray-6);
+  }
+
+  .foot-cta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    color: var(--shiny-purple-vivid);
     font-weight: 700;
     text-decoration: none;
-    color: white;
-    background: linear-gradient(135deg, var(--shiny-purple-vivid, #6A3DF0), var(--shiny-green-vivid, #0FBF7A));
-    box-shadow: 0 2px 10px rgba(106, 61, 240, 0.4);
-    transition: all 0.2s ease;
+    white-space: nowrap;
   }
 
-  .homenav-appbuilder:hover {
-    box-shadow: 0 6px 20px rgba(106, 61, 240, 0.55);
-    transform: translateY(-1px);
-    color: white;
+  .foot-cta svg { transition: transform 0.18s ease; }
+  .foot-cta:hover svg { transform: translateX(3px); }
+
+  /* ─────────────────────────────────────────────────────────────
+     Header-docked variant
+
+     Opened from the header's "Browse docs" button, the same panel drops
+     out of the toolbar instead of floating centre-screen, so it reads as
+     that button's menu. The scrim starts below the nav bar, which keeps
+     the header — and the open trigger — visible and lit.
+     ───────────────────────────────────────────────────────────── */
+  .finder.from-header {
+    align-items: start;
+    justify-items: start;
+    padding: calc(var(--sl-nav-height, 3.5rem) + 0.35rem) var(--sl-nav-pad-x, 1rem) 1rem;
   }
 
-  .homenav-appbuilder:active {
-    transform: translateY(0);
+  .finder.from-header .finder-scrim { top: var(--sl-nav-height, 3.5rem); }
+
+  .finder.from-header .finder-panel {
+    width: min(64rem, 100%);
+    max-height: min(72vh, 42rem);
+    border-top-left-radius: 0.35rem;
+    border-top-right-radius: 0.35rem;
+    box-shadow: 0 18px 46px rgba(10, 8, 22, 0.34);
+    animation: panel-drop 0.3s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* Hairline that ties the panel back to the brand rule in the header. */
+  .finder.from-header .finder-panel::before {
+    content: '';
+    position: absolute;
+    inset: 0 0 auto;
+    height: 2px;
+    background: linear-gradient(90deg, #6A3DF0, #0FBF7A, #A6D900);
+  }
+
+  @keyframes panel-drop {
+    from { opacity: 0; transform: translateY(-12px); }
+    to   { opacity: 1; transform: none; }
+  }
+
+  .finder.from-header.closing .finder-panel { animation: panel-out 0.16s ease both; }
+
+  /* ── Responsive ──────────────────────────────────────────── */
+  @media (max-width: 60rem) { .finder-browse { columns: 2; } }
+
+  @media (max-width: 40rem) {
+    .finder-browse { columns: 1; }
+    .finder-panel { max-height: 84vh; }
+    .finder { padding-top: 1rem; }
+    .finder.from-header { padding: calc(var(--sl-nav-height, 3.5rem) + 0.35rem) 0.5rem 0.5rem; }
+    .finder-foot .hint { display: none; }
+    .finder-pill span { display: none; }
+    .finder-pill { padding: 0.75rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .finder-scrim, .finder-panel, .topic,
+    .finder.closing .finder-panel, .finder.closing .finder-scrim,
+    .finder.from-header .finder-panel {
+      animation: none !important;
+    }
+    .finder-pill:hover { transform: none; }
   }
 </style>
 
+<style is:global>
+  /* Search rows are created at runtime via innerHTML, so Astro's scoped
+     styles never match them. These rules are global, namespaced under the
+     finder's own id so nothing else on the site can pick them up. */
+  #finder-results li { margin: 0; }
+
+  #finder-results .res {
+    display: flex;
+    align-items: baseline;
+    gap: 0.6rem;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.5rem;
+    text-decoration: none;
+    box-shadow: inset 0 0 0 0 var(--accent);
+    transition: background 0.12s ease, box-shadow 0.12s ease;
+  }
+
+  #finder-results .res-label {
+    flex-shrink: 0;
+    color: var(--sl-color-white);
+    font-size: 0.92rem;
+    font-weight: 650;
+  }
+
+  #finder-results .res-trail {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--sl-color-gray-3);
+    font-size: 0.78rem;
+  }
+
+  #finder-results mark {
+    padding: 0 0.1em;
+    border-radius: 0.2em;
+    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    color: inherit;
+    font-weight: 800;
+  }
+
+  #finder-results li.on .res,
+  #finder-results .res:hover {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    box-shadow: inset 3px 0 0 0 var(--accent);
+  }
+
+  #finder-results li.on .res-label { color: var(--accent); }
+
+  /* Per-topic accent, matching the browse columns. */
+  #finder-results .res[data-c='0'] { --accent: #6A3DF0; }
+  #finder-results .res[data-c='1'] { --accent: #0E9F68; }
+  #finder-results .res[data-c='2'] { --accent: #0077C2; }
+  #finder-results .res[data-c='3'] { --accent: #D96A00; }
+  #finder-results .res[data-c='4'] { --accent: #D81B60; }
+  #finder-results .res[data-c='5'] { --accent: #5E9B26; }
+  #finder-results .res[data-c='6'] { --accent: #00838F; }
+  #finder-results .res[data-c='7'] { --accent: #8E24AA; }
+  #finder-results .res[data-c='8'] { --accent: #E04416; }
+  #finder-results .res[data-c='9'] { --accent: #3949AB; }
+
+  :root[data-theme='dark'] #finder-results .res[data-c='0'] { --accent: #A98CFF; }
+  :root[data-theme='dark'] #finder-results .res[data-c='1'] { --accent: #45E8AB; }
+  :root[data-theme='dark'] #finder-results .res[data-c='2'] { --accent: #57BCFF; }
+  :root[data-theme='dark'] #finder-results .res[data-c='3'] { --accent: #FFAE52; }
+  :root[data-theme='dark'] #finder-results .res[data-c='4'] { --accent: #FF7BA8; }
+  :root[data-theme='dark'] #finder-results .res[data-c='5'] { --accent: #AEDC6C; }
+  :root[data-theme='dark'] #finder-results .res[data-c='6'] { --accent: #4FD6E4; }
+  :root[data-theme='dark'] #finder-results .res[data-c='7'] { --accent: #DB8CF0; }
+  :root[data-theme='dark'] #finder-results .res[data-c='8'] { --accent: #FF9270; }
+  :root[data-theme='dark'] #finder-results .res[data-c='9'] { --accent: #93A0F0; }
+</style>
+
 <script>
-(function() {
-  var toggle = document.getElementById('homenav-toggle');
-  var panel = document.getElementById('homenav-panel');
-  var backdrop = document.getElementById('homenav-backdrop');
+  (function () {
+    const root = document.getElementById('finder');
+    const input = document.getElementById('finder-input') as HTMLInputElement | null;
+    const browse = document.getElementById('finder-browse');
+    const results = document.getElementById('finder-results');
+    const empty = document.getElementById('finder-empty');
+    const dataEl = document.getElementById('finder-index');
+    if (!root || !input || !browse || !results || !empty || !dataEl) return;
 
-  if (!toggle || !panel || !backdrop) return;
+    type Entry = { l: string; h: string; t: string; c: number };
+    const index: Entry[] = JSON.parse(dataEl.textContent || '[]');
 
-  function open() {
-    // Sit flush under the real toolbar bottom — which moves down when the
-    // announcement banner is present, so --sl-nav-height alone isn't enough.
-    var header = document.querySelector('header.header');
-    if (header) {
-      panel.style.top = Math.max(0, header.getBoundingClientRect().bottom) + 'px';
+    let active = -1;
+    let lastFocus: HTMLElement | null = null;
+
+    // The overlay ships inside the site header so every page gets it. Reparent
+    // to <body> so no ancestor stacking context (header, sidebar) can cap it.
+    if (root.parentElement !== document.body) document.body.appendChild(root);
+    const pill = document.querySelector('.finder-pill');
+    if (pill && pill.parentElement !== document.body) document.body.appendChild(pill);
+
+    const triggers = Array.from(
+      document.querySelectorAll<HTMLElement>('[data-open-finder]')
+    );
+
+    /* ── Open / close ─────────────────────────────────────── */
+    /** `anchor` is the trigger that asked; a header one docks the panel. */
+    function open(anchor?: HTMLElement | null) {
+      lastFocus = document.activeElement as HTMLElement;
+      root.hidden = false;
+      root.classList.remove('closing');
+      root.classList.toggle('from-header', anchor?.dataset.finderAnchor === 'header');
+      triggers.forEach((t) => {
+        t.classList.toggle('is-open', t === anchor);
+        if (t.hasAttribute('aria-expanded')) t.setAttribute('aria-expanded', String(t === anchor));
+      });
+      document.body.style.overflow = 'hidden';
+      input.value = '';
+      render('');
+      // Focus after paint so the panel animation isn't skipped by the scroll.
+      requestAnimationFrame(() => input.focus());
     }
-    panel.classList.add('open');
-    backdrop.classList.add('open');
-    document.body.style.overflow = 'hidden';
-  }
 
-  function shut() {
-    panel.classList.remove('open');
-    backdrop.classList.remove('open');
-    document.body.style.overflow = '';
-  }
+    function close() {
+      root.classList.add('closing');
+      triggers.forEach((t) => {
+        t.classList.remove('is-open');
+        if (t.hasAttribute('aria-expanded')) t.setAttribute('aria-expanded', 'false');
+      });
+      const done = () => {
+        root.hidden = true;
+        root.classList.remove('closing', 'from-header');
+        document.body.style.overflow = '';
+        lastFocus?.focus();
+      };
+      const panel = root.querySelector('.finder-panel');
+      if (!panel || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return done();
+      panel.addEventListener('animationend', done, { once: true });
+      setTimeout(done, 300);
+    }
 
-  toggle.addEventListener('click', open);
-  backdrop.addEventListener('click', shut);
+    triggers.forEach((el) => el.addEventListener('click', () => open(el)));
+    root.querySelectorAll('[data-close-finder]').forEach((el) =>
+      el.addEventListener('click', close)
+    );
 
-  document.addEventListener('keydown', function(e) {
-    if (e.key === 'Escape' && panel.classList.contains('open')) shut();
-  });
-})();
+    // Hand off to DocSearch for full text — the finder only knows page titles.
+    root.querySelectorAll('[data-open-fulltext]').forEach((el) =>
+      el.addEventListener('click', () => {
+        close();
+        const btn = document.querySelector<HTMLButtonElement>(
+          '.DocSearch-Button, site-search button[data-open-modal]'
+        );
+        if (btn) setTimeout(() => btn.click(), 80);
+      })
+    );
+
+    /* ── Matching ─────────────────────────────────────────── */
+    /**
+     * Trim a common English suffix so "geofence" reaches "Geofencing" and
+     * "notifications" reaches "Notification". Only for longer words — a
+     * 3-letter term like "ble" must stay intact or it matches everything.
+     */
+    function stem(word: string) {
+      return word.length >= 5 ? word.replace(/(?:ies|ing|es|s|e)$/, '') : word;
+    }
+
+    /** All terms must appear somewhere in the entry. */
+    function matches(entry: Entry, keys: string[]) {
+      const hay = (entry.l + ' ' + entry.t + ' ' + entry.h).toLowerCase();
+      return keys.every((k) => hay.includes(k));
+    }
+
+    /** Rank on the first term: label hits beat trail hits beat URL hits. */
+    function score(entry: Entry, key: string) {
+      const label = entry.l.toLowerCase();
+      if (label === key) return 0;
+      if (label.startsWith(key)) return 1;
+      // Word-start inside the label beats a mid-word hit.
+      if (label.includes(' ' + key)) return 2;
+      if (label.includes(key)) return 3;
+      if (entry.t.toLowerCase().includes(key)) return 4;
+      return 5;
+    }
+
+    function mark(text: string, q: string) {
+      const at = text.toLowerCase().indexOf(q);
+      if (at < 0) return escape(text);
+      return (
+        escape(text.slice(0, at)) +
+        '<mark>' + escape(text.slice(at, at + q.length)) + '</mark>' +
+        escape(text.slice(at + q.length))
+      );
+    }
+
+    function escape(s: string) {
+      return s.replace(/[&<>"]/g, (c) =>
+        ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c] as string)
+      );
+    }
+
+    /* ── Render ───────────────────────────────────────────── */
+    function render(raw: string) {
+      const q = raw.trim().toLowerCase();
+      active = -1;
+
+      if (!q) {
+        browse.hidden = false;
+        results.hidden = true;
+        empty.hidden = true;
+        results.innerHTML = '';
+        return;
+      }
+
+      const keys = q.split(/\s+/).filter(Boolean).map(stem);
+      const hits = index
+        .filter((e) => matches(e, keys))
+        .map((e) => ({ e, s: score(e, keys[0]) }))
+        .sort((a, b) => a.s - b.s || a.e.l.length - b.e.l.length)
+        .slice(0, 40);
+
+      browse.hidden = true;
+      results.hidden = hits.length === 0;
+      empty.hidden = hits.length !== 0;
+
+      results.innerHTML = hits
+        .map(
+          ({ e }) =>
+            `<li><a class="res" data-c="${e.c % 10}" href="${e.h}">` +
+            `<span class="res-label">${mark(e.l, keys[0])}</span>` +
+            `<span class="res-trail">${escape(e.t)}</span></a></li>`
+        )
+        .join('');
+
+      if (hits.length) setActive(0);
+    }
+
+    function setActive(i: number) {
+      const items = results.querySelectorAll('li');
+      if (!items.length) return;
+      active = (i + items.length) % items.length;
+      items.forEach((li, n) => li.classList.toggle('on', n === active));
+      items[active].scrollIntoView({ block: 'nearest' });
+    }
+
+    input.addEventListener('input', () => render(input.value));
+
+    /* ── Keyboard ─────────────────────────────────────────── */
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === 'Enter') {
+        const link = results.querySelectorAll('li')[active]?.querySelector('a') as HTMLAnchorElement | undefined;
+        if (link) { e.preventDefault(); window.location.href = link.href; }
+      }
+    });
+
+    const headerTrigger = () =>
+      document.querySelector<HTMLElement>('[data-open-finder][data-finder-anchor="header"]');
+
+    document.addEventListener('keydown', (e) => {
+      const isOpen = !root.hidden;
+
+      if (isOpen && e.key === 'Escape') { e.preventDefault(); close(); return; }
+
+      // `/` opens, unless the visitor is already typing somewhere.
+      if (!isOpen && e.key === '/' && !e.metaKey && !e.ctrlKey) {
+        const el = document.activeElement as HTMLElement | null;
+        const tag = el?.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || el?.isContentEditable) return;
+        e.preventDefault();
+        open(headerTrigger());
+      }
+    });
+  })();
 </script>
