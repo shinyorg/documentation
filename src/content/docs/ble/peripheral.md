@@ -28,8 +28,8 @@ await peripheral.ConnectAsync(cancelToken: cts.Token, timeout: TimeSpan.FromSeco
 ### Auto Connect
 
 `AutoConnect` (on by default) keeps the peripheral connected for you - the connection is re-established when the
-peripheral comes back into range or is power-cycled, without you having to watch `WhenDisconnected()` and call
-`Connect()` again.
+peripheral comes back into range, is power-cycled, or the user toggles Bluetooth off and on, without you having to
+watch `WhenDisconnected()` and call `Connect()` again.
 
 ```csharp
 peripheral.Connect(new ConnectionConfig(AutoConnect: true));
@@ -53,6 +53,31 @@ reconnects behind your back. Call `Connect()` again to arm it once more.
   cancelling the previous pending connection first (iOS otherwise holds onto its connection slot).
 - **Windows** - the connection is held by a `GattSession` with `MaintainConnection` set, so the OS keeps the link up and
   re-establishes it itself.
+:::
+
+### Bluetooth turned off and on
+
+Users toggle Bluetooth in Settings - often *because* something is misbehaving - and neither OS reports the resulting
+drop per peripheral. CoreBluetooth does not call `didDisconnectPeripheral` when the adapter powers down, and several
+Android devices deliver no GATT connection-state callback either. Shiny watches the adapter itself and treats a
+power-down as a disconnect:
+
+- Every peripheral that was `Connected` or `Connecting` gets the full teardown a real disconnect gets - notifiers
+  cleared, in-flight operations broken so the operation queue is not left holding its lock, and on Android the GATT
+  client closed and service discovery re-armed.
+- `WhenStatusChanged()` emits `Disconnected`, so the status stream agrees with `IPeripheral.Status` (which reads the
+  platform live and reported `Disconnected` all along).
+- When the adapter comes back, every peripheral connected with `AutoConnect: true` is reconnected.
+
+Connects issued while the adapter is off are **parked**, not dropped. `ConnectPeripheral` below `PoweredOn` on Apple
+and `ConnectGatt` with the adapter off on Android are silent no-ops that never report back, so Shiny holds the request
+and replays it when the adapter returns - your own `Connect()` from `OnAdapterStateChanged` included. A
+`CancelConnection()` discards anything parked, as you would expect.
+
+:::caution[Behaviour change in 5.6]
+Before 5.6 an adapter power cycle produced no status change at all. If you drive your own reconnect off
+`WhenDisconnected()`, you will now see a `Disconnected` when the user turns Bluetooth off - gate that handler on the
+adapter being available, or let `AutoConnect: true` handle the cycle for you.
 :::
 
 :::caution
