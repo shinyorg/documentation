@@ -192,6 +192,122 @@ switch (action)
 | `destruction` | `string?` | Destructive action text (shown in red on some platforms). Pass `null` to omit. |
 | `buttons` | `string[]` | Action button labels |
 
+## ViewModel Dialogs
+
+`IDialogs` covers the four primitives above. When a dialog needs *real* UI to collect a result — a
+colour picker, a filter sheet, a signature pad — build an ordinary Page + ViewModel pair, have the
+ViewModel implement `IDialogAware<T>`, and `await` the value it produces.
+
+```csharp
+[ShellMap<PickColorPage>("PickColor")]
+public partial class PickColorViewModel : ObservableObject, IDialogAware<string>
+{
+    public event EventHandler<string>? Completed;
+    public event EventHandler? Cancelled;
+
+    [ShellProperty("The colour to pre-select", required: false)]
+    public string Preset { get; set; } = "Red";
+
+    [RelayCommand] void Pick(string colour) => this.Completed?.Invoke(this, colour);
+    [RelayCommand] void Cancel() => this.Cancelled?.Invoke(this, EventArgs.Empty);
+}
+```
+
+The ViewModel raises exactly one of the two events to close itself. There is no base class to inherit
+— a ViewModel's base slot belongs to `ObservableObject`.
+
+### Calling it
+
+The source generator emits a typed `Show{Route}Dialog` extension for every dialog-aware `[ShellMap]`
+ViewModel, so the call site needs no type arguments and `[ShellProperty]` values become parameters:
+
+```csharp
+var result = await navigator.ShowPickColorDialog(preset: "Violet");
+
+if (result.TryGetValue(out var colour))
+    this.Selected = colour;
+
+// or, with a fallback
+this.Selected = result.ValueOr("Red");
+```
+
+The underlying method is public if you'd rather not use the generated wrapper, but it needs both type
+arguments spelled out — C# cannot infer a type argument from a constraint:
+
+```csharp
+var result = await navigator.ShowDialog<PickColorViewModel, string>(x => x.Preset = "Violet");
+```
+
+:::note
+The dialog ViewModel must be mapped to a page like any other navigable ViewModel — `[ShellMap<TPage>]`
+plus `AddGeneratedMaps()`, or `ShinyAppBuilder.Add<TPage, TViewModel>()`. The page does **not** need
+`Shell.PresentationMode="Modal"`; the presenter pushes it modally for you.
+:::
+
+### DialogResult&lt;T&gt;
+
+`ShowDialog` returns `DialogResult<T>` rather than `T` because `default(T)` cannot express
+cancellation for a value type — a `bool` dialog could not otherwise tell "the user chose No" apart
+from "the user dismissed it".
+
+| Outcome | Result |
+|---|---|
+| ViewModel raised `Completed` | `IsCancelled == false`, `Value` set |
+| ViewModel raised `Cancelled` | `IsCancelled == true` |
+| User dismissed the dialog (hardware back, iOS swipe-down) | `IsCancelled == true` |
+| The `CancellationToken` you passed fired | throws `OperationCanceledException` |
+
+**Every dismissal path completes the `await`.** A dialog closed without either event being raised
+reports cancellation rather than hanging forever.
+
+### Lifecycle
+
+| Hook | Dialog ViewModel | Page underneath |
+|---|---|---|
+| `IPageLifecycleAware.OnAppearing` | ✅ when shown | ✅ when the dialog closes |
+| `IPageLifecycleAware.OnDisappearing` | ✅ when closed | ✅ when the dialog opens |
+| `IDisposable.Dispose` | ✅ when closed | — |
+| `INavigationAware.OnNavigatingFrom` | ❌ not raised | ❌ not raised |
+| `INavigationConfirmation.CanNavigate` | ❌ not consulted | ❌ not consulted |
+| `INavigator.Navigating` / `Navigated` | ❌ not raised | ❌ not raised |
+
+The three that don't fire are deliberate. Showing a dialog is not a navigation stack mutation, and an
+"are you sure you want to leave?" guard firing because a dialog opened would be wrong.
+
+:::caution
+The dialog ViewModel is disposed as its page detaches, which happens marginally **before** `ShowDialog`
+returns. The `DialogResult<T>` you get back was captured when the ViewModel raised its event and is
+unaffected — but don't hold on to the ViewModel instance after the await.
+:::
+
+### Changing how dialogs appear
+
+By default the page is pushed onto Shell's modal stack. Swap in your own presentation — a popup, a
+bottom sheet, anything that can host a `Page` — by implementing `IDialogPresenter`:
+
+```csharp
+public class MyPopupPresenter : IDialogPresenter
+{
+    public async Task Present(Page page, object viewModel, CancellationToken dismiss)
+    {
+        // show the page...
+        // complete this Task once the page is gone, whether the user dismissed it
+        // or `dismiss` fired. Never throw OperationCanceledException on `dismiss`.
+    }
+}
+```
+
+```csharp
+builder.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .UseDialogPresenter<MyPopupPresenter>()
+);
+```
+
+`IDialogPresenter` only decides *how* the page appears. Resolving the ViewModel, running `configure`,
+awaiting the result, and tearing the dialog down all stay in the navigator, so a custom presenter
+never reimplements any of that.
+
 ## Common Patterns
 
 ### Navigation Confirmation
