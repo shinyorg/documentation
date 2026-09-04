@@ -974,13 +974,21 @@ const index = sidebarTopics.flatMap((topic, ti) =>
       token++;
       clearTimeout(textTimer);
 
+      clearTimeout(settleTimer);
+      shownTerm = q;
+
       if (!q) {
         browse.hidden = false;
         results.hidden = true;
         empty.hidden = true;
         results.innerHTML = '';
+        // Cleared box: the next thing typed is a new search, even if it is a
+        // repeat of the one just abandoned.
+        sentTerm = '';
         return;
       }
+
+      settleTimer = setTimeout(() => trackSettled(q), SETTLE_MS);
 
       const keys = q.split(/\s+/).filter(Boolean).map(stem);
       const hits = index
@@ -1061,6 +1069,78 @@ const index = sidebarTopics.flatMap((topic, ti) =>
       items[active].scrollIntoView({ block: 'nearest' });
     }
 
+    /* ── Analytics ────────────────────────────────────────── */
+    /**
+     * One event per *settled* query rather than one per keystroke. Without the
+     * wait, "d", "do", "doc", "docu"… all arrive as separate searches and the
+     * GA report becomes a list of prefixes with the real question buried in it.
+     *
+     * The delay is deliberately longer than the Pagefind one (130ms): by the
+     * time it fires the body-text rows have been appended, so the result count
+     * read back off the DOM is the true one rather than the title-only count.
+     *
+     * `search` is GA4's own recommended event, but `search_term` only reaches
+     * reports once it is registered as a custom dimension in the GA4 admin —
+     * the automatic one is Enhanced Measurement's, which keys off a `?q=` in
+     * the URL and never sees a finder that never navigates. `search_no_results`
+     * is the one worth watching: it is the list of things the docs were asked
+     * for and did not have.
+     */
+    const SETTLE_MS = 900;
+
+    function track(name: string, params: Record<string, unknown>) {
+      const gtag = (window as any).gtag;
+      // Absent when GA is blocked, or on a page served before the tag loaded.
+      if (typeof gtag !== 'function') return;
+      gtag('event', name, params);
+    }
+
+    /**
+     * Search terms are free text a visitor typed, and GA must not be sent
+     * anything that identifies one. Too short to mean anything, absurdly long,
+     * or shaped like an email address — none of those go.
+     */
+    function reportable(q: string) {
+      return q.length >= 3 && q.length <= 100 && !/\S+@\S+\.\S+/.test(q);
+    }
+
+    let settleTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The last term actually sent, so a pause mid-word does not send twice. */
+    let sentTerm = '';
+    /** The term the rows on screen belong to, for the click event. */
+    let shownTerm = '';
+
+    function trackSettled(q: string) {
+      if (!reportable(q) || q === sentTerm) return;
+      sentTerm = q;
+      const count = results.querySelectorAll('li.res-item').length;
+      track('search', { search_term: q, search_results: count });
+      if (count === 0) track('search_no_results', { search_term: q });
+    }
+
+    /**
+     * Which result was taken, and how far down it was. A term that searches
+     * well but whose first hit nobody clicks is a ranking problem, and it looks
+     * identical to a successful search without this.
+     */
+    function trackResultClick(link: HTMLAnchorElement) {
+      if (!reportable(shownTerm)) return;
+      const items = Array.from(results.querySelectorAll('li.res-item'));
+      const row = link.closest('li.res-item');
+      track('search_result_click', {
+        search_term: shownTerm,
+        link_url: link.getAttribute('href') || '',
+        // 1-based, and 0 when the row has somehow gone — never a silent -1.
+        search_position: row ? items.indexOf(row) + 1 : 0,
+        search_result_kind: link.classList.contains('res--text') ? 'content' : 'title'
+      });
+    }
+
+    results.addEventListener('click', (e) => {
+      const link = (e.target as HTMLElement).closest('a.res') as HTMLAnchorElement | null;
+      if (link) trackResultClick(link);
+    });
+
     input.addEventListener('input', () => render(input.value));
 
     /* ── Keyboard ─────────────────────────────────────────── */
@@ -1069,7 +1149,7 @@ const index = sidebarTopics.flatMap((topic, ti) =>
       else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
       else if (e.key === 'Enter') {
         const link = results.querySelectorAll('li.res-item')[active]?.querySelector('a') as HTMLAnchorElement | undefined;
-        if (link) { e.preventDefault(); window.location.href = link.href; }
+        if (link) { e.preventDefault(); trackResultClick(link); window.location.href = link.href; }
       }
     });
 
