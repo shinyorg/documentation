@@ -957,7 +957,16 @@ export const ShinyComponents: ShinyComponent[] = [
         "id": "document-viewer",
         "nuget": "Shiny.Maui.Controls.Office",
         "blazorNuget": "Shiny.Blazor.Controls.Office",
-        "description": "Document & Slide Viewers (.docx/.pptx)",
+        "description": "Document Viewer (.docx)",
+        "category": "controls",
+        "version": "1.2.0",
+        "hideFromAppBuilder": true
+    },
+    {
+        "id": "slide-viewer",
+        "nuget": "Shiny.Maui.Controls.Office",
+        "blazorNuget": "Shiny.Blazor.Controls.Office",
+        "description": "Slide Viewer (.pptx)",
         "category": "controls",
         "version": "1.2.0",
         "hideFromAppBuilder": true

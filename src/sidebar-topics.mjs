@@ -601,8 +601,9 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Spreadsheet', link: 'controls/spreadsheet/' },
-          { label: 'Viewers', link: 'controls/document-viewer/' },
-          { label: 'Presenting Mode', link: 'controls/document-viewer/presenting', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document Viewer', link: 'controls/document-viewer/' },
+          { label: 'Slide Viewer', link: 'controls/slide-viewer/' },
+          { label: 'Presenting Mode', link: 'controls/slide-viewer/presenting', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Editor', link: 'controls/document-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Lists', link: 'controls/document-editor/lists', badge: { text: 'New', variant: 'success' } },

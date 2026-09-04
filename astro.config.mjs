@@ -70,6 +70,9 @@ export default defineConfig({
       '/release-notes/aspire/': '/aspire/orleans/release-notes/',
       '/aspire/release-notes/': '/aspire/orleans/release-notes/',
 
+      // Slide viewer split out of the combined "Document & Slide Viewers" page
+      '/controls/document-viewer/presenting/': '/controls/slide-viewer/presenting/',
+
       // Foundation redirects
       '/client/architecture/': '/foundation/architecture/',
       '/client/hosting/maui/': '/foundation/hosting/maui/',
