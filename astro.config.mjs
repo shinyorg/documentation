@@ -347,22 +347,8 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'controls-10',
-              content: 'Shiny Controls v1.0 - The Ultra Control Suite for .NET MAUI & Blazor',
-              variant: 'tip',
-              link: { text: 'O...M...G!', href: '/controls/' },
-              dismissable: false
-            },
-            {
-              id: 'controls-11',
-              content: 'Shiny Controls 1.1 - Global/Out of App Prompt Support, DataGrid Enhancements, & More!',
-              variant: 'tip',
-              link: { text: 'Show Me!', href: '/controls/' },
-              dismissable: false
-            },
-                        {
-              id: 'controls-12',
-              content: 'Shiny Controls 1.2 - View & Edit Word, Excel, & PowerPoint Docs!',
+              id: 'controls-13',
+              content: 'Shiny Controls 1.3 - View & Edit Word, Excel, & PowerPoint Docs!',
               variant: 'tip',
               link: { text: 'For Free!?!', href: '/controls/' },
               dismissable: false
@@ -376,46 +362,11 @@ export default defineConfig({
             },            
             {
               id: 'docdb-v13',
-              content: 'Document DB 13 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & More!',
+              content: 'Document DB v13 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & More!',
               variant: 'tip',
               link: { text: 'SHOW ME!!', href: '/documentdb/' },
               dismissable: false
-            },
-            {
-              id: 'music4-10',
-              content: 'Shiny.Music v4.1: More AI integration, wave form analysis, & VU metering!',
-              variant: 'tip',
-              link: { text: 'Turn It Up!', href: '/music' },
-              dismissable: false
-            },
-            {
-              id: 'mobilev5-4',
-              content: 'Client v5.4.0: Improve Contact & Calendar LINQ Async Querying, mDNS Publish & Scanning + more!',
-              variant: 'tip',
-              link: { text: 'Show Me!', href: '/client' },
-              dismissable: false
-            },
-            {
-              id: 'mobilev5-5',
-              content: 'Client v5.5.0: BLE Hosting Easy Mode, SSDP/UPNP Discovery, WIFI Control!',
-              variant: 'tip',
-              link: { text: 'Discover It!', href: '/client' },
-              dismissable: false
-            },            
-            {
-              id: 'obd-10',
-              content: 'OBD v1.0.0: Initial Release - BLE, WIFI, & USB Support for most OBD Commands!',
-              variant: 'tip',
-              link: { text: 'Drive Me There', href: '/obd' },
-              dismissable: false
-            },
-            {
-              id: 'obd-11',
-              content: 'OBD v1.1.0: OBD Emulation Library',
-              variant: 'tip',
-              link: { text: 'Drive Me There Again', href: '/obd' },
-              dismissable: false
-            }     
+            }
           ]
         }),
         starlightBlog({
