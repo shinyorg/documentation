@@ -4,7 +4,6 @@ import react from '@astrojs/react';
 import starlightBlog from 'starlight-blog';
 import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
-import starlightDocSearch from '@astrojs/starlight-docsearch';
 import starlightSidebarTopics from 'starlight-sidebar-topics';
 import starlightAnnouncement from 'starlight-announcement'
 import { sidebarTopics, sidebarTopicsOptions, cleanTopicsForStarlight } from './src/sidebar-topics.mjs';
@@ -280,7 +279,10 @@ export default defineConfig({
     mdx(),
     starlight({
       title: 'Shiny.NET',
-      pagefind: false,
+      // Pagefind builds a static full-text index into `dist/pagefind` at build
+      // time. The header has no search box of its own (see the `Search`
+      // override below) — the finder queries this index directly.
+      pagefind: true,
       favicon: '/favicon.png',
       // tableOfContents: { minHeadingLevel: 2, maxHeadingLevel: 2 },
       editLink: {
@@ -333,6 +335,9 @@ export default defineConfig({
         MarkdownContent: './src/components/MarkdownContent.astro',
         // Adds the ShinySoft header link beside starlight-blog's "Blog" link.
         ThemeSelect: './src/components/ThemeSelect.astro',
+        // Renders nothing: the finder is the only search control on the site.
+        // Pagefind stays enabled so the finder has an index to query.
+        Search: './src/components/Search.astro',
       },
       plugins:[
         //https://frostybee.github.io/starlight-announcement/
@@ -413,11 +418,6 @@ export default defineConfig({
             }     
           ]
         }),
-        starlightDocSearch({
-          appId: 'JHE1F0X28B',
-          apiKey: '92258958b2d4448dc6b24bf03f14b97b',
-          indexName: 'Shiny .NET',
-        }),
         starlightBlog({
           authors: {
             allanritchie: {
@@ -429,6 +429,20 @@ export default defineConfig({
           }
         }),
         starlightSidebarTopics(cleanTopicsForStarlight(sidebarTopics), sidebarTopicsOptions),
+        // Must come after `starlightAnnouncement`, which sets `components.Banner`
+        // unconditionally and would otherwise clobber this. See `Banner.astro`:
+        // it re-wraps the plugin's banner in `data-pagefind-ignore` so the
+        // announcement copy stays out of every page's search index.
+        {
+          name: 'shiny-banner-pagefind-ignore',
+          hooks: {
+            'config:setup': ({ updateConfig, config }) => {
+              updateConfig({
+                components: { ...config.components, Banner: './src/components/Banner.astro' },
+              });
+            },
+          },
+        },
       ],
     }),
   ],

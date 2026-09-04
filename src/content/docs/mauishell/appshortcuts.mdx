@@ -1,0 +1,134 @@
+---
+title: Shell | App Shortcuts
+description: Home screen quick actions declared on the route they open, with compile-time checking
+---
+
+Home screen quick actions — the menu you get long-pressing an app icon on iOS, or app shortcuts on
+Android — declared on the route they open.
+
+```csharp
+[ShellMap<SearchPage>(
+    Shortcut         = "Search",
+    ShortcutSubtitle = "Find anything",
+    ShortcutIcon     = "search",
+    ShortcutOrder    = 0
+)]
+public partial class SearchViewModel : ObservableObject { }
+```
+
+```csharp
+.UseShinyShell(x => x.AddGeneratedMaps())
+```
+
+That is the whole setup. No `AppDelegate`, no `MainActivity`, no manifest entries.
+
+## How it works
+
+Setting `Shortcut` is what declares the quick action — the other three properties are optional
+refinements and mean nothing on their own. **The route becomes the shortcut's id**, so there is no
+magic string to keep in sync and no hand-written `switch` over activations.
+
+Platform delivery is MAUI's own [`AppActions`](https://learn.microsoft.com/dotnet/maui/platform-integration/appmodel/app-actions);
+this layer only maps an activated id back to a route. Whether the activation pushes or resets the
+stack is inferred from `registerRoute`, exactly as it is for [App Links](/mauishell/applinks):
+
+| `registerRoute` | What the route is | An activation |
+|---|---|---|
+| `false` | `ShellContent` / tab / flyout item in AppShell XAML | resets the stack — `//route` |
+| `true` | `Routing.RegisterRoute`'d detail page | pushes onto the current stack |
+
+## Routes that need values
+
+An attribute cannot supply a runtime value, so a route with a **required** `[ShellProperty]` cannot
+declare a shortcut this way. That is a **SHINY010** error rather than a silent misfire — and the
+message points at the fix:
+
+```csharp
+.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .AddAppShortcut<ProductViewModel>(
+        "Featured",
+        icon: "star",
+        id: "featured-product",
+        configure: vm => vm.Id = 42
+    )
+)
+```
+
+The lambda works even though a shortcut outlives the process, because **only the id is persisted**
+by iOS and Android. The registration is rebuilt on every launch and resolved by id on activation, so
+nothing needs serializing. It mirrors `NavigateTo<TViewModel>(configure)` exactly.
+
+Give an explicit `id` whenever two shortcuts target the same route with different values —
+otherwise both would claim the route name.
+
+## Without source generation
+
+`AddGeneratedMaps()` emits calls to the public `AddAppShortcut<TViewModel>` API, so turning source
+generation off does not take the feature with it — call it directly:
+
+```csharp
+builder.AddAppShortcut<SearchViewModel>("Search", "Find anything", "search", order: 0);
+```
+
+You lose the compile-time diagnostics, but `AddAppShortcut` logs a warning at runtime when the
+registered set exceeds what the platform will show.
+
+## Diagnostics
+
+| Code | Severity | Meaning |
+|---|---|---|
+| **SHINY010** | Error | `Shortcut` set on a route with a required `[ShellProperty]` |
+| **SHINY011** | Warning | More than four shortcuts declared |
+| **SHINY012** | Error | A `Shortcut*` property set without `Shortcut` (the title) |
+
+**SHINY012** exists because named properties give up what a constructor parameter guarantees:
+`ShortcutIcon = "search"` with no `Shortcut` would otherwise declare nothing at all, silently.
+
+**SHINY011** exists because the platform failure is invisible — four quick actions appear, the fifth
+does not, and nothing anywhere tells you why.
+
+## Localized titles
+
+The declared strings are attribute literals, so they cannot be translated on their own. Register an
+`IAppShortcutText` and the declared string becomes a resource key:
+
+```csharp
+public class ResourceShortcutText : IAppShortcutText
+{
+    public string GetTitle(string route, string declared)
+        => AppResources.ResourceManager.GetString(declared) ?? declared;
+
+    public string? GetSubtitle(string route, string? declared)
+        => declared is null ? null : AppResources.ResourceManager.GetString(declared) ?? declared;
+}
+```
+
+```csharp
+.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .UseShortcutText<ResourceShortcutText>()
+)
+```
+
+Resolution happens at **install time**, not compile time, so `CurrentUICulture` is already known. It
+applies to generated and hand-registered shortcuts alike, and falling back to the declared literal
+means a missing resource degrades to readable text rather than a blank quick action.
+
+Installed shortcuts keep the text they were given until they are pushed again, so after the app's
+language changes:
+
+```csharp
+await appShortcuts.Refresh();   // IAppShortcuts, from DI
+```
+
+Without that call, "localized" means "localized as of last launch".
+
+## Limits worth knowing
+
+- **iOS shows at most four** quick actions and drops the excess silently. Android guarantees four.
+- **Titles truncate hard** on both platforms, and neither reports it.
+- **Subtitles are effectively iOS-only** — most Android launchers ignore them.
+- **Icons are per-platform strings**: a system icon name on iOS, a drawable resource on Android.
+  There is no cross-platform icon abstraction, because there is no honest one.
+- `AppActions.IsSupported` is false on Android below API 25; registration no-ops quietly there.

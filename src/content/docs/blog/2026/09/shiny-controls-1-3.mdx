@@ -1,0 +1,449 @@
+---
+title: 'Shiny Controls 1.3 — Word, Excel and PowerPoint in Your App. Free.'
+description: "Shiny Controls 1.3 adds IMediaService (a camera you call rather than a screen you build), a free-form OneNote-style Notebook to the Office suite, ribbons and Find across every Office editor, presenting mode for SlideView, a TimelineView, and 69 new motion icons."
+date: 2026-09-04
+authors:
+  - allanritchie
+tags:
+  - Controls
+  - MAUI
+  - Blazor
+  - Feature
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+**Shiny Controls 1.3** is the Office release. A fourth editor — a free-form **Notebook** — joins the
+document, the deck and the workbook; all four wear real **ribbons**; Find works across every one of
+them; and `SlideView` learned to present to a room. Alongside that, `IMediaService` turns the camera
+from a screen you build into a service you call, `TimelineView` lands on both hosts, and the motion
+icon set nearly triples.
+
+Everything below is on **both hosts** unless the heading says otherwise — native .NET MAUI and real
+Blazor components, same API, same painter, no WebViews.
+
+- <NugetBadge name="Shiny.Maui.Controls" showName={true} />
+- <NugetBadge name="Shiny.Blazor.Controls" showName={true} />
+- <NugetBadge name="Shiny.Maui.Controls.Office" showName={true} />
+- <NugetBadge name="Shiny.Blazor.Controls.Office" showName={true} />
+
+Go press things first: the whole Blazor gallery is live at
+[**shinyorg.github.io/controls**](https://shinyorg.github.io/controls/).
+
+---
+
+## `IMediaService` — a camera you call, not a screen you build
+
+*MAUI only.*
+
+Most apps reaching for a camera do not want a camera *screen*. They want a **result**: a photo of a
+receipt, a barcode, the number off a credit card. MAUI's own `IMediaPicker` gets you there by handing
+the job to the system camera UI — which cannot show a scan reticle, a bounding box, an effect strip,
+or a single word of your own copy. So every app that needs any of that hand-rolls a camera page.
+
+That page is now the service.
+
+```csharp
+builder
+    .UseShinyControls()
+    .UseShinyCamera(media =>
+    {
+        media.CompressionQuality = 85;
+        media.MaxDimension = 2048;
+        media.OutputFormat = MediaImageFormat.Jpeg;
+    });
+```
+
+```csharp
+public class DeliveryViewModel(IMediaService media)
+{
+    public async Task CapturePod()
+    {
+        var photo = await media.TakePhotoAsync(new PhotoCaptureOptions
+        {
+            Title = "Proof of delivery",
+            Instructions = "Fit the whole label in frame"
+        });
+
+        if (photo is not null)
+            await photo.SaveAsync(Path.Combine(FileSystem.AppDataDirectory, "pod.jpg"));
+    }
+}
+```
+
+You get camera and gallery permissions, `TakePhotoAsync` / `RecordVideoAsync` through a modal built
+from [`CameraView`](/controls/cameraview/), `PickPhotoAsync` / `PickPhotosAsync` / `PickVideoAsync`,
+and — from the analyzer add-ons — a one-line verb per document type.
+
+```csharp
+var code     = await media.ScanBarcodeAsync();          // closes on the first hit
+var card     = await media.ScanCreditCardAsync();
+var licence  = await media.ScanDriversLicenseAsync();
+var passport = await media.ScanPassportAsync();
+var contact  = await media.ScanBusinessCardAsync();
+
+await foreach (var scanned in media.ScanBarcodesAsync()) // stays up and streams
+    this.Codes.Add(scanned.Value);
+```
+
+Every scan comes in **two shapes**, and the plural one is the real one: the modal opens when
+enumeration *starts* and closes when it ends, so the singular overload is literally "take the first,
+then stop enumerating". Cancellation, the user tapping ✓, `MaxResults` and `Timeout` all end it the
+same way. Duplicate filtering is on by default — a code sitting in front of the lens is otherwise
+re-read every time it drifts out of view and back — and the key is chosen per type rather than by
+generic equality: symbology **plus** value for a barcode, since the same digits as an EAN-13 and as a
+QR code are two different scans.
+
+A few decisions worth calling out, because they are the ones you would otherwise hit later:
+
+- **Anything that presents UI asks for its own permissions first**, and returns `null` on a cancel or
+  a refusal rather than throwing. A cancelled camera is an ordinary outcome, not an exception.
+- **The modal ships no localizable strings of its own.** Close, torch, flip, flash, retake and accept
+  are drawn vector paths, not font glyphs or emoji — so there is nothing on the page to translate, and
+  the only text it shows is the `Title` and `Instructions` you supply already localized.
+- **A scan modal has no capture button at all.** The camera is on and streaming results; a shutter
+  would invite a tap with nothing for a still to be the result of.
+- **Compression defaults live at registration.** "Our photos are 85% JPEG capped at 2048px" is stated
+  once rather than at twenty call sites, and the per-call options are nullable so *unset* is
+  distinguishable from *deliberately 92*. Nothing is re-encoded when nothing was asked for.
+- **The service knows nothing about barcodes.** It exposes one primitive — `ScanAsync<T>` — and each
+  analyzer package contributes its typed verb on top. It is public, so an analyzer we ship no verb for
+  is a dozen lines rather than a fork.
+
+→ [IMediaService](/controls/cameraview/media-service)
+
+---
+
+## A free-form Notebook, in the Office packages
+
+`NotebookEditor` is the lone canvas; `NotebookEditorView` wraps it in a ribbon, section tabs and a page
+list. A OneNote-style page you write anywhere on, draw over, and fill with the same shapes, pictures
+and rich text as the `.docx` and `.pptx` editors.
+
+```csharp
+var notebook = NotebookDocument.Create("Field notebook");
+using var opened = await NotebookDocument.OpenAsync("field.shinynote");
+```
+
+```razor
+<div style="height:640px">
+    <NotebookEditorView Notebook="notebook" @bind-Tool="tool" />
+</div>
+```
+
+```xml
+<office:NotebookEditorView x:Name="Editor" />
+```
+
+The one structural difference from a slide is that **a page has no edges**. A slide is a fixed artboard
+the viewer fits to the window; a page grows to hold whatever is on it — its extent is the minimum
+unioned with every item's bounds plus padding — and the canvas scrolls and zooms instead, so there is
+always blank room past the furthest thing to keep writing into. Everything else is machinery the other
+three editors already run on: the same shape geometry, the same rich-text layout engine, the same
+SkiaSharp painter shared verbatim by both hosts, the same transactional undo stack.
+
+**Three layers of state, kept apart deliberately.** The *tool* decides what a press starts — Select,
+Text, Shape, Pen, Highlighter, Eraser, Lasso, Pan. The *selection* is a **set** of item ids rather than
+a single index, because a lasso routinely catches thirty strokes and a picture and they all have to
+move together. *Text editing* is a caret inside exactly one item. Escape steps back out one layer at a
+time — leaves the text, puts the tool down, clears the selection — which is the only affordance that
+makes a modal canvas safe to hand someone.
+
+**Ink is a real model, not a stroke overlay.** Pressure is normalised 0..1 where **0.5 means "no
+idea"** — the value a mouse, a finger on a screen with no force sensor and a stylus mid-flick all
+report — and it multiplies the pen's nominal width rather than replacing it, so switching device does
+not change how thick the pen looks. The highlighter paints *beneath* every other item, because ink over
+text greys the glyphs even at 40% alpha, which is exactly what a highlighter is not for. The point
+eraser **splits a stroke into separate items** where it passes through rather than leaving a hole in
+the point list. Hit-testing and lasso capture both work against a stroke's **path**, not its bounding
+box — a stroke's rectangle is mostly empty, so treating it as solid makes one flourish swallow every
+click in that corner.
+
+`.shinynote` is a zip holding JSON and the pictures: `notebook.json` for the notebook, its sections and
+each page's settings, `pages/{pageId}.json` for that page's items in z-order, pictures as files under
+`media/`. Pages are separate entries because a notebook is the one Office-shaped thing here that
+genuinely grows without bound, and it makes a page recoverable when a neighbour is corrupt. This is
+also the one editor whose **model is the truth** rather than a projection of an OOXML package, so there
+is no byte-identical promise — the equivalent guarantee is that everything survives a save and reopen.
+
+It is also the one Office surface whose **page follows the app theme**. A document and a deck are
+pictures of something printed, so tinting the paper misrepresents the file; a notebook page was never
+printed and has no canonical appearance. Existing ink is never recoloured, though — repainting a user's
+strokes is not theming.
+
+→ [Notebook](/controls/notebook/)
+
+---
+
+## The Office editors got their ribbons
+
+The Spreadsheet, Document Editor, Slide Editor and Image Editor were each a single scrolling strip of
+two dozen icons separated by anonymous hairlines. They are **titled groups on tabs** now, with undo and
+redo in a quick access row where they never move.
+
+| Control | Tabs |
+|---|---|
+| **Spreadsheet** | Home (Clipboard · Font · Alignment · Number · Editing) · **Data** (Cells · Columns · Functions) |
+| **Document Editor** | Home (Font · Paragraph · Proofing) · Layout (Page Setup · Insert · Zoom) · Shapes |
+| **Slide Editor** | Home (Slide · Font · Paragraph) · Insert · Shapes |
+| **Image Editor** | Home (Tools · Shapes · Image) · View · contextual *Drawing / Shape / Text Tools* |
+
+The tab strip stays off by default where there is a single tab to show — these are bars a host drops
+above a surface, not an application's whole chrome, and a strip carrying one "Home" is noise.
+
+The split is by **what a command changes**, not by how often it is reached. On the spreadsheet, *Home*
+changes how a cell looks and *Data* changes the shape of the sheet under it — which is what let the
+structural half finally grow past its ceiling. Delete rows and columns now sit beside the insert pair
+whose icons they mirror; a **Width** split button fits columns to their contents and offers four fixed
+widths behind its chevron, including the sheet's own default (the only way back once a column has been
+dragged); hide and unhide columns; and a **function library** gives SUM, AVERAGE, COUNT, MIN and MAX a
+button each. All of those existed on `SpreadsheetController` with nothing on the bar to reach them.
+
+The document editor was tried with four tabs, and Insert, Layout and Review each ended up holding a
+single group — a click to reach a bar with one button on it. Proofing rides on Home instead, because
+spelling is something you do while writing rather than a separate pass. The slide editor stops at two,
+because a slide is a fixed artboard always scaled to fit: there is nothing to pan to or zoom in on, so
+nothing to fill a third tab with.
+
+**Shapes are a tab in both editors, not a dropdown.** Twenty shapes behind one button is a panel large
+enough to cover the document it is about to draw on. Every button is drawn as the shape it inserts,
+using the same polygon, star and arrow maths the painter uses to lay that shape into the document —
+hand-drawn icons drift from what actually gets inserted the first time either side is adjusted.
+
+Two ribbon features came out of this and belong to `Ribbon` itself:
+
+- **`Ribbon.SimplifyBelowWidth`** switches the bar to the dense one-row layout on its own. Group
+  collapsing is the wrong answer at phone width — it folds groups into dropdowns worst-first, which is
+  right when a window is a little too narrow, but on a phone there is room for no group at all and
+  every command ends up behind a dropdown. A collapse the user asked for is never overridden.
+- **A ribbon that scrolls now says so.** Where collapsing is off, or the collapsed groups still do not
+  fit, the body scrolls — and a scrolling bar looked exactly like one that did not. Both hosts draw a
+  fade on whichever edge still has content past it. The platform scroll indicator is not the answer: on
+  iOS and Android it only appears once a scroll is under way, which is after the moment the user needed
+  to be told.
+
+:::caution[Breaking — MAUI only]
+The MAUI `Ribbon` moved from `Shiny.Maui.Controls.Desktop` into `Shiny.Maui.Controls`, and its
+namespace with it: `Shiny.Maui.Controls.Desktop.Ribbons` → `Shiny.Maui.Controls.Ribbons`. The desktop
+package's target frameworks stop at the desktop ones, which put the ribbon out of reach of every core
+control that wanted it. **XAML is unaffected** — it was always mapped onto the
+`http://shiny.net/maui/controls` URI, so `shiny:Ribbon` reads exactly as before and only a C# `using`
+needs changing. Blazor already had it in core and does not move.
+:::
+
+→ [Ribbon](/controls/ribbon/) · [Spreadsheet](/controls/spreadsheet/) ·
+[Document Editor](/controls/document-editor/) · [Slide Editor](/controls/slide-editor/) ·
+[Image Editor](/controls/imageeditor/)
+
+---
+
+## Find, on all three Office controls
+
+Home ▸ Find carries a box, a `3/12` readout and a previous/next pair on the Word, PowerPoint and Excel
+toolbars — one `OfficeFindBar` per host over one `IFindController`, which all three finders implement.
+The bar has no idea whether "the next one" is a paragraph below the fold, a shape on slide nine, or a
+cell three sheets over.
+
+Typing searches as you type and **steps onto the first hit at or after the caret**, not the top of the
+content — a find that always restarted at the beginning takes the user away from what they were
+reading. The arrows wrap, because a "next" that goes quiet at the last hit looks identical to one that
+has finished the document. A hit is **selected** rather than merely scrolled to: everything a person
+does after finding a word operates on the word. Finding changes nothing, so it stays live in a
+read-only editor.
+
+What each search covers is decided by what its arrows can reach. Word searches paragraphs and not table
+cells — a document position is a block and an offset, and a table has neither, so counting those hits
+would promise something "next" could never step to. PowerPoint searches the whole deck but only the
+shapes a slide itself owns, since a hit inside a layout or master would count the company name once per
+slide and step the user into something they cannot select. Excel searches cell text **as the formula bar
+shows it**, which is the only choice under which searching `SUM` finds the cells that total something.
+
+Every hit is washed amber and the one you are on is drawn as the **selection** instead of stacking the
+two — stacking made the current match a muddy blend and the hardest thing on the page to pick out,
+which is the opposite of what it is for.
+
+→ [Find in Office Documents](/controls/office-find/)
+
+---
+
+## `SlideView` presents
+
+A viewer shows a deck to the person holding the device. Presenting mode shows it to a room.
+
+```csharp
+this.Viewer.StartPresenting();   // MAUI
+```
+
+```razor
+<SlideView @ref="viewer" Deck="deck" @bind-IsPresenting="presenting" />
+@code {
+    Task PresentAsync() => this.viewer!.StartPresentingAsync();   // Blazor
+}
+```
+
+`IsPresenting` fits the slide **edge to edge on black** with no border and no margin, drops the app's
+chrome, and lays an auto-hiding control bar over it — previous, a counter, next, **Notes**, Exit — that
+fades after a few seconds and comes back on a touch or a pointer move. Tapping advances, except in the
+left quarter of the surface, which goes back. `Mode` is ignored for the length of the show and restored
+when it ends, because a thumbnail wall is how you find a slide rather than how you show one, and the
+inline viewer is left on the slide the show *ended* on.
+
+Presenting also pins the theme: black surround whatever the app is set to, and the slide's border
+dropped. A viewer's chrome is part of an app, but on a projector any lift at all reads as a grey frame
+around the deck.
+
+**Speaker notes** are in the show. The Notes button appears only when some slide in the deck actually
+has them, and the panel does *not* fade with the bar — notes are read while you are talking rather than
+while you are moving the pointer, so putting them on the chrome's timer would mean wiggling the mouse
+to finish a sentence.
+
+On MAUI the show is a **modal page carrying its own `SlideView`**, not a re-parented viewer: moving a
+view in the tree rebuilds its platform view, which is a visible stall on a canvas. Its own controller
+too — a controller owns a viewport, and sharing one would leave the inline viewer laid out for the
+projector after the show ended, with nothing to resize it back. Only the index crosses back. A modal
+page is also what makes the platform back gesture work, and the display is kept awake for the duration.
+
+On Blazor the CSS covers the viewport **and then** the Fullscreen API is asked for on top of it, in that
+order — `requestFullscreen` can be refused, and a refusal still has to give the room a full-window deck
+rather than nothing at all. `F5` starts a show and `Escape` leaves one, which are PowerPoint's keys.
+Prefer `StartPresentingAsync()` over setting the bound parameter: a browser grants fullscreen only
+inside the gesture that asked for it, and a round trip through a parameter loses that gesture.
+
+→ [Presenting mode](/controls/document-viewer/presenting)
+
+---
+
+## The rest of the Office work
+
+Individually small, collectively the difference between a demo and something you would hand a user:
+
+- **Page orientation.** Layout ▸ Page carries Portrait and Landscape as two toggles rather than one,
+  because a page is one of two things rather than on or off. Turning the paper swaps the dimensions
+  **and** writes `w:orient` — do one without the other and Word either shows the wrong state or
+  re-swaps on open.
+- **Page numbering, headers, footers, page breaks and print layout** are on the ribbon. All four were
+  already in the controller and reachable only from code. The page number is a menu rather than a
+  button, because a number has a place and a form, and it *appends* to a header already there rather
+  than replacing it.
+- **Page margins** are four buttons — Normal, Narrow, Moderate, Wide — rather than one button that
+  opens a sheet of four. Four is few enough to show, and the whole point of a ribbon is that the
+  choices are on it.
+- **Zoom, and a fit-width that makes a page readable on a phone.** Pinch on touch, ctrl-wheel on the
+  desktop, and a Zoom group stepping 50 – 300%. **Fit width** sets the zoom so the page exactly spans
+  the window, which on a phone is the difference between a document you can read and one you pan across
+  a line at a time.
+- **Cut, copy, paste, insert row and insert column on the spreadsheet** — whole rows and columns, not
+  just cell ranges, taking values, formulas and formatting as one undoable step. A **marching-ants
+  border** marks what is on the clipboard, in its own colour rather than a dashed version of the
+  selection green, since marking a source and moving to a destination is the whole shape of a paste.
+- **Both editable surfaces can be panned with a finger.** A drag meant "extend the selection", which is
+  right for a mouse and left touch with no gesture to scroll with — on a phone there was no way to
+  reach a column off the right-hand edge at all. Under touch a tap selects, a drag **pans**, and the
+  selection is extended by dragging the round handles on its ends. Nothing changes for a mouse. The
+  kind is read off each pointer event rather than decided per platform, because both turn up in one
+  session on an iPad with a trackpad.
+- **Spelling suggestions on the keyboard accessory bar** *(iOS/Android)*. The red underline was the
+  whole of what a phone user got, since the menu that acts on one hangs off a long press — and a long
+  press is not a gesture anyone performs on a word they were not already suspicious of. Corrections now
+  appear above the keyboard while the caret is inside a misspelling, with Ignore and Add beside them.
+  From the toolbar, Home ▸ Proofing walks the errors in either direction for a complete review loop.
+- **Watermarks, on the viewers as well as the editors.** `Watermark` draws a picture behind the content
+  on all six controls, defaulting to a 0.15 wash because the failure people actually hit is one drawn
+  at full strength that makes the page unusable. It is a **display** watermark — drawn, not written
+  into the file — which is deliberate: Word keeps a VML shape in the header part, Excel has no
+  watermark at all and fakes it with a header image, and PowerPoint expects a picture on the slide
+  master, so persisting means three unrelated mechanisms where drawing means one.
+- **Each Office control wears its own colour.** `Accent` paints the ribbon's header band, tab ink and
+  underline, and defaults to the colour Microsoft's own application wears — Excel green `#107C41`, Word
+  blue `#185ABD`, PowerPoint red `#C43E1C`. A user reads those colours as "spreadsheet" and "slides"
+  before any label has been looked at. It is the one part of an Office control's appearance
+  deliberately *not* taken from the app's theme; set your own brand colour, or `null` to leave the bar
+  on the theme.
+
+---
+
+## `TimelineView`
+
+A vertical rail of markers with arbitrary content beside each one — the wizard's three-state marker
+turned on its side and made item-driven. An activity feed, an order's progress, an audit trail, a
+changelog.
+
+```xml
+<shiny:TimelineView ItemsSource="{Binding Events}" ActiveIndex="2">
+    <shiny:TimelineView.ItemTemplate>
+        <DataTemplate>
+            <VerticalStackLayout Spacing="2">
+                <Label Text="{Binding Title}" FontAttributes="Bold" />
+                <Label Text="{Binding Detail}" FontSize="13" Opacity="0.75" />
+            </VerticalStackLayout>
+        </DataTemplate>
+    </shiny:TimelineView.ItemTemplate>
+</shiny:TimelineView>
+```
+
+```razor
+<TimelineView TItem="Delivery" ItemsSource="events" ActiveIndex="2">
+    <ItemTemplate>
+        <div class="entry-title">@context.Title</div>
+        <div class="entry-body">@context.Detail</div>
+    </ItemTemplate>
+</TimelineView>
+```
+
+`ActiveIndex` says how far along it is: nodes before it are complete, the one at it is current and
+draws a ring, everything after is pending, and the connector fills to match so the rail reads as a
+progress bar rather than a set of unrelated links. It **defaults to -1** — a timeline handed no
+position should not silently claim its first entry has happened — and `AllActive` fills every node for
+a history where everything has already happened.
+
+Rows size to their content, which is what decides how the rail is built: each node is one row whose
+height comes from whatever the template produced, and the connector stretches to fill it. That is why
+the rail is built **per row** rather than drawn as one continuous line behind the stack — a single line
+would have to be measured against a total height nothing knows until after layout. The marker sits a
+little below the top of its row so it lines up with the *first line of text* rather than the middle of
+the content box. Not virtualized on either host: the deliberate trade for rows of differing height,
+which is exactly what a recycling list is worst at.
+
+The three templates bind to different things on purpose. `ItemTemplate` and `OppositeTemplate` take the
+**item**, because content beside a timeline is ordinary content and should not reach through a wrapper
+to say `Item.Title`. `MarkerTemplate` takes a **`TimelineNode`** — index, state, whether it caps either
+end — because everything deciding how a marker is drawn is a property of position and none of it exists
+on the item.
+
+→ [Timeline](/controls/timeline/)
+
+---
+
+## Motion icons: 42 → 111
+
+Sixty-nine new icons, each with motion **authored** for it rather than a preset applied to it: a folder
+tab that lifts off its crease, a page that turns by squashing about the spine, three raindrops that
+fall, vanish and reappear above the cloud, a compass needle that settles in progressively smaller
+swings, a credit card that flips through a horizontal scale of zero.
+
+The additions fill the gaps the original set had — a complete set of arrows and chevrons, the rest of
+the transport bar (`stop`, `record`, `skip-back`, `skip-forward`, `shuffle`, `repeat`, `mute`), files
+and folders, weather, and the round status glyphs — grouped in the docs as **Actions, Navigation,
+Objects, Media, Files, Weather and Indicators**. Names stay one flat, case-insensitive namespace, so
+nothing about lookup or `MotionIconLibrary.Names` changes and no existing icon was renamed or redrawn.
+
+Directional icons are **matched sets**: every arrow travels the way it points and pulls its shaft in
+behind the head, every chevron bounces once in its own direction — so swapping `arrow-right` for
+`arrow-left` in a right-to-left layout gets the mirrored motion for free.
+
+→ [Motion Icons](/controls/motion-icons/) · [the icon set](/controls/motion-icons/icons/)
+
+---
+
+## Getting started
+
+```bash
+dotnet add package Shiny.Maui.Controls            # .NET MAUI
+dotnet add package Shiny.Blazor.Controls          # Blazor
+
+dotnet add package Shiny.Maui.Controls.Office     # Word, Excel, PowerPoint, Notebook
+dotnet add package Shiny.Maui.Controls.Camera     # CameraView + IMediaService
+```
+
+The [full 1.3 release notes](/controls/release-notes/) carry everything, including the fixes this post
+skipped. Then go press things in the [**playground**](https://shinyorg.github.io/controls/), and see
+the [controls documentation](/controls/) for the rest.

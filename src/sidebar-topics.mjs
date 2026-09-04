@@ -461,6 +461,7 @@ export const sidebarTopics = [
           { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
           { label: 'Source Generation', link: 'mauishell/sourcegen' },
           { label: 'App Links', link: 'mauishell/applinks' },
+          { label: 'App Shortcuts', link: 'mauishell/appshortcuts' },
           { label: 'AI Integration', link: 'mauishell/ai' },
           { label: 'Release Notes', link: 'mauishell/release-notes' }
         ]
