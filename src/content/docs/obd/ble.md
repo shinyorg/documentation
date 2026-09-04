@@ -281,6 +281,30 @@ Both the scanner and the transport's auto-scan match on the peripheral's name if
 
 That fallback matters on iOS. `CBPeripheral.Name` is null while scanning a peripheral the device has never connected to — the name lives only in the advertisement — so matching on the peripheral name alone finds almost nothing on iPhone. Android and Windows populate the name from the scan record, which is why this only shows up on Apple platforms.
 
+### Adapters with no name at all
+
+The fallback makes the name better, not reliable. Plenty of ELM327 clones advertise no name of any kind, and on iOS an adapter you have never connected to may have neither source until a connection has succeeded and CoreBluetooth has cached one.
+
+`BleObdDeviceScanner` therefore surfaces these too, with `Name` as an empty string. **Identify them by `Id`** — the BLE peripheral UUID, which is always present — and let your picker fall back to the id or RSSI for the row label.
+
+This is why you should persist `Id`, never `Name`, when remembering an adapter to reconnect to:
+
+```csharp
+// Pairing: remember the id
+settings.AdapterId = device.Id;
+
+// Later, reconnecting
+await scanner.Scan(device =>
+{
+    if (device.Id == settings.AdapterId)
+        selected = device;
+}, cts.Token);
+```
+
+Requiring a name here is a subtle trap on iOS, because it only bites the *first* connection of a process — the symptom is that pairing works, the first reconnect after a cold start fails, and every reconnect after that succeeds.
+
+Setting `DeviceNameFilter` still excludes unnamed adapters, and that is correct: a filter cannot match a name that isn't there. Use one when narrowing by name is what you actually want.
+
 ### Why the scan isn't filtered by service UUID
 
 `ServiceUuid` is used to talk to the adapter after connecting. It is deliberately **not** used as a scan filter.
@@ -307,7 +331,7 @@ Read the line as follows:
 
 - **The adapter isn't in the log at all** — it isn't advertising, is out of range, or BLE permissions were denied.
 - **It's in the log but not in your callback** — your `DeviceNameFilter` doesn't match the `Name` shown. Note that the filter is a case-insensitive *substring* match.
-- **`Name: (none)`** — the adapter advertises no name at all, so no name filter can match it. Leave `DeviceNameFilter` null and select the device by `Id` instead.
+- **`Name: (none)`** — the adapter advertises no name at all, so no name filter can match it. It is still surfaced to your callback with an empty `Name` as long as `DeviceNameFilter` is null; select it by `Id`.
 - **`Services: (none advertised)`** — normal for ELM327 clones, and harmless. The service is found after connecting.
 
 ### Connects, but every command times out

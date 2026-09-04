@@ -53,14 +53,16 @@ reconnects behind your back. Call `Connect()` again to arm it once more.
   cancelling the previous pending connection first (iOS otherwise holds onto its connection slot).
 - **Windows** - the connection is held by a `GattSession` with `MaintainConnection` set, so the OS keeps the link up and
   re-establishes it itself.
+- **Linux (BlueZ)** - Shiny re-issues the connect on a disconnect, but the adapter's own `Powered` state is not tracked,
+  so the Bluetooth off/on handling described below does not apply there.
 :::
 
 ### Bluetooth turned off and on
 
-Users toggle Bluetooth in Settings - often *because* something is misbehaving - and neither OS reports the resulting
-drop per peripheral. CoreBluetooth does not call `didDisconnectPeripheral` when the adapter powers down, and several
-Android devices deliver no GATT connection-state callback either. Shiny watches the adapter itself and treats a
-power-down as a disconnect:
+Applies to **iOS, Mac Catalyst, macOS, and Android**. Users toggle Bluetooth in Settings - often *because* something is
+misbehaving - and neither OS reports the resulting drop per peripheral. CoreBluetooth does not call
+`didDisconnectPeripheral` when the adapter powers down, and several Android devices deliver no GATT connection-state
+callback either. Shiny watches the adapter itself and treats a power-down as a disconnect:
 
 - Every peripheral that was `Connected` or `Connecting` gets the full teardown a real disconnect gets - notifiers
   cleared, in-flight operations broken so the operation queue is not left holding its lock, and on Android the GATT
@@ -73,6 +75,10 @@ Connects issued while the adapter is off are **parked**, not dropped. `ConnectPe
 and `ConnectGatt` with the adapter off on Android are silent no-ops that never report back, so Shiny holds the request
 and replays it when the adapter returns - your own `Connect()` from `OnAdapterStateChanged` included. A
 `CancelConnection()` discards anything parked, as you would expect.
+
+Starting a scan while a peripheral is waiting to reconnect is safe: `Scan()` prunes the manager's peripheral cache, but
+it no longer evicts a peripheral with an armed auto-reconnect or a parked connect. Scanning as a fallback while the link
+is down - a natural thing to do - will not quietly cancel the reconnect.
 
 :::caution[Behaviour change in 5.6]
 Before 5.6 an adapter power cycle produced no status change at all. If you drive your own reconnect off
