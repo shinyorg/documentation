@@ -1,0 +1,219 @@
+---
+title: Shell | App Links
+description: Deep linking with custom URL schemes and universal links by declaring templates on ShellMap
+---
+
+App links are declared where the route already is — the `appLinks` argument of `[ShellMap]`. There
+is no separate attribute, no URL parsing to write, and no platform class to subclass.
+
+```csharp
+[ShellMap<ProductPage>(
+    description: "Shows a product",
+    appLinks: ["product/{id}", "p/{id}"]
+)]
+public partial class ProductViewModel : ObservableObject
+{
+    [ShellProperty("The product id")] public int     Id  { get; set; }
+    [ShellProperty(required: false)]  public string? Tab { get; set; }
+}
+```
+
+`myapp://product/123?tab=reviews` and `https://shinylib.net/p/123` both open `ProductPage` with
+`Id = 123` and `Tab = "reviews"`.
+
+## How values bind
+
+- `{token}` path segments bind to the `[ShellProperty]` of the same name, case-insensitively.
+- Query string values bind by property name too, so a value can arrive either way.
+- A path token wins over a query value of the same name.
+- Templates carry no scheme or host — any configured scheme or domain serves any template, so
+  adding a domain later needs no attribute change.
+- Values convert with `InvariantCulture`. `1.5` parses the same on a German device as a US one.
+- A missing or unparseable **required** value is a routing miss, not a crash. The next-best template
+  is tried, then `OnUnhandled`.
+
+Supported property types: `string`, all integral types, `float`, `double`, `decimal`, `bool`,
+`Guid`, `DateTime`, `DateTimeOffset`, `DateOnly`, `TimeOnly`, `TimeSpan`, `Uri`, enums (by name,
+case-insensitively), and nullable variants of each. Anything else is a **SHINY006** build error
+rather than a runtime surprise.
+
+## Setup
+
+```xml
+<PropertyGroup>
+  <ShinyAppLinkSchemes>myapp</ShinyAppLinkSchemes>
+  <ShinyAppLinkDomains>shinylib.net;www.shinylib.net</ShinyAppLinkDomains>
+</PropertyGroup>
+```
+
+```csharp
+.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .UseAppLinks()
+)
+```
+
+`UseAppLinks()` installs the platform delivery points itself:
+
+| Platform | Hook | Carries |
+|---|---|---|
+| iOS / MacCatalyst | `OpenUrl` | Custom schemes |
+| iOS / MacCatalyst | `ContinueUserActivity` | Universal links |
+| Android | `OnCreate` | Cold start, from the launch intent |
+| Android | `OnNewIntent` | Warm start |
+
+Your `AppDelegate`, `MainActivity` and `App` classes stay untouched. Windows has no automatic hook —
+forward protocol activation to `IAppLinks.Handle(uri)`.
+
+## Push or reset is inferred
+
+You already declared whether a route is a Shell item or a detail page. The library does not ask twice.
+
+| `registerRoute` | What the route is | An app link |
+|---|---|---|
+| `false` | `ShellContent` / tab / flyout item in AppShell XAML | resets the stack — `//route` |
+| `true` | `Routing.RegisterRoute`'d detail page | pushes onto the current stack |
+
+A `ShellContent` cannot be pushed at all, so the inference is not a heuristic — it is the only
+correct navigation in each case.
+
+On a **warm start** a pushed link lands on top of wherever the user already was, so back returns
+them there. On a **cold start** it lands on Shell's default first item, or on `DefaultRoot` when set:
+
+```csharp
+.UseAppLinks(o =>
+{
+    o.DefaultRoot = "//main/home";                  // back stack for cold-start pushes
+    o.ResolveRoute = match => "//somewhere/else";   // last word on the destination
+    o.OnUnhandled = uri => Task.FromResult(false);  // nothing matched
+})
+```
+
+`ResolveRoute` is the escape hatch for a Shell whose structure breaks the `registerRoute`
+convention. Most apps never set any of these.
+
+## Matching order
+
+Literal segments beat tokens, so `product/featured` is tried before `product/{id}` regardless of
+declaration order. If the more specific template fails to bind its values, the next candidate still
+gets a turn. Two templates of the same shape — same length, tokens in the same positions, identical
+literals — are a **SHINY007** build error, so the runtime never has to guess.
+
+## Manifests
+
+The build **validates** your manifests and emits a warning containing the exact markup to paste. It
+does not edit them, for reasons that are not going away:
+
+- Android's merged manifest names the launcher activity with a CRC64 hash of its namespace
+  (`crc64<hash>.MainActivity`) that MSBuild cannot compute, so a generated manifest overlay has
+  nothing stable to merge onto and would add a second activity instead of amending the real one.
+- Apple universal links additionally need an `apple-app-site-association` file served from the
+  domain and the Associated Domains capability on the App ID — neither reachable from a build.
+
+| Code | Platform | Missing |
+|---|---|---|
+| **SHINY101** | Android | `[IntentFilter]` for a custom scheme |
+| **SHINY102** | Android | Verified (`AutoVerify`) `[IntentFilter]` for a domain |
+| **SHINY103** | iOS / MacCatalyst | `CFBundleURLTypes` in `Info.plist` |
+| **SHINY104** | iOS / MacCatalyst | `com.apple.developer.associated-domains` in `Entitlements.plist` |
+| **SHINY105** | Windows | `windows.protocol` extension in `Package.appxmanifest` |
+
+Set `<ShinyAppLinkValidation>false</ShinyAppLinkValidation>` to silence them.
+
+### Android
+
+```csharp
+[IntentFilter(
+    new[] { Intent.ActionView },
+    Categories = new[] { Intent.CategoryDefault, Intent.CategoryBrowsable },
+    DataSchemes = new[] { "myapp" }
+)]
+[IntentFilter(
+    new[] { Intent.ActionView },
+    Categories = new[] { Intent.CategoryDefault, Intent.CategoryBrowsable },
+    DataScheme = "https",
+    DataHosts = new[] { "shinylib.net", "www.shinylib.net" },
+    AutoVerify = true
+)]
+public class MainActivity : MauiAppCompatActivity { }
+```
+
+Verified App Links also need `assetlinks.json` at `https://<domain>/.well-known/assetlinks.json`
+carrying your signing certificate fingerprint.
+
+### iOS and MacCatalyst
+
+`Platforms/iOS/Info.plist` — custom schemes:
+
+```xml
+<key>CFBundleURLTypes</key>
+<array>
+    <dict>
+        <key>CFBundleTypeRole</key>
+        <string>Editor</string>
+        <key>CFBundleURLName</key>
+        <string>com.yourcompany.yourapp</string>
+        <key>CFBundleURLSchemes</key>
+        <array>
+            <string>myapp</string>
+        </array>
+    </dict>
+</array>
+```
+
+`Platforms/iOS/Entitlements.plist` — universal links:
+
+```xml
+<key>com.apple.developer.associated-domains</key>
+<array>
+    <string>applinks:shinylib.net</string>
+    <string>applinks:www.shinylib.net</string>
+</array>
+```
+
+Creating the entitlements file is enough on its own — the SDK picks it up without a
+`CodesignEntitlements` property. Subdomains are not implicit: `shinylib.net` does not cover
+`www.shinylib.net`. Append `?mode=developer` to a domain to test on device without waiting on
+Apple's CDN cache.
+
+Each domain also needs `https://<domain>/.well-known/apple-app-site-association`, served as
+`application/json` with no redirects and no file extension, plus the Associated Domains capability
+on the App ID and a regenerated provisioning profile.
+
+## Building links to share
+
+When exactly one scheme is configured (or one domain, with no scheme), an outbound builder is
+generated per route:
+
+```csharp
+var uri = navigator.CreateProductAppLink(id: 42, tab: "reviews");
+// myapp://product/42?Tab=reviews
+```
+
+With several schemes or domains configured there is no single correct base URL, so nothing is
+generated — build the URI yourself.
+
+## Handling a link by hand
+
+`IAppLinks` is public for the platforms and situations the automatic hooks cannot reach:
+
+```csharp
+public interface IAppLinks
+{
+    Task<bool> Handle(Uri uri);
+    bool TryResolve(Uri uri, out AppLinkMatch match);
+}
+```
+
+`TryResolve` matches without navigating, which is useful in tests and for inspecting a link before
+acting on it.
+
+## Diagnostics
+
+| Code | Severity | Meaning |
+|---|---|---|
+| **SHINY005** | Error | Template token has no matching `[ShellProperty]` |
+| **SHINY006** | Error | A templated property's type cannot be converted from a URL string |
+| **SHINY007** | Error | Two routes declare templates of the same shape |
+| **SHINY008** | Warning | `appLinks` declared but no scheme or domain configured |
+| **SHINY009** | Warning | A required property is not a token in the template, so links must supply it as a query value |
