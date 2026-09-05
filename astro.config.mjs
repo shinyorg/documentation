@@ -357,8 +357,8 @@ export default defineConfig({
               dismissable: false
             },
             {
-              id: 'httpserver-10',
-              content: 'Shiny.Net.HttpServer v1 - A lightweight feature rich HTTP Server - Tunnels, Websockets, AOT, ASPNET Featureset, & Works EVERYWHERE!',
+              id: 'httpserver-11',
+              content: 'Shiny.Net.HttpServer v1.1 - tvOS Support',
               variant: 'tip',
               link: { text: 'Let me see!', href: '/httpserver/' },
               dismissable: false
