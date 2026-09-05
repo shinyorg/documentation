@@ -1,0 +1,131 @@
+---
+title: tvOS
+description: Running an embedded HTTP server inside a tvOS app, where ASP.NET Core cannot go
+---
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside, Steps } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["dotnet"]} os={["tvos"]} />
+
+An Apple TV is a device on the network that is always plugged in, always on the same LAN, and has no
+browser and no address bar. That combination makes it an unusually good place to put a small server
+and an unusually bad place to debug one, which is most of what this page is about.
+
+The core server needs nothing special. `Shiny.Net.HttpServer` targets plain `net10.0`, so a tvOS app
+references it the way any other project does, and it compiles against the tvOS platform surface with
+the trim and AOT analyzers on and no platform-compatibility warnings at all.
+
+<Aside type="caution" title="tvOS is not MAUI">
+.NET MAUI does not target tvOS — Android, iOS, Mac Catalyst, Windows and Tizen is the list. A tvOS
+app here is a **native** app on the tvOS SDK with a `UIApplicationDelegate`, not a MAUI head. That is
+also why [`Shiny.Net.HttpServer.Mobile`](/httpserver/maui/) is not the answer on this platform yet;
+see [lifecycle](#lifecycle) below.
+</Aside>
+
+## The project
+
+```xml
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0-tvos</TargetFramework>
+    <SupportedOSPlatformVersion>17.0</SupportedOSPlatformVersion>
+    <OutputType>Exe</OutputType>
+    <ApplicationId>com.example.myapp</ApplicationId>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Shiny.Net.HttpServer" />
+  </ItemGroup>
+</Project>
+```
+
+## The Info.plist entry that decides whether any of this works
+
+```xml
+<key>NSLocalNetworkUsageDescription</key>
+<string>Serves this app's status page to other devices on your network.</string>
+```
+
+tvOS 16+ gates the local network exactly as iOS 14+ does, and it gates **serving** on it as much as
+connecting out. Without the key the listener binds, the server reports itself as `Running`, and no
+other device can reach it — with nothing in the log to say why.
+
+This is worse on a TV than on a phone. On a phone you can open the URL in the device's own browser to
+see whether the problem is the server or the network. An Apple TV has no browser, so the only witness
+is the very device that cannot connect.
+
+<Aside type="tip" title="Ask the bundle before you ask the network">
+`LocalNetworkAccess.Check()` in [`Shiny.Net.HttpServer.Mobile`](/httpserver/maui/#checking-at-runtime)
+reads the bundle and reports this key as a problem when it is missing or blank. That package does not
+target tvOS yet — but the check it performs is the one to reproduce by hand in the meantime, because
+the failure is invisible from every other direction.
+</Aside>
+
+## Lifecycle
+
+tvOS suspends a backgrounded app exactly as iOS does, and no background mode legitimately holds a
+listener open on either. So the useful behaviour is not "keep serving" — that is not on offer — but
+to be serving again by the time anyone is looking at the app.
+
+Wire it to the app delegate:
+
+```csharp
+[Register(nameof(AppDelegate))]
+public class AppDelegate : UIApplicationDelegate
+{
+    HttpServer? server;
+
+    public override bool FinishedLaunching(UIApplication app, NSDictionary? options)
+    {
+        var builder = HttpServer.CreateBuilder();
+        builder.Configure(o =>
+        {
+            o.Address = IPAddress.Any;   // the point is to be reachable from other devices
+            o.Port = 8080;
+        });
+
+        this.server = builder.Build();
+        this.server.MapGet("/ping", _ => Results.Text("pong"));
+
+        return true;
+    }
+
+    // A cold start goes through OnActivated but not WillEnterForeground, so both are wired.
+    public override void WillEnterForeground(UIApplication app) => _ = this.server!.StartAsync();
+    public override void OnActivated(UIApplication app)
+    {
+        if (this.server is { IsRunning: false } s)
+            _ = s.StartAsync();
+    }
+
+    public override void DidEnterBackground(UIApplication app) => _ = this.server!.StopAsync();
+}
+```
+
+[`Shiny.Net.HttpServer.Mobile`](/httpserver/maui/) does this and more — a bounded retry for the bind
+a half-woken network refuses, and a rebind when the device changes network. It does not target tvOS
+yet because Shiny.Core does not; when that lands, the overrides above become a single
+`AddHttpServerLifecycle()` call.
+
+## What does not work here
+
+| | |
+| --- | --- |
+| [cloudflared, ngrok, Tailscale agents](/httpserver/tunnel-agents/) | **No.** They work by starting a separate binary, and tvOS forbids process creation. The agent now throws a `TunnelAgentException` saying so rather than failing from inside the BCL. |
+| [SSH tunnels](/httpserver/ssh/) and [Azure Relay](/httpserver/azure-relay/) | **Yes.** Pure managed code, no agent to spawn. |
+| `Microsoft.Extensions.Logging.Console` | **No** — and it fails at *native link* time, not at runtime: it P/Invokes `GetStdHandle` and `GetConsoleMode`, and clang stops with "Undefined symbols for architecture arm64" long after the C# compiled clean. A TV app has no console anyway. |
+| Durable file storage | **Careful.** A tvOS app gets a read-only bundle and a *purgeable* Caches directory; there is no Documents directory that survives. Serve [static files](/httpserver/static-files/) from the bundle or a [`ZipFileSource`](/httpserver/static-files/#from-a-zip), and treat anything written to disk as something the OS may reclaim between launches. |
+
+## Trimming and AOT
+
+tvOS is fully ahead-of-time compiled with no JIT anywhere, so nothing can fall back to reflection at
+runtime. That makes the [source-generated typed endpoints](/httpserver/endpoints/) the recommended
+tier here rather than merely the fastest one, and the same applies to JSON: use a
+`JsonSerializerContext` rather than reflection-based serialization.
+
+## The sample
+
+`samples/Sample.TvOS` in the repository is a complete, minimal version of this page: a native tvOS
+app that starts the server on `IPAddress.Any` when it foregrounds, stops it when it backgrounds, and
+puts the LAN URL on the TV screen so there is something to type on another device.

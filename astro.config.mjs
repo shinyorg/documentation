@@ -369,6 +369,13 @@ export default defineConfig({
               variant: 'tip',
               link: { text: 'SHOW ME!!', href: '/documentdb/' },
               dismissable: false
+            },
+            {
+              id: 'client-v560',
+              content: 'Shiny Client v5.6.0 - tvOS Support + Live Activities for HTTP Transfers',
+              variant: 'tip',
+              link: { text: 'Live It Up!', href: '/ble' },
+              dismissable: false
             }
           ]
         }),

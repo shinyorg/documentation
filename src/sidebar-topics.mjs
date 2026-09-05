@@ -1137,6 +1137,7 @@ export const sidebarTopics = [
             label: 'Integrations',
             items:[
               { label: 'Mobile', link: 'httpserver/maui' },
+              { label: 'tvOS', link: 'httpserver/tvos' },
               { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
               { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
               { label: 'Model Context Protocol', link: 'httpserver/mcp' }
