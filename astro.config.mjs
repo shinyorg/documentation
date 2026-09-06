@@ -303,11 +303,16 @@ export default defineConfig({
       ],
       head: [
         // Default social share image (Open Graph + Twitter). Per-page frontmatter can override.
-        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png' } },
+        // Bump ?v= whenever og-image.png changes — X, Teams, LinkedIn and Slack
+        // cache the card by URL, so the same URL keeps serving the old artwork.
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png?v=2' } },
+        { tag: 'meta', attrs: { property: 'og:image:secure_url', content: 'https://www.shinylib.net/og-image.png?v=2' } },
+        { tag: 'meta', attrs: { property: 'og:image:type', content: 'image/png' } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
-        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny.NET — 30+ libraries, 40+ UI controls, built for AI' } },
-        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 30+ libraries, 67 UI controls, AOT trim-clean.' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png?v=2' } },
+        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 30+ libraries, 67 UI controls, AOT trim-clean.' } },
         // Adding google analytics
         {
           tag: 'script',
