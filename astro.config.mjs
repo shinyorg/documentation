@@ -350,6 +350,13 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
+              id: 'mauishell-7',
+              content: 'Shiny MAUI Shell v7 - App Links, App Shortcuts, & Navigation Interception!',
+              variant: 'tip',
+              link: { text: 'Shortcut me to it', href: '/mauishell/' },
+              dismissable: false   
+            },
+            {
               id: 'controls-13',
               content: 'Shiny Controls 1.3 - View & Edit Word, Excel, & PowerPoint Docs!',
               variant: 'tip',
