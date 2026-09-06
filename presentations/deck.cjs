@@ -6,6 +6,8 @@ const pptxgen = require('pptxgenjs');
 const sharp = require('sharp');
 const path = require('path');
 const { icon } = require('./icons.cjs');
+const B = require('./brand.cjs');
+const { gradientText, gradientBar, gradientPlate, radialGlow } = require('./gradients.cjs');
 
 const REPO = path.resolve(__dirname, '..');
 const IMG = (p) => path.join(REPO, 'public/images', p);
@@ -13,18 +15,24 @@ const IMG = (p) => path.join(REPO, 'public/images', p);
 const MOULTRIE_PNG = path.join(__dirname, '.moultrie.png');
 
 // ── Palette ───────────────────────────────────────────────────────────────
-const INK = '0B0918';       // dominant background
-const CARD = '19143C';      // card fill on ink
-const CARD_HI = '221A52';   // raised card
-const LINE = '2E2665';      // hairline
-const DEEP = '2A1580';      // section divider ground
+// The hues come from brand.cjs, which mirrors src/styles/custom.css. The deck
+// is a dark canvas, so it draws with the dark-mode vivid variants.
+const INK = B.COLOR.surface[0].hex;      // dominant background
+const CARD = B.COLOR.surface[1].hex;     // card fill on ink
+const CARD_HI = B.COLOR.surface[2].hex;  // raised card
+const LINE = B.COLOR.surface[3].hex;     // hairline
+const DEEP = B.COLOR.surface[4].hex;     // section divider ground
 const DEEP_CARD = '3C22A6';
-const PURPLE = '9B7BFF';
-const GREEN = '2BE5A0';
-const LIME = 'CFFA12';
+const PURPLE = B.PURPLE;
+const GREEN = B.GREEN;
+const LIME = B.LIME;
 const WHITE = 'FFFFFF';
-const MUTED = 'AFA8CE';
+const MUTED = B.COLOR.surface[5].hex;
 const DIM = '8079A8';
+
+// The signature purple→green→lime rule, rendered once and laid along the top
+// of every slide — the deck's echo of the site header's underline.
+let RULE = null;
 
 const HEAD = 'Arial';
 const BODY = 'Calibri';
@@ -45,6 +53,7 @@ pres.title = 'Shiny.NET — The hard parts of your app, already solved';
 function slide(bg = INK) {
   const s = pres.addSlide();
   s.background = { color: bg };
+  if (RULE) s.addImage({ data: RULE.data, x: 0, y: 0, w: W, h: 0.055 });
   return s;
 }
 
@@ -137,10 +146,18 @@ function pill(s, text, x, y, w, o = {}) {
 // ── Section divider ───────────────────────────────────────────────────────
 async function divider(n, title, sub, topics, iconName, notes) {
   const s = slide(DEEP);
-  await chip(s, M, 1.9, 0.92, LIME, iconName);
+
+  // The section chip carries the brand ramp rather than a flat fill — the one
+  // place on a divider where the full purple→green→lime shows.
+  const plate = await gradientPlate(B.GRADIENT.brandRamp, { w: 600, h: 600, radius: 168 });
+  s.addImage({ data: plate.data, x: M, y: 1.9, w: 0.92, h: 0.92 });
+  s.addImage({ data: await icon(iconName, INK), x: M + 0.24, y: 1.9 + 0.24, w: 0.44, h: 0.44 });
+
   txt(s, `SECTION ${n}`, { x: M, y: 3.12, w: 5, h: 0.26, fontSize: 11, bold: true, color: LIME, charSpacing: 2.6 });
   txt(s, title, { x: M, y: 3.42, w: 6.6, h: 1.0, fontSize: 40, bold: true, color: WHITE, fontFace: HEAD });
-  txt(s, sub, { x: M, y: 4.52, w: 6.2, h: 0.9, fontSize: 14, color: 'D6CCFF', lineSpacing: 20 });
+  const underline = await gradientBar(B.GRADIENT.brandRamp, { w: 1200, h: 10, radius: 5 });
+  s.addImage({ data: underline.data, x: M, y: 4.36, w: 2.4, h: 0.05 });
+  txt(s, sub, { x: M, y: 4.56, w: 6.2, h: 0.9, fontSize: 14, color: 'D6CCFF', lineSpacing: 20 });
 
   const bx = 7.55, bw = W - bx - M;
   let by = 1.9;
@@ -159,15 +176,32 @@ async function divider(n, title, sub, topics, iconName, notes) {
 // ── Content ───────────────────────────────────────────────────────────────
 async function build() {
 
+  // The brand rule is laid on every slide, so render it before the first one.
+  RULE = await gradientBar(B.GRADIENT.brandRamp, { w: 2666, h: 11 });
+
   // 1 ── Title ────────────────────────────────────────────────────────────
   {
     const s = slide(INK);
-    txt(s, 'SHINY.NET', { x: M, y: 0.9, w: 4, h: 0.3, fontSize: 12, bold: true, color: LIME, charSpacing: 3.2 });
-    txt(s, 'The hard parts\nof your app,\nalready solved.', {
-      x: M, y: 1.3, w: 7.4, h: 2.35, fontSize: 42, bold: true, color: WHITE, fontFace: HEAD, lineSpacing: 50,
+
+    // The hero's scan field, as a soft purple wash behind the screenshots.
+    const glow = await radialGlow(PURPLE, { d: 900, opacity: 0.34 });
+    s.addImage({ data: glow.data, x: 7.4, y: 0.3, w: 6.0, h: 6.0 });
+
+    // Logo lockup: the mark, then the wordmark.
+    s.addImage({ path: IMG('logo-mark.png'), x: M, y: 0.74, w: 0.46, h: 0.46 });
+    txt(s, 'SHINY.NET', { x: M + 0.62, y: 0.84, w: 4, h: 0.3, fontSize: 12, bold: true, color: LIME, charSpacing: 3.2 });
+
+    // The headline, split the way the site sets it — the second half carries
+    // the brand ramp, so it is rendered as art rather than text.
+    txt(s, B.SLOGAN.headline.plain.replace(' of your app,', '\nof your app,'), {
+      x: M, y: 1.44, w: 7.4, h: 1.6, fontSize: 42, bold: true, color: WHITE, fontFace: HEAD, lineSpacing: 50,
     });
-    txt(s, 'Bluetooth LE, background jobs, geofencing, push, an HTTP server that runs inside your MAUI app, a document database, 67 UI controls. Thirty-plus libraries that own the platform code, the permissions and the background execution — so your time goes to the app your users actually asked for.', {
-      x: M, y: 3.72, w: 7.3, h: 1.2, fontSize: 13, color: MUTED, lineSpacing: 19,
+    const gt = await gradientText(B.SLOGAN.headline.gradient, { size: 200, weight: 800, font: HEAD, gradient: B.GRADIENT.headline });
+    const gh = 0.58;
+    s.addImage({ data: gt.data, x: M, y: 2.72, w: gh / gt.ratio, h: gh });
+
+    txt(s, B.SLOGAN.lede + ' ' + B.SLOGAN.promise, {
+      x: M, y: 3.62, w: 7.3, h: 1.2, fontSize: 13, color: MUTED, lineSpacing: 19,
     });
 
     const facts = [
@@ -748,6 +782,161 @@ async function build() {
       x: M, y: 6.5, w: 7, h: 0.34, fontSize: 13, bold: true, color: LIME,
     });
     s.addNotes('Close on the low-commitment path: the App Builder produces a working configuration in a couple of minutes, and every library is a separate package so trying one costs nothing. The AI skills are the fastest way for a team already using Claude Code or Copilot to get idiomatic Shiny code from day one.');
+  }
+
+  // ── Brand reference ────────────────────────────────────────────────────
+  // Slides 28-31 document the identity the deck itself is drawn with. Every
+  // value is read from brand.cjs, so the reference cannot drift from the deck.
+
+  // 28 ── Palette ─────────────────────────────────────────────────────────
+  {
+    const s = slide(INK);
+    eyebrow(s, 'Brand');
+    heading(s, 'The palette', 'Three hues, in three variants. The pastels come straight off the logo; the vivid variants hold their colour where the pastels wash out, and brighten again on dark.');
+
+    const groups = [
+      { title: 'Logo', note: 'Straight off the mark', set: B.COLOR.logo },
+      { title: 'Vivid — on light', note: 'Saturated for contrast', set: B.COLOR.vividLight },
+      { title: 'Vivid — on dark', note: 'What this deck draws with', set: B.COLOR.vividDark },
+    ];
+    const gw = (CW - 0.3 * 2) / 3;
+    for (let i = 0; i < groups.length; i++) {
+      const g = groups[i];
+      const x = M + i * (gw + 0.3);
+      card(s, x, 1.98, gw, 2.42, { fill: i === 2 ? CARD_HI : CARD });
+      txt(s, g.title, { x: x + 0.26, y: 2.14, w: gw - 0.52, h: 0.26, fontSize: 12.5, bold: true, color: WHITE });
+      txt(s, g.note, { x: x + 0.26, y: 2.4, w: gw - 0.52, h: 0.22, fontSize: 9.5, color: DIM });
+      for (let j = 0; j < g.set.length; j++) {
+        const c = g.set[j];
+        const y = 2.74 + j * 0.54;
+        s.addShape(pres.ShapeType.roundRect, {
+          x: x + 0.26, y, w: 0.46, h: 0.46, rectRadius: 0.1,
+          fill: { color: c.hex }, line: { color: LINE, width: 1 },
+        });
+        txt(s, c.name, { x: x + 0.84, y: y + 0.02, w: gw - 1.1, h: 0.22, fontSize: 10.5, bold: true, color: WHITE });
+        txt(s, '#' + c.hex + (c.token ? '   ' + c.token : ''), {
+          x: x + 0.84, y: y + 0.24, w: gw - 1.1, h: 0.22, fontSize: 8.5, color: DIM, fontFace: MONO,
+        });
+      }
+    }
+
+    card(s, M, 4.62, CW, 1.96);
+    txt(s, 'Surfaces & type — the dark canvas this deck and the social card share', {
+      x: M + 0.3, y: 4.78, w: CW - 0.6, h: 0.26, fontSize: 12.5, bold: true, color: WHITE,
+    });
+    const sw = (CW - 0.6) / B.COLOR.surface.length;
+    for (let i = 0; i < B.COLOR.surface.length; i++) {
+      const c = B.COLOR.surface[i];
+      const x = M + 0.3 + i * sw;
+      s.addShape(pres.ShapeType.roundRect, {
+        x, y: 5.2, w: sw - 0.2, h: 0.6, rectRadius: 0.08,
+        fill: { color: c.hex }, line: { color: LINE, width: 1 },
+      });
+      txt(s, c.name, { x, y: 5.88, w: sw - 0.2, h: 0.22, fontSize: 10, bold: true, color: WHITE });
+      txt(s, '#' + c.hex, { x, y: 6.09, w: sw - 0.2, h: 0.2, fontSize: 8.5, color: DIM, fontFace: MONO });
+      txt(s, c.note, { x, y: 6.28, w: sw - 0.2, h: 0.24, fontSize: 8.5, color: DIM });
+    }
+
+    txt(s, 'Defined as CSS custom properties in src/styles/custom.css — the vivid tokens swap value between light and dark, so everything built on them follows the theme automatically.', {
+      x: M, y: 6.78, w: CW, h: 0.3, fontSize: 10, color: DIM,
+    });
+    s.addNotes('The three logo hues are the whole palette. The pastels are the literal logo colours but they wash out on white, so every accent on the site uses the vivid variants instead. Those are defined as CSS variables that change value between light and dark mode, which is why one rule covers both themes.');
+  }
+
+  // 29 ── Gradients ───────────────────────────────────────────────────────
+  {
+    const s = slide(INK);
+    eyebrow(s, 'Brand');
+    heading(s, 'The gradients', 'Purple to green to lime, at a handful of fixed angles. The three-stop ramp is the signature — it runs under the header, through the wordmark and across the social card.');
+
+    const list = [B.GRADIENT.brandRamp, B.GRADIENT.headline, B.GRADIENT.menuButton, B.GRADIENT.cta, B.GRADIENT.appBuilder];
+    for (let i = 0; i < list.length; i++) {
+      const g = list[i];
+      const y = 1.98 + i * 1.0;
+      card(s, M, y, CW, 0.88, { fill: i % 2 ? CARD : CARD_HI });
+      const bar = await gradientBar(g, { w: 1400, h: 200, radius: 28 });
+      s.addImage({ data: bar.data, x: M + 0.26, y: y + 0.21, w: 3.0, h: 0.46 });
+      txt(s, g.name, { x: M + 3.46, y: y + 0.17, w: 3.4, h: 0.26, fontSize: 13, bold: true, color: WHITE });
+      txt(s, g.where, { x: M + 3.46, y: y + 0.45, w: 4.0, h: 0.3, fontSize: 9.5, color: MUTED });
+      const stops = g.stops.map(([o, hex], k) => '#' + hex + (k === 0 || k === g.stops.length - 1 ? '' : ' ' + Math.round(o * 100) + '%')).join('  →  ');
+      txt(s, g.angle + '°', { x: W - M - 4.3, y: y + 0.17, w: 0.8, h: 0.26, fontSize: 12, bold: true, color: LIME, fontFace: MONO });
+      txt(s, stops, { x: W - M - 3.5, y: y + 0.19, w: 3.5, h: 0.5, fontSize: 9.5, color: DIM, fontFace: MONO, lineSpacing: 12 });
+    }
+
+    txt(s, 'PowerPoint cannot fill text with a three-stop gradient, so the ramp is rasterized to PNG at build time and placed as art — which is why it matches the site exactly.', {
+      x: M, y: 7.02, w: CW, h: 0.3, fontSize: 10, color: DIM,
+    });
+    s.addNotes('The three-stop ramp is the one people recognise. Angle matters — 110 degrees for the site title and header, 96 for the social card headline. The two-stop variants are for smaller surfaces where a third stop would read as mud at that size.');
+  }
+
+  // 30 ── Logos ───────────────────────────────────────────────────────────
+  {
+    const s = slide(INK);
+    eyebrow(s, 'Brand');
+    heading(s, 'The marks', 'The Shiny mark, and the ShinySoft lockups behind it. Dark artwork sits on a white plate; the rest goes straight onto ink.');
+
+    const lw = (CW - 0.28 * 3) / 4;
+    for (let i = 0; i < B.LOGO.length; i++) {
+      const l = B.LOGO[i];
+      const x = M + i * (lw + 0.28);
+      card(s, x, 2.16, lw, 3.5, { fill: CARD });
+      const file = IMG(l.file);
+      if (l.dark) {
+        await logoPlate(s, file, x + 0.26, 2.44, lw - 0.52, 1.24);
+      } else {
+        const meta = await sharp(file).metadata();
+        const ar = meta.width / meta.height;
+        const maxW = lw - 0.78, maxH = 1.0;
+        let w = maxW, h = w / ar;
+        if (h > maxH) { h = maxH; w = h * ar; }
+        s.addImage({ path: file, x: x + (lw - w) / 2, y: 2.44 + (1.24 - h) / 2, w, h });
+      }
+      txt(s, l.name, { x: x + 0.26, y: 3.86, w: lw - 0.52, h: 0.46, fontSize: 12, bold: true, color: WHITE, lineSpacing: 15 });
+      txt(s, l.src, { x: x + 0.26, y: 4.34, w: lw - 0.52, h: 0.24, fontSize: 8.5, color: LIME, fontFace: MONO });
+      txt(s, l.use, { x: x + 0.26, y: 4.62, w: lw - 0.52, h: 0.9, fontSize: 9.5, color: MUTED, lineSpacing: 12.5, valign: 'top' });
+    }
+
+    card(s, M, 5.84, CW, 0.86, { fill: CARD_HI });
+    await chip(s, M + 0.28, 6.06, 0.42, PURPLE, 'FaFilm');
+    txt(s, B.LOGO_NOTE, { x: M + 0.9, y: 6.02, w: CW - 1.3, h: 0.5, fontSize: 10, color: MUTED, valign: 'middle', lineSpacing: 13 });
+    s.addNotes('Two brands sit side by side. Shiny is the open-source library suite; ShinySoft Technologies is the consulting company that builds and maintains it. Use the Shiny mark for the libraries and the ShinySoft lockup when the company is the subject.');
+  }
+
+  // 31 ── Slogans ─────────────────────────────────────────────────────────
+  {
+    const s = slide(DEEP);
+    eyebrow(s, 'Brand');
+    heading(s, 'The words', 'One headline, one lede, and the short lines that carry the rest.');
+
+    card(s, M, 1.98, CW, 2.42, { fill: DEEP_CARD, line: '5335C9' });
+    txt(s, 'HEADLINE', { x: M + 0.32, y: 2.16, w: 3, h: 0.24, fontSize: 9.5, bold: true, color: LIME, charSpacing: 2.2 });
+    txt(s, B.SLOGAN.headline.plain, {
+      x: M + 0.32, y: 2.44, w: 7.4, h: 0.5, fontSize: 30, bold: true, color: WHITE, fontFace: HEAD,
+    });
+    const gt = await gradientText(B.SLOGAN.headline.gradient, { size: 200, weight: 800, font: HEAD, gradient: B.GRADIENT.headline });
+    const gh = 0.44;
+    s.addImage({ data: gt.data, x: M + 0.32, y: 2.98, w: gh / gt.ratio, h: gh });
+    txt(s, 'The second half carries the brand ramp — always. Never set the whole line in gradient, and never set it flat.', {
+      x: M + 0.32, y: 3.62, w: 6.6, h: 0.5, fontSize: 10.5, color: 'CBC0FF', lineSpacing: 13.5,
+    });
+
+    txt(s, 'LEDE', { x: 8.0, y: 2.16, w: 3, h: 0.24, fontSize: 9.5, bold: true, color: LIME, charSpacing: 2.2 });
+    txt(s, B.SLOGAN.lede, { x: 8.0, y: 2.44, w: CW - 7.7, h: 1.1, fontSize: 11, color: WHITE, lineSpacing: 15 });
+    txt(s, B.SLOGAN.promise, { x: 8.0, y: 3.56, w: CW - 7.7, h: 0.8, fontSize: 10, color: 'CBC0FF', lineSpacing: 13.5 });
+
+    const rows = B.SLOGAN.lines;
+    const rh = 0.36;
+    txt(s, 'SHORT LINES', { x: M, y: 4.62, w: 4, h: 0.24, fontSize: 9.5, bold: true, color: LIME, charSpacing: 2.2 });
+    for (let i = 0; i < rows.length; i++) {
+      const y = 4.9 + i * (rh + 0.05);
+      s.addShape(pres.ShapeType.roundRect, {
+        x: M, y, w: CW, h: rh, rectRadius: 0.09,
+        fill: { color: i % 2 ? DEEP_CARD : '33199B' }, line: { color: '5335C9', width: 1 },
+      });
+      txt(s, rows[i].text, { x: M + 0.3, y, w: 7.6, h: rh, fontSize: 11, color: WHITE, valign: 'middle' });
+      txt(s, rows[i].where, { x: 8.4, y, w: CW - 7.9, h: rh, fontSize: 9, color: 'CBC0FF', valign: 'middle' });
+    }
+    s.addNotes('The lede is deliberately open-ended — it names examples, not the catalogue, so it does not go stale every time a library ships. Keep it that way when you rewrite it. The headline is fixed: the first half plain, the second half in the gradient.');
   }
 
   const out = process.argv[2] || path.join(__dirname, 'Shiny.NET-Overview.pptx');
