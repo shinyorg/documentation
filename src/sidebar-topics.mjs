@@ -467,6 +467,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'mauishell/' },
           { label: 'Navigation', link: 'mauishell/navigation' },
+          { label: 'Navigation Interceptors', link: 'mauishell/interceptors' },
           { label: 'Dialogs', link: 'mauishell/dialogs' },
           { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
           { label: 'Source Generation', link: 'mauishell/sourcegen' },

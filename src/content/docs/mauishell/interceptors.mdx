@@ -1,0 +1,155 @@
+---
+title: Shell | Navigation Interceptors
+description: Cancel or redirect any navigation with INavigationInterceptor - auth guards, unsaved changes, audit logging
+---
+
+`INavigationInterceptor` sits in front of every navigation the app makes and can let it through,
+cancel it, or send it somewhere else. Register as many as you like — they run in registration order
+and the first one to cancel or redirect wins.
+
+```csharp
+public interface INavigationInterceptor
+{
+    Task<NavigationInterceptorResult> InterceptNavigationAsync(string uri, object? viewModel);
+}
+```
+
+## The auth guard
+
+```csharp
+public class AuthNavigationInterceptor(IAuthService auth) : INavigationInterceptor
+{
+    public Task<NavigationInterceptorResult> InterceptNavigationAsync(string uri, object? viewModel)
+        => Task.FromResult(auth.IsAuthorized || uri.Contains("Login")
+            ? NavigationInterceptorResult.Continue
+            : NavigationInterceptorResult.Redirect<LoginViewModel>()
+        );
+}
+```
+
+```csharp
+// MauiProgram.cs
+builder.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .AddNavigationInterceptor<AuthNavigationInterceptor>()
+    .AddNavigationInterceptor<AuditNavigationInterceptor>()
+
+    // or inline, when a class would be ceremony
+    .AddNavigationInterceptor((uri, vm) =>
+    {
+        Console.WriteLine($"Navigating to {uri}");
+        return Task.FromResult(NavigationInterceptorResult.Continue);
+    })
+);
+```
+
+Interceptors are registered as singletons, so keep no per-navigation state in fields. Register them
+yourself (`builder.Services.AddTransient<INavigationInterceptor, MyInterceptor>()`) for any other
+lifetime — the pipeline resolves them fresh on each navigation.
+
+## What gets intercepted
+
+| Path | Intercepted | `viewModel` argument |
+|:-----|:------------|:---------------------|
+| `NavigateTo(route)` | ✅ | Resolved from the route's ViewModel mapping |
+| `NavigateTo<TViewModel>(configure)` | ✅ | Your instance, after `configure` ran |
+| `CreateBuilder()…Navigate()` | ✅ | The last segment's ViewModel — the page the user lands on |
+| `GoBack` / `PopToRoot` | ✅ | The existing ViewModel from the navigation stack |
+| App links & app shortcuts | ✅ | The ViewModel with the link's values already applied |
+| Tab taps, flyout items, hardware back | ✅ | `null` |
+| `ShowDialog` / `SwitchShell` | ❌ | — |
+
+Deep links are the reason this exists: an inbound URL can arrive at any moment, at any route, from
+outside the app, and it goes through exactly the same guards as a button tap.
+
+## The ViewModel argument
+
+The ViewModel handed over is the **destination** one, resolved from DI and fully populated *before*
+the interceptor is called — the `configure` callback has run, an app link's values are already
+bound. So a guard can decide on the destination's own state rather than parsing its URI:
+
+```csharp
+public Task<NavigationInterceptorResult> InterceptNavigationAsync(string uri, object? viewModel)
+    => Task.FromResult(viewModel is OrderViewModel { RequiresApproval: true } && !user.IsManager
+        ? NavigationInterceptorResult.Cancel()
+        : NavigationInterceptorResult.Continue
+    );
+```
+
+That instance is the one bound to the page, so changes an interceptor makes stick. (Navigation
+arguments are applied by Shell afterwards and win over an interceptor's edit to the same property.)
+
+It is `null` when the destination route has no ViewModel mapping, and for user-driven Shell
+navigation — a tab tap or the hardware back button — where Shell builds the destination itself and
+Shiny will not construct a ViewModel nobody binds.
+
+## The page being left
+
+Inject `INavigationContextAccessor` for everything that does not fit in the two arguments:
+
+```csharp
+public class UnsavedChangesNavigationInterceptor(
+    INavigationContextAccessor context,
+    IDialogs dialogs
+) : INavigationInterceptor
+{
+    public async Task<NavigationInterceptorResult> InterceptNavigationAsync(string uri, object? viewModel)
+    {
+        if (context.Current?.FromViewModel is not IUnsavedChanges { HasUnsavedChanges: true })
+            return NavigationInterceptorResult.Continue;
+
+        return await dialogs.Confirm("Unsaved Changes", "Discard changes?")
+            ? NavigationInterceptorResult.Continue
+            : NavigationInterceptorResult.Cancel();
+    }
+}
+```
+
+`NavigationContext` carries `FromUri`, `FromViewModel`, `ToUri`, `NavigationType`, `Parameters` and
+`RedirectCount`. `Current` is null outside an interceptor call.
+
+Interceptors run on the main thread, so a dialog can be awaited directly — the navigation waits.
+
+## Cancel and redirect
+
+| Result | Behaviour |
+|:-------|:----------|
+| `NavigationInterceptorResult.Continue` | Next interceptor, then navigate |
+| `Cancel()` | Nothing navigates; the rest of the chain is skipped |
+| `Redirect("Detail")` | Pushes |
+| `Redirect("//Main/Home")` | Resets the Shell stack |
+| `Redirect("/Login")` | Same as `//Login` — a single leading slash is promoted |
+| `Redirect<LoginViewModel>()` | Resets the stack to that ViewModel's route |
+| `Redirect<DetailViewModel>(relativeNavigation: true)` | Pushes that ViewModel's route |
+
+Prefer the typed `Redirect<TViewModel>()` — the route comes from the ViewModel map, so renaming a
+route does not silently break a guard.
+
+`CancelNavigation` wins if a result sets both. A cancelled navigation is not a failure: the caller's
+`Task` completes normally and the user simply stays where they are.
+
+:::note[A redirect re-runs the whole chain]
+The abandoned destination's ViewModel is dropped rather than bound to anything, the redirect target
+is resolved, and every interceptor gets to inspect it — so a redirect is guarded exactly as
+thoroughly as the navigation that caused it, and one guard can hand off to another.
+
+Redirecting to the URI already being navigated to is ignored rather than looping, which is what
+makes an unconditional `Redirect<LoginViewModel>()` safe on the login page itself. A genuine loop
+(A → B → A) throws after 10 hops rather than hanging.
+:::
+
+An exception thrown from an interceptor propagates to the caller and the navigation does not
+happen — a guard that fails is never treated as a guard that passed. On tab taps and hardware back,
+where there is no caller to throw to, the exception is logged and the navigation is cancelled.
+
+## Choosing between the hooks
+
+| | Scope | Can cancel | Can redirect |
+|:--|:--|:--|:--|
+| `INavigationInterceptor` | App-wide, about the destination | ✅ | ✅ |
+| [`INavigationConfirmation`](/mauishell/lifecycle) | One ViewModel, about leaving it | ✅ | ❌ |
+| [`Navigating` / `Navigated` events](/mauishell/navigation#navigation-events) | App-wide, observation only | ❌ | ❌ |
+
+`INavigationConfirmation` only applies to user-driven Shell navigation (tabs, flyout, back button),
+and is asked before the interceptors. Use it for "this page has unsaved work"; use an interceptor
+when the rule belongs to the app rather than to one page, or when it needs to redirect.
