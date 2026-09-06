@@ -137,6 +137,59 @@ silently.
 | `RelevanceScore` | Ranks this activity against your app's others for the Dynamic Island (iOS) |
 | `Data` | Free-form `string`/`string` values your own widget reads |
 
+## What you can drive from C#, and what you can't
+
+Worth understanding before you design against this, because it shapes what fits.
+
+### The layout is never C#
+
+WidgetKit requires the Lock Screen and Dynamic Island views to be SwiftUI, in a widget extension signed
+with your own bundle id. No NuGet package can change that. **C# only ever sends state**; the drawing is
+Swift you own. Visually you are unconstrained — it just is not C#. The
+[bundled template](/liveactivities/widget) means most apps never open Xcode, but a custom look is Swift.
+
+Android has no equivalent constraint; the library posts the notification itself.
+
+### There is exactly one `ActivityAttributes` type
+
+ActivityKit needs a concrete `Codable` type at **compile** time, which would normally force every app to
+hand-write its own Swift — and makes a general-purpose .NET API impossible. Shiny pins a single
+`ShinyActivityAttributes` instead, with the fields that matter to the system strongly typed and everything
+app-specific in string dictionaries:
+
+| Strongly typed | Free-form |
+|----------------|-----------|
+| `title`, `body`, `shortStatus`, `progress`, `progressStart`, `progressEnd`, `indeterminate` | `data` (changes over the activity's life), `values` (static, from `LiveActivityRequest.Attributes`) |
+
+That buys the cross-platform API, and it costs three things:
+
+- **Custom fields are strings.** A number, date, nested object or array gets flattened on the C# side and
+  parsed in your Swift. Only the progress family is genuinely typed.
+- **One attributes type for the whole app.** Apple lets you declare several distinct `ActivityAttributes`
+  structs; here you get one, with `Kind` as a discriminator your widget branches on
+  (`switch context.attributes.kind`). A push-to-start payload must name `ShinyActivityAttributes` as its
+  `attributes-type`.
+- **The 4KB content-state cap** is easier to hit when everything is a string.
+
+### Not reachable through this package
+
+- **Interactive activities.** A `Button` or `Toggle` backed by an `AppIntent` lives in the extension, in
+  Swift, and `ILiveActivityDelegate` has no action callback — only `OnStarted`, `OnStateChanged` and the
+  two token events. Bridging one back to .NET is on you (an app group, a URL scheme).
+- **Alert sound.** `LiveActivityAlert` carries a title and body; Apple's `AlertConfiguration` also takes a
+  sound.
+
+### So what fits?
+
+Anything whose changing state is title, body, short status, progress, stale date, relevance score and a
+string bag — which is most real activities: delivery tracking, rideshare ETA, sports scores, timers,
+workouts, transfer progress.
+
+If you genuinely need your own typed schema, the escape hatch is forking `ShinyActivityAttributes.swift`
+(in **both** `native/ShinyLiveActivities/` and `templates/WidgetExtension/`) along with
+`LiveActivityContentSchema`. That puts you off the contract shared with `Shiny.Extensions.Push`, where
+drift [fails silently rather than throwing](/liveactivities/push) — so weigh it.
+
 ## Prefer a time range over a fraction
 
 ```csharp

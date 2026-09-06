@@ -372,7 +372,7 @@ export default defineConfig({
             },
             {
               id: 'client-v560',
-              content: 'Shiny Client v5.6.0 - tvOS Support + Live Activities for HTTP Transfers',
+              content: 'Shiny Client v5.6.0 - tvOS Support & Live Activities',
               variant: 'tip',
               link: { text: 'Live It Up!', href: '/ble' },
               dismissable: false
