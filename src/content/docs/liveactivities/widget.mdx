@@ -1,0 +1,75 @@
+---
+title: The iOS Widget Extension
+---
+
+iOS renders a Live Activity from a **SwiftUI widget extension inside your app bundle**. WidgetKit requires
+it — there is no way to drive the layout from C#, and no NuGet package can ship it for you, because the
+extension must be built and signed with *your* bundle identifier.
+
+:::danger[This is the number one reason an iOS activity never appears]
+Without the extension, or without `NSSupportsLiveActivities` in Info.plist, `Start` **succeeds** and the
+activity renders nothing. There is no exception and no log. Check both of these before debugging anything
+else.
+:::
+
+Android needs none of this — it draws a notification, which the library posts itself.
+
+## The template
+
+Shiny ships a ready-made extension at `templates/WidgetExtension` in the repo. It renders whatever
+`LiveActivityContent` your app or your server sends, so most apps add it unchanged and never open Xcode
+again. Its Swift is compile-checked in CI, so it cannot rot.
+
+| File | Purpose |
+|------|---------|
+| `ShinyLiveActivityWidget.swift` | The widget: Lock Screen view plus Dynamic Island, driven by the content state |
+| `ShinyActivityAttributes.swift` | The shared activity type. **Must stay byte-identical to the library's copy** — it is how ActivityKit matches your widget to the activity |
+| `Info.plist` | Marks the target as a WidgetKit extension |
+
+## Adding it to a .NET MAUI app
+
+1. **Create the extension in Xcode.** New project → iOS → Widget Extension. Name it e.g.
+   `MyAppLiveActivity`, tick *Include Live Activity*, and set its bundle id to
+   `<your-app-bundle-id>.MyAppLiveActivity`. Its deployment target must be **iOS 16.2 or later**.
+
+2. **Replace the generated Swift** with `ShinyLiveActivityWidget.swift` and `ShinyActivityAttributes.swift`
+   from the template. Delete the template's own attributes and bundle files so there is exactly one `@main`.
+
+3. **Wire it into the .NET build** in your app's `.csproj`:
+
+   ```xml
+   <ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+     <XcodeProject Include="../ios/MyAppLiveActivity/MyAppLiveActivity.xcodeproj">
+       <SchemeName>MyAppLiveActivity</SchemeName>
+       <Kind>AppExtension</Kind>
+     </XcodeProject>
+   </ItemGroup>
+   ```
+
+   The .NET iOS SDK builds the Xcode project and embeds the resulting `.appex` in `PlugIns/`.
+
+4. **Declare Live Activity support** in the app's `Info.plist`:
+
+   ```xml
+   <key>NSSupportsLiveActivities</key>
+   <true/>
+   <!-- only if you update more than a handful of times an hour -->
+   <key>NSSupportsLiveActivitiesFrequentUpdates</key>
+   <true/>
+   ```
+
+## Customizing
+
+Everything below the top of `ShinyLiveActivityWidget.swift` is ordinary SwiftUI — restyle it freely. To
+render different layouts per activity type, branch on `context.attributes.kind` (set from
+`LiveActivityRequest.Kind` in C#) and read your own values out of `context.state.data`.
+
+## Keep the three definitions in step
+
+`LiveActivityContent` (C#), `ShinyActivityAttributes.ContentState` (Swift, in **both**
+`native/ShinyLiveActivities/` and `templates/WidgetExtension/`), and the `content-state` a server pushes are
+**one contract**. A field-name or type drift between them does not throw — ActivityKit decodes the state
+with a stock `JSONDecoder`, so a mismatch just makes the update disappear and the activity stops refreshing.
+
+If you add a field, add it in all of them, and mirror it in `LiveActivityContentSchema` on the .NET side.
+See [push tokens and server updates](/liveactivities/push) for the wire shape, including the 2001 epoch trap.

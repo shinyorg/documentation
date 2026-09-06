@@ -31,8 +31,8 @@ and retires the surface — including when iOS relaunches your app in the backgr
 |----------|---------|
 | Android 16+ | The foreground-service notification, promoted ongoing: status bar chip, always-on display |
 | Android 8–15 | The foreground-service notification with a determinate progress bar |
-| iOS 16.2+ | A Live Activity — Lock Screen and Dynamic Island (add `Shiny.Mobile.LiveActivities.HttpTransfers`) |
-| Everything else | No renderer available; the manager does nothing |
+| iOS/iPadOS 16.2+ | A Live Activity — Lock Screen and Dynamic Island |
+| macOS, Mac Catalyst, tvOS, Windows, Linux, Blazor | No renderer available; the manager does nothing |
 
 :::note[One notification on Android, not two]
 Android requires a foreground service to move bytes in the background, and a foreground service requires a
@@ -44,10 +44,17 @@ The older `PerTransferNotificationStrategy` — which posted the second notifica
 when you adopt `AddTransferProgress()`.
 :::
 
-iOS ships no renderer in `Shiny.Net.Http` itself, because ActivityKit needs a Swift widget extension.
-Add the [`Shiny.Mobile.LiveActivities.HttpTransfers`](https://github.com/shinyorg/liveactivities) package
-and call `AddHttpTransferLiveActivities()` alongside; it registers an `ITransferProgressRenderer` and the
-same manager drives it.
+Both renderers ship **inside `Shiny.Net.Http`**. There is no second package and no second registration call:
+on iOS the package pulls [`Shiny.Mobile.LiveActivities`](/liveactivities/) for you — that reference sits on
+the `-ios` target alone, so no other head carries ActivityKit — and `AddTransferProgress()` registers
+`ILiveActivityManager` itself if you have not already called `AddLiveActivities()`.
+
+:::caution[iOS needs a widget extension]
+ActivityKit renders a Live Activity from a **SwiftUI widget extension in your app bundle**, and nothing about
+that layout can be driven from C#. Without it — and without `NSSupportsLiveActivities` in Info.plist — the
+activity starts and renders nothing, silently. See [the widget extension](/liveactivities/widget) for the
+ready-made template and its Xcode wiring, and check both of these first if an iOS activity never appears.
+:::
 
 ## Configuring what shows
 
@@ -104,9 +111,10 @@ estimate exceeds `MaximumProjection` (one hour by default). Android resolves the
 fraction — its foreground service is alive throughout, so real progress keeps arriving and the bar never has
 to coast.
 
-For **uploads** you can go further: set `RequestPushToken = true` on the Live Activities package's options
-and your server, which knows how many bytes actually landed, can push byte-accurate progress through the
-whole suspended window. It buys nothing for downloads, where no server knows how far the device has got.
+For **uploads** you can go further: set `opts.LiveActivity.RequestPushToken = true` and your server, which
+knows how many bytes actually landed, can push byte-accurate progress through the whole suspended window. It
+buys nothing for downloads, where no server knows how far the device has got. The token arrives on
+[`ILiveActivityDelegate.OnPushTokenChanged`](/liveactivities/push).
 
 ## Options
 
@@ -123,6 +131,8 @@ whole suspended window. It buys nothing for downloads, where no server knows how
 | `StaleAfter` | 30s | When content should be treated as out of date |
 | `DismissCompletedAfter` | 4s | How long the final state lingers |
 | `AlertOnCompletion` | `false` | Alert rather than refresh silently when a batch finishes |
+| `LiveActivity.Kind` | `shiny.httptransfers` | Stamped on the activity so a multi-layout widget can branch (iOS) |
+| `LiveActivity.RequestPushToken` | `false` | Ask ActivityKit for a per-activity push token (iOS) |
 | `RankByProgress` | `true` | Rank iOS activities by completion fraction |
 
 ## Writing your own renderer

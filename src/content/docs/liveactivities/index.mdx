@@ -1,0 +1,167 @@
+---
+title: Live Activities
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Mobile.LiveActivities" /> |
+
+<PlatformSupport os={["ios", "android"]} />
+
+A Live Activity is the persistent, updating status surface both phone platforms grew independently — a
+delivery on its way, a match score, a workout, a long upload. Shiny puts one typed API in front of both:
+**iOS/iPadOS Live Activities** (ActivityKit — Lock Screen and Dynamic Island) and **Android 16 Live
+Updates** (a promoted ongoing notification that also renders as a status bar chip and on the always-on
+display).
+
+The shared contract is a **state, not a UI tree**. The two platforms render very differently — iOS runs
+arbitrary SwiftUI from a widget extension, Android draws a notification — so what crosses the boundary is a
+typed `LiveActivityContent` and nothing else.
+
+## Platform support
+
+| Platform | What you get |
+|----------|--------------|
+| iOS / iPadOS 16.2+ | A real Live Activity through ActivityKit, rendered by **your** SwiftUI widget extension |
+| Android 16 (API 36)+ | `Notification.ProgressStyle` with `requestPromotedOngoing` and `setShortCriticalText` — status bar chip and AOD |
+| Android 8–15 | An ordinary ongoing notification with a determinate progress bar, no chip |
+| macOS, Mac Catalyst, tvOS, Windows, Linux, Blazor | `NoOpLiveActivityManager` — `IsSupported` is false and every call is a safe no-op |
+
+:::caution[There is no macOS or Mac Catalyst implementation, and there cannot be one]
+`ActivityKit.framework` ships in the macOS SDK, which misleads people into filing issues. Every public type
+in it is annotated `@available(macOS, unavailable)`, `@available(macCatalyst, unavailable)`,
+`@available(tvOS, unavailable)` and `@available(watchOS, unavailable)`. What a Mac displays is an *iPhone's*
+activity mirrored to it over iPhone Mirroring — nothing a Mac app declares or drives. That is why the native
+binding package is named `Shiny.iOS.LiveActivities.Binding`.
+:::
+
+Because unsupported platforms no-op rather than throw, shared view models need no `#if`. Branch on
+`IsSupported` only when the UI should hide the feature entirely.
+
+## Packages
+
+| Package | Role |
+|---------|------|
+| `Shiny.Mobile.LiveActivities` | The cross-platform API. This is the one you reference. |
+| `Shiny.iOS.LiveActivities.Binding` | The ActivityKit Swift shim, pulled in automatically on iOS. Never reference it directly. |
+
+ActivityKit is Swift-only — it has no Objective-C interface, so there is nothing for the .NET iOS SDK to
+bind directly. The binding package wraps it in an `@objc` bridge built from an Xcode project, which is also
+why the repo's CI runs on macOS.
+
+The namespace is `Shiny.LiveActivities`; the `Mobile` segment is a package-scope qualifier, not part of the
+API surface.
+
+## Registration
+
+```csharp
+builder.Services.AddLiveActivities();
+
+// or, if a server pushes updates — the delegate is the only way to learn the tokens
+builder.Services.AddLiveActivities<MyLiveActivityDelegate>();
+```
+
+## Start, update, end
+
+```csharp
+public class OrderTracker(ILiveActivityManager activities)
+{
+    string? activityId;
+
+    public async Task Begin(string orderNumber)
+    {
+        if (!activities.IsSupported)
+            return;
+
+        if (await activities.RequestAccess() != AccessState.Available)
+            return;
+
+        var activity = await activities.Start(new LiveActivityRequest
+        {
+            // static for the activity's whole life — on iOS this becomes ShinyActivityAttributes
+            Attributes = new Dictionary<string, string> { ["orderNumber"] = orderNumber },
+            Kind       = "delivery",
+            Content    = new LiveActivityContent
+            {
+                Title       = "Order confirmed",
+                Body        = "Preparing your order",
+                ShortStatus = "0%",
+                Progress    = LiveActivityProgress.FromValue(0.0)
+            }
+        });
+        this.activityId = activity.Id;
+    }
+
+    public Task Advance(double percent, string body) => activities.Update(
+        this.activityId!,
+        new LiveActivityContent
+        {
+            Title       = "Out for delivery",
+            Body        = body,
+            ShortStatus = $"{percent:P0}",
+            Progress    = LiveActivityProgress.FromValue(percent)
+        }
+    );
+
+    public Task Finish() => activities.End(
+        this.activityId!,
+        new LiveActivityContent { Title = "Delivered", Progress = LiveActivityProgress.FromValue(1.0) },
+        dismissAt: DateTimeOffset.UtcNow.AddMinutes(2)
+    );
+}
+```
+
+:::note[Update replaces, it does not merge]
+`Update` takes the **complete** new content, exactly as a server push does. There is no delta form.
+:::
+
+`GetAll()` lists what is running, newest first. `EndAll()` clears everything — call it on logout. Pass a
+`LiveActivityAlert` to `Update` to surface a banner and a tap on a paired watch instead of refreshing
+silently.
+
+## Content
+
+| Property | Purpose |
+|----------|---------|
+| `Title` | The headline — order status, team names, "Arriving in 5 min" |
+| `Body` | Supporting detail under the title |
+| `ShortStatus` | A handful of characters for the tightest surfaces: the Dynamic Island compact view and the Android status bar chip |
+| `Progress` | Optional progress indicator — see below |
+| `StaleDate` | When the content should be treated as out of date; the system flips the activity to `LiveActivityState.Stale` so your widget can render an "out of date" view. It does not end the activity |
+| `RelevanceScore` | Ranks this activity against your app's others for the Dynamic Island (iOS) |
+| `Data` | Free-form `string`/`string` values your own widget reads |
+
+## Prefer a time range over a fraction
+
+```csharp
+// self-advancing: the system animates it with no further updates from you
+Progress = LiveActivityProgress.FromRange(startedAt, expectedFinish)
+```
+
+Every push update costs budget, and on iOS a suspended app sends none at all — a fraction-based bar simply
+freezes until the app wakes. A range keeps advancing with no app involvement, and each real update
+re-anchors it. Use `FromValue` when the fraction is genuinely known and not time-shaped, and
+`Indeterminate = true` when it is unknown.
+
+## Permissions
+
+`GetCurrentAccess()` and `RequestAccess()` report the iOS per-app Live Activities switch, or notification
+permission on Android. iOS has no prompt for Live Activities, so `RequestAccess` there simply reports the
+current setting; Android 13+ asks for `POST_NOTIFICATIONS`.
+
+## Already done for you: HTTP transfer progress
+
+Do **not** hand-roll a Live Activity for `Shiny.Net.Http` uploads and downloads.
+[`AddTransferProgress()`](/httptransfers/progress) already drives one on iOS and the foreground-service
+notification on Android, from a single manager, with no code in your transfer delegate.
+
+## Next
+
+- [The iOS widget extension](/liveactivities/widget) — required on iOS, and the usual reason nothing appears
+- [Push tokens and server updates](/liveactivities/push)

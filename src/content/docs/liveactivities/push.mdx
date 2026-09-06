@@ -1,0 +1,124 @@
+---
+title: Push Tokens & Server Updates
+---
+
+A Live Activity is most useful when a **server** drives it — the app is usually suspended or closed for the
+part of the story the user actually cares about. iOS supports this through APNs; Android does not have the
+concept and is updated by your own app instead, typically from an FCM data message handled by `Shiny.Push`.
+
+## Three kinds of token, and they are not interchangeable
+
+This is where most Live Activity integrations go wrong. Apple issues tokens that *look* like device tokens
+but are only valid for the `liveactivity` topic.
+
+| Token | Lifetime | `PushTokenKind` | Where you get it |
+|-------|----------|-----------------|------------------|
+| Device token | the install | `Device` | `Shiny.Push` |
+| Push-to-start (iOS 17.2+) | the install — valid before any activity exists | `LiveActivityStart` | `OnPushToStartTokenChanged` |
+| Per-activity update | born and dead with that one activity | `LiveActivityUpdate` | `OnPushTokenChanged` |
+
+:::caution
+Send an ordinary alert to a Live Activity token and APNs answers `DeviceTokenNotForTopic`, which token
+managers read as "invalid" and **prune**. Keep the kinds separated on your server — `Shiny.Extensions.Push`
+carries a `TokenKind` on each registration and defaults `PushFilter.TokenKind` to `Device` precisely so a
+broadcast can never reach them by accident.
+:::
+
+A `410 Unregistered` on an update token is normal and expected — it means that activity has ended.
+
+## The delegate
+
+Tokens are **not available synchronously** — never poll `PushToStartToken`. The delegate is resolved from
+DI, so it can take dependencies, and it runs even when the event arrives with the app backgrounded or
+freshly relaunched.
+
+```csharp
+public class MyLiveActivityDelegate(IMyApi api) : LiveActivityDelegate
+{
+    // the device's push-to-start token — survives launches, lets the server start an activity
+    // with the app closed (iOS 17.2+)
+    public override Task OnPushToStartTokenChanged(string token)
+        => api.RegisterToken(token, PushTokenKind.LiveActivityStart);
+
+    // this one activity's own token — the only way to update it remotely, and it dies with it
+    public override Task OnPushTokenChanged(LiveActivity activity, string token)
+        => api.RegisterActivityToken(activity.Id, token);
+
+    public override Task OnStarted(LiveActivity activity) => Task.CompletedTask;
+    public override Task OnStateChanged(LiveActivity activity) => Task.CompletedTask;
+}
+```
+
+```csharp
+builder.Services.AddLiveActivities<MyLiveActivityDelegate>();
+```
+
+`LiveActivityDelegate` is a no-op base class — inherit it and override only what you need. Most apps only
+care about the two token callbacks.
+
+Set `RequestPushToken = false` on `LiveActivityRequest` if a particular activity is app-driven and does not
+need a token.
+
+## Sending from the server
+
+`Shiny.Extensions.Push` builds the three lifecycle pushes and enforces the fields each one requires — Live
+Activity pushes use a different push type, topic and `aps` body from an ordinary alert.
+
+```csharp
+// Start — push-to-start, iOS 17.2+. Goes to a LiveActivityStart token.
+await pushManager.SendLiveActivity(
+    LiveActivityPush.Start(
+        attributesType: "ShinyActivityAttributes",
+        attributes:     new Dictionary<string, LiveActivityValue> { ["orderNumber"] = "A-1234" },
+        contentState:   state,
+        alertTitle:     "Your order is on the way"
+    ),
+    new PushFilter { UserIdentifier = "user-42" }
+);
+
+// Update — goes to that activity's own token.
+await pushManager.SendLiveActivityToTokens([activityToken], LiveActivityPush.Update(state));
+
+// End — optional final state, and when it should leave the Lock Screen.
+await pushManager.SendLiveActivityToTokens(
+    [activityToken],
+    LiveActivityPush.End(finalState, dismissalDate: DateTimeOffset.UtcNow.AddMinutes(5))
+);
+```
+
+See [Live Activities in Shiny.Extensions.Push](/extensions-push/live-activities) for the full server story.
+
+## The wire contract
+
+`LiveActivityContentSchema` is public so a server payload can be built — or verified — against exactly the
+shape the app produces:
+
+```json
+{
+  "title":         "Out for delivery",
+  "body":          "2 stops away",
+  "shortStatus":   "5 min",
+  "progress":      0.65,
+  "progressStart": 774835200.0,
+  "progressEnd":   774838800.0,
+  "indeterminate": false,
+  "data":          { "orderId": "A-1234" }
+}
+```
+
+:::danger[Dates inside content-state use the 2001 epoch, not Unix]
+ActivityKit decodes the state with a stock `JSONDecoder`, so `Date` fields are **seconds since
+2001-01-01** — Swift's reference date. `LiveActivityContentSchema.ToAppleReferenceSeconds` converts, and
+`AppleReferenceEpochOffset` (978307200) is the constant. The `aps` envelope itself — `timestamp`,
+`stale-date`, `dismissal-date` — stays Unix. Getting this wrong does not throw; the update is silently
+dropped and the activity simply stops refreshing.
+:::
+
+Keep the payload small: ActivityKit caps content-state at **4KB**. `Data` is deliberately `string`-keyed and
+`string`-valued so the payload is byte-identical whether it came from your app or from your server.
+
+## Android
+
+Both token properties are null on Android — there is no push-token concept for a live update. Update the
+activity from your own app, typically in an FCM data message handler registered through `Shiny.Push`, by
+calling `ILiveActivityManager.Update` with the same `LiveActivityContent`.

@@ -429,6 +429,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Live Activities',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'liveactivities/', badge: { text: 'New', variant: 'success' } },
+          { label: 'iOS Widget Extension', link: 'liveactivities/widget' },
+          { label: 'Push Tokens & Server Updates', link: 'liveactivities/push' },
+          { label: 'Release Notes', link: 'liveactivities/release-notes' }
+        ]
+      },
+      {
         label: 'HTTP Transfers',
         jumpTo: true,
         items: [
