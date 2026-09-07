@@ -1,0 +1,107 @@
+---
+title: Diagram Editing & Undo
+description: How a Shiny DiagramView turns a gesture into a cancellable, revertable DiagramEditPlan — selection, node dragging, connection authoring, deletion, and why undo is a stack of plans and nothing else
+---
+
+Everything on this page is **off by default**. A diagram is a picture until you say otherwise.
+
+| Property | What it enables | Default |
+|---|---|---|
+| `AllowPan` | Dragging the background moves the viewport | on |
+| `AllowZoom` | Pinch (MAUI) / Ctrl-Cmd + wheel (Blazor) | on |
+| `AllowSelection` | Tapping selects a node or a connection | on |
+| `AllowMultiSelect` | Marquee selection | off |
+| `AllowNodeDrag` | Nodes can be dragged | off |
+| `AllowConnectionEdit` | A selected node shows connector handles | off |
+| `AllowDelete` | Delete and Backspace remove the selection (**Blazor only**) | off |
+
+Per-item overrides narrow it further: `DiagramNode.CanMove`, `DiagramNode.CanConnect` and
+`DiagramConnection.CanEdit`.
+
+`AllowDelete` is Blazor-only because MAUI has no reliable cross-platform key event on a content view
+and a phone has no Delete key at all. On MAUI, call `DeleteSelection()` from a toolbar button or a
+context menu.
+
+## Every edit is a plan
+
+A gesture builds a `DiagramEditPlan` describing **everything it is about to do** — deleting one node
+also lists the connections that go with it — and raises it for cancellation before anything is
+applied. A handler therefore decides with the full consequence in front of it rather than after the
+fact.
+
+```csharp title="MAUI"
+diagram.Editing += (sender, e) =>
+{
+    if (e.Plan.AffectedNodes.Any(n => n.Id == "root"))
+        e.Cancel = true;
+};
+
+diagram.Edited += (sender, e) =>
+    Console.WriteLine($"{e.Plan.Kind}: {e.Plan.AffectedNodes.Count} node(s)");
+```
+
+```razor title="Blazor"
+<DiagramView OnEditing="OnEditing" OnEdited="OnEdited" />
+
+@code {
+    void OnEditing(DiagramEditingEventArgs e) =>
+        e.Cancel = e.Plan.AffectedNodes.Any(n => n.Id == "root");
+
+    void OnEdited(DiagramEditPlan plan) =>
+        Console.WriteLine($"{plan.Kind}: {plan.AffectedNodes.Count} node(s)");
+}
+```
+
+`DiagramEditKind` says what happened: `Move`, `AddNode`, `RemoveNode`, `AddConnection`,
+`RemoveConnection`, `Reconnect`.
+
+## Undo is a stack of plans
+
+Because the plan recorded the **old values** rather than trying to recompute them, `Revert()` puts
+everything back including the cascade. That is the whole mechanism — `Undo()`, `Redo()`, `CanUndo` and
+`CanRedo` are a `Stack<DiagramEditPlan>` and nothing else, and the controls keep that stack for you.
+
+A plan also holds the collections it edited, so reverting a delete puts the node back **in its old
+slot** rather than on the end. That matters: supply order is what the layouts break ties by, and an
+undo that reordered the source would move unrelated nodes.
+
+Build your own stack only if you need to merge diagram edits into a wider undo history — take the plan
+from `Edited` / `OnEdited` and call `Revert()` on it yourself.
+
+`Redo` replays **moves only**. An add or a remove was applied by the gesture as it recorded it, and
+re-applying one would need the plan to know how to repeat a mutation rather than only how to invert
+it — a second mechanism for a case that has never come up.
+
+## Dragging
+
+Nodes move live so the drag is visible, and the plan built on release still carries the original
+positions — so a veto or an undo puts them back. The whole selection moves together, which is what
+makes marquee selection worth having; a node that is not selected drags alone.
+
+`SnapToGrid` rounds a dragged position to `GridSize`. Dragging sets `IsPinned`, so the node stays put
+through the next re-layout.
+
+## Drawing a connection
+
+Select a node and it grows four connector handles on its outline. Drag one onto another node and a
+`DiagramConnection` is added to your collection — as an `AddConnection` plan, so it is cancellable and
+undoable like anything else.
+
+Only the **selected** node shows handles. That is deliberate: on a crowded diagram, handles on every
+node would mean a touch anywhere near one grabs a connector instead of the node.
+
+## Selection
+
+`Select(nodes, connections, additive)` sets it from code, `Selection` reads it back, and
+`SelectionChanged` / `OnSelectionChanged` reports every change. On MAUI, `SelectedNode` is a two-way
+bindable single-value form for binding a detail pane to; it holds the last node added to the
+selection.
+
+Selection lives on the model — `DiagramNode.IsSelected` — so a node template can style itself without
+the consumer plumbing anything.
+
+## A note on gestures
+
+On MAUI, panning and marquee-selecting are the same gesture on the background and only one of them can
+have it: a finger has no shift key. `AllowPan` wins when both are on, because getting around a diagram
+is the more common need. On Blazor the two coexist — shift-drag marquees, plain drag pans.

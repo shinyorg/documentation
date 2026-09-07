@@ -617,6 +617,24 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Floor Plan',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Overview', link: 'controls/floorplan/' },
+        ]
+      },
+      {
+        label: 'Diagram',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Overview', link: 'controls/diagram/' },
+          { label: 'Layouts', link: 'controls/diagram/layouts' },
+          { label: 'Editing & Undo', link: 'controls/diagram/editing' },
+        ]
+      },
+      {
         label: 'Office',
         jumpTo: true,
         items:[
