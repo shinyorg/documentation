@@ -363,7 +363,7 @@ export default defineConfig({
             },
             {
               id: 'controls-13',
-              content: 'Shiny Controls 1.3 - View & Edit Word, Excel, & PowerPoint Docs!',
+              content: 'Shiny Controls 1.3 - View & Edit Word, Excel, & PowerPoints - GANTT Charts & More!',
               variant: 'tip',
               link: { text: 'For Free!?!', href: '/controls/' },
               dismissable: false
