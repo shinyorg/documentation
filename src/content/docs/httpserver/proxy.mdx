@@ -1,26 +1,37 @@
 ---
 title: Reverse Proxy
-description: Forwarding a route to another server — the device is often the only thing that can reach what the caller wants
+description: Forwarding a route to another server — clusters, load balancing, health checks, affinity, transforms and WebSockets, from a one-liner up
 ---
 
 import { Aside } from '@astrojs/starlight/components';
 
+```
+dotnet add package Shiny.Net.HttpServer.Proxy
+```
+
 ```csharp
+using Shiny.Net.HttpServer.Proxy;
+
 app.MapProxy("/api/{*path}", "https://api.example.com");
 ```
 
 Every method on that route is forwarded to the destination, and the answer is copied back.
 
-The reason this belongs in an embedded server rather than in a load balancer: the device is often the
-only thing that can reach what the caller wants.
+The reason this belongs beside an embedded server rather than in a load balancer: the device is often
+the only thing that can reach what the caller wants.
 
 - A phone bridges one of its own loopback services out through a [tunnel](/httpserver/tunneling/).
 - A Raspberry Pi fronts a printer or a camera that speaks HTTP with no TLS and no authentication —
   and the Pi adds both.
 - A dev server serves the app and forwards `/api` to the real backend, so the browser sees one
   origin and [CORS](/httpserver/cors/) never enters the picture.
+- A gateway on the LAN spreads requests over two or three instances of a service and takes one out
+  of rotation the moment it stops answering.
 
-## What is forwarded
+The four shapes below escalate. Each is the previous one with something added, and they are the same
+code path underneath: the single-destination call builds a cluster of one.
+
+## 1. One destination
 
 The remaining path comes from the route's catch-all parameter, so `/api/{*path}` sends
 `/api/orders/7?full=1` to `{destination}/orders/7?full=1`. A route with no catch-all forwards to the
@@ -37,9 +48,10 @@ this server and nothing else.
 | Status | When |
 | --- | --- |
 | **502** | The upstream is unreachable or answered nonsense. The caller's request was fine; ours was not answered |
+| **503** | Every destination in the cluster is out of rotation |
 | **504** | The upstream did not answer inside `Timeout` (100s by default) |
 
-## Options
+### Options
 
 ```csharp
 app.MapProxy("/printer/{*path}", "http://192.168.1.50", o =>
@@ -52,22 +64,221 @@ app.MapProxy("/printer/{*path}", "http://192.168.1.50", o =>
 
 | Property | Default | Notes |
 | --- | --- | --- |
-| `Client` | a private one | Redirects off, cookies off, no automatic decompression |
-| `Timeout` | 100s | Exceeding it is a 504 |
-| `AddForwardedHeaders` | `true` | `X-Forwarded-For` / `-Proto` / `-Host` |
+| `Client` | a shared one | Redirects off, cookies off, no automatic decompression |
+| `Timeout` | 100s | Exceeding it is a 504. Does not apply to an upgraded connection |
+| `AddForwardedHeaders` | `true` | `X-Forwarded-For` / `-Proto` / `-Host`. A shorthand for `Transforms.ForwardedHeaders` |
 | `RewriteHost` | `true` | Sends the destination's host, which is what most upstreams route on |
+| `ForwardUpgrades` | `true` | WebSockets and any other HTTP/1.1 upgrade |
+| `RequestVersion` | `1.1` | HTTP version for the outbound call |
 | `RewriteUri` | `null` | Replaces the whole "destination + remainder" rule |
 | `BeforeSend` | `null` | Last chance to touch the outbound request |
 | `AfterReceive` | `null` | First look at the upstream response |
+| `Transforms` | empty | The composable pipeline — see below |
+| `OnError` | `null` | Answer a failure in your own shape instead of the default status code |
 
 The default client does not follow redirects and does not decompress: following a redirect on the
 caller's behalf hides it from them, and decompressing here only to recompress on the way out spends
 the device's battery to change nothing.
 
-<Aside type="caution" title="Upgrades are not forwarded">
-A [WebSocket](/httpserver/websockets/) through a proxy route will not work. The upstream's response
-is passed through as-is, but the connection is not handed over.
+For a route that does its own deciding, forward from inside an ordinary handler:
+
+```csharp
+app.MapGet("/thing/{id}", ctx => HttpForwarder.ForwardAsync(ctx, "http://192.168.1.50").AsTask());
+```
+
+## 2. A cluster
+
+```csharp
+app.MapProxy("/api/{*path}", cluster =>
+{
+    cluster.AddDestination("a", "https://a.internal");
+    cluster.AddDestination("b", "https://b.internal");
+
+    cluster.LoadBalancing = LoadBalancingPolicy.PowerOfTwoChoices;
+});
+```
+
+| Policy | What it does |
+| --- | --- |
+| `PowerOfTwoChoices` | **Default.** Samples two destinations at random and takes the less busy one |
+| `RoundRobin` | Each request to the next destination in order |
+| `LeastRequests` | The destination with the fewest requests in flight |
+| `Random` | Uniformly random |
+| `First` | Always the first available destination — active/standby, not balancing |
+
+Power-of-two is the default because it costs two random numbers rather than a scan, and because it
+avoids the failure mode that makes plain least-requests dangerous: every proxy instance agreeing that
+the same idle destination is the best one and stampeding it simultaneously.
+
+Set `cluster.LoadBalancer` to an `ILoadBalancingPolicy` of your own to replace all of them.
+
+### Health
+
+Health is tracked in two independent places, exactly as the two checks observe it. Either can take a
+destination out, and neither overwrites the other's opinion — an active probe that passes while every
+real request is failing should not put a broken destination back into service.
+
+```csharp
+cluster.HealthCheck.Passive.FailureThreshold = 3;
+cluster.HealthCheck.Passive.ReactivationPeriod = TimeSpan.FromSeconds(30);
+
+cluster.HealthCheck.Active.Enabled = true;
+cluster.HealthCheck.Active.Path = "/health";
+cluster.HealthCheck.Active.Interval = TimeSpan.FromSeconds(10);
+```
+
+**Passive** watches real traffic: after `FailureThreshold` consecutive failures the destination is out
+for `ReactivationPeriod`, then gets traffic again and has to survive it. Only failures that say
+something about the destination count — a caller that hung up, or an upstream that answered 500, says
+nothing about whether that instance is reachable.
+
+**Active** probes on a timer whether or not traffic is flowing, and is **off by default**: a probe
+every few seconds against every destination is not free, and on a battery-powered device it is the
+kind of not-free that shows up in a graph. When it is on, the probe loop follows the server's own
+state — it starts when the server starts and stops when it stops, so a backgrounded app is not
+holding the radio awake to poll upstreams nothing is using.
+
+When every destination is out, the route answers **503**.
+
+<Aside type="note" title="A cluster of one behaves differently on purpose">
+The single-destination `MapProxy` builds a cluster whose passive check is **off**. Quarantining the
+only destination there is would turn a 502 that names a real upstream failure into a 503 that names
+nothing, and the request has nowhere else to go either way.
 </Aside>
+
+### Session affinity
+
+```csharp
+cluster.SessionAffinity.Mode = SessionAffinityMode.Cookie;      // or Header
+cluster.SessionAffinity.FailurePolicy = AffinityFailurePolicy.Redistribute;
+```
+
+The first request picks a destination and the caller is pinned to it — by a cookie for a browser, or
+by a header for anything else. When the pinned destination is gone or unhealthy, `Redistribute` picks
+a new one and re-pins; `Return503` fails instead, for an upstream where landing on a different
+instance is worse than failing.
+
+The value written is a hash of the cluster and destination ids rather than the destination id itself.
+A destination id is usually a host name, sometimes an internal one, and putting it in a cookie
+publishes the shape of the backend to anyone who opens dev tools — for no gain, since the proxy is
+the only thing that ever has to recognise it.
+
+## 3. Transforms
+
+```csharp
+cluster.Transforms
+    .RemovePathPrefix("/api")
+    .SetQueryValue("tenant", "acme")
+    .SetRequestHeader("X-Api-Key", key)
+    .RemoveResponseHeader("Server")
+    .WithForwardedHeaders(ForwardedHeadersMode.Append);
+```
+
+Request transforms run after the default path and query have been worked out and before the request
+is sent. Response transforms run after the upstream's headers have been copied onto the response and
+before the body streams back, which is the last moment anything can be changed.
+
+| Request | Response |
+| --- | --- |
+| `AddPathPrefix` · `RemovePathPrefix` · `SetPath` | `SetResponseHeader` |
+| `SetQueryValue` · `AppendQueryValue` · `SetQueryRouteValue` · `RemoveQueryValue` | `AppendResponseHeader` |
+| `SetRequestHeader` · `AppendRequestHeader` · `CopyRequestHeader` · `RemoveRequestHeader` | `RemoveResponseHeader` |
+| `SetRequestHost` · `WithForwardedHeaders` | `AddResponseTransform` |
+| `AddRequestTransform` | |
+
+`ForwardedHeadersMode.Set` — the default — replaces whatever the caller sent, which is the point: a
+caller supplying its own `X-Forwarded-For` is claiming to be a proxy, and believing it is how an
+[IP allow-list](/httpserver/ip-filtering/) is walked around. `Append` is for a deliberate chain of
+proxies; `Off` for an upstream that already sits behind something else that writes them.
+
+A query nothing touched is forwarded byte for byte. Re-encoding an untouched query is not a no-op: an
+upstream that signs its own URLs, or one that distinguishes `%2F` from `/`, notices the difference.
+
+## 4. Configuration
+
+```csharp
+builder.AddReverseProxy(configuration.GetSection("ReverseProxy"));
+```
+
+```json
+{
+  "ReverseProxy": {
+    "Routes": {
+      "api": {
+        "ClusterId": "backend",
+        "Match": {
+          "Path": "/api/{**rest}",
+          "Hosts": [ "*.example.com" ],
+          "Methods": [ "GET", "POST" ]
+        },
+        "Order": 0,
+        "Transforms": [
+          { "PathRemovePrefix": "/api" },
+          { "RequestHeader": "X-Tenant", "Set": "acme" },
+          { "ResponseHeaderRemove": "Server" }
+        ]
+      }
+    },
+    "Clusters": {
+      "backend": {
+        "LoadBalancingPolicy": "LeastRequests",
+        "SessionAffinity": { "Mode": "Cookie" },
+        "HealthCheck": {
+          "Active": { "Enabled": true, "Interval": 10, "Timeout": 5, "Path": "/health" },
+          "Passive": { "Enabled": true, "FailureThreshold": 3, "ReactivationPeriod": 30 }
+        },
+        "HttpRequest": { "ActivityTimeout": 30, "RewriteHost": true },
+        "Destinations": {
+          "d1": { "Address": "https://a.internal" },
+          "d2": { "Address": "https://b.internal", "Health": "https://b.internal:9000" }
+        }
+      }
+    }
+  }
+}
+```
+
+A catch-all may be written `{**rest}` or `{*rest}` — a configuration file copied over from YARP
+should not fail to parse over a star. A duration may be `"00:00:10"` or the bare number `10`, which
+is seconds.
+
+Without a container, map one straight onto the server and hold the runtime it hands back:
+
+```csharp
+var proxy = app.MapReverseProxy(configuration.GetSection("ReverseProxy"));
+```
+
+Two routes sharing a template are collapsed into one endpoint that tries them in `Order` and matches
+on `Hosts` and `Methods`; a request matching none of them is a 404. The router itself matches on
+method and path, so without that the two would collide in the table and one would silently win.
+
+### Reload
+
+Routes in this server are not frozen when it starts — the table is swapped atomically — so a
+configuration change is applied to the *running* server rather than needing a restart.
+
+- Clusters that keep their id keep their `ProxyCluster`, so a quarantined destination stays
+  quarantined and a probe loop is not torn down and rebuilt on every save.
+- Routes mapped in code are left alone. Only routes the configuration put there are replaced.
+- A file saved half-written is logged and ignored. Keeping the routes that are already working beats
+  tearing down a functioning proxy over a missing brace.
+
+Subscribe to `ReverseProxyRuntime.Reloaded` to be told when a new configuration has taken effect.
+
+## WebSockets
+
+An `Upgrade` request is completed against the upstream and, on a `101`, the connection is handed over
+outright and bytes are pumped both ways until either side stops. So a
+[WebSocket](/httpserver/websockets/) through a proxy route works end to end, as does anything else
+that upgrades on HTTP/1.1.
+
+```csharp
+app.MapProxy("/ws/{*path}", "http://127.0.0.1:9000");     // forwards the handshake and the socket
+```
+
+The request timeout covers the handshake only — applying it to an upgraded connection would close a
+WebSocket on the dot. `ForwardUpgrades = false` turns the whole thing off and answers the upstream's
+response as an ordinary one.
 
 <Aside type="danger" title="A proxy on a tunnel is a proxy for the internet">
 `MapProxy` will forward whatever reaches it. Behind a [tunnel](/httpserver/tunneling/), put

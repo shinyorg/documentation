@@ -1,0 +1,142 @@
+---
+title: Scheduling
+description: Working-time calendars, dependency types and lag, constraints, cascading successors and the critical path — the Gantt scheduling engine shared by the MAUI and Blazor controls
+---
+
+Everything on this page lives in **`Shiny.Controls.Gantt.Shared`** and behaves identically on both
+hosts. It is also usable with no UI at all.
+
+## Working calendars
+
+```csharp
+GanttCalendar.Continuous    // 24/7 — the default, and short-circuits every method
+GanttCalendar.StandardDays  // Mon-Fri, full days
+GanttCalendar.StandardHours // Mon-Fri, 09:00-17:00
+```
+
+Or build one:
+
+```csharp
+var calendar = new GanttCalendar(
+    workingDays: [DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
+                  DayOfWeek.Thursday, DayOfWeek.Friday],
+    shifts:      [GanttShift.FromHours(9, 12), GanttShift.FromHours(13, 17)],
+    holidays:    [new DateOnly(2026, 12, 25)],
+    exceptions:  [new(new DateOnly(2026, 6, 6), [GanttShift.FullDay])]  // a worked Saturday
+);
+```
+
+An exception with an **empty** shift list turns a weekday off; one with shifts turns a non-working
+day on. That single mechanism covers both company shutdowns and weekend overtime.
+
+With a calendar set:
+
+- weekends and holidays are shaded on the timeline;
+- a bar dropped on a Saturday lands on the Monday — a zero-length advance still normalizes onto a
+  working boundary, which is also what makes a milestone behave;
+- a task keeps its **working** duration across a move, so three working days stays three working days
+  and simply gets wider when it straddles a weekend;
+- durations, lag and slack are all measured in working time.
+
+`GanttCalendar.Continuous` is the default and costs nothing — every method short-circuits to plain
+arithmetic, so an app that never mentions working time never pays for the machinery.
+
+:::caution
+Every walk over days is bounded. A calendar with no working days at all — an empty `WorkingDays` set,
+or holidays covering the range — clamps and returns rather than spinning, because a control that
+freezes inside a layout pass is worse than one that gives up.
+:::
+
+## Dependency types
+
+| Type | Meaning |
+|---|---|
+| `FinishToStart` | The successor may not start until the predecessor finishes. The default. |
+| `StartToStart` | The successor may not start until the predecessor starts. |
+| `FinishToFinish` | The successor may not finish until the predecessor finishes. |
+| `StartToFinish` | The successor may not finish until the predecessor starts. |
+
+`Lag` delays the link. **Negative lag is lead time and is perfectly legal** — "start two days before
+the predecessor finishes" is an ordinary plan, not an error:
+
+```csharp
+new GanttDependency("a", "b", GanttDependencyType.FinishToStart, TimeSpan.FromDays(-2));
+```
+
+Lag is measured in working time when a calendar is set.
+
+## Constraints
+
+`GanttTask.Constraint` + `ConstraintDate` pin a task against the auto-scheduler:
+
+`MustStartOn`, `MustFinishOn`, `StartNoEarlierThan`, `StartNoLaterThan`, `FinishNoEarlierThan`,
+`FinishNoLaterThan`.
+
+Constraints **clamp** rather than block — dragging a pinned bar simply doesn't move it, and the clamp
+is reported as an issue on the plan. Blocking would make the bar feel broken.
+
+`ManuallyScheduled` is the softer option: links still draw and still report violations, but nothing
+drags the task along.
+
+## Cascading
+
+```csharp
+var plan = GanttScheduler.Move(model, task, newStart, new GanttScheduleOptions
+{
+    Calendar = GanttCalendar.StandardDays,
+    Cascade  = GanttCascadeMode.PushOnly,
+    MinimumDuration = TimeSpan.FromHours(4)
+});
+
+if (plan.IsValid)
+    plan.Apply();
+```
+
+The cascade runs to a fixed point rather than once, because the summary rollup and the link cascade
+feed each other: moving a task changes its summary's dates, and a summary is itself a legal
+predecessor.
+
+Dragging a **summary** shifts its whole subtree by the same delta, preserving the internal shape of
+the phase. Resizing one is refused by default — its dates are derived from its children, so the
+resize would be silently undone by the next rebuild.
+
+## Critical path
+
+`ShowCriticalPath` computes `TotalSlack` for every task and highlights the zero-slack chain.
+
+The pass is **backward only**. A textbook CPM starts by deriving earliest dates from durations, but a
+Gantt control is handed a plan that is *already scheduled* — those dates are the answer, not something
+to recompute. What is still unknown is how much each task could slip before the finish moves, and
+that comes from walking the graph in reverse.
+
+Consequences worth knowing:
+
+- Slack can be **negative**, when the plan already violates its own dependencies. That is the honest
+  answer, and the number a planner needs.
+- A link is critical only when **both** ends are. A red arrow drawn across slack that genuinely
+  exists is worse than no highlight at all.
+- Tasks on a dependency cycle are left out entirely and reported as issues, rather than the analysis
+  hanging.
+- `CriticalSlackThreshold` widens the definition, which a plan built from whole days usually wants.
+
+## Using the engine without a UI
+
+```csharp
+var model = GanttModel.Build(tasks, links, new GanttModelOptions
+{
+    Calendar = GanttCalendar.StandardDays,
+    ComputeCriticalPath = true
+});
+
+foreach (var issue in model.Issues)
+    logger.LogWarning("{Issue}", issue);
+
+var replan = GanttScheduler.Reschedule(model, new GanttScheduleOptions
+{
+    Cascade = GanttCascadeMode.Strict
+});
+replan.Apply();
+```
+
+`GanttModel` exposes the resolved hierarchy (`Roots`, `ChildrenOf`, `Rows`), the dependency graph
+(`PredecessorsOf`, `SuccessorsOf`, `TopologicalOrder`), the plan extent, and every validation issue.

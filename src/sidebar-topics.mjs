@@ -608,6 +608,15 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Gantt',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Overview', link: 'controls/gantt/' },
+          { label: 'Scheduling', link: 'controls/gantt/scheduling' },
+        ]
+      },
+      {
         label: 'Office',
         jumpTo: true,
         items:[
