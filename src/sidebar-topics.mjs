@@ -7,6 +7,11 @@
  *
  * Add `expandInHomenav: true` to a grouping node (e.g. "Aspire") so the homepage nav
  * panel lists its child libraries instead of the group itself.
+ *
+ * Add `platform: 'maui'` or `platform: 'blazor'` to any item that only exists on that host.
+ * `cleanTopicsForStarlight` turns it into a pill in the sidebar — on its own when the item has
+ * no other badge, or as a second pill beside an existing one (e.g. `Flyout [New] [MAUI]`).
+ * Prefer this over spelling "(MAUI Only)" out in the label.
  */
 export const sidebarTopics = [
   {
@@ -549,7 +554,6 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'controls/cameraview/' },
-          { label: 'Media Service', link: 'controls/cameraview/media-service', badge: { text: 'New', variant: 'success' } },
           { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
           { label: 'Effects & Filters', link: 'controls/cameraview/effects' },
           { label: 'Face Masks', link: 'controls/cameraview/face-masks' },
@@ -669,20 +673,15 @@ export const sidebarTopics = [
           { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
           { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
           { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
-          { label: 'Carousel (Blazor)', link: 'controls/carousel/', jumpTo: true },
+          { label: 'Carousel', link: 'controls/carousel/', jumpTo: true, platform: 'blazor' },
         ]
-      },
-      {
-        label: 'Ribbon',
-        link: 'controls/ribbon/',
-        jumpTo: true,
       },
       {
         label: 'Desktop',
         items:[
-          { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true },
+          { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true, platform: 'maui' },
           { label: 'Docking', link: 'controls/docking/', jumpTo: true },
-          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true, badge: { text: 'Blazor', variant: 'note' } },
+          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true, platform: 'blazor' },
         ]
       },
       {
@@ -704,10 +703,18 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/fab/blazor' },
         ]
       },
-      { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true },
+      {
+        label: 'Services',
+        items:[
+          { label: 'Dialog Service', link: 'controls/dialogs/', jumpTo: true },
+          { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true, platform: 'maui' },
+          { label: 'Media Service', link: 'controls/cameraview/media-service', jumpTo: true, platform: 'maui', badge: { text: 'New', variant: 'success' } },
+        ]
+      },
       {
         label: 'Flyout',
         jumpTo: true,
+        platform: 'maui',
         badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Getting Started', link: 'controls/flyout/' },
@@ -718,6 +725,7 @@ export const sidebarTopics = [
       {
         label: 'TabbedPage',
         jumpTo: true,
+        platform: 'maui',
         badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Getting Started', link: 'controls/tabbedpage/' },
@@ -728,6 +736,7 @@ export const sidebarTopics = [
       {
         label: 'NavigationPage',
         jumpTo: true,
+        platform: 'maui',
         badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Getting Started', link: 'controls/navigationpage/' },
@@ -738,6 +747,7 @@ export const sidebarTopics = [
       {
         label: 'Floating Panels',
         jumpTo: true,
+        platform: 'maui',
         items:[
           { label: 'Getting Started', link: 'controls/floatingpanel/' },
           { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
@@ -747,8 +757,8 @@ export const sidebarTopics = [
             items:[
               { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
               { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
-              { label: 'DurationPicker', link: 'controls/durationpicker/', jumpTo: true },
-              { label: 'Sheet View (Blazor Only)', link: 'controls/sheetview/', jumpTo: true },
+              { label: 'DurationPicker', link: 'controls/durationpicker/', jumpTo: true, platform: 'maui' },
+              { label: 'Sheet View', link: 'controls/sheetview/', jumpTo: true, platform: 'blazor' },
             ]
           },
         ]
@@ -803,11 +813,12 @@ export const sidebarTopics = [
             ]
           },
           { label: 'Speech Add-ins', link: 'controls/speech-addins/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Captcha (Blazor Only)', link: 'controls/captcha/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'Captcha', link: 'controls/captcha/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
-        label: 'Layout (Blazor)',
+        label: 'Layout',
+        platform: 'blazor',
         badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Stacks & Grid', link: 'controls/layout/', jumpTo: true },
@@ -817,6 +828,7 @@ export const sidebarTopics = [
       {
         label: 'Keyframe Animation',
         jumpTo: true,
+        platform: 'maui',
         badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Getting Started', link: 'controls/keyframe/' },
@@ -875,12 +887,13 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'Toolbar & TabBar (Blazor Only)',
+        label: 'Toolbar & TabBar',
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'controls/toolbar-tabbar/' },
-          { label: 'ShinyToolbar', link: 'controls/toolbar-tabbar/toolbar' },
-          { label: 'ShinyTabBar', link: 'controls/toolbar-tabbar/tabbar' },
+          { label: 'ShinyToolbar', link: 'controls/toolbar-tabbar/toolbar', platform: 'blazor' },
+          { label: 'ShinyTabBar', link: 'controls/toolbar-tabbar/tabbar', platform: 'blazor' },
+          { label: 'Ribbon', link: 'controls/ribbon/', jumpTo: true },
         ]
       },
       {
@@ -919,7 +932,7 @@ export const sidebarTopics = [
           { label: 'RangeSlider', link: 'controls/rangeslider/', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
-          { label: 'Splash Screen (Blazor Only)', link: 'controls/splashscreen/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'Splash Screen', link: 'controls/splashscreen/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
@@ -927,8 +940,7 @@ export const sidebarTopics = [
           { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
           { label: 'PasswordStrength', link: 'controls/passwordstrength/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Toast', link: 'controls/toast/', jumpTo: true },
-          { label: 'Dialogs', link: 'controls/dialogs/', jumpTo: true },
-          { label: 'Modal (Blazor Only)', link: 'controls/modal/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'Modal', link: 'controls/modal/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
         ]
       },
       { label: 'Blazor Playground', link: 'https://shinyorg.github.io/controls/', attrs: { target: '_blank' } },
@@ -1291,17 +1303,42 @@ export const sidebarTopics = [
  * `homeNavOnly` is dropped entirely — it stays in the homepage menu
  * (which reads the raw topics) but is excluded from the main sidebar.
  */
+/**
+ * The pill each `platform` value renders as.
+ * Keep in sync with `PLATFORM_PILLS` in src/components/SidebarSublist.astro.
+ */
+const PLATFORM_BADGES = {
+  maui: { text: 'MAUI', variant: 'tip' },
+  blazor: { text: 'Blazor', variant: 'note' },
+};
+
 export function cleanTopicsForStarlight(topics) {
   const stripHomeNavOnly = (nodes) =>
     nodes
       .filter(node => !node.homeNavOnly)
       .map(node => (node.items ? { ...node, items: stripHomeNavOnly(node.items) } : node));
 
-  return JSON.parse(JSON.stringify(stripHomeNavOnly(topics), (key, value) => {
+  // Turn `platform` into a badge. Starlight's sidebar schema only carries one badge per entry,
+  // so when the item already has one (usually "New") the platform rides along as a marker class
+  // that our SidebarSublist override expands into a second pill.
+  const applyPlatformBadges = (nodes) =>
+    nodes.map(node => {
+      const next = node.items ? { ...node, items: applyPlatformBadges(node.items) } : { ...node };
+      const platform = PLATFORM_BADGES[next.platform];
+      if (platform) {
+        next.badge = next.badge
+          ? { ...next.badge, class: [next.badge.class, `sl-platform-${next.platform}`].filter(Boolean).join(' ') }
+          : { ...platform };
+      }
+      return next;
+    });
+
+  return JSON.parse(JSON.stringify(applyPlatformBadges(stripHomeNavOnly(topics)), (key, value) => {
     if (key === 'jumpTo') return undefined;
     if (key === 'expandInHomenav') return undefined;
     if (key === 'flattenInHomenav') return undefined;
     if (key === 'homeNavOnly') return undefined;
+    if (key === 'platform') return undefined;
     return value;
   }));
 }

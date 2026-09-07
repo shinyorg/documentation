@@ -40,8 +40,9 @@ notification. `ForegroundNotificationRenderer` re-posts *that* notification rath
 so the user no longer sees a progress notification alongside a redundant "Shiny service is continuing to
 transfer data in the background".
 
-The older `PerTransferNotificationStrategy` — which posted the second notification — is obsolete. Remove it
-when you adopt `AddTransferProgress()`.
+The older `PerTransferNotificationStrategy` — which posted the second notification — has been removed.
+Delete the `AddShinyService<PerTransferNotificationStrategy>()` registration and call
+`AddTransferProgress()` instead.
 :::
 
 Both renderers ship **inside `Shiny.Net.Http`**. There is no second package and no second registration call:
