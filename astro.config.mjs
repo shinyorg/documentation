@@ -369,6 +369,13 @@ export default defineConfig({
               dismissable: false
             },
             {
+              id: 'controls-14',
+              content: 'Shiny Controls 1.4 - Diagrams & Floor Plans',
+              variant: 'tip',
+              link: { text: 'Let\'s Plan!', href: '/controls/' },
+              dismissable: false
+            }, 
+            {
               id: 'httpserver-11',
               content: 'Shiny.Net.HttpServer v1.1 - tvOS Support',
               variant: 'tip',
