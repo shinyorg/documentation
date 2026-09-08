@@ -1,0 +1,213 @@
+---
+title: Desktop Backends
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["maui"]} />
+
+.NET MAUI ships no first-party macOS (AppKit) or Linux head. [dotnet/maui-labs](https://github.com/dotnet/maui-labs)
+provides both — a native AppKit backend and a GTK4 backend — and Shiny MAUI Hosting supports them.
+
+| Backend | TFM | Shiny package |
+|---------|-----|---------------|
+| macOS (AppKit) | `net10.0-macos` | `Shiny.Extensions.MauiHosting` |
+| Linux (GTK4) | `net10.0` | `Shiny.Extensions.MauiHosting.Linux` |
+
+:::caution
+The maui-labs backends are `0.1.0-preview` packages and are **not** covered by the
+[.NET MAUI support policy](https://dotnet.microsoft.com/platform/support/policy/maui). APIs may change
+between releases.
+:::
+
+## Why Linux needs its own package
+
+On both heads `Microsoft.Maui.Essentials` resolves its platform-neutral `net10.0` asset, where every static
+member throws `NotImplementedInReferenceAssembly`. The two backends fix that differently:
+
+- **macOS** — `Microsoft.Maui.Platforms.MacOS.Essentials` reflects AppKit implementations into the private
+  backing fields behind `AppInfo.Current`, `DeviceInfo.Current`, `Browser.Default` and the rest, so once
+  `AddMacOSEssentials()` has run the ordinary static APIs work. `IAppSupport` and `IAppStore` need no
+  changes, which is why macOS lives in the main package.
+- **Linux** — `AddLinuxGtk4Essentials()` only redirects five statics (`Preferences`, `FilePicker`,
+  `SecureStorage`, `Clipboard`, `MediaPicker`). `AppInfo.Version`, `DeviceInfo.Model` and
+  `Browser.OpenAsync` still throw. The Linux implementations therefore resolve the Essentials **interfaces**
+  from the container, which is where the GTK4 backend registers them — a different implementation, hence a
+  different package.
+
+## macOS (AppKit)
+
+<Steps>
+1. Reference the backend alongside the hosting package:
+   ```xml
+   <PropertyGroup>
+       <TargetFramework>net10.0-macos</TargetFramework>
+       <OutputType>Exe</OutputType>
+       <UseMaui>true</UseMaui>
+       <SingleProject>true</SingleProject>
+       <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+   </PropertyGroup>
+
+   <ItemGroup>
+       <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+       <PackageReference Include="Microsoft.Maui.Platforms.MacOS" Version="*-*" />
+       <PackageReference Include="Shiny.Extensions.MauiHosting" Version="*" />
+   </ItemGroup>
+   ```
+
+   `Microsoft.Maui.Platforms.MacOS.Essentials` arrives transitively — the `net10.0-macos` asset of
+   `Shiny.Extensions.MauiHosting` depends on it.
+
+2. Write the entry point. There is no MAUI single-project generated `Main` on `-macos`:
+   ```csharp
+   // Main.cs
+   using AppKit;
+
+   public static class MainClass
+   {
+       static void Main(string[] args)
+       {
+           NSApplication.Init();
+           NSApplication.SharedApplication.Delegate = new MauiMacOSApp();
+           NSApplication.Main(args);
+       }
+   }
+
+   // MauiMacOSApp.cs
+   using Foundation;
+   using Microsoft.Maui.Platforms.MacOS.Platform;
+
+   [Register("MauiMacOSApp")]
+   public class MauiMacOSApp : MacOSMauiApplication
+   {
+       protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+   }
+   ```
+
+3. Register as usual:
+   ```csharp
+   using Microsoft.Maui.Platforms.MacOS.Hosting;
+   using Shiny;
+
+   var builder = MauiApp.CreateBuilder();
+   builder
+       .UseMauiAppMacOS<App>()
+       .AddInfrastructureModules(new MyModule())
+       .AddAppSupport()                                       // calls AddMacOSEssentials() for you
+       .AddAppStore(opts => opts.AppleAppId = "1234567890")
+       .AddStartupService();
+
+   return builder.Build();
+   ```
+</Steps>
+
+`MacOSMauiApplication` sets `IPlatformApplication.Current` before it builds the MAUI app, so `ShinyHost`
+and `IMauiModule.Use` behave exactly as on the other heads.
+
+| Capability | AppKit behaviour |
+|------------|------------------|
+| `IAppSupport` device info | MAUI Essentials, backed by the AppKit implementations |
+| Culture / time-zone changes | `NSNotificationCenter` — `NSLocale.CurrentLocaleDidChangeNotification` and `NSSystemTimeZoneDidChangeNotification` |
+| Orientation | `DeviceDisplay.MainDisplayInfoChanged` (`NSApplication.DidChangeScreenParametersNotification`). `SetOrientation`/`ResetOrientation` return `false` — AppKit windows don't rotate |
+| `IAppStore` | iTunes Search API scoped to `entity=macSoftware`; `macappstore://` deep links; `RequestReview` uses `StoreKit.AppStore.RequestReview` against the key window's `NSViewController` (macOS 14+) |
+| `IStartupService` | `SMAppService.MainApp` — works with or without the Essentials wiring |
+
+:::note
+MAUI's static `MainThread` has no AppKit implementation. Use the page/element `Dispatcher` (or
+`DispatchQueue.MainQueue`) to marshal back to the UI thread on this head.
+:::
+
+## Linux (GTK4)
+
+There is no `-linux` TFM, so a GTK4 head is a plain `net10.0` project sitting next to your shared MAUI code.
+
+<Steps>
+1. Reference the backend and the Linux hosting package:
+   ```xml
+   <PropertyGroup>
+       <TargetFramework>net10.0</TargetFramework>
+       <OutputType>Exe</OutputType>
+   </PropertyGroup>
+
+   <ItemGroup>
+       <PackageReference Include="Microsoft.Maui.Controls" Version="$(MauiVersion)" />
+       <PackageReference Include="Microsoft.Maui.Platforms.Linux.Gtk4" Version="*-*" />
+       <PackageReference Include="Shiny.Extensions.MauiHosting.Linux" Version="*" />
+   </ItemGroup>
+   ```
+
+   GTK 4.12+ has to be installed on the machine (`libgtk-4-dev` and friends).
+
+2. Write the entry point:
+   ```csharp
+   using Microsoft.Maui.Platforms.Linux.Gtk4.Platform;
+
+   public class Program : GtkMauiApplication
+   {
+       protected override MauiApp CreateMauiApp() => MauiProgram.CreateMauiApp();
+
+       public static void Main(string[] args) => new Program().Run(args);
+   }
+   ```
+
+3. Register with the **Linux** extension methods:
+   ```csharp
+   using Microsoft.Maui.Platforms.Linux.Gtk4.Hosting;
+   using Shiny;
+
+   var builder = MauiApp.CreateBuilder();
+   builder
+       .UseMauiAppLinuxGtk4<App>()
+       .AddInfrastructureModules(new MyModule())
+       .AddLinuxAppSupport()                          // IAppSupport over the GTK4 Essentials services
+       .AddLinuxAppStore("org.example.MyApp")         // IAppStore over Flatpak / Snap
+       .AddStartupService();                          // XDG autostart, from the base package
+
+   return builder.Build();
+   ```
+</Steps>
+
+:::caution
+`AddLinuxAppSupport()` and `AddLinuxAppStore()` are named apart from `AddAppSupport()`/`AddAppStore()`
+deliberately. Both packages put their extensions on `MauiAppBuilder` in the `Shiny` namespace, and on a
+GTK4 head only the `Linux` pair works — the base pair compiles but throws
+`NotImplementedInReferenceAssembly` at runtime.
+:::
+
+| Capability | Linux behaviour |
+|------------|-----------------|
+| Device info, browser, map | `IAppInfo`, `IDeviceInfo`, `IBrowser` and `IMap` registered by `AddLinuxGtk4Essentials()` (browser and map launch through `xdg-open`) |
+| Time-zone changes | `FileSystemWatcher` on `/etc/localtime`, which `systemd-timedated` replaces when the zone changes. Falls back to a 30-second poll when the watch can't be created |
+| Culture changes | 30-second poll. A Linux locale switch only applies to the *next* login, so a running process never sees one from the OS |
+| Orientation | Read from the GDK monitor geometry. `SetOrientation`/`ResetOrientation` return `false` |
+| `IStartupService` | The base package's `~/.config/autostart/{Identifier}.desktop` entry — no Linux-specific registration needed |
+
+### App store lookups
+
+`LinuxAppStore` covers the two packaging formats that publish an updatable version to a store. Anything
+else — a tarball, a distro package, `dotnet run` — has no store to ask, and `GetCurrent()` returns `null`.
+
+| Format | Installed version | Published version |
+|--------|-------------------|-------------------|
+| Flatpak | `flatpak info <id>` | `flatpak remote-info <origin> <id>`, against the remote the app was installed from |
+| Snap | `snap list <name>` | `snap info <name>`, reading the channel the install tracks |
+
+`OpenStore()` and `OpenReviewPage()` both hand `appstream://<LinuxAppId>` to `xdg-open`, which GNOME
+Software, Plasma Discover and the Snap Store all handle — software centres show reviews on the app's own
+page, so there's no separate review destination. `RequestReview()` falls back to `OpenReviewPage()`; no
+Linux software centre offers an in-app prompt.
+
+Inside a Flatpak sandbox the `flatpak` CLI lives on the host, so commands are forwarded with
+`flatpak-spawn --host`. Every command failure is treated as "can't tell" and surfaces as `null` or `false`
+rather than an exception.
+
+:::note
+`AppStoreOptions.LinuxAppId` is auto-detected from `FLATPAK_ID` or `SNAP_NAME` when the app runs from a
+sandbox. Set it explicitly for anything else — a developer build outside a sandbox has nothing to detect.
+:::
+
+## Samples
+
+The [extensions repo](https://github.com/shinyorg/extensions) has a runnable head for each backend —
+`samples/Sample.Maui.MacOS` and `samples/Sample.Maui.Linux` — both driving the same shared sample app as
+the mobile heads.

@@ -15,7 +15,7 @@ docs home page (`src/content/docs/index.mdx`). Structure:
 | 9–11   | **Hardware & Device Data** — radios and sensors, OS-owned data stores |
 | 12–14  | **AI & Intelligence** — the intelligence libraries, AI tools across the suite |
 | 15–17  | **Background, Delivery & MAUI** — jobs, transfers, notifications, app plumbing |
-| 18–20  | **UI Controls** — the 67 controls by group, the Office document stack |
+| 18–20  | **UI Controls** — the 70+ controls by group, the Office document stack |
 | 21–25  | **Data, Server & Cloud** — Document DB and its backends, HTTP server, Aspire |
 | 26–27  | Customer quotes, and how to get started |
 | 28–31  | **Brand reference** — palette, gradients, marks, slogans |

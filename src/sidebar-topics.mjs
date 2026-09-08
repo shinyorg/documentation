@@ -489,6 +489,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'mauihost/' },
           { label: 'App Support', link: 'mauihost/appsupport' },
           { label: 'App Store', link: 'mauihost/appstore' },
+          { label: 'Desktop Backends', link: 'mauihost/desktop' },
           { label: 'Release Notes', link: 'mauihost/release-notes' }
         ]
       },

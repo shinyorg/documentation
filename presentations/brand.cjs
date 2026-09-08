@@ -116,7 +116,7 @@ const SLOGAN = {
   lede:
     'Everything the platform makes hard: Bluetooth, background jobs, push, location, ' +
     'a document database, speech and AI, an HTTP server that runs inside your MAUI app, ' +
-    '67 UI controls, and plenty more.',
+    '70+ UI controls, and plenty more.',
 
   // The second half of the homepage lede — the value proposition.
   promise:

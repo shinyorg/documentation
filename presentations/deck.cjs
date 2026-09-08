@@ -207,7 +207,7 @@ async function build() {
     const facts = [
       { v: '40M+', l: 'NuGet downloads', c: LIME },
       { v: '30+', l: 'libraries', c: GREEN },
-      { v: '67', l: 'UI controls', c: PURPLE },
+      { v: '70+', l: 'UI controls', c: PURPLE },
       { v: 'AOT', l: 'trim-clean', c: WHITE },
     ];
     facts.forEach((f, i) => {
@@ -255,7 +255,7 @@ async function build() {
       { icon: 'FaBrain', color: LIME, title: 'AI & Intelligence', desc: 'Conversation, speech, face, voice, documents' },
       { icon: 'FaBell', color: PURPLE, title: 'Background & Delivery', desc: 'Jobs, transfers, local and push notifications' },
       { icon: 'FaRocket', color: GREEN, title: 'MAUI App', desc: 'Shell navigation, hosting, config, permissions' },
-      { icon: 'FaPalette', color: PURPLE, title: 'UI Controls', desc: '67 controls for MAUI and Blazor, one theme contract' },
+      { icon: 'FaPalette', color: PURPLE, title: 'UI Controls', desc: '70+ controls for MAUI and Blazor, one theme contract' },
       { icon: 'FaDatabase', color: GREEN, title: 'Data & Storage', desc: 'Document DB, spatial, data sync, key/value stores' },
       { icon: 'FaCloud', color: PURPLE, title: 'Server & Cloud', desc: 'Embeddable HTTP server, push dispatch, Aspire' },
     ], { y: 2.3, w: CW, h: 1.45, cols: 3, gapY: 0.28, titleSize: 13.5, descSize: 10.5, chip: 0.4 });
@@ -566,7 +566,7 @@ async function build() {
   }
 
   // 18 ── Divider: Controls ───────────────────────────────────────────────
-  await divider('05', 'UI Controls', '67 native controls for .NET MAUI and Blazor out of one design system — no WebViews, no per-platform forks.',
+  await divider('05', 'UI Controls', '70+ native controls for .NET MAUI and Blazor out of one design system — no WebViews, no per-platform forks.',
     ['Flagship: TableView, Scheduler, ChatView, DataGrid', 'Office: real .xlsx, .docx and .pptx editing', 'Collections, layout, input and media', 'Status, feedback and desktop controls', 'One shared theme token contract'], 'FaPalette',
     'Section five. The largest single group by package count, and the easiest to demo — the docs site has a live gallery for every control shown here.');
 
@@ -574,7 +574,7 @@ async function build() {
   {
     const s = slide(INK);
     eyebrow(s, 'Section 05 · UI Controls');
-    heading(s, '67 controls, two hosts, one theme contract', 'Native .NET MAUI and Blazor components out of the same design system.', { subW: 8.0 });
+    heading(s, '70+ controls, two hosts, one theme contract', 'Native .NET MAUI and Blazor components out of the same design system.', { subW: 8.0 });
 
     const groups = [
       ['FaStar', 'Flagship', 'TableView · Scheduler · ChatView · DataGrid · ImageEditor · CameraView', LIME],
