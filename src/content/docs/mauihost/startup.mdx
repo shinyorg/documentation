@@ -1,0 +1,110 @@
+---
+title: Startup Service
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+<PlatformSupport frameworks={["maui"]} />
+
+`IStartupService` installs the running application into the desktop operating system's startup ("launch at login") list — Windows, macOS, and Linux. Mobile platforms have no equivalent concept, so every call there returns `NotSupported` instead of throwing, which means the same view model can ship on all heads.
+
+## Registration
+
+```csharp
+using Shiny;
+
+builder.AddStartupService();   // registers IStartupService
+```
+
+With options:
+
+```csharp
+builder.AddStartupService(opts =>
+{
+    opts.Identifier = "MyApp";              // Windows Run value name / Linux .desktop file name
+    opts.DisplayName = "My App";            // Linux desktop entry Name
+    opts.Arguments.Add("--autostart");      // Windows + Linux
+});
+```
+
+| Option | Notes |
+|--------|-------|
+| `Identifier` | Defaults to the entry assembly name. Used as the `HKCU\...\Run` value name on Windows and the `.desktop` file name on Linux. Ignored on macOS |
+| `DisplayName` | Linux desktop entry `Name` key. Defaults to `Identifier` |
+| `ExecutablePath` | Defaults to `Environment.ProcessPath`, expanding to `dotnet <entry assembly>` when the app runs framework-dependent through the shared host. Ignored on macOS |
+| `Arguments` | Appended to the startup command line. Honoured on Windows and Linux; macOS login items launch the app bundle itself and cannot carry arguments |
+
+## Usage
+
+```csharp
+public class StartupToggleViewModel(IStartupService startup)
+{
+    public bool CanToggle => startup.IsSupported;
+
+    public Task<StartupServiceState> Load() => startup.GetState();
+
+    public async Task<StartupServiceState> Set(bool runAtLogin)
+    {
+        var state = runAtLogin
+            ? await startup.Register()
+            : await startup.Unregister();
+
+        // Neither of these is a failure — the OS is saying the user has to finish the job
+        if (state is StartupServiceState.RequiresApproval or StartupServiceState.DisabledByUser)
+            await startup.OpenSettings();
+
+        return state;
+    }
+}
+```
+
+| Member | Notes |
+|--------|-------|
+| `IsSupported` | `true` on Windows (unpackaged), macOS 13+, and Linux. Gate your "run at startup" toggle on this |
+| `GetState()` | Reads the current registration back from the OS |
+| `Register()` | Installs the app into the startup list and returns the state the OS settled on |
+| `Unregister()` | Removes the app from the startup list |
+| `OpenSettings()` | Opens the OS startup-apps / login-items screen. Returns `false` where there is nothing to open |
+
+## States
+
+`Register` returns a `StartupServiceState` rather than a bool because the user and the administrator both get a say.
+
+| State | Meaning |
+|-------|---------|
+| `NotSupported` | The platform has no startup list this library can manage |
+| `NotRegistered` | The app is not in the startup list |
+| `Enabled` | Registered and will launch at login |
+| `DisabledByUser` | Registered, but switched off in Task Manager / Login Items / the `.desktop` file |
+| `DisabledByPolicy` | Blocked by group policy or MDM — the app cannot override this |
+| `RequiresApproval` | macOS only — submitted, waiting for the user to approve it in System Settings |
+
+:::caution
+Never cache the state across sessions, and don't assume `Register` returns `Enabled`. The user can switch a startup entry off in the OS at any time, and macOS routinely answers `RequiresApproval` on the first registration. Bind your toggle to the returned state or to a fresh `GetState()`.
+:::
+
+## Platform Notes
+
+| Platform | Mechanism |
+|----------|-----------|
+| Windows (unpackaged, `WindowsPackageType=None`) | Writes the command line to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The `Explorer\StartupApproved\Run` key is read as well, so an entry the user switched off in Task Manager reports `DisabledByUser` rather than `Enabled`. `OpenSettings` launches `ms-settings:startupapps` |
+| Windows (MSIX packaged) | Not supported — MSIX virtualizes `HKCU` writes into a per-package hive, so a `Run` entry would never reach the shell. Packaged apps need a `windows.startupTask` declaration in `Package.appxmanifest` driven through WinRT, which this package cannot reach from its `net10.0` asset. `IsSupported` reports `false` |
+| macOS 13+ (Mac Catalyst) | `SMAppService.MainApp` registers the running app bundle, so `Identifier`, `ExecutablePath`, and `Arguments` are all ignored. The first `Register` commonly returns `RequiresApproval` until the user approves the item under System Settings > General > Login Items — `OpenSettings` opens exactly that pane |
+| macOS 12 and earlier | Not supported — `SMAppService` is macOS 13 / Mac Catalyst 16 and up, and the older `SMLoginItemSetEnabled` route isn't available to Catalyst apps |
+| Linux | Writes `~/.config/autostart/{Identifier}.desktop` (honouring `XDG_CONFIG_HOME`). `Hidden=true` or `X-GNOME-Autostart-enabled=false` in that file reports `DisabledByUser`. `OpenSettings` returns `false` — there is no settings page common to every desktop environment |
+| iOS / Android | Not supported — `IsSupported` is `false` and every call returns `NotSupported` |
+
+## Starting Minimized
+
+The OS just launches the app; starting quietly is your job. Register a marker argument and check for it at launch:
+
+```csharp
+builder.AddStartupService(opts => opts.Arguments.Add("--autostart"));
+
+var launchedAtLogin = Environment.GetCommandLineArgs().Contains("--autostart");
+```
+
+On macOS, where arguments can't be attached to a login item, use `NSProcessInfo`/the OS launch reason or simply track your own "first run of the day" state instead.
+
+## Errors
+
+`Register` and `Unregister` throw `InvalidOperationException` when the OS rejects the change outright — a macOS login item that can't be submitted, or an `HKCU` key that can't be opened. `NotSupported`, `DisabledByUser`, `DisabledByPolicy`, and `RequiresApproval` are returned states, not exceptions.
