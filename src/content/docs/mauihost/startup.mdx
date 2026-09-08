@@ -5,7 +5,7 @@ import PlatformSupport from '/src/components/PlatformSupport.astro';
 
 <PlatformSupport frameworks={["maui"]} />
 
-`IStartupService` installs the running application into the desktop operating system's startup ("launch at login") list — Windows, macOS, and Linux. Mobile platforms have no equivalent concept, so every call there returns `NotSupported` instead of throwing, which means the same view model can ship on all heads.
+`IStartupService` installs the running application into the desktop operating system's startup ("launch at login") list — Windows, macOS (Mac Catalyst and AppKit alike), and Linux. Mobile platforms have no equivalent concept, so every call there returns `NotSupported` instead of throwing, which means the same view model can ship on all heads.
 
 ## Registration
 
@@ -32,6 +32,20 @@ builder.AddStartupService(opts =>
 | `DisplayName` | Linux desktop entry `Name` key. Defaults to `Identifier` |
 | `ExecutablePath` | Defaults to `Environment.ProcessPath`, expanding to `dotnet <entry assembly>` when the app runs framework-dependent through the shared host. Ignored on macOS |
 | `Arguments` | Appended to the startup command line. Honoured on Windows and Linux; macOS login items launch the app bundle itself and cannot carry arguments |
+
+### macOS (AppKit)
+
+`Shiny.Extensions.MauiHosting` multi-targets `net10.0-macos` so a native AppKit app can use this service. An AppKit app has no `MauiAppBuilder`, so register against the service collection — the same overload works from any host (MAUI, WPF, console, generic host):
+
+```csharp
+using Shiny;
+
+services.AddStartupService(opts => opts.Identifier = "MyApp");
+```
+
+:::note
+The `net10.0-macos` asset carries `IStartupService` only. `IAppSupport` and `IAppStore` are built on MAUI Essentials, which publishes no AppKit implementation — its platform-neutral reference assembly throws `NotImplementedInReferenceAssembly` — so those two are compiled out of that head rather than shipped as API that throws.
+:::
 
 ## Usage
 
@@ -88,8 +102,8 @@ Never cache the state across sessions, and don't assume `Register` returns `Enab
 |----------|-----------|
 | Windows (unpackaged, `WindowsPackageType=None`) | Writes the command line to `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. The `Explorer\StartupApproved\Run` key is read as well, so an entry the user switched off in Task Manager reports `DisabledByUser` rather than `Enabled`. `OpenSettings` launches `ms-settings:startupapps` |
 | Windows (MSIX packaged) | Not supported — MSIX virtualizes `HKCU` writes into a per-package hive, so a `Run` entry would never reach the shell. Packaged apps need a `windows.startupTask` declaration in `Package.appxmanifest` driven through WinRT, which this package cannot reach from its `net10.0` asset. `IsSupported` reports `false` |
-| macOS 13+ (Mac Catalyst) | `SMAppService.MainApp` registers the running app bundle, so `Identifier`, `ExecutablePath`, and `Arguments` are all ignored. The first `Register` commonly returns `RequiresApproval` until the user approves the item under System Settings > General > Login Items — `OpenSettings` opens exactly that pane |
-| macOS 12 and earlier | Not supported — `SMAppService` is macOS 13 / Mac Catalyst 16 and up, and the older `SMLoginItemSetEnabled` route isn't available to Catalyst apps |
+| macOS 13+ (Mac Catalyst and AppKit) | `SMAppService.MainApp` registers the running app bundle, so `Identifier`, `ExecutablePath`, and `Arguments` are all ignored. The first `Register` commonly returns `RequiresApproval` until the user approves the item under System Settings > General > Login Items — `OpenSettings` opens exactly that pane. The implementation dispatches through `DispatchQueue.MainQueue` rather than MAUI's `MainThread`, so it behaves identically on the `net10.0-macos` head |
+| macOS 12 and earlier | Not supported — `SMAppService` is macOS 13 / Mac Catalyst 16 and up, and the older `SMLoginItemSetEnabled` route needs a separate signed helper bundle |
 | Linux | Writes `~/.config/autostart/{Identifier}.desktop` (honouring `XDG_CONFIG_HOME`). `Hidden=true` or `X-GNOME-Autostart-enabled=false` in that file reports `DisabledByUser`. `OpenSettings` returns `false` — there is no settings page common to every desktop environment |
 | iOS / Android | Not supported — `IsSupported` is `false` and every call returns `NotSupported` |
 
