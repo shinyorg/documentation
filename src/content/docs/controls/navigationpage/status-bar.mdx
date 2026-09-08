@@ -1,0 +1,122 @@
+---
+title: Status Bar & Safe Area
+description: How the bar's background reaches the status bar, why the notch never covers the title, and what each platform can actually be told about the clock.
+---
+
+Nothing here needs setting for the normal case. `RespectSafeArea` is `true` and `StatusBarStyle` is
+`Auto`, so giving the bar a colour is the whole setup:
+
+```xml
+<shiny:ShinyNavigationPage BarBackgroundColor="#3F2B96" BarTextColor="White">
+    <x:Arguments>
+        <local:InboxPage />
+    </x:Arguments>
+</shiny:ShinyNavigationPage>
+```
+
+The colour fills the status bar, the title sits below the notch, and the clock turns white.
+
+## The inset goes *inside* the background
+
+MAUI applies a safe-area inset by **offsetting the view that carries it**, not by padding it. That one
+fact decides where the flag can go. Put `Container` on the bar, or on the `Border` that paints it, and
+the whole background moves down by the inset — leaving a strip above it in the page's colour, which is
+the exact thing this feature exists to remove.
+
+So it goes on the view *inside* the background. The `Border` then stays flush with the top of the bar
+and grows by the inset, the colour runs to the physical top edge, and the title, the back button and
+the items sit below the status bar, the notch and the Dynamic Island.
+
+Three layers above it have to be edge-to-edge for that to be reachable at all, and all three are
+`Grid`s — which default to `Container`:
+
+| Layer | Why it is `None` |
+|---|---|
+| `ShinyNavBar` itself | Left at the default it takes the inset first, reserving a strip inside its own frame that the background can never be laid out into. |
+| The host grid a page's content is wrapped in | An inset host starts the bar below the status bar. |
+| The overlay root every Shiny page grows | It is a pass-through wrapper for toasts, dialogs and docked chrome — not a layout anyone asked for, so it must not introduce an inset of its own. |
+
+Any one of them left at the default stops the bar short.
+
+The page's own content is untouched and keeps MAUI's default for its type — a layout is `Container`
+and still insets itself out of the home indicator, a `ScrollView` keeps its automatic content insets.
+Nothing reaches into your content to change that.
+
+:::note[Opting out]
+`RespectSafeArea="False"` puts the bar under the status bar instead — the right answer for a media or
+camera overlay on a full-bleed page, where the chrome is meant to float over the content.
+:::
+
+## The clock and the icons
+
+There is no status bar *background* to set on a current device — iOS never had one, and Android 15
+took the settable colour away when it made edge-to-edge mandatory. What shows behind the clock is
+whatever the app paints there, which is what the section above is for. The **foreground** is
+`StatusBarStyle`:
+
+| Value | Meaning |
+|---|---|
+| `Auto` | Default. Read from the bar's own background: white clock on a dark bar, black on a light one. |
+| `LightContent` | White clock and icons. |
+| `DarkContent` | Black clock and icons. |
+| `None` | Leave the status bar entirely alone. |
+| `Inherit` | Only on `ShinyNav.StatusBarStyle` — follow the navigation page. |
+
+`Auto` measures **relative luminance**, not HSL lightness. HSL calls pure blue and pure yellow equally
+light, which would put a white clock on a yellow bar and a black one on an indigo bar — and an indigo
+bar is exactly the case an app is likely to have.
+
+A page overrides the navigation page:
+
+```xml
+<ContentPage shiny:ShinyNav.BarBackgroundColor="Black"
+             shiny:ShinyNav.StatusBarStyle="LightContent" />
+```
+
+`StatusBarColor` pins the colour the status bar is told about rather than reading the bar's. It is
+worth setting for a bar painted with an image or a pattern brush, which has no single colour for
+`Auto` to derive from — with nothing to read, `Auto` leaves the status bar alone rather than guessing.
+A gradient needs nothing: the stop at offset `0` is used, which is the end the status bar sits over.
+
+## What each platform can do
+
+| | Background behind the clock | Clock & icon colour |
+|---|---|---|
+| iOS / Mac Catalyst | ✅ the bar's, through the safe-area inset | ✅ needs an `Info.plist` key — see below |
+| Android 15+ | ✅ the bar's, through the safe-area inset | ❌ does not currently take |
+| Android 14 and below | ✅ filled with `Window.SetStatusBarColor` | ❌ does not currently take |
+| Windows, GTK4, macOS AppKit | no status bar | — |
+
+:::caution[Known limitation: the icon colour does not apply on Android]
+The **background** half works on Android — what shows behind the clock is the bar painting through
+the top inset, verified on an API 36 emulator. The **foreground** half does not. The style resolves
+correctly and both the AndroidX (`WindowInsetsControllerCompat`) and the platform
+(`WindowInsetsController.setSystemBarsAppearance`) writes execute, but the system re-asserts the
+theme's appearance afterwards — `adb shell dumpsys window | grep mLastAppearance` still reports
+`LIGHT_STATUS_BARS` over a plainly dark bar.
+
+Ruled out: a race with MAUI's presentation (a write triggered long after the page settled loses too),
+the activity lookup, and the AndroidX wrapper. Until it is fixed, choose an Android bar colour that
+reads against the system's own status bar icons.
+:::
+
+:::caution[iOS needs `UIViewControllerBasedStatusBarAppearance`]
+UIKit only lets an app set the status bar style directly when `Info.plist` contains:
+
+```xml
+<key>UIViewControllerBasedStatusBarAppearance</key>
+<false/>
+```
+
+That is UIKit's rule, not this control's — MAUI's own `BarTextColor` status bar handling lives under
+exactly the same key. Without it the clock keeps the system appearance and **only the background**
+follows the bar, which on a dark bar in dark mode already looks right. The alternative would be
+overriding `preferredStatusBarStyle`, and every view controller in the chain belongs to MAUI.
+:::
+
+## Theme swaps keep up
+
+`Auto` is re-derived whenever the bar's colour actually changes, including the moment a theme token
+finally resolves. A colour token is not a colour until the theme dictionary has merged, which is later
+than any property assignment — so the bar watches the resolved value rather than the property, and a
+theme swap moves the status bar with it.

@@ -741,6 +741,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/navigationpage/' },
           { label: 'Items & Overflow', link: 'controls/navigationpage/items' },
+          { label: 'Status Bar & Safe Area', link: 'controls/navigationpage/status-bar' },
           { label: 'Properties & Events', link: 'controls/navigationpage/properties' },
         ]
       },
