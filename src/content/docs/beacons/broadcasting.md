@@ -41,7 +41,7 @@ Defaults are `-59` dBm for iBeacon (measured at 1 metre) and `-18` dBm for Eddys
 | macOS | Yes | **No** |
 | Android | Yes | Yes |
 | Windows | Yes | Yes |
-| Linux | Not yet | Not yet |
+| Linux | Yes | Yes |
 | Blazor WASM | No | No |
 
 ### Apple cannot broadcast Eddystone
@@ -61,9 +61,21 @@ device can decode. Plan for foreground-only broadcasting on Apple platforms.
 
 ### Linux
 
-BlueZ is perfectly capable of this — `LEAdvertisement1` has both `ManufacturerData` and
-`ServiceData` properties — but Shiny's BlueZ advertising support is not implemented yet, so
-broadcasting throws. Beacon **scanning and monitoring** work fine on Linux.
+BlueZ inverts the model every other platform uses. Rather than handing a payload to an API, the
+application **exports a D-Bus object** describing the advertisement and registers its path with
+`org.bluez.LEAdvertisingManager1`; BlueZ then calls *back into your process* to read the properties,
+and calls `Release()` on that object when it drops the advertisement. Shiny does all of that for you,
+but two consequences leak through and are worth planning for:
+
+- **The process has to stay alive and connected to the system bus** for the advertisement to keep
+  running. There is no fire-and-forget: if your app exits, BlueZ has nothing left to read from.
+- **BlueZ can stop the advertisement on its own** — the adapter powering down, `bluetoothd`
+  restarting, or another client taking the last advertising slot. Shiny honours the resulting
+  `Release()`, so `IsAdvertising` goes false rather than getting stuck on, and you can start again.
+
+The adapter caps how many advertising instances run at once
+(`LEAdvertisingManager1.SupportedInstances`). When it is full, `RegisterAdvertisement` fails and the
+exception carries BlueZ's own reason.
 
 ## Building the payload yourself
 
