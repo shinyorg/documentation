@@ -799,6 +799,7 @@ export const sidebarTopics = [
             ]
           },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
+          { label: 'ZoomPanView', link: 'controls/zoompanview/', jumpTo: true },
           {
             label: 'ImageEditor',
             jumpTo: true,
