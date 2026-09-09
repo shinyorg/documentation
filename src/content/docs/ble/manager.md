@@ -35,7 +35,11 @@ On Android 12+ Shiny requests `BLUETOOTH_SCAN` / `BLUETOOTH_CONNECT` at runtime 
 Scanning returns an `IObservable<ScanResult>` that emits each time a peripheral advertisement is detected.
 
 :::caution
-Only one scan can be active at a time. Disposing the subscription stops the scan.
+Only one scan can be active at a time. Disposing the subscription — or calling `StopScan()` — stops the scan and releases the slot.
+:::
+
+:::note[You do not have to wait for the adapter]
+On Apple platforms a `CBCentralManager` reports `Unknown` for a moment after it is created and CoreBluetooth drops any scan issued in that window. Shiny parks the request instead: `Scan()` starts the native scan the instant the central reports powered on, so subscribing before `RequestAccessAsync()` has completed still discovers peripherals — including ones that only begin advertising later. The same applies to an adapter power cycle mid-scan; the scan resumes on its own when Bluetooth comes back, and `IsScanning` reports `false` for the window in between. You should still call `RequestAccessAsync()` — it is how you surface a denied permission or a disabled adapter to the user, and a scan parked against an adapter that never powers on simply never emits.
 :::
 
 ### Open Scan
