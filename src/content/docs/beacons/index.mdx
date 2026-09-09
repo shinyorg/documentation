@@ -1,0 +1,120 @@
+---
+title: Beacons
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Beacons" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui", "blazor"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+Shiny Beacons covers both beacon formats that matter — Apple's **iBeacon** and Google's
+**Eddystone** — across ranging (how far away is it?), background region monitoring (tell me when I
+arrive), and broadcasting (become a beacon).
+
+```bash
+dotnet add package Shiny.Beacons
+```
+
+## The one thing to understand first
+
+The two formats travel through different parts of a BLE advertisement, and that single fact shapes
+everything else about this library:
+
+- **iBeacon** is **manufacturer data** under Apple's company identifier `0x004C`. CoreBluetooth
+  **strips it out of every scan result** on iOS, Mac Catalyst and macOS. There is no scan
+  configuration that brings it back. So on Apple platforms iBeacon goes through **CoreLocation**,
+  and costs a *location* permission rather than a Bluetooth one. On every other platform Shiny reads
+  the advertisement directly.
+- **Eddystone** is **service data** under UUID `0xFEAA`, which CoreBluetooth passes through
+  untouched. It behaves identically everywhere, Apple included.
+
+If you have ever wondered why an iOS app cannot find an iBeacon with a plain BLE scan — that is why.
+
+## Registration
+
+```csharp
+// Foreground ranging - "which beacons are near me and how far?"
+services.AddBeaconRanging();
+
+// Background region monitoring - "tell me when I enter or leave"
+services.AddBeaconMonitoring<MyBeaconMonitorDelegate>();
+
+// Eddystone frames - works on every platform
+services.AddEddystoneScanning();
+
+// Become a beacon
+services.AddBeaconBroadcasting();
+```
+
+Each takes an optional [`BeaconRangingOptions`](/beacons/distance). `AddBeaconMonitoring` also wires
+the default repository, so monitored regions survive a process restart.
+
+On Linux, or any plain .NET host, register an `IBleManager` first (`AddBluetoothLE()` from
+`Shiny.BluetoothLE.Linux`). The beacon registrations throw a named error if none is present, rather
+than failing later with an unresolved dependency from inside a scan.
+
+## A first scan
+
+```csharp
+public class BeaconViewModel(IBeaconRangingManager ranging)
+{
+    IDisposable? sub;
+
+    public async Task Start()
+    {
+        var access = await ranging.RequestAccess();
+        if (access != AccessState.Available)
+            return;
+
+        var region = new BeaconRegion("store-front", Guid.Parse("B9407F30-F5F8-466E-AFF9-25556B57FE6D"));
+
+        this.sub = ranging
+            .WhenBeaconRanged(region)
+            .Subscribe(beacon => Console.WriteLine(
+                $"{beacon.Major}/{beacon.Minor}: {beacon.Distance:N1}m ({beacon.Proximity})"
+            ));
+    }
+
+    public void Stop() => this.sub?.Dispose();
+}
+```
+
+## Platform support
+
+| Feature | iOS / Mac Catalyst | macOS | Android | Windows | Linux | Blazor WASM |
+|---|---|---|---|---|---|---|
+| iBeacon ranging | CoreLocation | CoreLocation | BLE scan | BLE scan | BLE scan | BLE scan |
+| Region monitoring | `CLMonitor` (18+) / `CLLocationManager` | **Not supported by the OS** | BLE scan + foreground service | BLE scan | BLE scan | BLE scan |
+| Eddystone | BLE scan | BLE scan | BLE scan | BLE scan | BLE scan | BLE scan |
+| iBeacon broadcast | Yes | Yes | Yes | Yes | Not yet | No |
+| Eddystone broadcast | **No** | **No** | Yes | Yes | Not yet | No |
+
+**tvOS has no target.** tvOS binds no `CLBeacon` type of any kind — CoreLocation there is GPS only —
+so iBeacon is impossible, and an Eddystone-only surface that threw for half its members was not
+worth shipping.
+
+**macOS monitoring** registers successfully but reports `AccessState.NotSupported` and throws from
+`StartMonitoring`. That is deliberate: shared startup code runs unchanged, and you branch on
+`CurrentStatus` rather than on `OperatingSystem.IsMacOS()`. Ranging and Eddystone both work fine.
+
+**Blazor** needs `navigator.bluetooth.requestLEScan`, which is Chromium-only and sits behind
+`chrome://flags/#enable-experimental-web-platform-features`. The chooser fallback carries no
+advertisement payload at all, so beacons are invisible through it.
+
+## Where next
+
+- [Ranging](/beacons/ranging) — foreground detection and distance
+- [Monitoring](/beacons/monitoring) — background enter/exit regions
+- [Eddystone](/beacons/eddystone) — UID, URL and telemetry frames
+- [Broadcasting](/beacons/broadcasting) — becoming a beacon
+- [Distance & Accuracy](/beacons/distance) — filtering, estimators, and tuning
+
+<AiSkill skillName="shiny-beacons" />

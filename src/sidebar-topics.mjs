@@ -177,6 +177,19 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Beacons',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'beacons/' },
+          { label: 'Ranging', link: 'beacons/ranging' },
+          { label: 'Region Monitoring', link: 'beacons/monitoring' },
+          { label: 'Eddystone', link: 'beacons/eddystone' },
+          { label: 'Broadcasting', link: 'beacons/broadcasting' },
+          { label: 'Distance & Accuracy', link: 'beacons/distance' },
+          { label: 'Release Notes', link: 'beacons/release-notes' }
+        ]
+      },
+      {
         label: 'OBD',
         jumpTo: true,
         items: [

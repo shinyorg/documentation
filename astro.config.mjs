@@ -391,7 +391,7 @@ export default defineConfig({
             },
             {
               id: 'client-v560',
-              content: 'Shiny Client v5.6.0 - tvOS Support & Live Activities',
+              content: 'Shiny Client v5.6.0 - tvOS Support, Live Activities, & Beacons are back!',
               variant: 'tip',
               link: { text: 'Live It Up!', href: '/ble' },
               dismissable: false
