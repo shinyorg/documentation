@@ -200,6 +200,19 @@ const AndroidManifest = (props: Props) => {
     src += addP('CAMERA');
   }
 
+  if (has('screenrecorder')) {
+    src += addP('FOREGROUND_SERVICE');
+    src += addP('FOREGROUND_SERVICE_MEDIA_PROJECTION');
+    src += `
+      <!-- Only if capturing the microphone or app audio (system audio needs API 29+) -->`;
+    src += addP('RECORD_AUDIO');
+    src += `
+      <!-- The media-projection foreground service and the consent activity ship inside
+           Shiny.ScreenRecorder and merge into your manifest - do not declare them.
+           Consent is per recording and cannot be pre-granted, so RequestAccess() only answers
+           for the microphone and reports Unknown for the screen itself. -->`;
+  }
+
   if (has('music')) {
     src += `
       <!-- Android 13+ (API 33+) -->`;
@@ -209,8 +222,14 @@ const AndroidManifest = (props: Props) => {
     src += addP('READ_EXTERNAL_STORAGE', 32);
   }
 
-  if (has('notifications') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
+  if (has('notifications') || has('liveactivities') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
+  }
+  if (has('liveactivities')) {
+    src += `
+      <!-- Android 16 (API 36+) gets Notification.ProgressStyle + requestPromotedOngoing - the status
+           bar chip and always-on display. Android 8-15 degrades to an ordinary ongoing notification
+           with a determinate progress bar. Nothing extra to declare beyond POST_NOTIFICATIONS. -->`;
   }
   if (has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE');

@@ -96,6 +96,17 @@ public static class MauiProgram
     src += `
         builder.Services.AddGeneratedServices();`;
   }
+  if (has('serialization')) {
+    src += `
+        builder.Services.AddJsonSerialization();`;
+  }
+  if (has('screenrecorder')) {
+    src += `
+        // xdg-desktop-portal ScreenCast + gst-launch-1.0 (or ffmpeg on X11). Everything is probed
+        // at runtime - a machine missing the pieces reports Capabilities.None instead of failing
+        // when the user presses record. Flatpak sandboxes are not supported.
+        builder.Services.AddScreenRecorder();`;
+  }
   // Reflector is attribute-based only
 
   src += `

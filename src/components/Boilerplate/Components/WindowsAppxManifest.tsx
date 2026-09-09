@@ -49,6 +49,19 @@ const WindowsAppxManifest = (props: Props) => {
     );
   }
 
+  if (has('screenrecorder')) {
+    capabilities.push('      <Capability Name="graphicsCapture" />');
+    notes.push(
+      <p key="screenrecorder">
+        <strong>Shiny.ScreenRecorder on Windows uses Windows.Graphics.Capture (Windows 10 1903+).</strong>{' '}
+        Only <em>packaged</em> (MSIX) apps declare <code>graphicsCapture</code> — unpackaged apps need
+        nothing, as there is no runtime permission prompt. There is <strong>no audio on Windows</strong>:{' '}
+        <code>Capabilities</code> reports neither <code>Microphone</code> nor <code>SystemAudio</code>, and
+        asking for either throws <code>ScreenRecorderNotSupportedException</code>.
+      </p>
+    );
+  }
+
   if (has('wifi')) {
     capabilities.push('      <DeviceCapability Name="wiFiControl" />');
     capabilities.push('      <DeviceCapability Name="radios" />');

@@ -121,6 +121,20 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddPush<ShinyApp.Delegates.MyPushDelegate>();`;
   }
+  if (has('screenrecorder')) {
+    src += `
+      // Registers IScreenRecorder. Check .Capabilities before offering a feature - what a platform
+      // can do differs within a platform, not just between them, so never infer it from the TFM.
+      builder.Services.AddScreenRecorder();`;
+  }
+  if (has('liveactivities')) {
+    src += `
+      // iOS needs a widget extension of your own - https://shinylib.net/liveactivities/widget/
+      // Unsupported platforms register a no-op manager, so no #if is needed in shared code.
+      builder.Services.AddLiveActivities();
+      // OR, when a server pushes updates (the delegate is the only way to learn the tokens):
+      // builder.Services.AddLiveActivities<ShinyApp.Delegates.MyLiveActivityDelegate>();`;
+  }
   if (has('mediator')) {
     src += `
       builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;
@@ -163,6 +177,12 @@ const MauiProgram = (props: Props) => {
       // Desktop only — Android / iOS throw PlatformNotSupportedException on factory.Create()
       builder.UseTrayIcon();`;
   }
+  if (has('floorplan')) {
+    src += `
+      // Not optional - this registers SkiaSharp, without which FloorPlanView paints nothing
+      // and logs nothing.
+      builder.UseShinyFloorPlan();`;
+  }
   if (has('docking')) {
     src += `
       // Desktop docking host — register dockable panels with .AddDockPanel<TView>("panel-id")
@@ -181,6 +201,12 @@ const MauiProgram = (props: Props) => {
   if (has('stores')) {
     src += `
       builder.Services.AddShinyStores();`;
+  }
+  if (has('serialization')) {
+    src += `
+      // Only needed to resolve ISerializer from DI - [ShinyJsonContext] auto-registers your
+      // JsonSerializerContext through a [ModuleInitializer], so Shiny.Json.Default works without this.
+      builder.Services.AddJsonSerialization();`;
   }
   if (has('localization')) {
     src += `

@@ -136,6 +136,18 @@ public class Program
             VapidPublicKey = "YOUR_VAPID_PUBLIC_KEY"
         });`;
   }
+  if (has('serialization')) {
+    src += `
+        // Only needed to resolve ISerializer from DI - [ShinyJsonContext] auto-registers your
+        // JsonSerializerContext through a [ModuleInitializer].
+        builder.Services.AddJsonSerialization();`;
+  }
+  if (has('screenrecorder')) {
+    src += `
+        // getDisplayMedia + MediaRecorder. Secure context (HTTPS/localhost) AND a user gesture
+        // are both required, so Start() must be reached from a button click.
+        builder.Services.AddScreenRecorder();`;
+  }
   if (has('datasync')) {
     src += `
         // Blazor WASM transport — HttpClient + LocalStorage. Sync runs while the tab is open.

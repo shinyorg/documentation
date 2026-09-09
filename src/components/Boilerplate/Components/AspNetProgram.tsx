@@ -75,6 +75,26 @@ builder.Services.AddDocumentStore(opts =>
     opts.DatabaseProvider = new CockroachDbDatabaseProvider("Host=localhost;Port=26257;Username=root;Database=defaultdb;SSL Mode=Disable;");
 });`;
   }
+  if (has('serialization')) {
+    src += `
+builder.Services.AddJsonSerialization();`;
+  }
+  if (has('extensions-push')) {
+    src += `
+// Server-side dispatch. APNs, FCM, Web Push & WNS all live in the core package - add the
+// transports you actually send through. Omit UseDocumentDb() for the in-memory repository.
+builder.Services.AddPushNotifications(push =>
+{
+    push.AddApns(o =>
+    {
+        o.TeamId   = "ABCDE12345";
+        o.KeyId    = "KEY1234567";
+        o.BundleId = "com.example.app";
+        o.PrivateKeyPath = "AuthKey_KEY1234567.p8";
+    });
+    push.UseDocumentDb(o => o.DatabaseProvider = new SqliteDatabaseProvider("Data Source=push.db"));
+});`;
+  }
   if (has('di')) {
     src += `
 builder.Services.AddGeneratedServices();`;

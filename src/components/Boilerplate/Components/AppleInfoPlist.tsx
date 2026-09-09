@@ -118,6 +118,25 @@ const AppleInfoPlist = (props: Props) => {
   if (has('music')) {
     addKey('NSAppleMusicUsageDescription');
   }
+  if (has('screenrecorder')) {
+    src += `
+        <!-- No entitlement is needed to record your OWN app's UI - ReplayKit records nothing else.
+             The microphone key below is only needed when IncludeMicrophone is used. -->
+        `;
+    addKey('NSMicrophoneUsageDescription');
+  }
+  if (has('liveactivities')) {
+    src += `
+        <key>NSSupportsLiveActivities</key>
+        <true/>
+        <!-- Without this key AND a WidgetKit extension of your own, Start() succeeds and nothing
+             appears - https://shinylib.net/liveactivities/widget/ -->
+        <!-- Optional: opt into high-frequency ActivityKit push updates
+        <key>NSSupportsLiveActivitiesFrequentUpdates</key>
+        <true/>
+        -->
+        `;
+  }
   if (has('voiceintelligence')) {
     addKey('NSMicrophoneUsageDescription');
   }
