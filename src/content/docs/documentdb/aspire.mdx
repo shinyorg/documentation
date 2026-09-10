@@ -28,9 +28,8 @@ var store = builder
     .AddPostgresDocumentStore("orders")          // provisions Postgres and models the store
     .WithSeeder(async (ctx, ct) =>
     {
-        // Runs once, after the DB is ready, before dependents start.
-        // ctx => (StoreName, Provider, ConnectionString). DocumentDb's seeder is idempotent,
-        // so this is the lifecycle gate, not the run-once guarantee.
+        // Runs on the FIRST setup of this database only. Restarting the AppHost does nothing.
+        // ctx => (StoreName, Provider, ConnectionString, Recreate).
     });
 
 builder.AddProject<Projects.Api>("api")
@@ -44,6 +43,53 @@ builder.AddSqliteDocumentStore("orders", "orders.db");   // local dev — no con
 builder.AddSqlServerDocumentStore("orders");
 builder.AddMySqlDocumentStore("orders");
 ```
+
+### When the seeder runs
+
+A seeder fires on exactly **two triggers** — the first time the database is set up, and a destructive
+recreation. Ordinary AppHost restarts never re-seed.
+
+The "has this store been seeded" marker (`__shiny_documentdb_aspire_seed`) is written **into the backing
+database itself**, not into AppHost state. That is what makes the two triggers one mechanism: destroy the
+data and the marker goes with it, so the next start is a first-time setup again.
+
+```csharp
+builder.AddPostgresDocumentStore("orders")
+    .WithSeeder(Seed);                                     // DocumentStoreSeedMode.FirstTimeOnly (default)
+
+// AppHost start #1  -> marker absent  -> seeds, writes marker
+// AppHost start #2  -> marker present -> skips
+// `docker volume rm` the Postgres volume, start #3 -> marker gone -> seeds again
+```
+
+Ask for a rebuild on every start with `DocumentStoreSeedMode.Recreate`. The AppHost never issues DDL of
+its own — it tells you *which* trigger fired via `ctx.Recreate`, and your callback (which holds a real
+store) does the wipe:
+
+```csharp
+builder.AddPostgresDocumentStore("orders")
+    .WithSeeder(
+        async (ctx, ct) =>
+        {
+            var store = BuildStore(ctx.Provider, ctx.ConnectionString);
+
+            if (ctx.Recreate && store is IDocumentMaintenance m)   // false on a first-time setup
+                await m.ClearAll(ct);
+
+            await DocumentSeedRunner.RunAsync(store, MySeeders, cancellationToken: ct);
+        },
+        DocumentStoreSeedMode.Recreate
+    );
+```
+
+The marker is written **only after the callback succeeds**, so a seeder that throws is retried on the next
+start rather than being silently skipped. Markers are keyed by store name, so several stores can share one
+database and each still gets its own first-time setup.
+
+:::caution[`Recreate` destroys data]
+`Recreate` is a dev-loop convenience — it is a standing instruction to wipe the store on every AppHost
+start. Don't ship it in an AppHost that runs against anything you care about.
+:::
 
 ### Layer onto a DB resource you already declared
 
@@ -238,6 +284,33 @@ For an AppHost that publishes a **public demo**, add `.WithoutAi()`. It removes 
 paste their own API key into a database browser they don't control.
 :::
 
+### Configure the assistant from the AppHost
+
+`.WithAi(...)` points the admin tool's [assistant](/documentdb/admin/assistant/) at a chat backend, so a
+developer who opens the tool gets a working assistant without pasting their own key into a database
+browser. It works the same on the container and the terminal resource — both are the same tool over the
+same configuration.
+
+```csharp
+builder.AddDocumentDbAdmin()
+       .WithReference(store)
+       .WithAi(AdminAiProvider.Anthropic, "claude-sonnet-4-5-20250929",
+               builder.AddParameter("anthropic-key", secret: true))
+       .WithAiWrites(insert: true)                 // off unless you ask; delete stays off here
+       .WithAiFor(otherStore, AdminAiProvider.OpenAI, "gpt-4o");   // one store, bigger model
+```
+
+Configuring it here makes it **read-only there**: the tool treats a host-supplied assistant exactly like a
+host-supplied connection, so the settings page shows the values and refuses to change them. Azure and
+OpenAI-compatible need `endpoint:`, and the AppHost throws if you leave it out rather than letting the tool
+come up assistant-less.
+
+:::caution[`WithAiWrites` is a grant, not a preference]
+It is a separate call from `WithAi` on purpose. A write tool the AppHost enabled quietly is exactly the
+thing nobody wants to find out about later — so nothing is granted unless this line is present. The tool
+still refuses every write on a connection marked read-only, whatever is granted here.
+:::
+
 ## How the pieces connect
 
 - The hosting resource implements `IResourceWithConnectionString` over its backing DB and publishes a
@@ -246,7 +319,8 @@ paste their own API key into a database browser they don't control.
 - The client reads both, maps the kind to a provider (`new PostgreSqlDatabaseProvider(conn)` etc.), and
   registers the keyed store with the standard (core) instrumentation decorator.
 - `WithSeeder` gates a callback on the backing resource's ready event — the same pattern the Shiny Aspire
-  Orleans integration uses for its database setup.
+  Orleans integration uses for its database setup — and decides whether to run it by reading a
+  `__shiny_documentdb_aspire_seed` marker row kept **inside the backing database**.
 
 This means the provider choice and seed strategy live in the AppHost, and the consuming code is a single
 provider-agnostic `AddDocumentStore("name")` that works regardless of which backend the AppHost picked.
