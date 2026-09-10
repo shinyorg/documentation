@@ -222,6 +222,60 @@ An exception thrown from an interceptor propagates to the caller and the navigat
 happen — a guard that fails is never treated as a guard that passed. On tab taps and hardware back,
 where there is no caller to throw to, the exception is logged and the navigation is cancelled.
 
+## Asking the user
+
+One action sheet can produce all three outcomes — let it through, send it somewhere else, or stop
+it — which makes it the shortest way to see the whole contract work. This is
+`AskFirstNavigationInterceptor`, on the sample app's **Route Interceptor** page:
+
+```csharp
+public class AskFirstNavigationInterceptor(
+    IDialogs dialogs,
+    INavigationContextAccessor context
+) : INavigationInterceptor
+{
+    const string LetItGo = "Let it through";
+    const string SendElsewhere = "Redirect to Lifecycle";
+    const string StopIt = "Stop navigation";
+
+    public async Task<NavigationInterceptorResult> InterceptNavigationAsync(
+        string uri,
+        object? viewModel,
+        CancellationToken cancellationToken
+    )
+    {
+        // narrow to the destination being guarded, or every tab tap prompts too
+        if (viewModel is not DetailViewModel detail)
+            return NavigationInterceptorResult.Continue;
+
+        var choice = await dialogs.ActionSheet(
+            $"{context.Current?.FromUri} -> {uri} (Text: '{detail.Text}')",
+            cancel: StopIt,          // a dismissed sheet returns the cancel text
+            destruction: null,
+            buttons: [LetItGo, SendElsewhere]
+        );
+
+        return choice switch
+        {
+            LetItGo => NavigationInterceptorResult.Continue,
+            SendElsewhere => NavigationInterceptorResult.Redirect<LifecycleDemoViewModel>(relativeNavigation: true),
+            _ => NavigationInterceptorResult.Cancel()
+        };
+    }
+}
+```
+
+The sheet's title is built entirely from the navigation in flight: where the user is now
+(`INavigationContextAccessor`), where they asked to go, and the state of the destination ViewModel
+itself. A real guard asks an auth service or a dirty-state flag instead of the user, but the shape
+of the method is identical — await something, then return `Continue`, `Redirect` or `Cancel`.
+
+:::caution[Treat a dismissed sheet as a cancel]
+`ActionSheet` returns the `cancel` text when the user dismisses it rather than choosing, so the
+`_ =>` arm covers "stopped" and "did not answer" together. Falling through to `Continue` instead
+would let a swipe-away past the guard.
+:::
+
 ## Blocked app links
 
 `IAppLinks.Handle` returns an `AppLinkResult`: `Navigated`, `Blocked` (a guard cancelled it) or
