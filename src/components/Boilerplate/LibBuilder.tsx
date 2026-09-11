@@ -236,7 +236,7 @@ const LegacyLibBuilder = (props: Props) => {
         {isMaui && usingForeground(components) && (
             <Alert type="caution">
                 You are using a component that uses an Android foreground service!  You must have an application icon set or a drawable resource called notification in order for this background operation to work.
-                For additional information, please read <a href="/client/other/androidforeground">Android Foreground Services</a>
+                For additional information, please read <a href="/core/android-foreground">Android Foreground Services</a>
             </Alert>
         )}
         <div className="app-builder__output">

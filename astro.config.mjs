@@ -158,9 +158,13 @@ export default defineConfig({
       '/client/permissions/': '/permissions/',
       '/client/permissions/android': '/permissions/android',
       '/client/permissions/ios': '/permissions/ios',
-      '/client/other/startupservices': '/other/startupservices',
-      '/client/other/lifecyclehooks': '/other/lifecyclehooks',
-      '/client/other/androidforeground': '/other/androidforeground',
+      '/client/other/startupservices': '/core/startup',
+      '/client/other/lifecyclehooks': '/core/lifecycle',
+      '/client/other/androidforeground': '/core/android-foreground',
+      '/other/startupservices': '/core/startup',
+      '/other/lifecyclehooks': '/core/lifecycle',
+      '/other/androidforeground': '/core/android-foreground',
+      '/foundation/release-notes': '/core/release-notes',
       '/client/release-notes/': '/release-notes/',
 
       // MAUI → flat redirects

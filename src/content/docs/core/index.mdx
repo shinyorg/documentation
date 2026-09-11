@@ -1,0 +1,141 @@
+---
+title: Shiny Core
+description: The host, platform abstractions, lifecycle hooks, and device monitoring that every Shiny module builds on
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+`Shiny.Core` is the package every other Shiny module sits on. You rarely reference it on purpose, because Jobs, Locations, BluetoothLE, Push and the rest all pull it in. It is still worth knowing what it gives you, since a lot of it is useful in your own code.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Core" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui", "blazor"]} os={["android", "ios", "tvos", "macos", "windows", "linux", "web"]} />
+
+## What It Does
+
+<CardGrid>
+  <Card title="Host" icon="rocket">
+    `HostBuilder` and `IHost` build the DI container, run startup tasks, and expose a static `Host.Current` so platform callbacks can find your services, even when the OS starts the app in the background with no UI.
+  </Card>
+  <Card title="Platform abstraction" icon="laptop">
+    `IPlatform` gives every platform the same app-data, cache and public directories, plus main-thread marshalling. The concrete `AndroidPlatform` also handles runtime permissions, activity tracking and intents. [Platform →](/core/platform)
+  </Card>
+  <Card title="Lifecycle hooks" icon="random">
+    You implement `IAndroidLifecycle.*`, `IIosLifecycle.*` or `IMacLifecycle.*`, register the class, and Shiny calls it for app foreground/background, deep links, push tokens, activity results and more. [Lifecycle Hooks →](/core/lifecycle)
+  </Card>
+  <Card title="Startup tasks" icon="setting">
+    `IShinyStartupTask` runs as soon as the container is built. `ShinyLifecycleTask` does the same and also receives foreground/background changes on every platform. [Startup Tasks →](/core/startup)
+  </Card>
+  <Card title="Device monitoring" icon="information">
+    `IConnectivity` and `IBattery` report network reachability, connection types, charge level and charging state, with plain C# `Changed` events. [Device Monitoring →](/core/device-monitoring)
+  </Card>
+  <Card title="Permissions" icon="approve-check">
+    `AccessState` is the one permission result used by every module. `Assert()` and `PermissionException` turn a bad state into a clear error. [Access & Permissions →](/core/permissions)
+  </Card>
+</CardGrid>
+
+It also includes a few small utilities that Shiny's own modules use: `NotifyPropertyChanged`, a thread-safe `BindingList<T>`, `DisposableCollection`, and a delegate runner. See [Utilities](/core/utilities).
+
+Storage and DI registration are separate packages that `Shiny.Core` depends on, so you get them automatically:
+
+- **[Stores](/stores/)** (`Shiny.Extensions.Stores`): `IKeyValueStore`, the secure store, `[Bind]` persisted settings, and `IRepository`
+- **[Dependency Injection](/di/)** (`Shiny.Extensions.DependencyInjection`): the `[Singleton]` / `[Scoped]` / `[Transient]` source generator that emits `AddGeneratedServices()`
+
+## Packages
+
+| Package | Use it for |
+|---------|------------|
+| `Shiny.Core` | The core itself. Targets `net10.0`, Android, iOS, tvOS, Mac Catalyst, macOS and Windows |
+| `Shiny.Hosting.Maui` | `UseShiny()` for .NET MAUI apps. See [MAUI hosting](/foundation/hosting/maui) |
+| `Shiny.Hosting.Native` | `ShinyAppDelegate`, `ShinyAndroidApplication` and `ShinyAndroidActivity` for apps without MAUI, and the only way to host on tvOS. See [Native hosting](/foundation/hosting/native) |
+| `Shiny.Core.Linux` | `IConnectivity` and `IBattery` for Linux (plain `net10.0`) |
+| `Shiny.Core.Blazor` | `IConnectivity` and `IBattery` for Blazor WebAssembly |
+
+## Booting the Host
+
+Most apps never touch the host directly, because the [hosting model](/foundation/hosting/) builds and runs it for you:
+
+```csharp
+// .NET MAUI
+builder.UseShiny();
+```
+
+What the hosting layer does, and what you do yourself in a console, service, or Linux desktop app, looks like this:
+
+```csharp
+using Shiny;
+using Shiny.Hosting;
+using Shiny.Infrastructure;
+
+var builder = HostBuilder.Create();
+
+// Platform TFMs (Android, iOS, macOS, Windows...) call this inside Build().
+// Plain net10.0 has no hosting layer, so a console/GTK/service host calls it itself.
+builder.Services.AddShinyCoreServices();
+
+builder.Services.AddConnectivity(); // Shiny.Core.Linux on Linux
+builder.Services.AddBattery();
+builder.Services.AddGeneratedServices(); // your [Singleton]/[Scoped]/[Transient] classes
+builder.Logging.AddConsole();
+
+using IHost host = builder.Build();
+host.Run(); // runs every IShinyStartupTask, then sets Host.Current
+```
+
+`HostBuilder.Create(services, loggingBuilder)` can wrap an existing `IServiceCollection` / `ILoggingBuilder`. That is how `UseShiny()` shares MAUI's container. To use a third-party container, set `ConfigureContainer`:
+
+```csharp
+builder.ConfigureContainer = services => new MyContainerAdapter(services).BuildServiceProvider();
+```
+
+### What `AddShinyCoreServices` registers
+
+| Platform | Registrations |
+|----------|---------------|
+| All | `AddShinyStores()`: the default and secure `IKeyValueStore`, `IKeyValueStoreFactory` |
+| Android | `AndroidPlatform` (also as `IPlatform`), `AndroidLifecycleExecutor` (runs as a startup task) |
+| iOS / tvOS / Mac Catalyst | `IosPlatform` (also as `IPlatform`), `IosLifecycleExecutor` (runs as a startup task) |
+| macOS (AppKit) | `MacPlatform` (also as `IPlatform`), `MacLifecycleExecutor` (runs as a startup task) |
+| Windows | `WindowsPlatform` (also as `IPlatform`) |
+| Plain `net10.0` | `NetPlatform` (also as `IPlatform`). There is no lifecycle executor, because nothing tells a console app that it went to the background |
+
+`IConnectivity` and `IBattery` are **not** registered by default. Call `AddConnectivity()` / `AddBattery()` yourself. Both use `TryAdd`, so calling them again after a module has already registered them does nothing.
+
+### The static `Host`
+
+Some code runs where constructor injection can't reach it: an Android `BroadcastReceiver`, a `Service` the OS recreated after killing the process, or an `AppDelegate` callback. For that code, `Shiny.Hosting.Host` exposes the running host:
+
+| Member | Description |
+|--------|-------------|
+| `Host.Current` | The running `IHost`. Throws `InvalidOperationException` with a setup hint before `Run()` has been called |
+| `Host.IsInitialized` | `true` once `Run()` has completed. Check it before touching `Current` in code that can run early |
+| `Host.ServiceProvider` / `Host.GetService<T>()` | Resolve from the container |
+| `Host.LoggingFactory` | The host's `ILoggerFactory` |
+| `Host.Platform` | The concrete platform (`AndroidPlatform`, `IosPlatform`, `MacPlatform`) on those TFMs |
+| `Host.Lifecycle` | The platform lifecycle executor. This is what [manual hosting](/foundation/hosting/manual) forwards OS events into |
+
+:::caution
+Use `Host.Current` only in code the OS constructs. Everywhere else, inject the service. A static lookup hides the dependency and makes the class hard to test.
+:::
+
+## Reactive Extensions
+
+As of v5, `Shiny.Core` has no dependency on System.Reactive. `IConnectivity`, `IBattery` and the lifecycle hooks all use plain C# events or interfaces, which keeps Core AOT- and trim-clean. When you want Rx semantics, wrap an event yourself with `Observable.FromEventPattern`.
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-core" />
+
+## Next Steps
+
+- [Hosting Models](/foundation/hosting/): choose MAUI, native, or manual hosting
+- [Platform](/core/platform): directories, main thread, and Android/Apple helpers
+- [Lifecycle Hooks](/core/lifecycle) and [Startup Tasks](/core/startup)
+- [Device Monitoring](/core/device-monitoring): connectivity and battery
+- [Release Notes](/core/release-notes)

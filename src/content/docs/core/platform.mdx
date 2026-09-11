@@ -1,0 +1,118 @@
+---
+title: Platform
+description: IPlatform directories and main-thread marshalling, plus the Android and Apple platform helpers in Shiny.Core
+---
+
+`IPlatform` is the small cross-platform surface every Shiny module uses to find a place for files and to get onto the UI thread. Inject it anywhere:
+
+```csharp
+public interface IPlatform
+{
+    void InvokeOnMainThread(Action action);
+    DirectoryInfo AppData { get; }
+    DirectoryInfo Cache { get; }
+    DirectoryInfo Public { get; }
+}
+```
+
+## Directories
+
+| Platform | `AppData` | `Cache` | `Public` |
+|----------|-----------|---------|----------|
+| Android | `Context.FilesDir` | `Context.CacheDir` | `GetExternalFilesDir(null)` (can be `null` if external storage is unavailable) |
+| iOS / tvOS / Mac Catalyst | `Library` | `Library/Caches` | `Documents` |
+| macOS (AppKit) | `Library` | `Library/Caches` | `Documents` |
+| Windows (packaged) | `ApplicationData.Current.LocalFolder` | `LocalFolder/Cache` | `LocalFolder/Public` |
+| Windows (unpackaged) / plain .NET | `LocalApplicationData/<entry assembly>` | `…/Cache` | `…/Public` |
+
+On Linux, `LocalApplicationData` resolves to `$XDG_DATA_HOME` (falling back to `~/.local/share`), so the plain .NET layout already follows XDG. The folder is named after the entry assembly so that apps don't write into a directory the whole desktop shares.
+
+`ResourceToFilePath(assembly, resourceName)` copies an embedded resource into `AppData` the first time it is asked for, then returns the path. Use it for native APIs that only accept a file, such as a bundled database or model.
+
+## Main Thread
+
+`InvokeOnMainThread` runs the action inline if you are already on the main thread and posts it otherwise. The extensions in `PlatformExtensions` add async versions that complete when the work has run and pass exceptions back to the caller:
+
+```csharp
+await platform.InvokeOnMainThreadAsync(() => label.Text = "Done");
+var result = await platform.InvokeOnMainThreadAsync(() => ReadSomeUiState());
+
+// async work that must start on the UI thread
+await platform.InvokeTaskOnMainThread(async () => await ShowDialogAsync(), cancellationToken);
+```
+
+Windows and plain .NET have no toolkit-independent main thread, so `WindowsPlatform.MainThreadHandler` and `NetPlatform.MainThreadHandler` are static hooks for the hosting layer to set. `UseShiny()` sets the Windows hook to the WinUI dispatcher. A GTK or other desktop head should set the `NetPlatform` hook to its own main loop:
+
+```csharp
+NetPlatform.MainThreadHandler = action => GLib.Idle.Add(() => { action(); return false; });
+```
+
+If nothing sets the handler, the action runs inline. Code with no UI thread still works; it just isn't marshalled.
+
+## Android — `AndroidPlatform`
+
+Resolve the concrete `AndroidPlatform` (or use `Host.Platform`) for the Android-specific helpers Shiny's modules are built on.
+
+### Runtime permissions
+
+```csharp
+var result = await platform.RequestPermissions(
+    Manifest.Permission.AccessFineLocation,
+    Manifest.Permission.AccessCoarseLocation
+);
+if (!result.IsSuccess())
+{
+    var fineGranted = result.IsGranted(Manifest.Permission.AccessFineLocation);
+}
+
+// single permission, mapped to AccessState
+var state = await platform.RequestAccess(Manifest.Permission.Camera);
+
+// no prompt, just the current state
+var current = platform.GetCurrentPermissionStatus(Manifest.Permission.Camera);
+```
+
+- If every permission is already granted, the request returns immediately without showing a dialog.
+- A request needs a foreground `Activity`. If none is up yet (for example, the request fired during startup), Shiny waits **up to 5 seconds** for one to resume and then throws `TimeoutException`. That timeout applies only to getting an activity. Once the dialog is showing, the user can take as long as they want. Pass a `CancellationToken` to give up yourself.
+- `GetCurrentPermissionStatus` returns `Unknown` rather than `Denied` for a permission the app has never requested. Shiny records requested permissions in the default store so that the distinction survives a restart.
+- `RequestFilteredPermissions(params AndroidPermission[])` and `EnsureAllManifestEntries(...)` take `AndroidPermission(permission, minSdk, maxSdk)` records and skip entries that don't apply to the running API level. Use them for permissions that were added or retired across Android versions.
+- `IsInManifest(permission)` checks the merged manifest.
+
+### Activities
+
+| Member | Description |
+|--------|-------------|
+| `CurrentActivity` | The most recently active `Activity`, or `null` |
+| `ActivityChanged` | Event raised with an `ActivityChanged(Activity, ActivityState, Bundle?)` for Created, Started, Resumed, Paused, Stopped, SaveInstanceState and Destroyed |
+| `WaitForActivity(state, ct)` | Completes the next time any activity reaches `state` (Resumed by default) |
+
+### Services, intents and resources
+
+| Member | Description |
+|--------|-------------|
+| `AppContext` | The Android `Application` |
+| `StartService(type, stopWithTask)` / `StopService(type)` | Start or stop a [Shiny foreground service](/core/android-foreground). Uses `StartForegroundService` on API 31+ |
+| `RequestForegroundServicePermissions()` | Requests `FOREGROUND_SERVICE` and, on API 33+, `POST_NOTIFICATIONS`. Returns `Restricted` when only the notification permission was refused |
+| `CreateIntent<T>(actions)` / `GetBroadcastPendingIntent<T>(...)` | Intent helpers. `GetPendingIntentFlags` adds `Mutable` on API 31+ |
+| `RegisterBroadcastReceiver<T>(exported, actions)` | Registers a receiver with the exported flag Android 14 requires |
+| `GetSystemService<T>(name)` / `GetSystemServiceValue(...)` | Typed system-service access |
+| `GetNotificationIconResource()` | Returns the `notification` drawable, or the app icon if there isn't one. Throws if neither exists |
+| `GetResourceIdByName`, `GetColorByName`, `GetRawResourceIdByName` | Resource lookups by name |
+
+## Apple — `IosPlatform` and `AppleExtensions`
+
+`IosPlatform` (iOS, tvOS, Mac Catalyst) adds `AppIdentifier`, which returns the bundle identifier. `AppleExtensions` collects the helpers Shiny's Apple backends use:
+
+| Member | Description |
+|--------|-------------|
+| `IsSimulator` | `true` on the iOS/tvOS simulator, always `false` on Mac Catalyst/macOS |
+| `HasBackgroundMode("location")` | Checks `UIBackgroundModes` in Info.plist |
+| `AssertInfoPlistEntry(key, assert)` / `HasPlistValue(key, ifVersion)` | Info.plist checks, optionally only from an OS version onward |
+| `HasAppDelegateHook(selector)` / `AssertAppDelegateHook(...)` | Checks that the `AppDelegate` implements a selector, for example `didRegisterForRemoteNotificationsWithDeviceToken` |
+| `ToDateTime()` / `ToNSDate()` | `NSDate` conversions (Apple's reference date is 2001-01-01 UTC) |
+| `ToGuid()` / `ToNSUuid()` | `NSUuid` conversions |
+| `FromNsDictionary()` / `ToNsDictionary()` | String dictionary conversions |
+
+## Windows
+
+`Shiny.Permissions.IsInMainfest(capability)` reads `AppxManifest.xml` to check whether a `DeviceCapability` is declared. It only applies to packaged apps.

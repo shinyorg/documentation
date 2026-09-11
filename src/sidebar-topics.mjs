@@ -32,6 +32,21 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Core',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'core/' },
+          { label: 'Platform', link: 'core/platform' },
+          { label: 'Lifecycle Hooks', link: 'core/lifecycle' },
+          { label: 'Startup Tasks', link: 'core/startup' },
+          { label: 'Device Monitoring', link: 'core/device-monitoring' },
+          { label: 'Access & Permissions', link: 'core/permissions' },
+          { label: 'Android Foreground Service', link: 'core/android-foreground' },
+          { label: 'Utilities', link: 'core/utilities' },
+          { label: 'Release Notes', link: 'core/release-notes' }
+        ]
+      },
+      {
         label: 'Mediator',
         jumpTo: true,
         items:[
@@ -142,7 +157,6 @@ export const sidebarTopics = [
       { label: 'AI Skills', link: 'foundation/ai-skills' },
       { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps' },
       { label: 'Getting Help', link: 'foundation/support' },
-      { label: 'Release Notes', link: 'foundation/release-notes' },
     ],
   },
   {
@@ -524,14 +538,6 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'permissions/' },
           { label: 'Android', link: 'permissions/android' },
           { label: 'iOS', link: 'permissions/ios' }
-        ]
-      },
-      {
-        label: 'Other',
-        items: [
-          { label: 'Startup Services', link: 'other/startupservices' },
-          { label: 'Lifecycle Hooks', link: 'other/lifecyclehooks' },
-          { label: 'Android Foreground Service', link: 'other/androidforeground' },
         ]
       },
     ]
@@ -1365,7 +1371,7 @@ export const sidebarTopicsOptions = {
     '/blog',
     '/blog/**/*',
     '/foundation/hosting/uno',
-    '/other/androidforeground',
+    '/core/android-foreground',
     '/mediator/extensions',
     '/controls/tableview/release-notes',
     '/controls/scheduler/release-notes',

@@ -1,0 +1,91 @@
+---
+title: Device Monitoring
+description: Network connectivity and battery state with IConnectivity and IBattery
+---
+
+`Shiny.Core` includes two small monitors: `IConnectivity` for network reachability and `IBattery` for power state. Shiny's modules use them to decide when to run. Jobs, for example, use them to honour `RequiredInternetAccess` and `BatteryNotLow`. You can inject them in your own code too.
+
+## Registration
+
+Neither monitor is registered by default:
+
+```csharp
+services.AddConnectivity();
+services.AddBattery();
+```
+
+Both use `TryAdd`, so they are safe to call even if a module already registered them. On Linux, the methods come from `Shiny.Core.Linux`, and on Blazor WebAssembly from `Shiny.Core.Blazor`. The call is the same everywhere.
+
+:::caution[Name collisions with MAUI]
+MAUI's implicit usings include `Microsoft.Maui.Networking.IConnectivity` and `Microsoft.Maui.Devices.IBattery`. Refer to Shiny's types by their full names, `Shiny.Net.IConnectivity` and `Shiny.Power.IBattery`, rather than adding `Shiny.Net` / `Shiny.Power` as global usings.
+:::
+
+## Connectivity
+
+```csharp
+public interface IConnectivity
+{
+    event EventHandler? Changed;
+    ConnectionTypes ConnectionTypes { get; }  // [Flags] None, Unknown, Bluetooth, Wired, Wifi, Cellular
+    NetworkAccess Access { get; }             // Unknown, None, Local, ConstrainedInternet, Internet
+}
+```
+
+```csharp
+public class SyncService(Shiny.Net.IConnectivity connectivity) : IDisposable
+{
+    public void Start() => connectivity.Changed += this.OnChanged;
+
+    void OnChanged(object? sender, EventArgs e)
+    {
+        if (connectivity.IsInternetAvailable())
+            _ = this.FlushOutbox();
+    }
+
+    public void Dispose() => connectivity.Changed -= this.OnChanged;
+}
+```
+
+`IsInternetAvailable(allowConstrained: true)` returns `true` for `Internet`, and also for `ConstrainedInternet` (a captive portal or low-data mode) unless you pass `false`. Check `ConnectionTypes.HasFlag(ConnectionTypes.Wifi)` if you want to hold large transfers until the device is on Wi-Fi.
+
+## Battery
+
+```csharp
+public interface IBattery
+{
+    event EventHandler? Changed;
+    BatteryState Status { get; }  // Unknown, None, Charging, Full, NotCharging, Discharging
+    double Level { get; }         // 0.0 – 1.0
+}
+```
+
+`IsPluggedIn()` returns `true` for `Charging`, `Full` and `None`. `None` means no battery was found, which means the device is on mains power.
+
+## Events
+
+`Changed` has no payload. Read `Access` / `ConnectionTypes` or `Status` / `Level` inside the handler. On most platforms the native listener only starts when the first handler subscribes and stops when the last one unsubscribes, so remember to unsubscribe, for example in `Dispose` or when a page is left. The properties always return a fresh reading, whether or not anything is subscribed.
+
+## Platform Backends
+
+| Platform | Connectivity | Battery |
+|----------|--------------|---------|
+| Android | `ConnectivityManager.NetworkCallback` | `ACTION_BATTERY_CHANGED` broadcast |
+| iOS / Mac Catalyst | `NWPathMonitor` | `UIDevice` battery notifications |
+| tvOS | `NWPathMonitor` | None. An Apple TV is mains powered and `UIDevice` has no battery API there, so it always reports `Full` / `1.0` and `Changed` never fires |
+| macOS (AppKit) | `NWPathMonitor` | IOKit power sources (`IOPSNotificationCreateRunLoopSource`) |
+| Windows | `NetworkInformation.NetworkStatusChanged` | `Battery.AggregateBattery` |
+| Linux (`Shiny.Core.Linux`) | `System.Net.NetworkInformation` (netlink change events) | sysfs `/sys/class/power_supply/BAT*`, polled every 5 seconds while subscribed. Reports `None` / `1.0` on machines without a battery |
+| Blazor WASM (`Shiny.Core.Blazor`) | `navigator.onLine` + Network Information API | Battery Status API (`navigator.getBattery`) |
+
+On Linux, `Access` reports `Internet` whenever a non-loopback interface is up. It does not check whether the internet is actually reachable.
+
+### Blazor WebAssembly
+
+The browser implementations (`ConnectivityManager`, `BatteryManager`) load a JavaScript module, so they must be started before they report anything. Until then they return `Unknown` (and a `Level` of `1.0`):
+
+```csharp
+var connectivity = (Shiny.Infrastructure.ConnectivityManager)host.Services.GetRequiredService<Shiny.Net.IConnectivity>();
+await connectivity.StartAsync();
+```
+
+Browser support varies. Only Chromium-based browsers expose the Network Information and Battery Status APIs. Firefox and Safari report `ConnectionTypes.Unknown`, and battery status is unavailable there.

@@ -1,0 +1,83 @@
+---
+title: Utilities
+description: NotifyPropertyChanged, BindingList, DisposableCollection, and the other small helpers that ship in Shiny.Core
+---
+
+`Shiny.Core` includes a few general-purpose types that its modules use internally. They are public, so you can use them too.
+
+## `NotifyPropertyChanged`
+
+A minimal `INotifyPropertyChanged` base class:
+
+```csharp
+public class TripViewModel : NotifyPropertyChanged
+{
+    string? status;
+    public string? Status
+    {
+        get => this.status;
+        set => this.Set(ref this.status, value); // raises only when the value changes
+    }
+
+    protected override void OnNpcHookChanged(bool hasSubscribers)
+    {
+        // start/stop expensive work when the first binding attaches or the last one leaves
+    }
+}
+```
+
+`HasSubscribers` and `OnNpcHookChanged` let a class stay idle until something actually binds to it. `RaisePropertyChanged()` raises the event manually, using the caller's member name by default.
+
+:::tip
+For settings that should persist, use [`[Bind]` partial properties](/stores/) from `Shiny.Extensions.Stores` instead. The generator writes the property code and the persistence for you.
+:::
+
+## Collections
+
+| Type | Description |
+|------|-------------|
+| `INotifyReadOnlyCollection<T>` | `IReadOnlyList<T>` + `INotifyCollectionChanged`. Lets a service expose a live list without letting callers change it |
+| `INotifyCollectionChanged<T>` | A mutable version with `AddRange`, `RemoveRange` and `ReplaceAll`, each raising a single change notification |
+| `BindingList<T>` | An `ObservableCollection<T>` implementation of the above. Writes take a reader/writer lock, enumeration returns a snapshot, and bulk operations raise one `Reset` instead of one event per item |
+
+```csharp
+readonly Shiny.Collections.BindingList<Peripheral> found = new();
+public INotifyReadOnlyCollection<Peripheral> Found => this.found;
+
+void OnScanBatch(IEnumerable<Peripheral> batch) => this.found.AddRange(batch);
+```
+
+:::note
+`Shiny.Collections.BindingList<T>` has the same name as `System.ComponentModel.BindingList<T>`. Use the full name if both namespaces are imported.
+:::
+
+## `DisposableCollection`
+
+A thread-safe `ICollection<IDisposable>` that disposes everything in it at once. Adding is thread-safe, and disposal takes a snapshot first, so a disposable that adds another disposable during `Dispose` doesn't break it:
+
+```csharp
+readonly DisposableCollection subscriptions = new();
+
+subscriptions.Add(someSubscription);
+subscriptions.Add(anotherOne);
+
+// later
+subscriptions.Dispose(); // disposes all of them and empties the collection
+```
+
+## Running Delegates
+
+`RunDelegates` is how Shiny calls every registered delegate for an event, such as all your `IGpsDelegate` implementations. It runs them concurrently, logs each failure against the delegate's type, and never lets one failing delegate stop the others:
+
+```csharp
+await services.RunDelegates<IMyDelegate>(x => x.OnSomething(args), logger);
+```
+
+Use it if you write your own delegate-style extension point.
+
+## Small Extensions
+
+| Member | Description |
+|--------|-------------|
+| `string.IsEmpty()` | `String.IsNullOrWhiteSpace` as an extension |
+| `Type.GetDefaultValue()` | The default value of a primitive or common BCL struct without reflection (AOT-safe). Throws `NotSupportedException` for other structs |
