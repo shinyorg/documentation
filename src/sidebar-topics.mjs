@@ -554,7 +554,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Overview', link: 'controls/theming/' },
           { label: 'Theme Packs', link: 'controls/theming/packs', badge: { text: 'New', variant: 'success' } },
-          { label: 'Theme Creator', link: 'controls/theming/creator', badge: { text: 'New', variant: 'success' } },
+          { label: 'Theme Composer', link: 'controls/theming/creator', badge: { text: 'New', variant: 'success' } },
           { label: 'Dark Mode', link: 'controls/theming/dark-mode', badge: { text: 'New', variant: 'success' } },
         ],
       },
@@ -956,6 +956,9 @@ export const sidebarTopics = [
           { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
           { label: 'Splash Screen', link: 'controls/splashscreen/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
+          { label: 'ButtonGroup', link: 'controls/button-group/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'TagEntry', link: 'controls/tag-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'ChipGroup', link: 'controls/chip-group/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
           { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
