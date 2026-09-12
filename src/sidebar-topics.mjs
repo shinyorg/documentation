@@ -8,6 +8,11 @@
  * Add `expandInHomenav: true` to a grouping node (e.g. "Aspire") so the homepage nav
  * panel lists its child libraries instead of the group itself.
  *
+ * Add `featuredInHomenav: [{ label, link, note }]` to a *topic* to give it a row of highlighted
+ * links at the top of its block in the homepage nav panel — for pages that matter more than their
+ * place in the tree suggests (e.g. Theming, which isn't a control and so never appears in the
+ * flattened control catalogue).
+ *
  * Add `platform: 'maui'` or `platform: 'blazor'` to any item that only exists on that host.
  * `cleanTopicsForStarlight` turns it into a pill in the sidebar — on its own when the item has
  * no other badge, or as a second pill beside an existing one (e.g. `Flyout [New] [MAUI]`).
@@ -547,6 +552,12 @@ export const sidebarTopics = [
     link: '/controls/',
     icon: 'seti:html',
     flattenInHomenav: true,
+    // Theming isn't a control, so the flattened catalogue below would never list it —
+    // but it's the first thing you need before any control looks right.
+    featuredInHomenav: [
+      { label: 'Theming', link: 'controls/theming/', note: 'Tokens, colour roles & theme packs' },
+      { label: 'Theme Composer', link: 'controls/theming/creator', note: 'Design a theme live, take the CSS or XAML' },
+    ],
     items:[
       { label: 'Getting Started', link: 'controls/' },
       {
@@ -1363,6 +1374,7 @@ export function cleanTopicsForStarlight(topics) {
     if (key === 'jumpTo') return undefined;
     if (key === 'expandInHomenav') return undefined;
     if (key === 'flattenInHomenav') return undefined;
+    if (key === 'featuredInHomenav') return undefined;
     if (key === 'homeNavOnly') return undefined;
     if (key === 'platform') return undefined;
     return value;
