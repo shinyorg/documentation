@@ -97,6 +97,119 @@ If most of your workloads filter on just one of the columns, prefer two single-c
 
 Every expression index adds a B-tree write to every `Insert` / `Update` / `Upsert` / `BatchInsert`. Five indexes ≈ 6× the write cost of an unindexed table. Index the properties you actually query; do not index defensively. See [Performance](/documentdb/performance/) for more.
 
+## Unique indexes
+
+`CreateIndexAsync` builds **performance** indexes. Uniqueness is different: it is a rule about the data, so it is
+declared on the document type and the store enforces it on every provider except DuckDB, on every write path — `Insert`, `Update`,
+`Upsert`, `SetProperty`, set-based `ExecuteUpdate`, batches, sessions and backup import.
+
+```csharp
+options.ConfigureDocument<Customer>(cfg =>
+{
+    cfg.MapUniqueIndex(x => x.Email);                               // one property
+    cfg.MapUniqueIndex(x => new { x.Region, x.AccountNumber });     // composite: an anonymous type
+    cfg.MapUniqueIndex(x => x.Address.PostalCode);                  // nested property
+    cfg.MapProperty(x => x.Sku, p => p.Unique());                   // shorthand for a single property
+});
+```
+
+A write that would give two documents the same key stores nothing and throws `UniqueConstraintException`:
+
+```csharp
+try
+{
+    await store.Insert(customer);
+}
+catch (UniqueConstraintException ex)
+{
+    logger.LogWarning("{Type} {Id} collides on {Properties} ({Index})", ex.TypeName, ex.DocumentId, ex.PropertyNames, ex.IndexName);
+}
+```
+
+| Member | Description |
+|---|---|
+| `TypeName` / `DocumentType` | The document type whose index was violated |
+| `IndexName` | `uq_{Type}_{Properties}`, or `uq_{Type}_{name}` when `MapUniqueIndex(..., name: "...")` was given (capped at 51 characters). Relational indexes are created under this name plus a short hash of the table, because PostgreSQL and Oracle scope index names to the schema |
+| `PropertyNames` | The key's properties, in order |
+| `DocumentId` | The rejected document's id — `null` for a set-based write, where the store cannot tell which row collided |
+
+The duplicated **value** is deliberately not in the message: unique keys are very often personal data (an email
+address, a national id), and exception messages end up in logs. `UniqueConstraintException` derives from
+`InvalidOperationException`.
+
+:::tip
+Catch the exception rather than querying first. "Check, then insert" races with every other writer — the index is the
+only thing that actually guarantees uniqueness.
+:::
+
+### The rules — identical everywhere
+
+- **Scoped to the document type.** Other types in the same table may hold the same value. On a
+  [shared-table multi-tenant](/documentdb/multi-tenancy/) store the index is also scoped to the tenant.
+- **A null or missing key part is not constrained.** Any number of customers may have no email; a composite key with
+  one null part is unconstrained too.
+- **Values compare exactly, so uniqueness is case-sensitive** — even on SQL Server and MySQL, whose default collations
+  are not. For case-insensitive uniqueness, normalize the value before writing it (for example, store the email
+  lower-cased).
+- **Key parts are plain property chains.** A method call such as `x => x.Email.ToLower()`, or the same property twice,
+  throws `ArgumentException`.
+- **Randomized-encrypted properties** can't be a key part or be read by the filter — equal values encrypt differently —
+  and fail when the store is built. [`EncryptionMode.Deterministic`](/documentdb/encryption/) works.
+
+### Filters and soft delete
+
+A `filter:` constrains only the documents it matches, and is re-evaluated on every write — updating a document back
+into the filter can collide, and moving it out releases its value. The natural pairing is
+[soft delete](/documentdb/soft-delete/), so a removed user gives their email back:
+
+```csharp
+options.ConfigureDocument<User>(cfg =>
+{
+    cfg.AddSoftDelete(x => x.IsDeleted);
+    cfg.MapUniqueIndex(x => x.Email, filter: x => !x.IsDeleted);
+});
+
+await store.Remove<User>("u1");                                     // flags u1
+await store.Insert(new User { Id = "u2", Email = "alice@x.com" });  // fine — u1 no longer holds the value
+```
+
+Global query filters (`AddQueryFilter`) never apply to a unique index; only its own `filter:` does.
+
+### How each provider enforces it
+
+| Provider | Mechanism |
+|---|---|
+| SQLite / SQLCipher | Partial unique expression index — `CREATE UNIQUE INDEX uq_Customer_Email_<table hash> ON documents (json_extract(Data, '$.email')) WHERE TypeName = 'Customer'` (plus the filter) |
+| PostgreSQL / CockroachDB | Partial unique expression index over the same typed extraction a query uses. An entry larger than ~2.7 KB is rejected by the engine; key and filter expressions must be immutable (a `DateTime` comparison is not) |
+| MySQL | Functional unique index. Each key part is `CASE WHEN TypeName = … AND <filter> THEN SHA2(<JSON text>, 256) END`, so another type's or a filtered-out row is NULL and never collides, and a long value can't hit the key-length limit. `ON DUPLICATE KEY UPDATE` and `INSERT IGNORE` treat a collision on any unique key as the conflicting row, so upserts and backup `Replace`/`SkipExisting` of a unique-indexed type take a read-then-write path instead |
+| MariaDB | The same key parts as `VIRTUAL` generated columns (`{index}_k0`, …) with a unique index over them — MariaDB has no functional key parts |
+| SQL Server | `PERSISTED` computed columns — a SHA-256 hash per key part plus a discriminator (`{index}_k0`, …, `{index}_x`) — under a unique index filtered by `TypeName`. SQL Server treats NULLs as equal in a unique index, which the discriminator works around. String values longer than 4000 characters are not constrained |
+| Oracle | Function-based unique index whose parts are `STANDARD_HASH` of the extracted value, NULL for an excluded row (Oracle leaves all-NULL keys out of an index). String values longer than 4000 characters are not constrained |
+| DuckDB | **Not supported.** DuckDB can't index an expression over a JSON value (nor add a generated column to an existing table), so a mapped unique index fails when the store is built with `DocumentConfigurationException` |
+| MongoDB / Amazon DocumentDB | Native unique index on `data.<path>` with a `partialFilterExpression` of the type name, a `$type` check per key part (so null and missing are excluded), and the translated filter. The filter must be expressible there: `&&`, `\|\|`, `!boolProp`, `==`, `<` `<=` `>` `>=`, `== null`, and `Contains` over a constant list; `\|\|` and `Contains` need MongoDB 6.0+, and Amazon DocumentDB needs 5.0+. Anything else fails at index creation |
+| Cosmos DB | A reservation item per key (`__unique__<sha-256>`) in the document's own logical partition, committed in the same `TransactionalBatch` as the document. Released keys are deleted after the commit; one left behind is taken over by the next writer once its owner no longer holds the value. Document ids starting with `__unique__` are reserved |
+| LiteDB | A reservation document per key in a `{collection}_unique` sidecar collection, written in the same LiteDB transaction as the document (or the unit of work's) |
+| IndexedDB | A reservation record per key (`~uq:<sha-256>`) in the document's object store, checked and written in the same readwrite transaction as the document |
+| DynamoDB | A reservation item per key (`pk = unique#<sha-256>`) written in the same `TransactWriteItems` as the document |
+| Azure Table | A reservation row per key (`~uq-<sha-256>`) in the document's partition, committed in the same entity-group transaction |
+| Firestore | A reservation document per key in `{collection}_unique`, committed in the same Firestore transaction |
+| Redis | A reservation key per key (`uq:<sha-256>`) claimed in the same Lua script that writes the document. Needs a single-shard deployment |
+| RavenDB | A compare-exchange value per key (`uq/<sha-256>`), claimed before the session saves and released after. Not atomic: a claim orphaned by a crash between the claim and the save blocks its value for 30 seconds, after which another writer can take it over |
+
+Batch, `Clear`, `ExecuteUpdate` and `ExecuteDelete` operations on the reservation-based providers are atomic per
+document or per chunk, the same boundary those operations already have there.
+
+### Existing data, and changing an index
+
+- **Native-index providers** (the relational providers, MongoDB, Amazon DocumentDB) create the index when the
+  table/collection is first used. If documents already stored there share a key, that fails with a
+  `DocumentConfigurationException` naming the index — resolve the duplicates and it is retried on the next call.
+- **The index is created once and never altered.** After changing a key or filter, drop the old index yourself, or give
+  the new one a different `name:`.
+- **Reservation-based providers** don't back-fill: documents stored before the mapping was added hold no reservation,
+  so they can't block a new document. Redis, LiteDB and IndexedDB re-reserve a document on its next write; the others
+  only once a write changes its key.
+
 ## Transactions — the session (unit of work)
 
 Grouping writes into a single transaction is done through an `IDocumentSession` opened from the store (`store.OpenSession()`). It buffers `Add`/`AddRange`/`Update`/`Upsert`/`Remove` operations and applies them atomically when you call `SaveChanges` — all commit or all roll back. There is no `RunInTransaction`; `SaveChanges` is the implicit transaction, and `session.BeginTransaction()` is the explicit one (see below).
