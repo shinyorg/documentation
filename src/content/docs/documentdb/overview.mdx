@@ -1,0 +1,299 @@
+---
+title: What DocumentDb Does
+description: A guided tour of Shiny.DocumentDb — store object graphs on any of 20 databases, then search, audit, protect, publish, and serve them with one API.
+---
+import { Icon, Tabs, TabItem, LinkCard, CardGrid } from '@astrojs/starlight/components';
+import { Image } from 'astro:assets';
+import DatabaseProviders from '/src/components/DatabaseProviders/DatabaseProviders.astro';
+import browseImg from '/src/assets/documentdb/admin-browse.jpg';
+
+Most apps end up with the same data layer problems: an object graph that doesn't fit flat tables, a
+migration for every new field, then search, audit history, encryption, events and an API bolted on as
+separate libraries. **Shiny.DocumentDb** gives you all of that as one library on top of the database you
+already run. This page shows what it does, one capability at a time, with the code for each.
+
+<DatabaseProviders variant="compact" />
+
+<div class="ai-card-grid not-content" style="grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr))">
+  <a class="ai-card" href="#store-and-query">
+    <span class="ai-card-icon"><Icon name="document" /></span>
+    <span class="ai-card-title">Store and query</span>
+    <span class="ai-card-desc">Whole object graphs as JSON documents, LINQ over nested data, no migrations.</span>
+    <span class="ai-card-more">Jump<Icon name="right-arrow" /></span>
+  </a>
+  <a class="ai-card" href="#search">
+    <span class="ai-card-icon"><Icon name="magnifier" /></span>
+    <span class="ai-card-title">Search</span>
+    <span class="ai-card-desc">Vector similarity, relevance-ranked full text, and geospatial queries on native indexes.</span>
+    <span class="ai-card-more">Jump<Icon name="right-arrow" /></span>
+  </a>
+  <a class="ai-card" href="#history-and-data-protection">
+    <span class="ai-card-icon"><Icon name="seti:clock" /></span>
+    <span class="ai-card-title">History and protection</span>
+    <span class="ai-card-desc">Point-in-time reads, restore, soft delete, and field-level encryption.</span>
+    <span class="ai-card-more">Jump<Icon name="right-arrow" /></span>
+  </a>
+  <a class="ai-card" href="#events-and-messaging">
+    <span class="ai-card-icon"><Icon name="random" /></span>
+    <span class="ai-card-title">Events and messaging</span>
+    <span class="ai-card-desc">Transactional outbox and change feeds — react to writes without dual-write bugs.</span>
+    <span class="ai-card-more">Jump<Icon name="right-arrow" /></span>
+  </a>
+  <a class="ai-card" href="#serve-it-over-http-and-ai">
+    <span class="ai-card-icon"><Icon name="puzzle" /></span>
+    <span class="ai-card-title">HTTP and AI</span>
+    <span class="ai-card-desc">REST endpoints with live queries, LLM tools, and an MCP server from the same model.</span>
+    <span class="ai-card-more">Jump<Icon name="right-arrow" /></span>
+  </a>
+  <a class="ai-card" href="#scale-out">
+    <span class="ai-card-icon"><Icon name="cloud-download" /></span>
+    <span class="ai-card-title">Scale out</span>
+    <span class="ai-card-desc">Multi-tenancy, Orleans persistence, and .NET Aspire orchestration.</span>
+    <span class="ai-card-more">Jump<Icon name="right-arrow" /></span>
+  </a>
+</div>
+
+## Store and query
+
+A document is your object — nested addresses, child collections and all — saved as one JSON document. There
+is no `CREATE TABLE`, no mapping, and no migration when you add a property. Queries are ordinary LINQ, including
+over nested collections, and are translated to the database's own query language rather than run in memory.
+
+```csharp
+public class Order
+{
+    public Guid Id { get; set; }                 // generated on insert
+    public string Customer { get; set; } = "";
+    public string Status { get; set; } = "open";
+    public Address ShipTo { get; set; } = new();
+    public List<OrderLine> Lines { get; set; } = [];
+}
+
+await store.Insert(order);                        // the whole graph, one write
+
+var bigOpenOrders = await store.Query<Order>()
+    .Where(o => o.Status == "open" && o.Lines.Any(l => l.Price > 100))
+    .OrderBy(o => o.Customer)
+    .Paginate(0, 20)
+    .ToList();
+```
+
+Projections, aggregates, `GroupBy`, bulk `ExecuteUpdate` / `ExecuteDelete`, JSON indexes, and units of work
+are all on the same fluent surface. The same code runs on every provider — only the registration changes.
+
+[CRUD](/documentdb/crud/) · [Querying](/documentdb/querying/) · [Aggregates](/documentdb/aggregates/) ·
+[Indexes & transactions](/documentdb/indexes/) · [Typed context](/documentdb/context/)
+
+## Search
+
+Three kinds of search, each backed by the database's own index — `pgvector`, DiskANN, FTS5, `tsvector`, GiST,
+R\*Tree, `2dsphere` and friends — not a second search service you have to keep in sync.
+
+<Tabs>
+  <TabItem label="Vector">
+    Find the documents closest in meaning. Pair it with `Microsoft.Extensions.AI` and embeddings are generated
+    on every write.
+
+    ```csharp
+    opts.ConfigureDocument<Article>(cfg =>
+        cfg.MapVectorProperty(a => a.Embedding, dimensions: 1536, metric: VectorDistance.Cosine));
+
+    var hits = await store.Query<Article>()
+        .Where(a => a.Tenant == tenantId)
+        .NearestVectors(queryEmbedding, k: 10);
+    ```
+
+    [Vector / ANN search](/documentdb/vector/) · [VectorData connector](/documentdb/vectordata/)
+  </TabItem>
+  <TabItem label="Full text">
+    Relevance-ranked keyword search, with an optional pre-filter.
+
+    ```csharp
+    opts.ConfigureDocument<Article>(cfg => cfg.MapFullTextProperty(a => a.Body));
+
+    var hits = await store.FullTextSearch<Article>("orleans persistence", maxResults: 20);
+    foreach (var hit in hits)
+        Console.WriteLine($"{hit.Score:F2}  {hit.Document.Title}");
+    ```
+
+    [Full-text search](/documentdb/full-text/)
+  </TabItem>
+  <TabItem label="Spatial">
+    Radius, bounding box, nearest neighbour, and full OGC geometry predicates.
+
+    ```csharp
+    var nearby = await store.WithinRadius<Restaurant>(
+        new GeoPoint(45.5231, -122.6765),   // Portland, OR
+        5000,                               // metres
+        filter: r => r.Cuisine == "Italian");
+
+    foreach (var result in nearby)
+        Console.WriteLine($"{result.Document.Name} — {result.DistanceMeters:N0}m away");
+    ```
+
+    [Spatial](/documentdb/spatial/) · [Reference geo data](/documentdb/geo-reference/) · [Geofencing](/documentdb/geofencing/)
+  </TabItem>
+</Tabs>
+
+## History and data protection
+
+Know what a document looked like last Tuesday, undo a bad write, keep deleted rows recoverable, and make sure a
+leaked backup doesn't leak the sensitive fields.
+
+<Tabs>
+  <TabItem label="Temporal history">
+    Opt a type into append-only versioning; every write records a snapshot.
+
+    ```csharp
+    opts.ConfigureDocument<Order>(cfg => cfg.MapTemporal(o => o.Retention = TimeSpan.FromDays(90)));
+
+    var temporal = (ITemporalDocumentStore)store;
+    var versions = await temporal.History<Order>(orderId);        // every version, oldest first
+    var lastWeek = await temporal.AsOf<Order>(orderId, when);     // state at a point in time
+    ```
+
+    Diff two versions, restore one, or ask what a given user changed. [Temporal history](/documentdb/temporal/)
+  </TabItem>
+  <TabItem label="Soft delete">
+    `Remove` sets a flag instead of deleting, and every read hides flagged documents.
+
+    ```csharp
+    opts.ConfigureDocument<Customer>(cfg => cfg.AddSoftDelete(x => x.IsDeleted));
+    ```
+
+    [Soft delete](/documentdb/soft-delete/) · [Query filters](/documentdb/query-filters/)
+  </TabItem>
+  <TabItem label="Field encryption">
+    AES-256-GCM ciphertext wherever the property is stored — including history and backups — with no change to
+    how you read or write.
+
+    ```csharp
+    opts.UseEncryptor(new AesGcmDocumentEncryptor("k1", key));
+    opts.ConfigureDocument<Patient>(cfg => cfg.MapProperty(x => x.Ssn, p => p.Encrypt()));
+    ```
+
+    [Field-level encryption](/documentdb/encryption/)
+  </TabItem>
+</Tabs>
+
+## Events and messaging
+
+"Save the order, then publish OrderPlaced" is two writes, and one of them eventually fails. The outbox commits
+the message in the **same transaction** as the document, and change feeds let anything react to writes.
+
+<Tabs>
+  <TabItem label="Transactional outbox">
+    ```csharp
+    await using var session = store.OpenSession();
+    session.Add(order)
+           .Enqueue(new OrderPlaced(order.Id, order.Total));
+    await session.SaveChanges();   // the order and the message commit together, or neither does
+    ```
+
+    At-least-once dispatch with retries, backoff and dead-lettering. [Transactional outbox](/documentdb/outbox/)
+  </TabItem>
+  <TabItem label="Change feeds">
+    ```csharp
+    await foreach (var change in store.NotifyOnChange<Order>(ct))
+        Console.WriteLine($"{change.ChangeType}: {change.Id}");
+    ```
+
+    In-process on every provider, plus native feeds that see *all* writers on PostgreSQL, SQL Server, Cosmos DB
+    and DynamoDB. [Change monitoring](/documentdb/change-monitoring/) · [Write interceptors](/documentdb/interceptors/)
+  </TabItem>
+</Tabs>
+
+## Serve it over HTTP and AI
+
+The document model you already have becomes an API — for browsers, for integrations, and for LLM agents — with
+the scoping rules enforced by the library, not by each endpoint.
+
+<Tabs>
+  <TabItem label="REST and live queries">
+    List, get, count, create, replace, merge-patch, delete, and a Server-Sent Events live tail — in one call.
+
+    ```csharp
+    app.MapDocuments<Order>("/orders", o =>
+    {
+        o.Operations = DocumentEndpoints.All;
+        o.AllowFilterOn(x => x.Status, x => x.CustomerId, x => x.Total);
+        o.Scope<ITenantContext>((tenant, _) => x => x.TenantId == tenant.TenantId);
+    });
+    ```
+
+    [REST & live queries](/documentdb/rest-endpoints/) · [OData](/documentdb/odata/)
+  </TabItem>
+  <TabItem label="AI tools and MCP">
+    Expose document types as `Microsoft.Extensions.AI` tool functions, read-only by default.
+
+    ```csharp
+    services.AddDocumentStoreAITools(tools =>
+        tools.AddType(jsonContext.Customer, capabilities: DocumentAICapabilities.ReadOnly));
+    ```
+
+    The same tools power an MCP server for Claude Code, Copilot, and other MCP clients.
+    [AI tools](/documentdb/ai-tools/) · [MCP server](/documentdb/mcp/)
+  </TabItem>
+</Tabs>
+
+## Scale out
+
+From one SQLite file to a tenant-per-database cluster behind Orleans — without rewriting the data layer.
+
+<Tabs>
+  <TabItem label="Multi-tenancy">
+    ```csharp
+    services.AddSingleton<ITenantResolver, MyTenantResolver>();
+    services.AddMultiTenantDocumentStore(tenantId => new DocumentStoreOptions
+    {
+        DatabaseProvider = new SqliteDatabaseProvider($"Data Source={tenantId}.db")
+    });
+    ```
+
+    Shared-table or database-per-tenant, applied transparently. [Multi-tenancy](/documentdb/multi-tenancy/)
+  </TabItem>
+  <TabItem label="Orleans">
+    Grain storage, reminders, clustering and grain directory on any backend — and grain state you can query
+    without activating grains.
+
+    ```csharp
+    siloBuilder.AddDocumentDbGrainStorage("Default", o =>
+        o.DatabaseProvider = new PostgreSqlDatabaseProvider(connectionString));
+    ```
+
+    [Orleans persistence](/documentdb/orleans/) · [Orleans streams](/documentdb/orleans-streams/)
+  </TabItem>
+  <TabItem label=".NET Aspire">
+    The backend becomes a deployment decision, and the admin UI comes up already connected.
+
+    ```csharp
+    // AppHost
+    var store = builder.AddPostgresDocumentStore("orders");
+    builder.AddDocumentDbAdmin(port: 8085).WithReference(store);
+
+    // Api
+    builder.AddDocumentStore("orders");
+    ```
+
+    [Aspire](/documentdb/aspire/)
+  </TabItem>
+</Tabs>
+
+## See your data
+
+**ShinyDocDbMyAdmin** is a phpMyAdmin-style front end for any DocumentDb store: browse and edit documents, run
+queries and `EXPLAIN`, diff temporal versions, map geometry, inspect vectors, generate test data, and ask an AI
+assistant about your data. It ships as a container image and as a terminal UI.
+
+<Image src={browseImg} alt="ShinyDocDbMyAdmin browsing documents in a sampled-column grid" />
+
+[Admin UI](/documentdb/admin/) · [Terminal UI](/documentdb/admin/terminal/) · [Try the live demo](https://docdbmyadmin.acrhome.ca/)
+
+## Next steps
+
+<CardGrid>
+  <LinkCard title="Getting Started" description="Install a provider package and register the store." href="/documentdb/" />
+  <LinkCard title="Why DocumentDb" description="Feature matrix and benchmarks against EF Core and sqlite-net." href="/documentdb/comparison/" />
+  <LinkCard title="Provider Reference" description="What each of the 20 databases supports, side by side." href="/documentdb/providers/" />
+  <LinkCard title="FAQ & Decision Trees" description="Which provider, which tenancy model, which search." href="/documentdb/faq/" />
+</CardGrid>

@@ -165,6 +165,7 @@ export const sidebarTopics = [
     ],
   },
   {
+    id: 'hardware',
     label: 'Hardware & Connectivity',
     link: '/ble/',
     icon: 'link',
@@ -278,6 +279,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'device-data',
     label: 'Device Data',
     link: '/music/',
     icon: 'mobile-android',
@@ -338,6 +340,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'ai',
     label: 'AI & Intelligence',
     link: '/aiconversation/',
     icon: 'star',
@@ -421,6 +424,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'background',
     label: 'Background & Delivery',
     link: '/jobs/',
     icon: 'clock',
@@ -494,6 +498,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'maui',
     label: 'MAUI App',
     link: '/mauishell/',
     icon: 'rocket',
@@ -548,6 +553,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'controls',
     label: 'UI Controls',
     link: '/controls/',
     icon: 'seti:html',
@@ -985,6 +991,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'data',
     label: 'Data & Storage',
     link: '/documentdb/',
     icon: 'seti:db',
@@ -994,6 +1001,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'documentdb/' },
+          { label: 'What It Does', link: 'documentdb/overview' },
           { label: 'Why DocumentDb', link: 'documentdb/comparison' },
           { label: 'Migrating v12 → v13', link: 'documentdb/migrating-v12-v13' },
           { label: 'AOT Setup', link: 'documentdb/aot' },
@@ -1150,6 +1158,7 @@ export const sidebarTopics = [
     ]
   },
   {
+    id: 'server',
     label: 'Server & Cloud',
     link: '/httpserver/',
     icon: 'cloud-download',
@@ -1393,6 +1402,13 @@ export const sidebarTopicsOptions = {
     '/controls/mermaid-diagrams/release-notes',
   ],
   topics: {
-    foundation: ['/'],
+    foundation: ['/', '/libraries/foundation'],
+    hardware: ['/libraries/hardware'],
+    'device-data': ['/libraries/device-data'],
+    ai: ['/libraries/ai'],
+    background: ['/libraries/background'],
+    maui: ['/libraries/maui'],
+    data: ['/libraries/data'],
+    server: ['/libraries/server'],
   },
 };
