@@ -330,6 +330,82 @@ registered in your `JsonSerializerContext` and pass its type info. See
 | LiteDB / IndexedDB | ⚠️ Client-side | In-memory LINQ grouping; loads the matched set — pre-filter with `Where`. Typed surface only. |
 | **Azure Table / DynamoDB** | ❌ Throws | Key-partitioned, no server grouping — `NotSupportedException`, no silent scan. |
 
+## Joins
+
+A join reads two document types in one query. `Query<TLeft>().Join<TRight>(condition)` pairs each left document
+with the right documents the condition matches, and the engine does the matching, filtering, ordering and paging.
+It is an explicit, key-based join between two types — there are no navigation properties, `Include` or change
+tracking, and data that always travels together still belongs embedded in one document.
+
+```csharp
+var rows = await store.Query<Order>()
+    .Where(o => o.Status == "open")                                // filters the left side
+    .Join<Customer>((o, c) => o.CustomerId == c.Id)                  // inner join
+    .Where((o, c) => c.Region == "eu" && o.Total > c.CreditLimit)    // either side, or both
+    .OrderBy((o, c) => c.Name)
+    .Paginate(0, 50)
+    .Select((o, c) => new { OrderId = o.Id, Customer = c.Name, o.Total })
+    .ToList();
+```
+
+- **Kinds.** `JoinKind.Inner` (the default) returns matched pairs only. `JoinKind.Left` returns every left document,
+  with a `null` right document when nothing matched — guard it in the projection (`c == null ? null : c.Name`), and
+  find the unmatched rows with `Where((o, c) => c == null)`.
+- **Projection.** `Select` runs over the materialized documents, so any shape works — a named type, an anonymous type
+  or a single value — and encrypted properties read as plaintext. Reading the missing document of a left join without a
+  guard throws an `InvalidOperationException` that says so.
+- **Terminals.** `ToList`, `ToAsyncEnumerable`, `Count`, `Any`, `First`, `FirstOrDefault` and `ToQueryString`. Paging
+  does not apply to `Count` and `Any`. Cursor paging, `ExecuteUpdate`/`ExecuteDelete`, `NotifyOnChange` and the raw
+  JSON terminals are not available on a join.
+- **Query filters and tenancy.** Each side keeps its own global query filters (soft delete included) and shared-table
+  tenant scope. The right side's filters are part of the join condition, so in a left join a soft-deleted customer makes
+  the order unmatched instead of removing it. `IgnoreQueryFilters()` on the join lifts filters on both sides; on the
+  query the join starts from, it lifts them on the left side.
+- **Order of calls.** `Where` clauses on the source query are carried into the join. `OrderBy` and `Paginate` belong to
+  the joined pairs — call them after `Join`; calling them before it throws.
+- **Tables.** The two types may share a table or each have their own (`cfg.Table`). Index the right side's key path the
+  way you would for any frequent `Where`.
+- **Sessions.** A join started from `session.Query<T>()` runs inside that session's transaction.
+
+### String syntax
+
+Name the two documents and qualify every field with one of the names:
+
+```csharp
+var rows = await store.Query<Order>()
+    .Join<Customer>("o", "c", "o.customerId = c.id", JoinKind.Left)
+    .Where("c.region = 'eu' and o.total > c.creditLimit")
+    .OrderBy("c.name")
+    .Project("o.id as orderId, c.name as customer, o.total")   // IJoinResult<JsonObject>
+    .ToList();
+```
+
+A LINQ join's parameter names are its aliases, so `Join<Customer>((o, c) => …).Where("c.region = 'eu'")` works too, as
+does the interpolated `Where($"c.region = {region}")`. An unqualified field or an unknown alias throws instead of binding
+to a nested property. `Project` keys an unaliased field by its leaf JSON name and throws when two fields collide — alias
+one of them. In a left join, the missing document's fields project as `null`.
+
+The right-hand side of a comparison may be a field anywhere in the grammar, so a single-type `Where("total > discount")`
+is the same query as `Where(x => x.Total > x.Discount)`.
+
+### What a join cannot do
+
+- **Join on an encrypted property.** An encrypted property filters its own side as usual (`c.Code == "gold"` is rewritten
+  into ciphertext), but comparing it with the other document — in the join condition or a `Where` — throws
+  `NotSupportedException`, because two ciphertexts are not comparable in the engine.
+- **Use single-document features.** Spatial and full-text functions, computed properties, JSON collections
+  (`store.Collection(…)`) and `GroupBy` are not available inside a join.
+- **Join more than two types.** A join has exactly two sides.
+
+### Provider support
+
+| Provider | Joins | How |
+|---|---|---|
+| SQLite, SQLCipher, DuckDB, PostgreSQL, CockroachDB, MySQL, MariaDB, SQL Server, Oracle | ✅ | One SQL statement — `INNER JOIN` / `LEFT JOIN` with the right side's type, tenant and filters in `ON`. |
+| MongoDB | ✅ | One aggregation — `$match`, a correlated `$lookup`, `$unwind`. A condition that compares the two documents must be a comparison between two properties, a join orders by properties only, and a left join's condition cannot test the left document alone (move that to `Where`). |
+| Amazon DocumentDB | ❌ | No correlated `$lookup` sub-pipeline — throws `NotSupportedException`. |
+| Cosmos DB, LiteDB, IndexedDB, Azure Table, DynamoDB, Firestore, Redis, RavenDB | ❌ | Throws `NotSupportedException`. Embed the related data, or run two queries. |
+
 ## Ordering
 
 Sort results at the SQL level using `.OrderBy()` and `.OrderByDescending()`.
@@ -934,7 +1010,7 @@ The expression visitor translates a subset of C#. Anything below throws `NotSupp
 | `Select(u => new { u.Name })` (anonymous type) | Use a named DTO: `Select(u => new UserName { Name = u.Name })`. |
 | `Select(u => (u.Name, u.Age))` (tuple) | Same — use a named DTO. |
 | `GroupBy(o => new { o.Status, o.Country })` (multi-key) | Single-key only. Concatenate or denormalize: `GroupBy(o => o.StatusCountryKey)`. |
-| `Join`, `SelectMany`, `Distinct`, `Union` | Not a relational store — embed the joined data on the document, or do the join in C# after two queries. |
+| `SelectMany`, `Distinct`, `Union` | Not translated. For documents of another type use a [join](#joins); otherwise embed the data or combine two queries in C#. |
 | `string.Format("{0}-{1}", a, b)`, interpolation | Use `a + b` (translated) or build the string in C# before the predicate. |
 | Custom instance methods on your types | Register a translation with [`MapFunctionTranslation`](#custom-function-translations), or inline the logic into the expression. |
 

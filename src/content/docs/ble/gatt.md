@@ -78,6 +78,10 @@ peripheral
 await peripheral.WriteCharacteristicAsync("service-uuid", "char-uuid", data);
 ```
 
+On iOS, tvOS, Mac Catalyst and macOS a write without response goes through CoreBluetooth's flow control: if
+the peripheral's send buffer is full, the write waits for CoreBluetooth to report it is ready before sending.
+Back-to-back writes are paced for you rather than dropped - await each one in turn, with no delay of your own.
+
 ### BLOB Writes
 
 For writing data larger than a single GATT operation, use blob writes, which automatically chunk the

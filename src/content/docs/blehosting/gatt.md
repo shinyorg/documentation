@@ -100,6 +100,36 @@ await characteristic.Notify(data, central1, central2);
 var subscribers = characteristic.SubscribedCentrals;
 ```
 
+On iOS, Mac Catalyst and macOS, `Notify` applies CoreBluetooth's back-pressure: when the transmit queue is
+full it waits until the queue drains and retries, so the returned task completes once the value is actually
+queued. Await it before sending the next notification rather than firing many in parallel.
+
+Pass a `CancellationToken` to stop waiting - it goes before the centrals. If Bluetooth powers off while a
+notification is waiting, the task faults with `InvalidOperationException`.
+
+```csharp
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+await characteristic.Notify(data, cts.Token);
+await characteristic.Notify(data, cts.Token, central1, central2);
+```
+
+An empty centrals list sends to every subscriber; a named list sends only to those centrals. `SubscribedCentrals`
+is tracked whether or not you pass a subscribe hook to `SetNotification`.
+
+:::note[Android]
+`Notify` waits for each central's `onNotificationSent` before sending that central the next value - Android
+refuses a second notification while one is in flight. Centrals are sent to in parallel. A notification Android
+refuses or reports as failed throws; a central that disconnects mid-send is skipped.
+:::
+
+:::caution[Linux (BlueZ)]
+BlueZ tells an external GATT application only *whether* notifications are enabled, not *which* central
+enabled them - while any central is subscribed, every connected central is reported in `SubscribedCentrals`. BlueZ
+also sends each value to every subscribed central, so the `centrals` you pass cannot narrow the recipients (the
+send is skipped only if none of them is subscribed). Don't put per-central data on a notify characteristic shared
+by several centrals on Linux.
+:::
+
 `NotificationOptions` flags: `Notify`, `Indicate`, `EncryptionRequired`
 
 ## Managing Services
