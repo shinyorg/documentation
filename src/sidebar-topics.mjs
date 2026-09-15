@@ -315,6 +315,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'In-App Purchases',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'pay/', badge: { text: 'New', variant: 'success' } },
+          { label: 'Store Setup', link: 'pay/store-setup' },
+          { label: 'Server', link: 'pay/server' },
+          { label: 'Release Notes', link: 'pay/release-notes' }
+        ]
+      },
+      {
         label: 'Contact Store',
         jumpTo: true,
         items:[

@@ -299,6 +299,19 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios'],
             },
             {
+                label: 'In-App Purchases',
+                tagline: 'StoreKit 2 and Google Play Billing 9 behind one API, with the backend included',
+                summary: 'Sell consumables, non-consumables and subscriptions through the App Store and Google Play from one `IInAppPurchaseManager`. The server package verifies purchases and turns App Store Server Notifications and Google Play RTDN into one stream of purchase events.',
+                highlights: [
+                    'StoreKit 2 on iOS, Play Billing 9 on Android',
+                    'Subscriptions, offers, free trials and pending purchases',
+                    'ASP.NET Core webhooks for renewals, refunds and cancellations',
+                ],
+                packages: ['Shiny.Mobile.Pay', 'Shiny.Mobile.Pay.Server'],
+                frameworks: ['maui', 'aspnet'],
+                os: ['android', 'ios'],
+            },
+            {
                 label: 'Contact Store',
                 tagline: 'Device contacts with full CRUD and LINQ queries',
                 summary: "Access device contacts with full CRUD, a fluent async query builder with native translation, and Shiny's `AccessState` permission model. Runs in any Shiny host, with or without .NET MAUI.",

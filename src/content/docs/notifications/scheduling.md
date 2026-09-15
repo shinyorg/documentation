@@ -72,6 +72,10 @@ await notifications.Send(new Notification
 });
 ```
 
+:::note[Linux]
+Linux has no OS-level scheduler, so repeating notifications fire from an in-process timer that checks every 30 seconds while the host is running - expect up to ~30 seconds of lateness. An `Interval` repeats every interval from the moment you call `Send`. `TimeOfDay` is local time and fires today if that time is still ahead, otherwise on the next day (or the next matching `DayOfWeek`).
+:::
+
 ## Geofence Notifications
 
 Trigger a notification when the user enters a geographic area. Requires `AccessRequestFlags.LocationAware`.

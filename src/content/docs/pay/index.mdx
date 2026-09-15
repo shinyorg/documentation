@@ -1,0 +1,184 @@
+---
+title: Getting Started
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="pay" /> |
+| Downloads | <NugetDownloads name="Shiny.Mobile.Pay" /> |
+| Server | <NugetDownloads name="Shiny.Mobile.Pay.Server" /> |
+
+<PlatformSupport frameworks={["maui"]} os={["android", "ios"]} />
+
+Shiny.Mobile.Pay is cross-platform **in-app purchases** for .NET MAUI — consumables, non-consumables and auto-renewable subscriptions — built on the current generation of each store's API: **StoreKit 2** on iOS and **Google Play Billing Library 9** on Android. The companion `Shiny.Mobile.Pay.Server` package is the other half: an ASP.NET Core backend that verifies purchases and receives the stores' server-to-server notifications (renewals, refunds, cancellations, billing problems).
+
+:::note[In-app purchases, not card payments]
+This library sells digital goods through the App Store and Google Play. Apple Pay and Google Pay card payments for physical goods are a different thing — those are charged and reported by a payment processor such as Stripe, not by Apple or Google.
+:::
+
+## Features
+* One `IInAppPurchaseManager` for StoreKit 2 and Google Play Billing 9
+* Consumables, non-consumables and auto-renewable subscriptions — including Google base plans, offers and free trials, and Apple introductory offers
+* Pending purchases handled properly — Ask to Buy on iOS, slow payment methods on Android
+* Out-of-band updates (approvals, renewals, refunds, purchases on another device) via `IPurchaseDelegate`, listening from app launch
+* `AccountToken` ties every purchase to your user — it comes back in App Store and Google Play server notifications
+* Every purchase carries `VerificationData` that the server package verifies directly — Apple's signed JWS or Google's purchase token
+* Nothing finishes automatically, so an app crash between payment and granting can never lose a purchase
+* Server: App Store Server Notifications V2 and Google Play Real-time Developer Notifications, normalized into one `PurchaseEvent` stream — see [Server](/pay/server)
+
+## Setup
+
+Install `Shiny.Mobile.Pay` into your MAUI app, then register it:
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseShiny();
+
+builder.Services.AddInAppPurchases<MyPurchaseDelegate>();
+```
+
+Products must exist in App Store Connect and the Google Play Console, and the app's bundle id / package name must match — see [Store Setup](/pay/store-setup).
+
+## Loading products
+
+```csharp
+public class StoreViewModel(IInAppPurchaseManager purchases)
+{
+    public async Task Load()
+    {
+        if (!await purchases.CanMakePaymentsAsync())
+            return; // store unavailable, or payments restricted by parental controls/MDM
+
+        var products = await purchases.GetProductsAsync(["coins_100", "remove_ads", "premium_monthly"]);
+        foreach (var product in products)
+            Console.WriteLine($"{product.Title} - {product.DisplayPrice} ({product.Type})");
+    }
+}
+```
+
+Unknown product ids are left out of the result rather than throwing. `DisplayPrice` is already localized for the user's storefront — show it as-is.
+
+## Purchasing
+
+```csharp
+var result = await purchases.PurchaseAsync("remove_ads", new PurchaseOptions
+{
+    AccountToken = currentUser.Id // a Guid - returned in server notifications
+});
+
+switch (result.Status)
+{
+    case PurchaseResultStatus.Success:
+        // 1. verify on your server  2. grant  3. finish
+        await api.VerifyAndGrant(result.Purchase!.VerificationData);
+        await purchases.FinishPurchaseAsync(result.Purchase!, consume: false);
+        break;
+
+    case PurchaseResultStatus.Pending:
+        // Ask to Buy / slow payment - do NOT grant yet; IPurchaseDelegate is called when it resolves
+        break;
+
+    case PurchaseResultStatus.Cancelled:
+        break;
+
+    case PurchaseResultStatus.AlreadyOwned:
+        // Google Play only - offer "Restore Purchases"
+        break;
+}
+```
+
+Genuine failures (network, product not found, billing unavailable, verification failure) throw `PayException` with an `ErrorCode`. Cancellation is not an exception.
+
+:::caution[Always finish purchases]
+`PurchaseAsync` never finishes a purchase for you. Call `FinishPurchaseAsync` once the entitlement is granted. **Google Play automatically refunds purchases that are not acknowledged within three days**, and unfinished Apple transactions are redelivered on every launch.
+:::
+
+### Consumables
+
+Google Play has no concept of a consumable product — it depends on how the purchase is finished. Pass `consume: true` for anything the user can buy again (coins, credits, lives) and `consume: false` for permanent unlocks and subscriptions. On iOS both simply finish the transaction.
+
+### Subscriptions & offers
+
+For subscriptions, `StoreProduct.SubscriptionOffers` lists what the user can buy:
+
+* **Google Play** — one entry per base plan and per offer the user is eligible for. Pass the chosen `OfferToken` in `PurchaseOptions.OfferToken`; without one, the first base plan is purchased.
+* **Apple** — the introductory offer (only when the user is eligible) and any promotional offers. The App Store applies an eligible introductory offer automatically.
+
+Each offer has `PricingPhases` (for example a `FreeTrial` phase of `P1W` followed by a `Recurring` phase of `P1M`), with ISO 8601 billing periods.
+
+To upgrade or downgrade on Google Play, pass `PurchaseOptions.Replacement` with the old product id and purchase token. On iOS, changes within a subscription group are handled by the App Store and `Replacement` is ignored.
+
+## Out-of-band updates
+
+Many purchase changes don't happen while you're awaiting `PurchaseAsync`: a parent approves an Ask to Buy request, a pending cash payment clears, a subscription renews, a refund is issued, or the user buys on another device. Implement `IPurchaseDelegate`:
+
+```csharp
+public class MyPurchaseDelegate(IInAppPurchaseManager purchases, MyApi api) : IPurchaseDelegate
+{
+    public async Task OnPurchaseUpdated(Purchase purchase)
+    {
+        switch (purchase.State)
+        {
+            case PurchaseState.Purchased when !purchase.IsFinished:
+                await api.VerifyAndGrant(purchase.VerificationData);
+                await purchases.FinishPurchaseAsync(purchase, consume: purchase.ProductId == "coins_100");
+                break;
+
+            case PurchaseState.Revoked:
+                await api.Revoke(purchase.OriginalTransactionId);
+                break;
+        }
+    }
+}
+```
+
+The same purchase can arrive more than once, so key your handling on `TransactionId`. The `PurchaseUpdated` event carries the same updates for UI that's currently on screen.
+
+:::tip[Your server is the source of truth]
+The device only sees part of the picture — Google doesn't expose subscription expiry on the device at all, and refunds can happen while the app is never opened. Treat the delegate as a convenience and let [server notifications](/pay/server) drive entitlements.
+:::
+
+## Entitlements & restoring
+
+```csharp
+// What the user owns right now: non-consumables + active subscriptions
+var owned = await purchases.GetEntitlementsAsync();
+
+// Completed but never finished - check at startup
+var unfinished = await purchases.GetUnfinishedPurchasesAsync();
+
+// "Restore Purchases" button - on iOS this can prompt for the Apple Account password,
+// so only call it in response to the user
+var restored = await purchases.RestorePurchasesAsync();
+
+// Platform subscription management UI
+await purchases.ShowManageSubscriptionsAsync();
+```
+
+## The Purchase record
+
+| Property | Apple (StoreKit 2) | Google Play |
+|---|---|---|
+| `TransactionId` | transaction id (new on each renewal) | order id (purchase token while pending) |
+| `OriginalTransactionId` | original transaction id | purchase token |
+| `VerificationData` | signed JWS transaction | purchase token |
+| `AccountToken` | `appAccountToken` | `obfuscatedAccountId` |
+| `ExpirationDate` | subscription expiry | not available on device |
+| `IsFinished` | transaction finished | acknowledged |
+| `Environment` | Production / Sandbox / Xcode | Unknown (the server can tell) |
+
+## Samples
+* [Sample MAUI App](https://github.com/shinyorg/pay/tree/main/samples/Sample.Maui)
+* [Sample Server](https://github.com/shinyorg/pay/tree/main/samples/Sample.Server)
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-mobile-pay" />
+
+## Links
+* [GitHub Repository](https://github.com/shinyorg/pay)

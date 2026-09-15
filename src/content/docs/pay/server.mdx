@@ -1,0 +1,177 @@
+---
+title: Server
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| Downloads | <NugetDownloads name="Shiny.Mobile.Pay.Server" /> |
+
+`Shiny.Mobile.Pay.Server` is the backend half of in-app purchases, for ASP.NET Core. It:
+
+* **verifies purchases** the app sends (`Purchase.VerificationData`) before you grant anything,
+* receives **App Store Server Notifications V2** and **Google Play Real-time Developer Notifications**,
+* turns both into a single stream of `PurchaseEvent`s for renewals, refunds, cancellations and billing problems.
+
+It has no third-party dependencies (all crypto uses the BCL) and is trim/AOT compatible.
+
+:::tip[Why a server at all?]
+The device is only part of the picture. Google doesn't expose subscription expiry on the device, refunds and chargebacks happen while the app is closed, and anything on the device can be tampered with. Let the stores' server notifications drive your entitlements.
+:::
+
+## Setup
+
+```csharp
+builder.Services
+    .AddShinyPayServer(options => builder.Configuration.GetSection("Pay").Bind(options))
+    .AddPurchaseEventHandler<MyPurchaseEventHandler>();
+
+var app = builder.Build();
+
+app.MapShinyPay("/pay");                                            // POST /pay/apple, POST /pay/google
+app.MapShinyPayVerification("/pay/verify").RequireAuthorization();  // your app calls this
+```
+
+```json
+{
+  "Pay": {
+    "Apple": {
+      "BundleId": "com.mycompany.myapp",
+      "AppAppleId": 1234567890,
+      "AllowSandbox": true,
+      "IssuerId": "",
+      "KeyId": "",
+      "PrivateKey": ""
+    },
+    "Google": {
+      "PackageName": "com.mycompany.myapp",
+      "ServiceAccountJson": "",
+      "PubSubAudience": "https://api.mycompany.com/pay/google",
+      "PubSubServiceAccountEmail": "pubsub-push@my-project.iam.gserviceaccount.com"
+    }
+  }
+}
+```
+
+Leave out a store's section to disable its endpoint. Options are validated at startup. Keep `PrivateKey` and `ServiceAccountJson` in user-secrets or a vault, not in `appsettings.json`.
+
+| Option | Required | Notes |
+|---|---|---|
+| `Apple.BundleId` | ✅ | Every notification and transaction must carry it |
+| `Apple.AppAppleId` | Production | App Store Connect → App Information → Apple ID. Production notifications are rejected without it. |
+| `Apple.AllowSandbox` | | Default `true`. Accepts sandbox and TestFlight purchases. |
+| `Apple.IssuerId` / `KeyId` / `PrivateKey` | Optional | The App Store Server API key (`.p8`). Only needed for `IAppleStoreClient` lookups and test notifications. |
+| `Apple.EnableOnlineRevocationCheck` | | Adds OCSP/CRL checking of the signing certificates |
+| `Google.PackageName` | ✅ | Every notification must carry it |
+| `Google.ServiceAccountJson` | ✅ in practice | Needed to verify purchases and fetch notification details (the Play Developer API) |
+| `Google.RequirePubSubAuthentication` | | Default `true`. Only turn it off for local experiments. |
+| `Google.PubSubAudience` / `PubSubServiceAccountEmail` | When authenticating | Must match the push subscription's authentication settings |
+
+See [Store Setup](/pay/store-setup) for where each value comes from.
+
+## Handling events
+
+```csharp
+public class MyPurchaseEventHandler(MyDb db) : IPurchaseEventHandler
+{
+    public async Task HandleAsync(PurchaseEvent e, CancellationToken ct)
+    {
+        switch (e.Type)
+        {
+            case PurchaseEventType.Purchased:
+            case PurchaseEventType.Renewed:
+            case PurchaseEventType.Recovered:
+            case PurchaseEventType.Restarted:
+                await db.Grant(e.AccountToken, e.ProductId, e.OriginalTransactionId, e.ExpiresAt, ct);
+                break;
+
+            case PurchaseEventType.Expired:
+            case PurchaseEventType.Refunded:
+            case PurchaseEventType.Revoked:
+                await db.Revoke(e.OriginalTransactionId, ct);
+                break;
+
+            case PurchaseEventType.RenewalFailed:
+            case PurchaseEventType.OnHold:
+                await db.FlagBillingIssue(e.OriginalTransactionId, ct);
+                break;
+        }
+    }
+}
+```
+
+Handlers are scoped. You can register several, and they run in registration order.
+
+| `PurchaseEvent` property | Apple | Google |
+|---|---|---|
+| `NotificationId` | `notificationUUID` | Pub/Sub `messageId` |
+| `Type` | Normalized from `notificationType` + `subtype` | Normalized from the RTDN notification type |
+| `RawType` | e.g. `SUBSCRIBED/INITIAL_BUY` | e.g. `SUBSCRIPTION_PURCHASED` |
+| `OriginalTransactionId` | `originalTransactionId` | purchase token |
+| `AccountToken` | `appAccountToken` | `obfuscatedExternalAccountId` |
+| `ExpiresAt`, `IsAutoRenewing` | From the signed transaction and renewal info | From the fetched `SubscriptionPurchaseV2` |
+| `Apple` / `Google` | The verified notification, transaction and renewal info | The notification plus the fetched subscription or product purchase |
+
+`PurchaseEventType` values: `Purchased`, `Renewed`, `RenewalFailed`, `GracePeriodStarted`, `GracePeriodExpired`, `AutoRenewDisabled`, `AutoRenewEnabled`, `PlanChanged`, `Expired`, `Refunded`, `RefundDeclined`, `RefundReversed`, `Revoked`, `Paused`, `OnHold`, `Recovered`, `Restarted`, `PriceChange`, `PendingCanceled`, `ConsumptionRequest`, `OfferRedeemed`, `Test`, `Other`. The exact store value is always in `RawType`.
+
+## Retries & de-duplication
+
+| Situation | Response | Store behavior |
+|---|---|---|
+| Processed, or already processed | `200` | Done |
+| Bad signature / certificate chain / OIDC token | `401` | Not processed |
+| Malformed body, wrong bundle id / package / environment | `400` | Not processed |
+| Google Play API lookup failed | `502` | Retried |
+| A handler threw | `500` | Retried. The notification is **not** marked processed. |
+
+The stores deliver *at least once*, so notifications are de-duplicated by `NotificationId` after all handlers succeed. The default de-duplicator is in-memory and per process. With more than one instance, plug in shared storage:
+
+```csharp
+builder.Services
+    .AddShinyPayServer(...)
+    .UseDeduplicator<MyRedisDeduplicator>(); // implements IPurchaseEventDeduplicator
+```
+
+Handlers should still be idempotent (for example, upsert on `TransactionId`).
+
+## Verifying purchases from the app
+
+`MapShinyPayVerification` accepts `{ "platform": "AppStore" | "GooglePlay", "verificationData": "...", "productId": "..." }` and returns a `VerifiedPurchase`. You can also call `IPurchaseVerifier` from your own endpoint:
+
+```csharp
+app.MapPost("/purchases", async (PurchaseDto dto, IPurchaseVerifier verifier, ClaimsPrincipal user, MyDb db) =>
+{
+    var result = await verifier.VerifyAsync(new PurchaseVerificationRequest
+    {
+        Platform = dto.Platform,
+        VerificationData = dto.VerificationData,
+        ProductId = dto.ProductId
+    });
+
+    if (!result.IsValid)
+        return Results.BadRequest(result.Error);
+
+    if (result.IsActive)
+        await db.Grant(user.GetUserId(), result.ProductId, result.OriginalTransactionId, result.ExpiresAt);
+
+    return Results.Ok();
+}).RequireAuthorization();
+```
+
+* **Apple** verifies offline: the JWS signature and the x5c chain are checked against the embedded Apple Root CA G3, along with the bundle id and environment. No network call is made.
+* **Google** looks up the purchase token with the Play Developer API (`subscriptionsv2`, falling back to `productsv2`).
+
+Grant to the **authenticated user**, never to an account id sent in the request.
+
+## Store clients
+
+| Interface | Methods |
+|---|---|
+| `IAppleStoreClient` | `VerifyNotification`, `VerifyTransaction`, `VerifyRenewalInfo` (offline) · `GetTransactionAsync`, `GetSubscriptionStatusesAsync`, `RequestTestNotificationAsync` (App Store Server API) |
+| `IGooglePlayClient` | `GetSubscriptionAsync`, `GetProductAsync`, `AcknowledgeSubscriptionAsync`, `AcknowledgeProductAsync`, `ConsumeProductAsync` |
+
+The App Store Server API client signs ES256 tokens with your `.p8` key. It tries production first and falls back to sandbox when a transaction isn't found. The Google client exchanges your service account key for an OAuth token and caches it.
+
+:::note[Acknowledging from the server]
+Google purchases can be acknowledged server-side with `AcknowledgeProductAsync` / `AcknowledgeSubscriptionAsync`. That's a safety net for when the app never calls `FinishPurchaseAsync`. Consumables still need to be consumed before they can be bought again.
+:::
