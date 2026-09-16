@@ -668,6 +668,14 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Kanban',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Overview', link: 'controls/kanban/' },
+        ]
+      },
+      {
         label: 'Floor Plan',
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },

@@ -574,6 +574,7 @@ export const categories: CategoryCopy[] = [
             { label: 'ChatView', href: '/controls/chatview/' },
             { label: 'DataGrid', href: '/controls/datagrid/' },
             { label: 'Gantt', href: '/controls/gantt/' },
+            { label: 'Kanban', href: '/controls/kanban/' },
             { label: 'Diagram', href: '/controls/diagram/' },
             { label: 'CameraView', href: '/controls/cameraview/' },
             { label: 'Spreadsheet', href: '/controls/spreadsheet/' },
