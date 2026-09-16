@@ -1,0 +1,103 @@
+---
+title: Security
+description: The session guard, remote access and your own authenticated endpoints in Shiny.AppDeviceBridge
+---
+
+## The session guard
+
+Binding to loopback keeps other machines out, but not other apps: on Android any app can connect to
+`127.0.0.1`. So:
+
+- **Launch token.** Each launch generates a 256-bit token. The WebView's first navigation trades it
+  for an `HttpOnly`, `SameSite=Strict` cookie. Every other request without that cookie gets a `403`.
+- **Host header.** Requests whose `Host` isn't the loopback origin get a `421`. This blocks DNS
+  rebinding.
+- **Origin header.** Bridge calls that carry an `Origin` must carry this one.
+- **Releases.** A release must pass five checks before it's served: signature, app id, a version
+  newer than the installed one, host compatibility, then size and hash. An archive without its entry
+  document is refused.
+- **Anything not from this device** is held to a second, stricter set of rules, and by default there is
+  nothing for it to reach. See below.
+- **Your own endpoints** are authorized by their own policies, not the launch cookie — which is one
+  scheme among several there. See [Your own endpoints](/appdevicebridge/security/#your-own-endpoints).
+
+## Serving the network
+
+The server is loopback-only until you say otherwise, and saying otherwise does not open the bridges —
+they're raw device access, and a caller on the network has no session and no launch token. Each one is
+published by name:
+
+```csharp
+o.RemoteAccess.Enabled = true;                          // bind past loopback
+o.RemoteAccess.AllowBridge("files", "settings");        // and only these, remotely
+o.RemoteAccess.ServeWebApp = true;                      // optional: the app's own pages too
+```
+
+```
+GET http://192.168.1.15:5780/_bridge/files/data/list?path=exports   → 200
+GET http://192.168.1.15:5780/_bridge/ble/status                     → 403 remote_denied
+```
+
+- **The allowlist is the authorization.** There's no credential. Anything that can reach the port can
+  call the bridges you name, and an allowed bridge is fully reachable — every route, every method,
+  writes included. Name only what you'd put on an unauthenticated HTTP endpoint.
+  `RemoteAccess.Authorize` is the hook for a check of your own; return `false` and the request gets `401`.
+  Nothing on this device goes through it, so the WebView is unaffected.
+- **The session never leaves the device.** `/_host/start` answers `403` over the network, so a remote
+  caller can't trade a token for the cookie even holding one.
+- **Host headers must be an IP address**, or a name in `RemoteAccess.AllowedHosts`. That's what stops
+  DNS rebinding: a hostile site pointing its own name at the device arrives under that name and gets
+  `421`. Add `AllowHost("kiosk.local")` for an mDNS name you control.
+- **A browser can't drive it cross-origin.** A remote bridge call carrying an `Origin` that isn't the
+  request's own is refused. Clients that aren't browsers send none and are unaffected.
+- **The dev server is never relayed.** Remote callers get the installed build, never the proxy to
+  `dotnet watch`.
+- Nothing here is compiled differently in Debug. If you want it open while testing, set it yourself
+  under your app's own `#if DEBUG` — `#if DEBUG` inside the package would be the package's build,
+  not yours.
+
+## Your own endpoints
+
+Serve your own API beside the web app and the bridges — raw routes, source-generated `[Route]`
+classes or modules, with Shiny.Net.HttpServer's own API, and authentication to go with them:
+
+```csharp
+using Shiny.Net.HttpServer;
+using Shiny.Net.HttpServer.Security;     // AllowAnonymous, RequireAuthorization, AddApiKey
+
+builder
+    .UseWebAppHost(o => { … })
+    .AddWebAppEndpoints(server =>
+    {
+        server.MapOrderEndpoints();                                         // [Route("/api/orders")]
+        server.MapGet("/api/health", ctx => …).AllowAnonymous();
+        server.MapGet("/api/admin", ctx => …).RequireAuthorization("admin");
+        server.MapGet("/api/draft", ctx => …).RequireAuthorization(WebAppPolicies.Session);
+    })
+    .AddWebAppAuthentication(auth => auth.AddApiKey(o => o.AddKey(key, "kiosk", "admin")))
+    .AddWebAppAuthorization(o => o.AddPolicy("admin", p => p.RequireRole("admin")));
+```
+
+- **Authenticated by default.** An endpoint that says nothing needs a caller who authenticated through
+  *some* scheme. The WebView's session is one — the page calls your endpoints with no extra setup —
+  and every scheme from `AddWebAppAuthentication` is another. `AllowAnonymous()` opts an endpoint out;
+  `WebAppPolicies.Session` accepts the WebView and nothing else, however valid another credential is.
+- **Bridges keep their own rules.** They're authorized by the host's guard — the launch cookie on the
+  device, `RemoteAccess.AllowBridge` off it — and are kept out of these policies entirely. A key that
+  opens `/api/admin` opens nothing on the device, and no policy you write can loosen device access.
+- **Reachable from the network** when `RemoteAccess.Enabled` is on, with no allowlist: these are data
+  you chose to publish, and their authorization is the gate. The WebView's session never counts off the
+  device, so a remote caller needs a scheme of its own.
+- **Mapped from the root, served under `BasePath`.** A generated `[Route]` class can only map at the
+  template it was written with, so the host moves everything afterwards — constraints, `[Authorize]`,
+  `[AllowAnonymous]` and all. Anything under the bridge prefix or `_host` is refused at startup.
+- **`AddWebAppAuthorization` can be called as often as you like.** Shiny.Net.HttpServer's own
+  `AddAuthorization` keeps the first call and silently drops the rest; this one applies every call.
+- **Your app's own container is left alone.** Schemes and policies live in a container the host owns,
+  so an app that runs a Shiny.Net.HttpServer of its own keeps its own authentication. Endpoint classes
+  still get their dependencies from your app. The one consequence: a scheme that resolves a dependency
+  *by type* (`AddBasic<UserStore>()`) needs it registered on `auth.Services` too; delegate options
+  such as an API key's `ValidateAsync` can reach your services through `context.RequestServices`.
+
+A path that matches none of your endpoints is the web app's, and without the WebView's session that's
+a `403` — so a caller outside the page can't probe which routes exist.

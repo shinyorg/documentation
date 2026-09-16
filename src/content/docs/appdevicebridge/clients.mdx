@@ -1,0 +1,87 @@
+---
+title: Typed Clients
+description: Call every bridge through generated C# and TypeScript clients, and give your own bridges one
+---
+
+## Typed clients
+
+Every bridge ships a `.Client` package: its request and response contracts, and an interface such as
+`ICalendarBridge` whose implementation is generated at build time. The native bridge serializes the same
+contracts, so the page and the device agree on every shape by construction.
+
+```csharp
+// Program.cs
+builder.Services
+    .AddWebAppHostClient()          // transport + host, settings, files, links
+    .AddCalendarBridgeClient()
+    .AddWifiBridgeClient();
+
+// a page
+@inject ICalendarBridge Calendar
+
+var created = await Calendar.CreateEventAsync(new NewCalendarEvent
+{
+    Title = "Standup",
+    Start = DateTimeOffset.Now.AddHours(1),
+    End = DateTimeOffset.Now.AddHours(1.5)
+});
+```
+
+- **Errors** throw `BridgeException` with `StatusCode`, the bridge's `Code` and `IsNotSupported` for `501`.
+- **Events** are methods too: `await using var sub = await Wifi.OnChangedAsync(e => …)`.
+- **Files and binaries:** a method returning `Task<Stream>` or `Task<byte[]>` reads the body raw; a
+  `[BridgeBody("text/plain")]` parameter sends one.
+- **TypeScript:** `clients/typescript` holds the same clients, generated from the same assemblies by
+  `tools/Shiny.AppDeviceBridge.TypeScript` — `new CalendarBridge().createEvent({ title, start, end })`. Required
+  members are required, optional parameters go in an options object with an `AbortSignal`, and events return an
+  unsubscribe function. A test fails when the committed TypeScript falls behind the C# declarations.
+- **Your own endpoints** can still be called untyped through `WebAppBridge.GetAsync<T>(path, typeInfo)` and
+  `SendAsync<TBody, TResult>(…)`, or given a `[BridgeClient]` interface of their own.
+
+## Writing a bridge
+
+```csharp
+public sealed class ClipboardBridge(IClipboard clipboard) : IWebAppBridge
+{
+    public string Name => "clipboard";
+    public bool IsSupported => true;
+
+    public void Map(WebAppBridgeRoutes routes) => routes
+        .MapGet("", async ctx => await WebAppBridgeResults.Json(ctx, new Clip(await clipboard.GetTextAsync()), MyJson.Default.Clip));
+}
+
+public static MauiAppBuilder AddClipboardBridge(this MauiAppBuilder builder)
+{
+    builder.Services.AddWebAppBridge<ClipboardBridge>();
+    return builder;
+}
+```
+
+Use source-generated JSON contexts (`JsonTypeInfo`). The packages are trim and AOT clean, and bridges
+should stay that way.
+
+To give it a typed client, declare the API once in a plain `net10.0` project that references
+`Shiny.AppDeviceBridge.Client`. The generator implements the interface, and the same contracts serialize on
+both sides:
+
+```csharp
+[BridgeClient("clipboard", typeof(ClipboardJson))]
+public interface IClipboardBridge
+{
+    [BridgeGet] Task<Clip> GetAsync(CancellationToken cancellationToken = default);
+    [BridgePut] Task SetAsync(Clip clip, CancellationToken cancellationToken = default);
+    [BridgeEvent("clipboard.changed")] Task<IAsyncDisposable> OnChangedAsync(Func<Clip, Task> handler);
+}
+
+public sealed record Clip(string? Text);
+
+[JsonSerializable(typeof(Clip))]
+public partial class ClipboardJson : JsonSerializerContext;
+
+// the page
+builder.Services.AddWebAppHostClient().AddClipboardBridgeClient();
+```
+
+Route tokens (`[BridgeGet("items/{id}")]`) bind parameters by name, a complex parameter on a POST or PUT is the
+JSON body, and everything else is the query string. A declaration the generator can't turn into a request —
+a complex type on a GET, a route token with no parameter — is build error `ADB001`.

@@ -1,0 +1,101 @@
+---
+title: Settings, Files & Folders
+description: Settings, file roots, picked folders and photos for a Shiny.AppDeviceBridge web app
+---
+
+## Settings and files
+
+Both are built into the host and on by default (`EnableSettings`, `EnableFiles`).
+
+**Settings** go through Shiny.Extensions.Stores. `local` is the platform's settings store. `secure` is
+its secure store: Keychain, Android KeyStore or DPAPI. On Linux it's a plain file, and the listing's
+`encrypted` flag says so. Values can be any JSON and come back exactly as written. Keys are namespaced
+by app id, so the page never sees or clears the native app's own settings.
+
+```csharp
+await Settings.SetAsync(SettingsScope.Secure, "token", token, MyJson.Default.String);
+var saved = await Settings.GetAsync(SettingsScope.Secure, "token", MyJson.Default.String);
+```
+
+**Files** are confined to named roots: `data` (persistent) and `cache` (the OS may clear it), unless
+you set `FileRoots` — plus any folder the user picked through the folders bridge. Paths are relative and use
+forward slashes. A path is refused if it contains `..`, `\`, `:`, a control character or anything a file name
+can't hold on some platform (`< > " | ? *`), or passes through a link that leads out of the root. Writes are atomic, parent
+directories are created as needed, and `MaxFileWriteBytes` (256 MB) caps a single file.
+
+```ts
+const files = new FilesBridge();
+await files.write("data", "photos/cat.jpg", blob);
+const entries = await files.list("data", { path: "photos" });
+await files.move("data", { from: "photos/cat.jpg", to: "photos/tabby.jpg" });
+```
+
+A bridge that adds roots at runtime — as the folders bridge does — adds a `WebAppFileStore` to the
+`WebAppFileRoots` service. `WebAppFileRoot` is a directory on disk; a store that isn't one implements the same
+operations over whatever it is, and `GetLocalPath` returns null so path-only bridges refuse its files.
+
+## Picked folders
+
+- **Picking:** `POST folders/pick` with `{ "root": "documents" }` shows the platform's folder picker. The folder
+  becomes a file root under that name — `/_bridge/files/documents/…` — and answers `204` if the user cancels.
+  Picking again under the same name replaces the folder. The app's own roots can't be replaced.
+- **Remembered:** picked folders come back as roots every time the app starts, until
+  `DELETE folders/{root}` forgets one. `GET folders` lists them, with `available: false` for one that was
+  moved, deleted or had its access revoked since.
+- **Platforms:** Apple platforms keep a security-scoped bookmark; Android keeps a persisted Storage Access
+  Framework grant; Windows and Linux (GTK's file dialog) keep the path.
+- **Android folders aren't paths.** The files bridge reads and writes them through the Storage Access Framework,
+  but bridges that hand the OS a file path — sharing, transfers, notification images — refuse them.
+
+## Photos
+
+**Photos:** photos never go in the JSON. `hasPhoto` says whether one exists, and
+  `GET contacts/items/{id}/photo?size=full|thumbnail` returns the image bytes.
+- **Writing:** `PUT` changes only the properties you send. An empty list clears one.
+- **iOS:** reading `note` and `relationships` needs the `com.apple.developer.contacts.notes` entitlement.
+  Without it they come back empty.
+
+**Calendar:**
+- **Platforms:** Android, iOS, Mac Catalyst, macOS and Windows.
+- **Access:** `POST calendar/access` takes `ReadWrite` (the default), `ReadOnly` or `WriteOnly`. Write-only
+  access (iOS 17+) is reported as `Restricted`.
+- **Listing:** `GET calendar/events` requires `start` and `end`, at most 366 days apart. Paging works like
+  contacts.
+- **Reminders:** `reminderMinutes` counts minutes before the start.
+- **Read-only fields:** attendees, the organizer and recurrence can be read but not written.
+- **Read-only calendars:** writing to one returns `403 read_only`, and so does writing to a system calendar on
+  Windows, which only allows writes to app-owned calendars.
+- **Deleting:** `DELETE calendar/events/{id}?series=true` removes the rest of a recurring series rather than one
+  occurrence.
+- **Mac Catalyst, sandboxed macOS:** also need the `com.apple.security.personal-information.calendars`
+  entitlement. Without it, access is denied without a prompt.
+
+Both bridges return `403 access_denied` until access has been granted.
+
+**Startup:** part of the app bridge, because the same package is behind it. `GET /_bridge/app/startup` says
+whether the app launches when the user logs in. Windows writes it under `HKCU\…\CurrentVersion\Run`
+(unpackaged apps only — the OS virtualizes that key for MSIX), macOS 13+ submits the running bundle to
+`SMAppService`, and Linux writes `~/.config/autostart/{Identifier}.desktop`. Mobile has no such list, so it
+answers `{ "supported": false, "state": "NotSupported" }` and the rest return `501`. `state` is read back from
+the OS every time rather than remembered, because the user can turn a registered app off in Task Manager,
+System Settings or Login Items without the app hearing about it — which is also why `Enabled` is not the only
+success: `DisabledByUser`, `DisabledByPolicy` and `RequiresApproval` mean the user has to finish the job in the
+OS, and `POST app/startup/settings` opens the screen where they do. Pass arguments your app can recognise on an
+OS-started launch:
+
+```csharp
+builder.AddAppSupportBridge(startup: o => o.Arguments.Add("--autostart"));
+```
+
+- **Picker:** `POST photos/pick` shows the system photo picker — no permission needed — and copies what the user
+  chose into a file root (`cache` by default) under `photos/`. The answer lists each as a `{ root, path }` the page
+  reads through the files bridge. An empty list means the user cancelled. Every head has a picker.
+- **Library:** browse every photo on the device, newest first: `GET photos/library?offset=&limit=` (200 at most),
+  `GET photos/library/{id}/thumbnail?size=` for a JPEG that fits a square (32–1024 px), and
+  `POST photos/library/{id}/export` to copy the original into a file root. It needs access —
+  `POST photos/access` — and answers `403` without it.
+- **Platforms:** PhotoKit on iOS, Mac Catalyst and macOS; MediaStore on Android; the user's Pictures folder on
+  Windows. Linux has no photo library, so the library endpoints return `501` there.
+- **Platform setup:** `NSPhotoLibraryUsageDescription` on Apple platforms, plus the
+  `com.apple.security.personal-information.photos-library` entitlement where the app is sandboxed.
+  `READ_MEDIA_IMAGES` on Android 13 and later, `READ_EXTERNAL_STORAGE` before.

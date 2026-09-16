@@ -1270,6 +1270,21 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'App Device Bridge',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'appdevicebridge/' },
+          { label: 'Hosting', link: 'appdevicebridge/hosting' },
+          { label: 'Updates', link: 'appdevicebridge/updates' },
+          { label: 'Security', link: 'appdevicebridge/security' },
+          { label: 'Typed Clients', link: 'appdevicebridge/clients' },
+          { label: 'Bridges', link: 'appdevicebridge/bridges' },
+          { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
+          { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
+          { label: 'Release Notes', link: 'appdevicebridge/release-notes' }
+        ]
+      },
+      {
         label: 'Web Hosting',
         jumpTo: true,
         items:[

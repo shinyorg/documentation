@@ -1,0 +1,128 @@
+---
+title: Hosting
+description: Host options, mount points, WebView permissions, hot reload and App Store review for Shiny.AppDeviceBridge
+---
+
+## Options worth knowing
+
+| Option | Default | Why |
+| --- | --- | --- |
+| `Port` | `5780` | Fixed on purpose. localStorage, IndexedDB and cookies belong to the origin, and the port is part of the origin. |
+| `AllowPortFallback` | `true` | If the port is taken, serve on a random one, with empty web storage for that launch. |
+| `CheckTimeout` | 5 s | After this, the installed version is shown anyway. |
+| `Channel` | stable | Follow a prerelease channel such as `beta`. |
+| `BlockOnRequiredUpdateFailure` | `false` | By default, a required download that fails midway is treated as offline. |
+| `ApplyOptionalUpdatesImmediately` | `false` | Swap to an optional update and reload as soon as it lands. |
+| `RemoteAccess.Enabled` | `false` | Bind past loopback. Every bridge still stays on the device until named — see [Serving the network](/appdevicebridge/security/#serving-the-network). |
+| `BasePath` | `/` | Serve everything under a path — `/kiosk/`, `/kiosk/_bridge/…`. See [Mount points](/appdevicebridge/hosting/#mount-points). |
+| `BridgePrefix` | `/_bridge` | Move the bridges when the web app wants that route for itself. |
+
+## Mount points
+
+The app is served at `/` and the bridges at `/_bridge`. Both move:
+
+```csharp
+o.BasePath = "/kiosk";          // http://127.0.0.1:5780/kiosk/
+o.BridgePrefix = "/_native";    // http://127.0.0.1:5780/kiosk/_native/app/info
+```
+
+- **`_host` doesn't move.** `{base}/_host/start`, `/ping` and `/config` stay directly under `BasePath`,
+  because `GET {base}/_host/config` is how a page finds out where everything else is. `BridgePrefix`
+  can't be `/_host` or sit under it.
+- **`<base href>` is rewritten for you.** A Blazor publish ships `<base href="/" />`, which would send
+  every asset request to the origin root. The host rewrites it — in the entry document and in whatever
+  the SPA fallback serves — to match `BasePath`, inserting the tag if the document has none. You don't
+  need to republish with `--base-href`.
+- **The page discovers the prefix, it isn't told it.** `Shiny.AppDeviceBridge.Blazor` and the injected
+  `invoke/client.js` both read `{base}/_host/config` and build their URLs from it. That matters because
+  the web app updates on its own schedule: a page built against one host keeps working when the next
+  host moves the bridges.
+
+```js
+const { base, bridge } = await (await fetch(new URL("_host/config", document.baseURI))).json();
+//    "/kiosk/"        "/kiosk/_native/"
+const info = await (await fetch(bridge + "app/info")).json();
+```
+
+The typed clients, C# and TypeScript, discover the prefix the same way. Raw `fetch("/_bridge/...")` calls in
+your own code are the one thing that won't follow — build them from `bridge`, or keep the defaults. `/kiosk` without the trailing slash redirects to `/kiosk/`, and anything
+outside `BasePath` gets a `404`.
+
+## Camera, microphone and location in the page
+
+The page can use `getUserMedia`, `navigator.geolocation` and `<input type="file" capture>` directly, with no
+bridge, but not by default. A WebView denies these unless the app decides for it, and on Android it can't even
+ask for the runtime permission. Say which ones the web app may use:
+
+```csharp
+builder
+    .UseWebAppHost(o => { … })
+    .AllowWebPermissions(WebAppWebPermissions.Camera | WebAppWebPermissions.Microphone | WebAppWebPermissions.Geolocation);
+```
+
+- **Only the web app gets them.** Requests from any other origin, such as a site the user navigated to or a
+  third-party iframe, are denied. One exception: Android's file chooser doesn't say which frame opened it, so
+  an iframe the web app embeds can still reach the camera through `<input capture>`.
+- **The OS prompt comes when the page first asks.** You still declare the permissions: `CAMERA`, `RECORD_AUDIO`,
+  `MODIFY_AUDIO_SETTINGS` and the location permissions on Android; `NSCameraUsageDescription`,
+  `NSMicrophoneUsageDescription` and `NSLocationWhenInUseUsageDescription` on Apple platforms, plus the
+  `com.apple.security.device.camera` and `com.apple.security.device.audio-input` entitlements when sandboxed.
+  On Apple platforms a missing usage description crashes the app when the page asks.
+- **File inputs** already work everywhere MAUI's WebView supports them. On Android, `capture` opens the camera
+  when `Camera` is allowed; otherwise it opens the file picker. On the macOS (AppKit) head the host adds the open
+  panel that head lacks.
+
+| | Camera / microphone | Geolocation |
+| --- | --- | --- |
+| Android | decided by the host | decided by the host |
+| iOS, Mac Catalyst, macOS (AppKit) | decided by the host | WebKit asks the user itself; the usage description is the only gate |
+| Windows | decided by the host | decided by the host |
+| Linux (GTK4) | denied: WebKitGTK needs a `permission-request` handler, which the host doesn't install | denied |
+
+## Developing the web app with hot reload
+
+In Debug builds the sample sets `DevServer`. The app on the device or emulator then gets its pages from
+`dotnet watch` on your machine, while the bridge, settings, files and session stay on the device.
+
+```bash
+cd samples/Sample.Blazor
+dotnet watch run --launch-profile device       # listens on http://0.0.0.0:5288
+```
+
+Start the app from your IDE as usual. Edit a `.razor` file and save, and the change appears in the app
+without rebuilding it.
+
+| Target | Dev server | Hot reload |
+| --- | --- | --- |
+| Android emulator | `http://10.0.2.2:5288` (default) | yes |
+| iOS simulator, Mac Catalyst, macOS, Windows, Linux | `http://localhost:5288` (default) | yes |
+| Android over USB | `adb reverse tcp:5288 tcp:5288`, then build with `-p:WebAppDevServer=http://localhost:5288` | also `adb reverse` the two socket ports (see below) |
+| Any device over Wi-Fi | build with `-p:WebAppDevServer=http://<your machine's LAN address>:5288` | pages only; reload the app to see changes |
+
+**How it works:**
+- **At startup:** the host probes `DevServer` for up to 1.5 seconds. If `dotnet watch` isn't running,
+  the embedded or installed build is served as usual. `-p:WebAppDevServer=off` switches dev mode off.
+- **Pages:** every request outside `/_bridge` and `/_host` is forwarded to the dev server. The page keeps
+  its `http://127.0.0.1:5780` origin, so its bridge calls still reach the device.
+- **Not forwarded:** the session cookie never leaves the device, and no update check runs.
+- **`background.js`:** fetched fresh from the dev server on every call, so edits apply at once.
+
+**The hot reload socket:** `dotnet watch` tells the page to connect to `ws://localhost:<random port>`,
+and listens on your machine's loopback only. The host rewrites `localhost` to the dev server's host,
+which is enough wherever that host reaches your machine's loopback: the emulator's `10.0.2.2` and the
+simulator's `localhost`. A device on Wi-Fi can't reach a loopback-only listener, so it gets live pages
+but not live updates. Over USB, forward the socket ports too; they change each time `dotnet watch`
+starts:
+
+```bash
+curl -s http://localhost:5288/_framework/aspnetcore-browser-refresh.js | grep webSocketUrls
+adb reverse tcp:<ws port> tcp:<ws port>
+```
+
+## App Store review
+
+The downloaded content is HTML and JavaScript that runs in WebKit. Guideline 2.5.2 and section
+3.3.1(B) of the Apple Developer Program License Agreement allow that, as long as updates don't change
+the app's primary purpose. Keep native capabilities in the binary (bridges ship with the app), ship a
+complete baseline, and use `minimumHostVersion` rather than shipping web features the installed app
+can't support.

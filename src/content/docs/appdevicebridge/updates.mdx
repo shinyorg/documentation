@@ -1,0 +1,47 @@
+---
+title: Updates
+description: Serve signed web app releases from ASP.NET Core and the rules the device follows to install them
+---
+
+## The server
+
+```csharp
+builder.Services.AddWebAppReleases(o =>
+{
+    o.SigningKey = builder.Configuration["WebApps:SigningKey"];   // PEM, from your secret store
+    o.ReleasesDirectory = "/srv/webapps";
+});
+
+app.MapWebAppReleases("/webapps");   // returns the route group: add auth, rate limiting, caching
+```
+
+Publishing a release means copying a file:
+
+```
+/srv/webapps/field-app/
+    app.json              { "minimumVersion": "1.2.0" }
+    1.2.0.zip
+    1.3.0-beta.1.zip
+    1.3.0-beta.1.json     { "channel": "beta", "minimumHostVersion": "2.1", "platforms": ["ios", "android"] }
+```
+
+Hashes and sizes are computed and cached. Implement `IWebAppReleaseStore` to serve releases from blob
+storage or a database instead. Set `downloadUrl` in the sidecar to serve the zip from a CDN; the
+signature still covers it.
+
+Create a key pair once, with `WebAppReleaseSignature.CreateKeyPair()` or openssl:
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt > private.pem
+openssl ec -in private.pem -pubout > public.pem
+```
+
+## Update rules
+
+- **Nothing installed:** any compatible release is required.
+- **Below `minimumVersion`:** required, and it installs before the app shows.
+- **Newer release available:** optional. It downloads in the background and applies next launch, or
+  when the page calls `POST /_bridge/host/apply-update`.
+- **Release needs a newer native app:** skipped. Set `minimumHostVersion` when a web build depends
+  on bridge endpoints older apps don't have.
+- **Offline or server down:** the newer of the bundled and installed builds is served.

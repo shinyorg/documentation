@@ -1,0 +1,298 @@
+---
+title: Bridges
+description: Every Shiny.AppDeviceBridge bridge — routes, events, platforms and setup
+---
+
+| Bridge | Routes | Events |
+| --- | --- | --- |
+| host (built in) | `GET /_bridge/host`, `POST /_bridge/host/apply-update` | |
+| settings (built in) | `GET/DELETE settings/{local\|secure}`, `GET/PUT/DELETE settings/{scope}/{key}` | |
+| files (built in) | `GET files`, `GET files/{root}/list`, `GET files/{root}/info`, `GET/PUT files/{root}/content`, `POST files/{root}/append`, `POST files/{root}/directory`, `DELETE files/{root}/entry`, `POST files/{root}/move`, `POST files/{root}/copy`, with paths in `?path=` | |
+| AppSupport | `GET app/info`, `POST/DELETE app/orientation`, `POST app/browser`, `POST app/map`, `POST app/settings`, `GET app/store`, `POST app/store/open`, `POST app/store/review`, `POST app/share`, `POST app/haptics`, `POST/DELETE app/vibrate`, `GET app/connectivity`, `GET app/battery`, `GET app/screen`, `PUT/DELETE app/screen/keep-awake`, `GET/PUT/DELETE app/clipboard`, `GET app/startup`, `POST/DELETE app/startup/registration`, `POST app/startup/settings` | `app.orientation`, `app.culture`, `app.timezone`, `app.connectivity`, `app.battery`, `app.energysaver` |
+| GPS | `GET gps/status`, `POST gps/access`, `GET gps/last`, `GET gps/current`, `GET/POST/DELETE gps/listener` | `gps.reading` |
+| Geofences | `GET geofences/status`, `POST geofences/access`, `GET/POST/DELETE geofences/regions`, `DELETE geofences/regions/{id}`, `GET geofences/regions/{id}/state` | `geofence.status` |
+| Motion activity | `GET motion/status`, `POST motion/access`, `GET motion/current`, `GET/POST/DELETE motion/listener` | `motion.activity` |
+| Bluetooth LE | `GET ble/status`, `POST ble/access`, `POST/DELETE ble/scan`, `GET ble/peripherals[/{uuid}]`, `POST/DELETE …/connection`, `GET …/rssi`, `GET …/services`, `GET …/characteristics`, `GET/PUT …/characteristics/{c}`, `POST/DELETE …/notifications` | `ble.scan`, `ble.status`, `ble.notification`, `ble.error` |
+| OBD-II | `GET obd/status`, `GET obd/commands`, `POST obd/scan`, `GET obd/adapters`, `POST/DELETE obd/connection`, `POST obd/command`, `POST obd/raw`, `GET obd/vin`, `GET/DELETE obd/dtc`, `POST/DELETE obd/monitor` | `obd.reading`, `obd.disconnected` |
+| Wi-Fi | `GET wifi`, `POST wifi/access`, `GET wifi/networks`, `GET wifi/current`, `POST/DELETE wifi/connection`, `GET wifi/known`, `DELETE wifi/known?id=`, `GET/PUT wifi/radio`, `GET/POST/DELETE wifi/hotspot`, `GET wifi/hotspot/clients` | `wifi.changed`, `wifi.hotspot` |
+| Discovery | `POST discovery/{mdns,ssdp,wsd}/search`, `POST discovery/{mdns,ssdp,wsd}/browse`, `GET discovery/mdns/resolve`, `GET discovery/wsd/resolve`, `GET discovery/ssdp/description?udn=`, `POST discovery/{mdns,ssdp,wsd}/publications`, `GET discovery/browses`, `DELETE discovery/browses/{id}`, `GET discovery/publications`, `DELETE discovery/publications/{id}` | `discovery.mdns`, `discovery.ssdp`, `discovery.wsd`, `discovery.error`, `discovery.stopped` |
+| Notifications | `GET notifications`, `POST notifications/access`, `POST notifications/send`, `GET notifications/pending`, `DELETE notifications[?scope=]`, `DELETE notifications/{id}`, `GET/PUT notifications/badge`, `GET/POST notifications/channels`, `DELETE notifications/channels/{id}` | `notification.entry`, `notification.received` |
+| HTTP transfers | `GET/POST/DELETE transfers`, `GET/DELETE transfers/{id}`, `POST transfers/{id}/pause`, `POST transfers/{id}/resume` | `transfer.progress`, `transfer.completed`, `transfer.failed`, `transfer.cancelled` |
+| App links | `GET/DELETE links/pending` | `app.link` |
+| Health | `GET health`, `POST health/access`, `GET/POST health/samples/{type}`, `POST/DELETE health/listeners/{type}` | `health.reading`, `health.stopped` |
+| Speech | `GET speech/status`, `POST speech/access`, `POST speech/recognize`, `GET/POST/DELETE speech/listener`, `POST/DELETE speech/speak`, `GET speech/voices?culture=`, `GET speech/cultures` | `speech.partial`, `speech.result`, `speech.keyword`, `speech.ended`, `speech.spoken`, `speech.error` |
+| Contacts | `GET contacts`, `POST contacts/access`, `GET/POST contacts/items`, `GET/PUT/DELETE contacts/items/{id}`, `GET contacts/items/{id}/photo` | |
+| Calendar | `GET calendar`, `POST calendar/access`, `GET calendar/calendars`, `GET/POST calendar/events`, `GET/PUT/DELETE calendar/events/{id}` | |
+| Photos | `GET photos`, `POST photos/access`, `POST photos/pick`, `GET photos/library`, `GET photos/library/{id}/thumbnail`, `POST photos/library/{id}/export` | |
+| Folders | `GET folders`, `POST folders/pick`, `DELETE folders/{root}` | |
+| Tray icon | `GET/POST/DELETE tray`, `GET/PUT/DELETE tray/{id}`, `PUT/DELETE tray/{id}/menu`, `POST tray/{id}/menu/show`, `POST tray/{id}/notification`, `PUT/DELETE tray/{id}/animation` | `tray.click`, `tray.menu` |
+
+The routes are the wire protocol. A page doesn't build them by hand: every bridge has a typed client, in C# for
+Blazor and in TypeScript for everything else, generated from one declaration so the two can't drift — see
+[Typed clients](/appdevicebridge/clients/).
+
+```csharp
+@inject IAppBridge App
+@inject IGpsBridge Gps
+
+var info = await App.GetInfoAsync();
+await using var readings = await Gps.OnReadingAsync(reading => { position = reading; return Task.CompletedTask; });
+```
+
+```ts
+import { AppBridge, GpsBridge } from "@shinyorg/appdevicebridge";
+
+const info = await new AppBridge().getInfo();
+const stop = new GpsBridge().onReading(reading => console.log(reading.latitude));
+```
+
+Errors return `{ "code": "...", "message": "..." }`. The clients throw `BridgeException` (C#) or `BridgeError`
+(TypeScript) carrying the status and `code`, so pages can switch on either.
+
+**Wi-Fi:** what works depends on the platform. iOS can't scan, and Android can't toggle the radio.
+`GET /_bridge/wifi` lists the platform's capabilities, and any call it lacks returns `501`. Linux
+uses NetworkManager through `Shiny.Net.Wifi.Linux`, which the bridge picks automatically.
+`wifi.changed` only runs while a page is listening. Permissions come from Shiny.Net.Wifi: location on
+Android; the Access Wi-Fi Information and Hotspot Configuration entitlements on iOS.
+
+**Discovery:**
+- **Searching:** `search` returns everything seen during `scanMs`, 5 s by default and 30 s at most.
+- **Browsing:** each `browse` streams results as events. At most 8 run at once, and they stop when
+  the page's last event stream closes.
+- **Publishing:** `publications` keep advertising until deleted. At most 16.
+- **Platform setup:** on iOS and Mac Catalyst, list every browsed service type in `NSBonjourServices`
+  and set `NSLocalNetworkUsageDescription`. On Android, SSDP and WS-Discovery need
+  `CHANGE_WIFI_MULTICAST_STATE`.
+
+**Device:** sharing, haptics, connectivity, battery, the screen and the clipboard come from .NET MAUI
+Essentials, so each head's own build decides what works. A feature a backend lacks returns `501` on its
+own, and the rest keep working. Files are shared by the same `{ root, path }` as the files bridge:
+
+```ts
+await new AppBridge().share({ files: [{ root: "data", path: "photos/cat.jpg" }] });
+```
+
+`app.connectivity`, `app.battery` and `app.energysaver` only run while a page is listening. On Android,
+vibration needs `VIBRATE`, and battery needs `BATTERY_STATS` in the manifest (without it, `GET app/battery`
+returns `403`). `vibrate` is capped at 5 seconds.
+
+**Motion activity:** walking, running, cycling, driving or stationary, from the OS's activity recognition.
+There's no history, only the latest reading and live ones. `AddLocationBridges()` doesn't include it,
+because it needs its own setup: `NSMotionUsageDescription` on iOS (the permission request crashes without it),
+and `ACTIVITY_RECOGNITION` with Google Play Services on Android. Other platforms return `501`.
+
+**OBD-II:**
+- **Adapters:** ELM327 and OBDLink, one at a time. `scan` finds Bluetooth LE adapters, or with
+  `"transport": "wifi"` probes the addresses Wi-Fi adapters ship with. `connection` takes the
+  `peripheralUuid` from a scan, or a Wi-Fi `host` and `port`. The host must be a loopback, private or
+  link-local IP address.
+- **Reading:** `command` takes a name from `GET obd/commands` (`engineRpm`, `vehicleSpeed`,
+  `coolantTemperature`…) and answers the decoded value with its unit. `POST obd/raw` sends a read-only request:
+  modes 01, 02, 03, 05, 06, 07, 09, 0A or 22, or an informational AT command. Commands are serialized,
+  because ELM327 is half-duplex.
+- **Trouble codes:** `GET obd/dtc` returns stored, pending and permanent codes. A list is `null` when
+  the vehicle doesn't support that mode. `DELETE obd/dtc` needs `?confirm=true`, because clearing codes
+  also resets the emissions readiness monitors.
+- **Monitoring:** `monitor` polls up to 10 commands, every 250 ms at most often, and sends each result
+  as `obd.reading`. It stops when the page's last event stream closes. After three rounds with no
+  answers the connection is dropped with `obd.disconnected`.
+- **Platform setup:** Bluetooth as for the Bluetooth LE bridge. Wi-Fi adapters need
+  `NSLocalNetworkUsageDescription` on iOS and Mac Catalyst. On Android, the app has to bind to the
+  adapter's network, which has no internet. Linux supports Wi-Fi adapters only.
+
+**HTTP transfers:**
+- **Queuing:** `POST /_bridge/transfers` with a `type` (`Download`, `UploadMultipart` or `UploadRaw`), a `url`,
+  and a file as `root` plus `path`, the same names `/_bridge/files` uses. Uploads can add `method`, `headers`,
+  `formDataName` and a small multipart `body`. Downloads can pass `"overwrite": false`.
+- **Downloads land whole:** the file is written beside its destination under a hidden name and moved into
+  place when it completes. The destination is checked again at that moment.
+- **Limits:** http and https only. Loopback URLs are refused unless you change `AllowUrl`. Connection,
+  length and proxy headers are refused. At most `MaxTransfers` (32) are queued at once.
+- **Ownership:** the page only lists and cancels its own transfers. `DELETE /_bridge/transfers` leaves the native
+  app's transfers running.
+- **Finishing in the background:** `transfer.completed` and `transfer.failed` reach the page, or background.js
+  when no page is open. Progress is an event only, at most every `ProgressInterval` (250 ms) per transfer.
+- **Platform setup:** Android needs `FOREGROUND_SERVICE_DATA_SYNC`. On iOS and Mac Catalyst, override
+  `HandleEventsForBackgroundUrl` in the app delegate and pass it to
+  `Shiny.Hosting.Host.Lifecycle.OnHandleEventsForBackgroundUrl`, or transfers that finish while the app is
+  suspended wait for the next launch. macOS and Linux run transfers in-process only.
+
+**App links:** links to the app become routes in the web app. A custom scheme's host is the first path segment,
+so `myapp://orders/42` becomes `/orders/42`. An https link on a listed host keeps its path, so
+`https://app.example.com/orders/42` also becomes `/orders/42`. Set `MapRoute` to map links another way.
+- **Other links:** any other scheme or host is left to the native app.
+- **Route checks:** a route must be a local page path. Routes that aren't, including anything under `/_bridge`
+  or `/_host`, are refused, whatever `MapRoute` returns.
+- **Delivery:** the page gets `app.link` while it's open. `DELETE /_bridge/links/pending` returns the latest
+  link and removes it. Call it at boot and on each event, so a link is acted on exactly once.
+- **Cold start:** with `NavigateOnColdStart`, a link that launched the app becomes the first page loaded, and is
+  consumed.
+- **Background:** links never go to `background.js`.
+
+```ts
+const links = new LinksBridge();
+
+async function openPendingLink() {
+    const link = await links.consume();
+    if (link) router.push(link.route);
+}
+
+openPendingLink();
+links.onLink(openPendingLink);
+```
+
+Platform setup:
+- **Android:** a `SingleTop` main activity with `ACTION_VIEW` intent filters, plus `assetlinks.json` for https.
+- **Apple:** `CFBundleURLTypes`, plus the Associated Domains entitlement and `apple-app-site-association` for https.
+- **maui-labs AppKit:** the head overrides `OpenUrls` and calls `AppLinks.Receive`, because the launching link
+  arrives before `MauiProgram`.
+- **Windows:** a protocol registration; redirect activations to the first instance for links while running.
+- **Linux:** `x-scheme-handler` in the .desktop file; cold starts only.
+
+**Health:**
+- **Platforms:** HealthKit on iOS, Health Connect on Android. Other platforms return `501`. On Android
+  without Health Connect, every call except `GET health` returns `503`.
+- **Access:** ask for access before reading, one entry per type. On iOS, HealthKit never reveals a read
+  denial: `granted` can be `true` and reads still come back empty. On Android, reading a type that
+  wasn't granted returns `403`.
+- **Types:** `GET health` lists every type, with its unit and whether it's bucketed.
+- **Reads:** numeric types and blood pressure are totalled or averaged into `minutes`, `hours` or `days`
+  buckets. Cycle tracking, workouts and nutrition come back as individual records. A read covers at
+  most 366 days and 2,000 buckets.
+- **Writes:** `POST health/samples/{type}` takes `start`, `end` and the fields for the type: `value`,
+  `systolic`/`diastolic`, `flow`, `workout` and so on.
+- **Listeners:** a listener sends `health.reading` for new samples. At most 8 run at once, and they stop
+  when the page's last event stream closes.
+- **Privacy:** health values are never logged.
+- **Platform setup:** on iOS, add the HealthKit entitlement plus `NSHealthShareUsageDescription` and
+  `NSHealthUpdateUsageDescription`. On Android, set minSdk 26, add a `android.permission.health.*`
+  permission for each record type, the Health Connect `<queries>` entry, and the
+  `VIEW_PERMISSION_USAGE` activity-alias. MainActivity also needs a filter for
+  `androidx.health.ACTION_SHOW_PERMISSIONS_RATIONALE`.
+
+```ts
+const health = new HealthBridge();
+await health.requestAccess({ permissions: [{ type: "StepCount", access: "Read" }] });
+
+const today = new Date(); today.setHours(0, 0, 0, 0);
+const steps = await health.getSamples("StepCount", today, new Date(), { interval: "Hours" });
+```
+
+**Speech:** built on Shiny.Speech, which is still a prerelease package.
+- **Recognizing once:** `recognize` listens until a pause and returns `{ "text": … }`. It gives up after
+  `timeoutMs`: 15 s by default, 60 s at most. `text` is `null` if nothing was heard.
+- **Dictation:** `POST listener` keeps the microphone open and streams `speech.partial` and
+  `speech.result` events until you delete it. It also stops when the page's last event stream
+  closes, so a page that goes away can't leave the microphone on. `speech.ended` says why it
+  stopped: `Stopped`, `PageClosed` or `Error`.
+- **One microphone:** a recognition and a listener can't run at once. The second gets `409`
+  `microphone_busy`.
+- **Speaking:** `speak` waits until the text has been spoken, unless you pass `"wait": false`, which
+  returns `204` straight away and raises `speech.spoken` when done. A new utterance interrupts the current one.
+  Text is capped at 4,000 characters.
+- **Platforms:** Linux has no OS speech engine, so its endpoints return `501`. To use a cloud
+  provider or Whisper there, pass `o => o.RegisterSpeechServices = false` and register your own
+  `ISpeechToTextService` / `ITextToSpeechService`.
+- **Platform setup:** Android needs `RECORD_AUDIO`, plus a `<queries>` entry for
+  `android.intent.action.TTS_SERVICE`. Apple platforms need `NSSpeechRecognitionUsageDescription` and
+  `NSMicrophoneUsageDescription`, plus the `com.apple.security.device.audio-input` entitlement for sandboxed apps.
+
+**Contacts:**
+- **Platforms:** Android and iOS. Shiny.Contacts has no Mac Catalyst, macOS, Windows or Linux backend, so there
+  every endpoint returns `501`.
+- **Listing:** `GET contacts/items?search=&offset=&limit=` returns one page (50 by default, 500 at most) and
+  `hasMore`. `search` matches names, phone numbers and emails.
+- **Photos:** photos never go in the JSON. `hasPhoto` says whether one exists, and
+  `GET contacts/items/{id}/photo?size=full|thumbnail` returns the image bytes.
+- **Writing:** `PUT` changes only the properties you send. An empty list clears one.
+- **iOS:** reading `note` and `relationships` needs the `com.apple.developer.contacts.notes` entitlement.
+  Without it they come back empty.
+
+**Calendar:**
+- **Platforms:** Android, iOS, Mac Catalyst, macOS and Windows.
+- **Access:** `POST calendar/access` takes `ReadWrite` (the default), `ReadOnly` or `WriteOnly`. Write-only
+  access (iOS 17+) is reported as `Restricted`.
+- **Listing:** `GET calendar/events` requires `start` and `end`, at most 366 days apart. Paging works like
+  contacts.
+- **Reminders:** `reminderMinutes` counts minutes before the start.
+- **Read-only fields:** attendees, the organizer and recurrence can be read but not written.
+- **Read-only calendars:** writing to one returns `403 read_only`, and so does writing to a system calendar on
+  Windows, which only allows writes to app-owned calendars.
+- **Deleting:** `DELETE calendar/events/{id}?series=true` removes the rest of a recurring series rather than one
+  occurrence.
+- **Mac Catalyst, sandboxed macOS:** also need the `com.apple.security.personal-information.calendars`
+  entitlement. Without it, access is denied without a prompt.
+
+Both bridges return `403 access_denied` until access has been granted.
+
+**Startup:** part of the app bridge, because the same package is behind it. `GET /_bridge/app/startup` says
+whether the app launches when the user logs in. Windows writes it under `HKCU\…\CurrentVersion\Run`
+(unpackaged apps only — the OS virtualizes that key for MSIX), macOS 13+ submits the running bundle to
+`SMAppService`, and Linux writes `~/.config/autostart/{Identifier}.desktop`. Mobile has no such list, so it
+answers `{ "supported": false, "state": "NotSupported" }` and the rest return `501`. `state` is read back from
+the OS every time rather than remembered, because the user can turn a registered app off in Task Manager,
+System Settings or Login Items without the app hearing about it — which is also why `Enabled` is not the only
+success: `DisabledByUser`, `DisabledByPolicy` and `RequiresApproval` mean the user has to finish the job in the
+OS, and `POST app/startup/settings` opens the screen where they do. Pass arguments your app can recognise on an
+OS-started launch:
+
+```csharp
+builder.AddAppSupportBridge(startup: o => o.Arguments.Add("--autostart"));
+```
+
+**Photos:**
+- **Picker:** `POST photos/pick` shows the system photo picker — no permission needed — and copies what the user
+  chose into a file root (`cache` by default) under `photos/`. The answer lists each as a `{ root, path }` the page
+  reads through the files bridge. An empty list means the user cancelled. Every head has a picker.
+- **Library:** browse every photo on the device, newest first: `GET photos/library?offset=&limit=` (200 at most),
+  `GET photos/library/{id}/thumbnail?size=` for a JPEG that fits a square (32–1024 px), and
+  `POST photos/library/{id}/export` to copy the original into a file root. It needs access —
+  `POST photos/access` — and answers `403` without it.
+- **Platforms:** PhotoKit on iOS, Mac Catalyst and macOS; MediaStore on Android; the user's Pictures folder on
+  Windows. Linux has no photo library, so the library endpoints return `501` there.
+- **Platform setup:** `NSPhotoLibraryUsageDescription` on Apple platforms, plus the
+  `com.apple.security.personal-information.photos-library` entitlement where the app is sandboxed.
+  `READ_MEDIA_IMAGES` on Android 13 and later, `READ_EXTERNAL_STORAGE` before.
+
+**Folders:**
+- **Picking:** `POST folders/pick` with `{ "root": "documents" }` shows the platform's folder picker. The folder
+  becomes a file root under that name — `/_bridge/files/documents/…` — and answers `204` if the user cancels.
+  Picking again under the same name replaces the folder. The app's own roots can't be replaced.
+- **Remembered:** picked folders come back as roots every time the app starts, until
+  `DELETE folders/{root}` forgets one. `GET folders` lists them, with `available: false` for one that was
+  moved, deleted or had its access revoked since.
+- **Platforms:** Apple platforms keep a security-scoped bookmark; Android keeps a persisted Storage Access
+  Framework grant; Windows and Linux (GTK's file dialog) keep the path.
+- **Android folders aren't paths.** The files bridge reads and writes them through the Storage Access Framework,
+  but bridges that hand the OS a file path — sharing, transfers, notification images — refuse them.
+
+**Tray icon:** the system tray on Windows, the menu bar on macOS, the status notifier area on Linux —
+desktop only, `501` elsewhere.
+- **Naming an icon:** use `PUT /_bridge/tray/main` rather than `POST /_bridge/tray`. The first call creates
+  the icon and later ones adopt it, so a page reload or an applied update doesn't stack up a second icon.
+  A `PUT` changes only the properties it sends; `""` clears `tooltip`, `title` or `badge`.
+- **Images:** either `{ "root": "data", "path": "icons/tray.png" }` — the same file roots the files bridge
+  takes, so the page can't point the tray at anything it couldn't already read — or `{ "data": "…" }` holding
+  base64, with or without a `data:` URI prefix, which is how a page ships an icon it drew itself. Set
+  `"templateImage": true` for a black-with-alpha image macOS and Linux tint for light and dark menu bars.
+- **Menus:** each entry is `Item`, `Check`, `Separator` or `Submenu`, and its `id` is what comes back on
+  `tray.menu`; omit it and one is assigned. Ids must be unique across the whole menu.
+- **Clicks reach the web app either way:** `tray.click` and `tray.menu` go out as events *and* as calls the
+  page handles when it is open and `background.js` handles when it is not — which is the case a tray menu
+  exists for. `tray.click` isn't raised on Linux, where the app indicator handles clicks itself and opens the
+  menu on its own (so `menu/show` is a no-op there).
+- **Lifetime:** icons outlive the page and are removed when the app shuts down, or by
+  `DELETE /_bridge/tray/{id}`. `MaxIcons` (4) caps how many exist at once.
+
+```ts
+await new TrayBridge().put("main", {
+    tooltip: "Field App",
+    templateImage: true,
+    icon: { root: "data", path: "icons/tray.png" },
+    menu: { items: [
+        { id: "open", label: "Open" },
+        { type: "Separator" },
+        { id: "sync", type: "Check", label: "Sync", checked: true }
+    ] }
+});
+```

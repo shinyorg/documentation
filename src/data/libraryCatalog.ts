@@ -674,6 +674,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'tvos', 'macos', 'windows', 'linux'],
             },
             {
+                label: 'App Device Bridge',
+                tagline: 'A web app inside a MAUI app, with typed access to the device',
+                summary: 'Ship Blazor, React or any static web app inside a .NET MAUI app — served from the device, updated over the air from a signed release server, and calling native features through bridges with generated C# and TypeScript clients.',
+                highlights: [
+                    'Served offline from its zip on a loopback server',
+                    'Signed over-the-air updates',
+                    'Typed C# and TypeScript clients for every bridge',
+                    'Location, Bluetooth, notifications, photos, folders, tray icons and more',
+                ],
+                packages: ['Shiny.AppDeviceBridge.Maui', 'Shiny.AppDeviceBridge.Blazor', 'Shiny.AppDeviceBridge.AspNetCore'],
+                frameworks: ['maui', 'blazor'],
+                os: ['android', 'ios', 'macos', 'windows', 'linux'],
+            },
+            {
                 label: 'Web Hosting',
                 tagline: 'Modular ASP.NET Core startup with IWebModule',
                 summary: 'Break a bloated `Program.cs` apart into `IWebModule` classes, each responsible for its own services and middleware — authentication, CORS, Swagger, logging and health checks stop tangling together.',

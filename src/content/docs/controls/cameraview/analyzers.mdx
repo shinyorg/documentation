@@ -433,6 +433,20 @@ public class GreenScreenAnalyzer : FrameAnalyzer
 
 `Deliver(args, raiseEvent, command, onDetected)` is gated by arming — it does nothing while disarmed, raises your event + bound `Command` (and awaits `onDetected`) only while armed, consumes the arm so a lingering detection won't re-fire, and re-arms when `onDetected` returns `true`. Boxes via `ResolveOverlay(args, provider, defaultBoxes)` draw every frame regardless (honoring `ShowBoundingBox` / `OverlayProvider`). Keep analyzers allocation-light and don't retain the frame past the returned task — the pipeline disposes it (releasing the pooled native buffer) once the analyzer finishes.
 
+### Releasing native resources
+
+An analyzer that holds something native — an ML Kit client, a Core ML model, an ONNX session — should create it lazily on first use and release it in `OnDetached()`, never in the constructor or a field initializer. `IFrameAnalyzer` has `OnAttached()` / `OnDetached()` hooks (default no-ops; `protected virtual` on `FrameAnalyzer`). The pipeline calls `OnDetached()` when the analyzer is removed or swapped, when `IsEnabled` goes false, or when the camera's handler disconnects — deferred until any in-flight `AnalyzeAsync` completes, and only once every camera sharing the analyzer has let go. `OnAttached()` fires when it becomes live again, so re-create on the next frame.
+
+```csharp
+protected override void OnDetached()
+{
+    this.session?.Dispose();
+    this.session = null; // re-created lazily in AnalyzeAsync
+}
+```
+
+The built-in Barcode, Face, OCR and document analyzers do exactly this; `BarcodeScanner` and `TextRecognizer` expose `ReleaseNativeResources()` if you use them directly.
+
 ## Writing a custom document analyzer
 
 For an **OCR-backed document** you don't derive from `FrameAnalyzer` directly — derive from **`DocumentAnalyzer<TDocument>`** and supply an **`IDocumentParser<TDocument>`**. The base class does the heavy lifting: it runs the shared OCR recognizer each frame, hands the recognized text to your parser, delivers the typed `DocumentDetected` event (the bound `DocumentDetectedCommand`, and `OnDetected`) while armed, draws the parser's boxes, and honors `IsEnabled` / `ShowBoundingBox` / `OverlayProvider`. You only write **what counts as your document and how to pull its fields out of text**.

@@ -1,0 +1,91 @@
+---
+title: Native Calls & Background
+description: Background jobs, GPS, geofences, push, notifications and transfers calling into the page or background.js
+---
+
+Background jobs, GPS readings, geofence transitions and pushes can call into the web app, whether or
+not a page is open.
+
+- **Page open and listening:** the call goes to the page. The page has 2 seconds to accept it, then
+  posts its result.
+- **No page, or the page doesn't accept in time:** the call runs in `background.js` from the web app's
+  zip, inside an embedded JavaScript engine ([Jint](https://github.com/sebastienros/jint)).
+- **Accepted by the page:** the page owns the call. A call is never run in both places.
+
+```csharp
+// in a Blazor page
+await nativeCalls.HandleAsync("job:sync", AppDeviceBridgeJsonContext.Default.JobRun, MyJson.Default.SyncResult, async job =>
+{
+    await SyncAsync();
+    return new SyncResult(RanIn: "page");
+});
+```
+
+```js
+// in any other page
+import { on } from "/_bridge/invoke/client.js";
+on("job:sync", async ({ name }) => { /* ... */ });
+```
+
+```js
+// background.js: a classic script at the root of the zip
+appdevicebridge.on("job:sync", async ({ name }) => {
+    const token = await (await fetch("/_bridge/settings/secure/token")).json();
+    const data = await fetch("https://api.example.com/sync", { headers: { Authorization: `Bearer ${token}` } });
+    await fetch("/_bridge/files/data/content?path=sync.json", { method: "PUT", body: await data.text() });
+});
+```
+
+`background.js` gets `appdevicebridge.on`, `console` and `fetch` with string bodies. Relative URLs go to the
+host's own `/_bridge`, so handlers read and write the same settings and files the page uses. It has
+no DOM, no timers, and keeps no state between calls: each call runs the script's top level again,
+then the handler. It gets `BackgroundScriptTimeout` (25 s) and 64 MB.
+
+| Source | Handler | Registered by |
+| --- | --- | --- |
+| Background job | `job:{name}` with `{ name }` | `builder.AddWebAppJob("sync", job => job.WithInternet(InternetAccess.Any))` (Bridge.Jobs) |
+| GPS reading delivered in the background | `gps` with a reading | `AddGpsBridge()` |
+| Geofence transition | `geofence` with `{ identifier, state }` | `AddGeofenceBridge()` |
+| Push | `push.received`, `push.entry` with `{ data, title, message }` | `AddPushBridge(o => o.DispatchToWebApp = true)` (Bridge.Push) |
+| Motion activity delivered in the background | `motion` with `{ activity, confidence, timestamp }` | `AddMotionActivityBridge()` (Bridge.Locations) |
+| Notification tapped | `notification.entry` with `{ id, title, message, channel, thread, data, action, text }` | `AddNotificationsBridge()` (Bridge.Notifications) |
+| Notification presented while the app is open (Apple platforms) | `notification.received` with the same shape | `AddNotificationsBridge()` |
+| HTTP transfer finished | `transfer.completed` / `transfer.failed` with the transfer | `AddHttpTransfersBridge()` (Bridge.HttpTransfers) |
+
+From your own native code, call `WebAppInvoker.InvokeAsync(name, payload, typeInfo)`.
+
+**Jobs:** the OS picks when jobs run: at best every 15 minutes on Android, less predictably on iOS.
+Jobs with the same charging and network requirements run together as one native job. On iOS, add
+`BGTaskSchedulerPermittedIdentifiers` (`com.shiny.job`, `com.shiny.jobnet`, `com.shiny.jobpower`,
+`com.shiny.jobpowernet`) and the `processing` background mode.
+
+**Push:** `AddPushBridge()` always adds `GET /_bridge/push` (access and token),
+`POST/DELETE /_bridge/push/registration` and `GET/PUT /_bridge/push/tags`, plus the `push.token` and
+`push.unregistered` events. Pushes only reach the web app when you set `DispatchToWebApp`. You still
+need Shiny.Push's platform setup: APNs entitlements, and `google-services.json` on Android.
+
+**Notifications:** `POST /_bridge/notifications/send` takes a `message` and optionally a `title`, `channel`,
+`thread`, `data`, and one trigger: `scheduleDate`, `repeat` (`{ "intervalSeconds": 3600 }` or
+`{ "timeOfDay": "09:00:00", "dayOfWeek": "Monday" }`), or `geofence` (`{ "latitude", "longitude", "radiusMeters" }`).
+It answers `{ "id": 7 }`. Sending needs no UI, so `background.js` can notify from a job or a geofence.
+
+- **Images:** on iOS and Mac Catalyst, `image: { "root": "data", "path": "photos/cat.jpg" }` attaches a file the
+  page wrote through the files bridge. Other platforms ignore it. `GET /_bridge/notifications` reports what the
+  platform supports: `badge`, `entry`, `received`, `geofences` and `images`.
+- **Ownership:** only notifications the web app sent reach its handlers, unless you set
+  `AddNotificationsBridge(o => o.Dispatch = WebAppNotificationDispatch.All)`. The bridge marks its notifications
+  with a `appdevicebridge.source` data key, which the page never sees and can't set.
+- **Taps:** reach `notification.entry` on Android, iOS and Mac Catalyst. Windows and Linux have no tap callback,
+  and on the macOS (AppKit) head nothing runs Shiny's startup tasks, so neither handler fires there yet.
+- **Linux:** scheduled notifications only fire while the app runs, and repeating ones don't fire at all in
+  Shiny.Notifications.Linux 5.6.3.
+- **Platform setup:** on Android, `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM` for on-time schedules, and a
+  drawable named `notification` for the small icon (without it, `send` returns `400`). Geofence triggers need the
+  location usage descriptions.
+
+**Blazor WebAssembly:** handlers registered from the page can be C#, through `WebAppNativeCalls` in Shiny.AppDeviceBridge.Blazor.
+Payloads are the bridges' own contracts — `GpsReading` for `gps`, `PushPayload` for `push.received`,
+`TransferInfo` for `transfer.completed` — read through their JSON contexts. The
+background path can't: Jint doesn't run WebAssembly, and a hidden WebView is exactly what iOS
+suspends. Write the background handler in JavaScript that stores its results through the bridge;
+the Blazor app reads them when it next opens.
