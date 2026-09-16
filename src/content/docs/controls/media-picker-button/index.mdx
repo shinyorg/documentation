@@ -66,6 +66,72 @@ ObservableCollection<MediaPickerItem> photos = new();   // Shiny.Maui.Controls.M
 
 On Blazor `OutputFormat` is a string (`"jpeg"` / `"png"`), and each `MediaPickerItem` exposes a `DataUri` you can bind directly to `<img src>`.
 
+## Where the bytes live (Blazor)
+
+A picked photo stays in the **browser**. What crosses into .NET is a descriptor — id, an object URL for `<img src>`, dimensions, content type and size — and the bytes move only when something asks for them, always as binary:
+
+| You want | What happens |
+|---|---|
+| `MediaPickerItem.Data` | Filled from a chunked `IJSStreamReference` when the photo is picked (the default) |
+| `await item.OpenReadStreamAsync()` / `ReadAllBytesAsync()` | The same stream, on demand |
+| `UploadUrl` set | The browser posts the photo as multipart form data itself — the bytes never enter .NET |
+
+Nothing is base64-encoded on any path. That matters most on **Blazor Server**: a base64 photo is one SignalR message, and a 4MB photo becomes a 5.4MB string — far past the default 32KB `MaximumReceiveMessageSize`, so the server closes the circuit and the upload never happens.
+
+## Uploading from the browser (Blazor)
+
+```razor
+<MediaPickerButton @ref="picker"
+                   @bind-Photos="photos"
+                   MaxPhotos="5"
+                   MaxImageDimension="1600"
+                   CompressionQuality="85"
+                   UploadProgress="OnProgress" />
+
+@code {
+    MediaPickerButton? picker;
+    IReadOnlyList<MediaPickerItem> photos = [];
+    int percent;
+
+    // Save the record FIRST, so each photo has something that exists to be addressed to.
+    async Task Save()
+    {
+        var id = await SaveTheThing();
+
+        var results = await picker!.UploadAllAsync(new MediaPickerUpload($"/photos/{id}")
+        {
+            Headers = new Dictionary<string, string> { ["X-Upload-Ticket"] = ticket }
+        });
+
+        foreach (var failed in results.Where(r => !r.Success))
+            ...   // still picked, so "try again" costs the user nothing
+    }
+
+    void OnProgress(MediaPickerUploadProgress p)
+    {
+        percent = p.Percent ?? 0;
+        StateHasChanged();
+    }
+}
+```
+
+`AutoUpload="true"` sends each photo the moment it is picked, for when the address is known up front. `Uploaded` reports each result, and the server's answer comes back verbatim in `MediaPickerUploadResult.Body`. A successful upload takes the photo out of the picker unless you pass `keep: true`, which is how the same photos go to more than one place.
+
+:::caution
+Do not hand an API access token to the browser just to upload. Post to your **own** origin with a short-lived ticket in `Headers`, and let your server attach the real credential — same origin, no CORS, and nothing reusable if the ticket leaks.
+:::
+
+### Blazor-only properties
+
+| Property | Type | Default | Description |
+|---|---|---|---|
+| `UploadUrl` | `MediaPickerUpload?` | `null` | Where the browser posts each photo — `Url`, `FieldName` (default `file`), `FileName`, `Method`, `Headers`, `WithCredentials` |
+| `AutoUpload` | bool | `false` | Upload as soon as a photo is picked, rather than waiting for `UploadAllAsync` |
+| `LoadBytes` | bool? | `null` | Fill `MediaPickerItem.Data` on pick. Defaults to `true`, or `false` when `UploadUrl` is set |
+| `MaxReadSize` | long | 32MB | Refuses to read a photo larger than this into .NET |
+
+**Methods:** `UploadAllAsync(upload?, keep?, ct)`, `UploadAsync(item, upload?, keep?, ct)`, `ClearAsync()`.
+
 ## Properties
 
 | Property | Type | Default | Description |
@@ -90,12 +156,14 @@ On Blazor `OutputFormat` is a string (`"jpeg"` / `"png"`), and each `MediaPicker
 - `PhotoAdded` / `PhotoRemoved` — a photo was added or removed (`MediaPickerItem`).
 - `PhotosChanged` (MAUI event + `PhotosChangedCommand`; Blazor `EventCallback`) — the collection changed.
 - `PermissionDenied` — camera/gallery access was denied (message string).
+- `Uploaded` (Blazor) — one photo finished uploading: `MediaPickerUploadResult` with `Success`, `StatusCode` and the server's `Body`.
+- `UploadProgress` (Blazor) — how far a photo's upload has got, from the browser's own upload events (`Percent` is null when the size is unknown).
 
 ## How it works
 
 - **Multi-photo** is add-one-at-a-time — each tap picks/captures a single photo and appends until `MaxPhotos`. The OS pickers do not offer native multi-select here.
 - **MAUI** is a plain `ContentView` using the built-in `Microsoft.Maui.Media.MediaPicker` — no handler or builder registration. The `MediaPicker` drives the OS permission prompts; a denial surfaces `PermissionDeniedText`.
-- **Blazor** self-imports its JS module (no DI). Gallery/camera use a hidden `<input type="file" accept="image/*">` (with `capture="environment"` for the camera); compression/resize/format-conversion happen on an offscreen canvas.
+- **Blazor** self-imports its JS module (no DI). Gallery/camera use a hidden `<input type="file" accept="image/*">` (with `capture="environment"` for the camera); compression/resize/format-conversion happen on an offscreen canvas, and the encoded blob is kept there — see [Where the bytes live](#where-the-bytes-live-blazor).
 - **Viewing** reuses the [ImageViewer](/controls/imageviewer/) (pinch/zoom); **editing** reuses the [ImageEditor](/controls/imageeditor/).
 
 ## AI Skill
