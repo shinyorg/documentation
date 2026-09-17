@@ -9,6 +9,7 @@ description: Every Shiny.AppDeviceBridge bridge — routes, events, platforms an
 | settings (built in) | `GET/DELETE settings/{local\|secure}`, `GET/PUT/DELETE settings/{scope}/{key}` | |
 | files (built in) | `GET files`, `GET files/{root}/list`, `GET files/{root}/info`, `GET/PUT files/{root}/content`, `POST files/{root}/append`, `POST files/{root}/directory`, `DELETE files/{root}/entry`, `POST files/{root}/move`, `POST files/{root}/copy`, with paths in `?path=` | |
 | AppSupport | `GET app/info`, `POST/DELETE app/orientation`, `POST app/browser`, `POST app/map`, `POST app/settings`, `GET app/store`, `POST app/store/open`, `POST app/store/review`, `POST app/share`, `POST app/haptics`, `POST/DELETE app/vibrate`, `GET app/connectivity`, `GET app/battery`, `GET app/screen`, `PUT/DELETE app/screen/keep-awake`, `GET/PUT/DELETE app/clipboard`, `GET app/startup`, `POST/DELETE app/startup/registration`, `POST app/startup/settings` | `app.orientation`, `app.culture`, `app.timezone`, `app.connectivity`, `app.battery`, `app.energysaver` |
+| Sensors | `GET sensors`, `POST/DELETE sensors/{sensor}`, `DELETE sensors` | `sensors.accelerometer`, `sensors.gyroscope`, `sensors.magnetometer`, `sensors.compass`, `sensors.barometer`, `sensors.orientation`, `sensors.shake` |
 | GPS | `GET gps/status`, `POST gps/access`, `GET gps/last`, `GET gps/current`, `GET/POST/DELETE gps/listener` | `gps.reading` |
 | Geofences | `GET geofences/status`, `POST geofences/access`, `GET/POST/DELETE geofences/regions`, `DELETE geofences/regions/{id}`, `GET geofences/regions/{id}/state` | `geofence.status` |
 | Motion activity | `GET motion/status`, `POST motion/access`, `GET motion/current`, `GET/POST/DELETE motion/listener` | `motion.activity` |
@@ -26,6 +27,9 @@ description: Every Shiny.AppDeviceBridge bridge — routes, events, platforms an
 | Photos | `GET photos`, `POST photos/access`, `POST photos/pick`, `GET photos/library`, `GET photos/library/{id}/thumbnail`, `POST photos/library/{id}/export` | |
 | Folders | `GET folders`, `POST folders/pick`, `DELETE folders/{root}` | |
 | Tray icon | `GET/POST/DELETE tray`, `GET/PUT/DELETE tray/{id}`, `PUT/DELETE tray/{id}/menu`, `POST tray/{id}/menu/show`, `POST tray/{id}/notification`, `PUT/DELETE tray/{id}/animation` | `tray.click`, `tray.menu` |
+| Quick entry | `GET quickentry`, `PUT quickentry/options`, `POST quickentry/{show,hide,toggle}`, `GET/PUT quickentry/prompt`, `POST quickentry/prompt/reset`, `POST quickentry/glow/{show,hide,pulse}` | `quickentry.submitted`, `quickentry.suggestion`, `quickentry.cancelled`, `quickentry.microphone`, `quickentry.opened`, `quickentry.closed` |
+| Device camera | `GET camera`, `POST camera/access`, `POST camera/open`, `POST camera/close`, `POST camera/photo`, `POST/DELETE camera/recording`, `PUT camera/settings`, `GET camera/preview` (MJPEG) | `camera.status` |
+| Pi camera | `GET rpicamera`, `GET rpicamera/snapshot`, `POST rpicamera/capture`, `GET rpicamera/stream` (MJPEG), `GET/PUT rpicamera/controls`, `DELETE rpicamera/streams` | |
 
 The routes are the wire protocol. A page doesn't build them by hand: every bridge has a typed client, in C# for
 Blazor and in TypeScript for everything else, generated from one declaration so the two can't drift — see
@@ -266,8 +270,8 @@ builder.AddAppSupportBridge(startup: o => o.Arguments.Add("--autostart"));
 - **Android folders aren't paths.** The files bridge reads and writes them through the Storage Access Framework,
   but bridges that hand the OS a file path — sharing, transfers, notification images — refuse them.
 
-**Tray icon:** the system tray on Windows, the menu bar on macOS, the status notifier area on Linux —
-desktop only, `501` elsewhere.
+**Tray icon** (`Shiny.AppDeviceBridge.Desktop`, `AddTrayIconBridge()`): the system tray on Windows, the menu bar on
+macOS, the status notifier area on Linux — desktop only, `501` elsewhere.
 - **Naming an icon:** use `PUT /_bridge/tray/main` rather than `POST /_bridge/tray`. The first call creates
   the icon and later ones adopt it, so a page reload or an applied update doesn't stack up a second icon.
   A `PUT` changes only the properties it sends; `""` clears `tooltip`, `title` or `badge`.
@@ -295,4 +299,154 @@ await new TrayBridge().put("main", {
         { id: "sync", type: "Check", label: "Sync", checked: true }
     ] }
 });
+```
+
+**Quick entry** (`Shiny.AppDeviceBridge.Desktop`, `AddQuickEntryBridge()`): Shiny's quick entry prompt as a borderless,
+always-on-top window that opens over other applications, in the style of Spotlight or a desktop assistant. The page
+configures it, hears what's submitted and writes the answer back. Desktop only: macOS (AppKit and Catalyst), Windows and
+Linux; `501` elsewhere.
+
+```csharp
+builder
+    .AddQuickEntryBridge(
+        o => o.HotKey = "Ctrl+Alt+Space",                         // toggles the window from anywhere
+        quickEntry => quickEntry.ScreenGlow = ScreenGlowTrigger.WhileBusy
+    );
+```
+
+- **Opening it:** the global hotkey, `POST quickentry/show` or `toggle`, or a tray click that calls one. `PUT
+  quickentry/options` changes the hotkey (`""` removes it), size, placement and dismissal while the app runs;
+  `hotKeyRegistered: false` in the status means another application already owns the combination.
+- **The prompt:** `PUT quickentry/prompt` sets the placeholder, suggestions (each with an optional `value` that comes
+  back when it's chosen), `isBusy` with `busyText`, and `response`, the text shown under the entry. Only what you send
+  changes; `""` clears the response and `[]` the suggestions. What you set survives a window that rebuilds its prompt.
+- **Answering:** `quickentry.submitted` goes out as an event *and* as a call the page handles when it's open and
+  `background.js` handles when it isn't, which is the usual case for a window summoned over other applications. Set
+  `isBusy`, do the work, then set `response`.
+- **The glow:** `glow/show`, `glow/hide` and `glow/pulse` drive the colour wash around the screen's edge; the
+  `glow` option lights it while the window is open or while the prompt is busy.
+- **Custom content:** if the app replaces the prompt through `QuickEntryOptions.ContentFactory`, the prompt routes
+  answer `409` and the window routes still work.
+
+```ts
+const quickEntry = new QuickEntryBridge();
+
+await quickEntry.setPrompt({ placeholder: "Ask Field App…", suggestions: [{ text: "Sync now", value: "sync" }] });
+quickEntry.onSubmitted(async ({ text, suggestion }) => {
+    await quickEntry.setPrompt({ isBusy: true, busyText: "Thinking…" });
+    await quickEntry.setPrompt({ isBusy: false, response: await answer(text, suggestion?.value) });
+});
+```
+
+**Device camera** (`Shiny.AppDeviceBridge.Camera`, `AddCameraBridge()`): this device's own camera, driven from a page anywhere — the
+reason being a phone on a mount, framed and fired from a laptop across the room. Not the camera of the machine showing the
+page: that's `getUserMedia` (see [Camera, microphone and location in the page](/appdevicebridge/hosting/#camera-microphone-and-location-in-the-page)).
+Android, iOS, Mac Catalyst, macOS and Windows, through Shiny's `CameraView`; Linux has no camera and answers `501`.
+
+```csharp
+builder.AddCameraBridge(o =>
+{
+    o.Root = "data";                 // captures are filed here…
+    o.Folder = "camera";             // …as camera/IMG_20260916-201502.jpg, camera/VID_….mov
+});
+```
+
+- **A camera screen, not a background service.** The camera runs on a view on screen — iOS won't run one in the
+  background at all — so `GET camera` says whether one is `live`, and until it is every command answers
+  `409 camera_not_open`. That's a normal state: show it as "open the camera on the device", not as an error.
+- **Opening it from afar.** `POST camera/open` (`202`) asks the device to show its camera. Unless something handles
+  `CameraBridgeSession.OpenRequested`, the bridge pushes its own `CameraBridgePage` over the web app — shutter, photo and
+  video, flip, torch, close. `POST camera/close` closes it. For a camera screen of your own, put a `CameraBridgeView` on
+  it, set `PresentWhenOpened = false` and navigate there from `OpenRequested`; the buttons on that screen and the
+  requests from a page run the same methods.
+- **Driving it.** `POST camera/photo` and `POST`/`DELETE camera/recording` capture at full resolution and file into the
+  file root, answering `{ file: { root, path }, kind, size, … }` for the files bridge. `PUT camera/settings` is a
+  patch — `videoMode`, `facing`, `cameraId`, `active`, `filter`, `torchOn`, `zoom` — so two viewers don't undo each
+  other; changing the camera mid-recording is a `422 camera_state`. Phones flip front and back; desktops list
+  `cameras` and set `choosesCamera`, since none of theirs is front or back.
+- **The viewfinder.** `GET camera/preview` is `multipart/x-mixed-replace` MJPEG an `<img>` plays: small (720 px) and 12
+  frames a second by default (`PreviewMaxEdge`, `PreviewFramesPerSecond`, `PreviewQuality`), because latency matters more
+  than smoothness when framing. The device encodes only while someone watches, and a slow viewer gets the newest frame.
+- **Everyone follows the device.** `camera.status` carries the whole status whenever anything changes — somebody picks
+  the phone up and switches to video, and every page's controls follow.
+- **Filing elsewhere.** Register an `ICameraCaptureStore` before `AddCameraBridge` to file captures through your own
+  storage.
+- **Platform setup:** `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` on Apple platforms (plus the camera
+  and audio-input entitlements where sandboxed), `CAMERA` and `RECORD_AUDIO` on Android, the `webcam` and `microphone`
+  capabilities on Windows. `POST camera/access` prompts where the platform will.
+
+```html
+<img src="_bridge/camera/preview?t=1726517702" />   <!-- a new query each time it's shown -->
+```
+
+```ts
+const camera = new CameraBridge();
+camera.onStatus(status => render(status));
+await camera.open();
+const photo = await camera.takePhoto();              // { file: { root: "data", path: "camera/IMG_….jpg" }, … }
+await camera.updateSettings({ videoMode: true, zoom: 2 });
+```
+
+**Sensors** (`Shiny.AppDeviceBridge.AppSupport`, added by `AddAppSupportBridge()`): the accelerometer (g), gyroscope
+(rad/s), magnetometer (µT), compass (degrees from magnetic north), barometer (hPa) and orientation (a quaternion), over
+.NET MAUI Essentials.
+- **Start, then listen.** `POST sensors/compass` with `{ "speed": "UI", "minIntervalMs": 16 }` starts the sensor; readings
+  arrive only as events. Posting again with another speed restarts it; another interval changes only what gets through.
+- **Throttled.** Readings closer together than `minIntervalMs` (16 by default, at least 5) are dropped before they
+  reach the page, so `Fastest` can't flood the event stream. `sensors.shake` is never dropped, and fires only while the
+  accelerometer runs.
+- **Stopped for you.** Every sensor stops when the page's last event stream closes, so a page that navigates away or
+  closes doesn't leave one draining the battery. `DELETE sensors` stops them all.
+- **Platforms.** Whatever Essentials offers on Android, iOS, Mac Catalyst and Windows, and only the sensors the device
+  has. `GET sensors` says which; starting one that isn't there answers `501`. The macOS (AppKit) and Linux (GTK4) heads
+  have none.
+
+```ts
+const sensors = new SensorsBridge();
+sensors.onCompass(({ heading }) => needle.style.rotate = `${-heading}deg`);
+await sensors.start("Compass", { speed: "UI", minIntervalMs: 50 });
+```
+
+**Pi camera** (`Shiny.AppDeviceBridge.RpiCamera`, `http.AddRpiCameraBridge()`): Raspberry Pi cameras through libcamera, with no
+`rpicam-apps` process to launch. Linux with the native shim only; everywhere else `GET rpicamera` says why there is no
+camera and the rest answer `501`.
+
+```csharp
+// The server's own builder: a camera appliance is usually a headless Pi, running the bridge server with no MAUI.
+services.AddShinyHttpServer(http => http
+    .AddAppDeviceBridge(o => o.AppId = "greenhouse")
+    .AddRpiCameraBridge(o =>
+    {
+        o.StreamWidth = 1280;
+        o.StreamHeight = 720;
+        o.Camera.NativeLibraryPath = "/opt/greenhouse/native";
+    }));
+
+await services.BuildServiceProvider().GetRequiredService<AppDeviceBridgeServer>().StartAsync();
+```
+
+- **The native shim.** `libshinyrpi_camera.so` links against libcamera's C++ ABI, so it's built against the libcamera the
+  device runs: on the Pi with `native/shinyrpi-camera/build.sh`, or with the arm64 `Dockerfile` beside it. A missing or
+  mismatched shim doesn't stop the app; the status carries the loader's message.
+- **Snapshots and captures.** `GET rpicamera/snapshot` answers `image/jpeg`; `POST rpicamera/capture` writes the JPEG into
+  a file root, where a transfer, a share or the files bridge picks it up. Frames are encoded on the device, from the
+  sensor's NV12 or YUV.
+- **One stream per camera.** `GET rpicamera/stream` is `multipart/x-mixed-replace` MJPEG that an `<img>` plays directly.
+  The camera is exclusive, so every viewer shares one session: the first viewer decides size, quality and frame rate
+  (capped by `MaxFps`), a slow viewer skips to the newest frame, and a snapshot during a stream comes from it. The
+  session closes when the last viewer leaves, `MaxStreamDuration` ends a viewer that never does, and
+  `DELETE rpicamera/streams` ends them all.
+- **Controls.** `GET rpicamera/controls` lists what the attached sensor accepts; `PUT` applies values to a running stream
+  and to every session opened after. A control the sensor lacks is a `400 unsupported_control`: a Camera Module 3 has
+  autofocus, a v2 doesn't.
+- **Busy.** Another process holding the camera (`rpicam-still`, say) is a `409 camera_unavailable`.
+
+```html
+<img src="_bridge/rpicamera/stream?fps=10" />
+```
+
+```ts
+const camera = new RpiCameraBridge();
+const photo = await camera.capture({ root: "data", path: "photos/now.jpg" });
+await camera.setControls({ values: [{ control: "Brightness", value: 0.2 }] });
 ```

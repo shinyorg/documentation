@@ -1,0 +1,164 @@
+---
+title: Wi-Fi | Getting Started
+description: Cross-platform Wi-Fi for .NET - scan for access points, join and leave networks, manage the networks the device has saved, monitor the current network's SSID/signal/IP/DNS, and host a hotspot
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
+
+Scan for the access points in range, join and leave networks, manage the ones the device has saved,
+watch the network it is actually on — SSID, signal, IP, DNS, gateway — and raise a hotspot. Built on
+`Shiny.Core`, so it runs in any Shiny host: MAUI, console, service, or daemon.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Net.Wifi" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["android", "ios", "windows", "linux", "macos"]} />
+
+## Read this first
+
+Wi-Fi is the most unevenly exposed capability across these platforms, and a lot of what people
+reasonably expect is simply not available to a sandboxed app. iOS has no scanning API. Neither phone
+OS will show an app the networks the *user* saved. Only Android, Windows and Linux can raise a
+hotspot.
+
+Rather than pretend otherwise, every manager here publishes a **`WifiCapabilities`** flags property,
+and anything unavailable throws **`WifiNotSupportedException`** with a message naming the specific
+limit — an Apple entitlement, an Android API level that revoked the call, a platform with no such
+concept. Check the flag to branch; catch the exception as a backstop.
+
+```csharp
+if (wifi.Capabilities.HasFlag(WifiCapabilities.Scan))
+    networks = await wifi.Scan(ct);
+else
+    ShowJoinByNameField();   // iOS
+```
+
+## What each platform can do
+
+| Operation | Android | iOS / Catalyst | macOS | Windows | Linux |
+|-----------|---------|----------------|-------|---------|-------|
+| Scan | ✅ | ❌ | ✅ | ✅ | ✅ |
+| Connect / disconnect | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Current network (SSID, signal) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Current network (IP, DNS, gateway) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Radio on/off | ⚠️ API ≤ 28 | ❌ | ✅ | ✅ | ✅ |
+| Hotspot | ⚠️ local-only | ❌ | ❌ | ✅ | ✅ |
+| Hotspot client list | ❌ | ❌ | ❌ | ✅ | ✅ |
+| Known networks — list | ⚠️ own app | ⚠️ own app | ✅ | ✅ | ✅ |
+| Known networks — forget | ⚠️ own app | ⚠️ own app | ⚠️ admin auth | ✅ | ✅ |
+| Known networks — rejoin by id | ⚠️ API ≤ 28 | ❌ | ✅ | ✅ | ✅ |
+
+See [Platform Setup](/client/wifi/platform/) for what each of those costs in manifest entries and
+entitlements, and why the gaps exist.
+
+## Features
+
+- **Scan** — one `WifiNetwork` per BSSID with SSID, security scheme, dBm and 0-100 signal, frequency, band, and channel.
+- **Connect** — join by name and passphrase; returns once an address has been assigned, not merely on association.
+- **Current network** — SSID, BSSID, security, signal, every IP, DNS resolver, gateway and mask, with a de-duplicated `Changed` event.
+- **Known networks** — list what the device has saved, forget one, or rejoin one without handing the passphrase over again.
+- **Hotspot** — raise an access point, read back the SSID and passphrase actually in use, and list connected clients on Windows and Linux.
+- **Honest capabilities** — no silent empty results standing in for "this platform cannot do that".
+- **AOT & trimmer compatible**.
+
+<AiSkill skillName="shiny-wifi" />
+
+## Setup
+
+<LibBuilder componentName="wifi" client:load />
+
+Install the package:
+
+```bash
+dotnet add package Shiny.Net.Wifi
+```
+
+On Linux, install the NetworkManager-backed package instead — it registers the same interfaces:
+
+```bash
+dotnet add package Shiny.Net.Wifi.Linux
+```
+
+Register what you need:
+
+```csharp
+using Shiny;
+
+builder.Services.AddWifi();           // IWifiManager
+builder.Services.AddWifiHotspot();    // IWifiHotspot
+```
+
+:::caution[Ask for access before scanning]
+Android returns an *empty list* rather than an error when location has not been granted, and both
+phone platforms leave the SSID null rather than failing. Call `RequestAccess()` before `Scan()` or
+before `GetCurrentNetwork()`. See [Platform Setup](/client/wifi/platform/).
+:::
+
+## Scan for networks
+
+```csharp
+public class NetworkPicker(IWifiManager wifi)
+{
+    public async Task<IReadOnlyList<WifiNetwork>> Load(CancellationToken ct)
+    {
+        var access = await wifi.RequestAccess(ct);
+        if (access != AccessState.Available)
+            return [];
+
+        var found = await wifi.Scan(ct);
+
+        // one network shows up once per radio on a multi-band or mesh setup, so results are
+        // unique on BSSID - group and take the strongest for a picker
+        return found
+            .GroupBy(x => x.Ssid)
+            .Select(g => g.MaxBy(x => x.SignalStrengthPercent)!)
+            .ToList();
+    }
+}
+```
+
+## Join a network
+
+```csharp
+var joined = await wifi.Connect(
+    new WifiConnectionRequest("Kitchen") { Passphrase = "hunter2hunter2" },
+    ct
+);
+
+Console.WriteLine($"{joined.Ssid} at {joined.IPv4Address}");
+```
+
+## Rejoin a saved network
+
+```csharp
+var saved = await wifi.GetKnownNetworks(ct);
+
+// on Windows, macOS and Linux this rejoins without needing the passphrase again
+if (wifi.Capabilities.HasFlag(WifiCapabilities.ConnectKnownNetwork))
+    await wifi.Connect(saved[0].Id, ct);
+```
+
+On iOS and Android the list holds only what **your own app** saved — see
+[Known Networks](/client/wifi/known-networks/).
+
+## Watch the current network
+
+```csharp
+wifi.Changed += (_, network) =>
+{
+    if (network == null)
+        return;   // dropped off Wi-Fi
+
+    Console.WriteLine($"{network.Ssid} — {network.SignalStrengthPercent}%");
+    Console.WriteLine($"IP  {network.IPv4Address}");
+    Console.WriteLine($"DNS {String.Join(", ", network.DnsAddresses)}");
+};
+```
+
+Read on: [Networks](/client/wifi/networks/) · [Known Networks](/client/wifi/known-networks/) ·
+[Hotspot](/client/wifi/hotspot/) · [Platform Setup](/client/wifi/platform/)

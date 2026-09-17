@@ -130,7 +130,7 @@ const AppleInfoPlist = (props: Props) => {
         <key>NSSupportsLiveActivities</key>
         <true/>
         <!-- Without this key AND a WidgetKit extension of your own, Start() succeeds and nothing
-             appears - https://shinylib.net/liveactivities/widget/ -->
+             appears - https://shinylib.net/client/liveactivities/widget/ -->
         <!-- Optional: opt into high-frequency ActivityKit push updates
         <key>NSSupportsLiveActivitiesFrequentUpdates</key>
         <true/>

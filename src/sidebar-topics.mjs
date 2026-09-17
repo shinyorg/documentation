@@ -40,15 +40,15 @@ export const sidebarTopics = [
         label: 'Core',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'core/' },
-          { label: 'Platform', link: 'core/platform' },
-          { label: 'Lifecycle Hooks', link: 'core/lifecycle' },
-          { label: 'Startup Tasks', link: 'core/startup' },
-          { label: 'Device Monitoring', link: 'core/device-monitoring' },
-          { label: 'Access & Permissions', link: 'core/permissions' },
-          { label: 'Android Foreground Service', link: 'core/android-foreground' },
-          { label: 'Utilities', link: 'core/utilities' },
-          { label: 'Release Notes', link: 'core/release-notes' }
+          { label: 'Getting Started', link: 'client/core/' },
+          { label: 'Platform', link: 'client/core/platform' },
+          { label: 'Lifecycle Hooks', link: 'client/core/lifecycle' },
+          { label: 'Startup Tasks', link: 'client/core/startup' },
+          { label: 'Device Monitoring', link: 'client/core/device-monitoring' },
+          { label: 'Access & Permissions', link: 'client/core/permissions' },
+          { label: 'Android Foreground Service', link: 'client/core/android-foreground' },
+          { label: 'Utilities', link: 'client/core/utilities' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -167,46 +167,46 @@ export const sidebarTopics = [
   {
     id: 'hardware',
     label: 'Hardware & Connectivity',
-    link: '/ble/',
+    link: '/client/ble/',
     icon: 'link',
     items: [
       {
         label: 'BluetoothLE',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'ble/' },
-          { label: 'BLE Manager', link: 'ble/manager' },
-          { label: 'Peripheral', link: 'ble/peripheral' },
-          { label: 'Services/Characteristics/Descriptors', link: 'ble/gatt' },
-          { label: 'L2CAP', link: 'ble/l2cap' },
-          { label: 'Background Operations', link: 'ble/background' },
-          { label: 'Best Practice/FAQ', link: 'ble/best-practices' },
+          { label: 'Getting Started', link: 'client/ble/' },
+          { label: 'BLE Manager', link: 'client/ble/manager' },
+          { label: 'Peripheral', link: 'client/ble/peripheral' },
+          { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
+          { label: 'L2CAP', link: 'client/ble/l2cap' },
+          { label: 'Background Operations', link: 'client/ble/background' },
+          { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'ble/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'BluetoothLE Hosting',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'blehosting/' },
-          { label: 'GATT Service', link: 'blehosting/gatt' },
-          { label: 'Source Generator', link: 'blehosting/source-generator' },
-          { label: 'L2CAP', link: 'blehosting/l2cap' },
-          { label: 'Release Notes', link: 'blehosting/release-notes' }
+          { label: 'Getting Started', link: 'client/blehosting/' },
+          { label: 'GATT Service', link: 'client/blehosting/gatt' },
+          { label: 'Source Generator', link: 'client/blehosting/source-generator' },
+          { label: 'L2CAP', link: 'client/blehosting/l2cap' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'Beacons',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'beacons/' },
-          { label: 'Ranging', link: 'beacons/ranging' },
-          { label: 'Region Monitoring', link: 'beacons/monitoring' },
-          { label: 'Eddystone', link: 'beacons/eddystone' },
-          { label: 'Broadcasting', link: 'beacons/broadcasting' },
-          { label: 'Distance & Accuracy', link: 'beacons/distance' },
-          { label: 'Release Notes', link: 'beacons/release-notes' }
+          { label: 'Getting Started', link: 'client/beacons/' },
+          { label: 'Ranging', link: 'client/beacons/ranging' },
+          { label: 'Region Monitoring', link: 'client/beacons/monitoring' },
+          { label: 'Eddystone', link: 'client/beacons/eddystone' },
+          { label: 'Broadcasting', link: 'client/beacons/broadcasting' },
+          { label: 'Distance & Accuracy', link: 'client/beacons/distance' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -230,27 +230,27 @@ export const sidebarTopics = [
         label: 'Locations',
         jumpTo: true,
         items:[
-          { label: 'Architecture', link: 'locations/architecture' },
-          { label: 'GPS', link: 'locations/gps' },
-          { label: 'Platform GPS Requests', link: 'locations/platform-requests' },
-          { label: 'Geofencing', link: 'locations/geofencing' },
-          { label: 'Motion Activity', link: 'locations/motionactivity' },
-          { label: 'AI Tools', link: 'locations/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Architecture', link: 'client/locations/architecture' },
+          { label: 'GPS', link: 'client/locations/gps' },
+          { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
+          { label: 'Geofencing', link: 'client/locations/geofencing' },
+          { label: 'Motion Activity', link: 'client/locations/motionactivity' },
+          { label: 'AI Tools', link: 'client/locations/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'locations/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'Network Discovery',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'discovery/' },
-          { label: 'Browsing & Resolving', link: 'discovery/browsing' },
-          { label: 'Publishing', link: 'discovery/publishing' },
-          { label: 'SSDP & UPnP', link: 'discovery/ssdp' },
-          { label: 'WS-Discovery & ONVIF', link: 'discovery/wsdiscovery' },
-          { label: 'Platform Setup', link: 'discovery/platform' },
-          { label: 'Release Notes', link: 'discovery/release-notes' }
+          { label: 'Getting Started', link: 'client/discovery/' },
+          { label: 'Browsing & Resolving', link: 'client/discovery/browsing' },
+          { label: 'Publishing', link: 'client/discovery/publishing' },
+          { label: 'SSDP & UPnP', link: 'client/discovery/ssdp' },
+          { label: 'WS-Discovery & ONVIF', link: 'client/discovery/wsdiscovery' },
+          { label: 'Platform Setup', link: 'client/discovery/platform' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -258,12 +258,12 @@ export const sidebarTopics = [
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },
         items: [
-          { label: 'Getting Started', link: 'wifi/' },
-          { label: 'Networks', link: 'wifi/networks' },
-          { label: 'Known Networks', link: 'wifi/known-networks' },
-          { label: 'Hotspot', link: 'wifi/hotspot' },
-          { label: 'Platform Setup', link: 'wifi/platform' },
-          { label: 'Release Notes', link: 'wifi/release-notes' }
+          { label: 'Getting Started', link: 'client/wifi/' },
+          { label: 'Networks', link: 'client/wifi/networks' },
+          { label: 'Known Networks', link: 'client/wifi/known-networks' },
+          { label: 'Hotspot', link: 'client/wifi/hotspot' },
+          { label: 'Platform Setup', link: 'client/wifi/platform' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -271,9 +271,9 @@ export const sidebarTopics = [
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },
         items: [
-          { label: 'Getting Started', link: 'screenrecorder/' },
-          { label: 'Platform Setup', link: 'screenrecorder/platform' },
-          { label: 'Release Notes', link: 'screenrecorder/release-notes' }
+          { label: 'Getting Started', link: 'client/screenrecorder/' },
+          { label: 'Platform Setup', link: 'client/screenrecorder/platform' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
     ]
@@ -328,11 +328,11 @@ export const sidebarTopics = [
         label: 'Contact Store',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'contactstore/' },
-          { label: 'Permissions', link: 'contactstore/permissions' },
-          { label: 'Querying', link: 'contactstore/querying' },
-          { label: 'AI Tools', link: 'contactstore/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'contactstore/release-notes' }
+          { label: 'Getting Started', link: 'client/contactstore/' },
+          { label: 'Permissions', link: 'client/contactstore/permissions' },
+          { label: 'Querying', link: 'client/contactstore/querying' },
+          { label: 'AI Tools', link: 'client/contactstore/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -340,11 +340,11 @@ export const sidebarTopics = [
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },
         items:[
-          { label: 'Getting Started', link: 'calendarstore/' },
-          { label: 'Permissions', link: 'calendarstore/permissions' },
-          { label: 'Querying', link: 'calendarstore/querying' },
-          { label: 'AI Tools', link: 'calendarstore/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'calendarstore/release-notes' }
+          { label: 'Getting Started', link: 'client/calendarstore/' },
+          { label: 'Permissions', link: 'client/calendarstore/permissions' },
+          { label: 'Querying', link: 'client/calendarstore/querying' },
+          { label: 'AI Tools', link: 'client/calendarstore/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
     ]
@@ -436,73 +436,73 @@ export const sidebarTopics = [
   {
     id: 'background',
     label: 'Background & Delivery',
-    link: '/jobs/',
+    link: '/client/jobs/',
     icon: 'clock',
     items: [
       {
         label: 'Jobs',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'jobs/' },
-          { label: 'Architecture', link: 'jobs/architecture' },
-          { label: 'Create a Job', link: 'jobs/create' },
-          { label: 'Managing Jobs', link: 'jobs/managing' },
-          { label: 'FAQ', link: 'jobs/faq' },
-          { label: 'Release Notes', link: 'jobs/release-notes' }
+          { label: 'Getting Started', link: 'client/jobs/' },
+          { label: 'Architecture', link: 'client/jobs/architecture' },
+          { label: 'Create a Job', link: 'client/jobs/create' },
+          { label: 'Managing Jobs', link: 'client/jobs/managing' },
+          { label: 'FAQ', link: 'client/jobs/faq' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'Local Notifications',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'notifications/' },
-          { label: 'Sending Notifications', link: 'notifications/sending' },
-          { label: 'Channels', link: 'notifications/channels' },
-          { label: 'Platform Specific', link: 'notifications/platform' },
-          { label: 'Scheduling & Triggers', link: 'notifications/scheduling' },
-          { label: 'AI Tools', link: 'notifications/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'notifications/release-notes' }
+          { label: 'Getting Started', link: 'client/notifications/' },
+          { label: 'Sending Notifications', link: 'client/notifications/sending' },
+          { label: 'Channels', link: 'client/notifications/channels' },
+          { label: 'Platform Specific', link: 'client/notifications/platform' },
+          { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' },
+          { label: 'AI Tools', link: 'client/notifications/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'Push Notifications',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'push/' },
-          { label: 'Architecture', link: 'push/architecture' },
-          { label: 'Native', link: 'push/native' },
-          { label: 'Platform Specific', link: 'push/platform' },
-          { label: 'Azure Push Notifications', link: 'push/azure' },
-          { label: 'Firebase (iOS)', link: 'push/firebase-ios' },
-          { label: 'FAQ', link: 'push/faq' },
+          { label: 'Getting Started', link: 'client/push/' },
+          { label: 'Architecture', link: 'client/push/architecture' },
+          { label: 'Native', link: 'client/push/native' },
+          { label: 'Platform Specific', link: 'client/push/platform' },
+          { label: 'Azure Push Notifications', link: 'client/push/azure' },
+          { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
+          { label: 'FAQ', link: 'client/push/faq' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'push/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'Live Activities',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'liveactivities/', badge: { text: 'New', variant: 'success' } },
-          { label: 'iOS Widget Extension', link: 'liveactivities/widget' },
-          { label: 'Push Tokens & Server Updates', link: 'liveactivities/push' },
-          { label: 'Release Notes', link: 'liveactivities/release-notes' }
+          { label: 'Getting Started', link: 'client/liveactivities/', badge: { text: 'New', variant: 'success' } },
+          { label: 'iOS Widget Extension', link: 'client/liveactivities/widget' },
+          { label: 'Push Tokens & Server Updates', link: 'client/liveactivities/push' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
         label: 'HTTP Transfers',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'httptransfers/' },
-          { label: 'Architecture', link: 'httptransfers/architecture' },
-          { label: 'Transfers', link: 'httptransfers/transfers' },
-          { label: 'Azure Blob Storage', link: 'httptransfers/azure' },
-          { label: 'AWS S3', link: 'httptransfers/aws-s3' },
-          { label: 'Transfer Delegate', link: 'httptransfers/delegate' },
-          { label: 'Monitoring', link: 'httptransfers/monitoring' },
-          { label: 'Transfer Progress', link: 'httptransfers/progress' },
+          { label: 'Getting Started', link: 'client/httptransfers/' },
+          { label: 'Architecture', link: 'client/httptransfers/architecture' },
+          { label: 'Transfers', link: 'client/httptransfers/transfers' },
+          { label: 'Azure Blob Storage', link: 'client/httptransfers/azure' },
+          { label: 'AWS S3', link: 'client/httptransfers/aws-s3' },
+          { label: 'Transfer Delegate', link: 'client/httptransfers/delegate' },
+          { label: 'Monitoring', link: 'client/httptransfers/monitoring' },
+          { label: 'Transfer Progress', link: 'client/httptransfers/progress' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'httptransfers/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
     ]
@@ -544,11 +544,11 @@ export const sidebarTopics = [
         label: 'Configuration',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'configuration/' },
-          { label: 'JSON Platform Bundle', link: 'configuration/json' },
-          { label: 'Platform Preferences', link: 'configuration/preferences' },
-          { label: 'Remote Configuration', link: 'configuration/remote' },
-          { label: 'Release Notes', link: 'configuration/release-notes' }
+          { label: 'Getting Started', link: 'client/configuration/' },
+          { label: 'JSON Platform Bundle', link: 'client/configuration/json' },
+          { label: 'Platform Preferences', link: 'client/configuration/preferences' },
+          { label: 'Remote Configuration', link: 'client/configuration/remote' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -1152,16 +1152,16 @@ export const sidebarTopics = [
         label: 'Data Sync',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'datasync/' },
-          { label: 'Architecture', link: 'datasync/architecture' },
-          { label: 'Entity Registration', link: 'datasync/entity-registration' },
-          { label: 'Conflict Resolution', link: 'datasync/conflict-resolution' },
-          { label: 'Removal Strategies', link: 'datasync/removal-strategies' },
-          { label: 'Sync Interceptors', link: 'datasync/sync-interceptor' },
-          { label: 'Server API Contracts', link: 'datasync/server-contracts' },
-          { label: 'Platform Behavior', link: 'datasync/platform-behavior' },
-          { label: 'Custom Transports', link: 'datasync/custom-transports' },
-          { label: 'Release Notes', link: 'datasync/release-notes' }
+          { label: 'Getting Started', link: 'client/datasync/' },
+          { label: 'Architecture', link: 'client/datasync/architecture' },
+          { label: 'Entity Registration', link: 'client/datasync/entity-registration' },
+          { label: 'Conflict Resolution', link: 'client/datasync/conflict-resolution' },
+          { label: 'Removal Strategies', link: 'client/datasync/removal-strategies' },
+          { label: 'Sync Interceptors', link: 'client/datasync/sync-interceptor' },
+          { label: 'Server API Contracts', link: 'client/datasync/server-contracts' },
+          { label: 'Platform Behavior', link: 'client/datasync/platform-behavior' },
+          { label: 'Custom Transports', link: 'client/datasync/custom-transports' },
+          { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
       {
@@ -1428,7 +1428,7 @@ export const sidebarTopicsOptions = {
     '/blog',
     '/blog/**/*',
     '/foundation/hosting/uno',
-    '/core/android-foreground',
+    '/client/core/android-foreground',
     '/mediator/extensions',
     '/controls/tableview/release-notes',
     '/controls/scheduler/release-notes',

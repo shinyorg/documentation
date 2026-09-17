@@ -28,11 +28,11 @@ app, served from the device itself, updated from your own server, and able to ca
 ┌─ MAUI app ───────────────────────────────────────────────────┐
 │  WebAppHostView ── WebView ──▶ http://127.0.0.1:5780         │
 │                                   │                          │
-│  WebAppHost ── Shiny.Net.HttpServer (loopback only)          │
-│    ├─ session guard   launch token → HttpOnly cookie         │
+│  AppDeviceBridgeServer ── Shiny.Net.HttpServer (configurable)│
+│    ├─ bridge policy   on this device · launch session        │
 │    ├─ /_bridge/*      device · location · BLE · push · …     │
 │    ├─ /_bridge/events Server-Sent Events                     │
-│    └─ static files ◀─ ZipFileSource ◀─ baseline or download  │
+│    └─ WebAppHost ◀─ ZipFileSource ◀─ baseline or download    │
 │                                              ▲               │
 └──────────────────────────────────────────────┼───────────────┘
                                                │ signed release
@@ -52,15 +52,17 @@ app, served from the device itself, updated from your own server, and able to ca
 
 | Package | Use it in | What it does |
 | --- | --- | --- |
-| `Shiny.AppDeviceBridge.Maui` | the app | `UseWebAppHost`, `WebAppHostView`, `WebAppHostPage`, `AllowWebPermissions`, `AddWebAppEndpoints`, `AddWebAppAuthentication`, `AddWebAppAuthorization` |
+| `Shiny.AppDeviceBridge.Maui` | the app | `UseAppDeviceBridge`: `AddShinyHttpServer` with the bridges on it, started with the app and restarted on resume |
+| `Shiny.AppDeviceBridge.WebView` | the app | `UseWebAppHost`, `WebAppHostView`, `WebAppHostPage`, `AllowWebPermissions`: the web app in a WebView, over-the-air updates, the dev server proxy, the launch session and `background.js` |
 | `Shiny.AppDeviceBridge.Blazor` | the Blazor WebAssembly app | `AddWebAppHostClient()`: the page's transport, typed clients for the built-in bridges (`IHostBridge`, `ISettingsBridge`, `IFilesBridge`, `ILinksBridge`), `WebAppEvents`, `WebAppNativeCalls` (typed C# handlers for jobs, GPS, geofences and push), and `WebAppBridge` for endpoints of your own |
 | `Shiny.AppDeviceBridge.Client` | (dependency) | the typed-client foundation: `IBridgeTransport`, `BridgeException`, the `[BridgeClient]` attributes and the generator that implements them, and the built-in bridges' contracts |
 | `Shiny.AppDeviceBridge.{Bridge}.Client` | the web app | one per bridge: its contracts and typed client — `ICalendarBridge`, `IWifiBridge`, … — registered with `Add{Bridge}BridgeClient()` |
 | `@shinyorg/appdevicebridge` | a JavaScript or TypeScript web app | the same typed clients in TypeScript, generated from the same declarations (`clients/typescript`) |
-| `Shiny.AppDeviceBridge` | (dependency) | host, updater, install store, session guard, bridge contracts, built-in settings and files endpoints, your own endpoints and their authentication; no MAUI dependency |
+| `Shiny.AppDeviceBridge` | (dependency) | the bridge server: `http.AddAppDeviceBridge()` on Shiny.Net.HttpServer's `ShinyHttpServerBuilder`, `AppDeviceBridgeOptions` (mount points, allowed hosts, the bridge policy), bridge contracts, built-in settings, files and native-call endpoints; no MAUI dependency |
+| `Shiny.AppDeviceBridge.Tunnel` | the app, or a headless device | `http.AddAppDeviceBridgeTunnel()`: a public HTTPS address for the server, opened and closed while the app runs; everything through it is treated as a remote caller |
 | `Shiny.AppDeviceBridge.Core` | (dependency) | protocol contracts, version ordering, release signatures |
 | `Shiny.AppDeviceBridge.AspNetCore` | your server | `AddWebAppReleases`, `MapWebAppReleases`, file-system release store |
-| `Shiny.AppDeviceBridge.AppSupport` | the app | `AddAppSupportBridge()` — device info, orientation, browser, maps, settings, app store, launch at login, share, haptics and vibration, connectivity, battery, screen and clipboard |
+| `Shiny.AppDeviceBridge.AppSupport` | the app | `AddAppSupportBridge()` — device info, orientation, browser, maps, settings, app store, launch at login, share, haptics and vibration, connectivity, battery, screen and clipboard; and `/_bridge/sensors` — accelerometer, gyroscope, magnetometer, compass, barometer and orientation |
 | `Shiny.AppDeviceBridge.Locations` | the app | `AddGpsBridge()`, `AddGeofenceBridge()`, `AddLocationBridges()`, `AddMotionActivityBridge()` |
 | `Shiny.AppDeviceBridge.BluetoothLE` | the app | `AddBluetoothLEBridge()` |
 | `Shiny.AppDeviceBridge.Obd` | the app | `AddObdBridge()`: OBD-II over Bluetooth LE or Wi-Fi adapters — decoded PIDs, VIN, trouble codes, live readings |
@@ -75,18 +77,20 @@ app, served from the device itself, updated from your own server, and able to ca
 | `Shiny.AppDeviceBridge.Speech` | the app | `AddSpeechBridge()`: on-device speech recognition, dictation as events, text-to-speech, voices |
 | `Shiny.AppDeviceBridge.Contacts` | the app | `AddContactsBridge()`: access, paged search, read, photos, create, update and delete (Android, iOS) |
 | `Shiny.AppDeviceBridge.Calendar` | the app | `AddCalendarBridge()`: access, calendars, events in a date range, create, update and delete |
+| `Shiny.AppDeviceBridge.Camera` | the app | `AddCameraBridge()`: this device's own camera driven from a page anywhere — a live MJPEG viewfinder, photos and video filed into a file root, lens, zoom, torch and effects; `CameraBridgeView` for a camera screen of your own |
 | `Shiny.AppDeviceBridge.Photos` | the app | `AddPhotosBridge()`: the system photo picker, and the photo library — pages, thumbnails and full-size exports — as files in a file root |
-| `Shiny.AppDeviceBridge.Folders` | the app | `AddFoldersBridge()`: the platform's folder picker, with each picked folder remembered as a file root across launches |
-| `Shiny.AppDeviceBridge.TrayIcon` | the app | `AddTrayIconBridge()`: system tray / menu bar icons, menus, badges, notifications and animation, with clicks handed back to the web app |
+| `Shiny.AppDeviceBridge.Folders` | the app | `AddFoldersBridge()`: the platform's folder picker, and `FolderRoots` for folders the app adds by path — each remembered as a file root across launches |
+| `Shiny.AppDeviceBridge.Desktop` | the app | `AddTrayIconBridge()`: system tray / menu bar icons, menus, badges, notifications and animation. `AddQuickEntryBridge()`: a prompt window that opens over other applications from a global hotkey. Both hand what the user does back to the web app |
+| `Shiny.AppDeviceBridge.RpiCamera` | the app, or a headless Pi | `http.AddRpiCameraBridge()` on the server's builder: Raspberry Pi cameras through libcamera — snapshots, captures into a file root, sensor controls and a shared live MJPEG stream |
 
 ## The app
 
 ```csharp
 builder
     .UseMauiApp<App>()
+    .UseAppDeviceBridge(o => o.AppId = "field-app")
     .UseWebAppHost(o =>
     {
-        o.AppId = "field-app";
         o.UseBaseline(typeof(App).Assembly, "webapp.zip", "1.0.0");   // runs offline on first launch
         o.UpdateServer = new Uri("https://api.example.com/webapps");
         o.PublicKey = """
@@ -111,9 +115,13 @@ Updates are optional. Without an `UpdateServer` nothing is checked, downloaded o
 simply serves the zip compiled into it — which is a complete setup on its own:
 
 ```csharp
-o.AppId = "field-app";
-o.UseBaseline(typeof(App).Assembly, "webapp.zip");   // version defaults to 1.0.0
+builder
+    .UseAppDeviceBridge(o => o.AppId = "field-app")
+    .UseWebAppHost(o => o.UseBaseline(typeof(App).Assembly, "webapp.zip"));   // version defaults to 1.0.0
 ```
+
+No web app at all? `UseAppDeviceBridge` alone serves the bridges to callers on the device (any caller in a debug build),
+and the server's own builder and `AuthorizeBridges` decide the rest. See [Security](/appdevicebridge/security/).
 
 There is no manifest, no signing key and no network at any point; the install directory is never even
 created. Add `UpdateServer` and `PublicKey` later and the embedded build becomes the floor that
@@ -131,7 +139,8 @@ Embed the baseline zip with a `LogicalName`:
 ```
 
 The zip can hold the files at its root or under `wwwroot/`. A zipped Blazor publish works either way,
-and its precompressed `.br`/`.gz` files are served as they are.
+and its precompressed `.br`/`.gz` files are served as they are. Only the entry document is sent with `Cache-Control: no-cache`,
+so an update is never hidden behind a cached `index.html`; every other file carries no cache header from the host.
 
 ## Platform setup
 

@@ -1,0 +1,120 @@
+---
+title: Firebase (iOS)
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import LibBuilder from '../../../../components/Boilerplate/LibBuilder';
+
+Firebase Cloud Messaging on iOS requires a separate native binding since Apple does not natively support FCM. This package provides a full iOS Firebase push provider with topic subscription support, while Android continues to use the built-in Shiny.Push Firebase support.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="firebase" /> |
+| Downloads | <NugetDownloads name="Shiny.Push.FirebaseMessaging" /> |
+| Package | <NugetDownloads name="Shiny.Push.FirebaseMessaging" /> |
+
+<PlatformSupport os={["android", "ios"]} />
+
+## Setup
+
+<LibBuilder componentName="pushfirebase" client:load />
+
+### iOS Configuration
+
+:::note[Option 1: GoogleService-Info.plist (Recommended)]
+Download your `GoogleService-Info.plist` from the [Firebase Console](https://console.firebase.google.com/) and add it to your iOS project with Build Action set to `BundleResource`.
+:::
+
+:::note[Option 2: Manual Configuration]
+If you cannot use `GoogleService-Info.plist`, configure Firebase manually:
+```csharp
+services.AddPushFirebaseMessaging<MyPushDelegate>(new FirebaseConfiguration(
+    UseEmbeddedConfiguration: false,
+    AppId: "your-app-id",
+    SenderId: "your-sender-id",
+    ProjectId: "your-project-id",
+    ApiKey: "your-api-key"
+));
+```
+:::
+
+### Android Configuration
+
+On Android, this package delegates to the built-in Shiny.Push Firebase support. Follow the standard [Push Notifications Getting Started](/client/push/) guide for Android Firebase setup using `google-services.json`.
+
+### Registration
+
+```csharp
+// Auto-config from GoogleService-Info.plist (iOS) / google-services.json (Android)
+services.AddPushFirebaseMessaging<MyPushDelegate>();
+
+// Or with explicit configuration
+services.AddPushFirebaseMessaging<MyPushDelegate>(new FirebaseConfiguration(
+    UseEmbeddedConfiguration: false,
+    AppId: "your-app-id",
+    SenderId: "your-sender-id",
+    ProjectId: "your-project-id",
+    ApiKey: "your-api-key"
+));
+```
+
+## Topic Subscriptions
+
+On iOS, the Firebase provider implements `IPushTagSupport`, which maps tags to FCM topic subscriptions. Use the standard Shiny tag APIs:
+
+```csharp
+IPushManager pushManager; // injected
+
+if (pushManager.IsTagsSupport())
+{
+    await pushManager.Tags.AddTag("news");
+    await pushManager.Tags.SetTags("premium", "sports");
+    await pushManager.Tags.RemoveTag("news");
+    await pushManager.Tags.ClearTags();
+
+    var tags = pushManager.Tags.RegisteredTags;
+}
+```
+
+## How It Works
+
+On iOS, the provider:
+1. Initializes the Firebase SDK (auto-config or manual)
+2. Swizzles the APNs token and exchanges it for an FCM registration token
+3. Provides the FCM token through the standard `IPushManager.RegistrationToken` property
+4. Maps tag operations to FCM topic subscribe/unsubscribe calls
+
+On Android, it delegates to `Shiny.Push`'s built-in Firebase support with the same `FirebaseConfiguration` options.
+
+:::caution
+Make sure you have enabled "Push Notifications" capability and "Remote Notifications" background mode in your iOS project's Entitlements.
+:::
+
+## Only one Firebase SDK per app
+
+The iOS binding embeds its own copy of the native Firebase SDK. Adding a second Firebase iOS binding to the
+same app (for example one of the `AdamE.Firebase.iOS.*` packages) puts two copies of FirebaseCore in the
+bundle, which means two `FIRApp` classes — the one that gets configured is not necessarily the one that serves
+the token request. Pick one Firebase SDK and use its provider.
+
+The give-away is this line at startup:
+
+```
+objc[1234]: Class FIRApp is implemented in both .../SomeFramework and .../AnotherFramework.
+One of the two will be used. Which one is undefined.
+```
+
+## Troubleshooting
+
+### `RequestAccess()` never returns
+
+No token, no exception, and `IPushDelegate.OnNewToken` is never called. The native FCM completion block is
+waiting on a `FIRApp` that was never configured.
+
+- On **5.0.2 and earlier this was a bug in the library itself** — the Core and Messaging shims shipped in
+  separate frameworks, each with its own FirebaseCore. Upgrade to **5.1.0 or later**.
+- On 5.1.0+, it means a second Firebase iOS SDK is present in the app — see above.
+
+From 5.1.0 this case throws `Firebase has not been configured` instead of hanging.

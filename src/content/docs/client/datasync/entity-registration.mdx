@@ -1,0 +1,179 @@
+---
+title: Entity Registration
+---
+
+Endpoints are registered inside the `AddDataSync` callback — one URL per entity type, one stable key. This page lists every option on `SyncEndpoint`.
+
+## ISyncEntity
+
+Anything sync'd through `IDataSyncManager` must implement `ISyncEntity` — a single property:
+
+```csharp
+public interface ISyncEntity
+{
+    string Identifier { get; }
+}
+```
+
+The `Identifier` is the stable, server-recognized id. The engine uses it to build per-op URLs (`PUT {url}/{id}`, `DELETE {url}/{id}`), to deduplicate within a batch, and to dispatch tombstones.
+
+## Registering an endpoint
+
+```csharp
+builder.Services.AddDataSync<MyDataSyncDelegate>(opts =>
+{
+    opts.RegisterEndpoint<TodoItem>("https://api.example.com/todos");
+
+    opts.RegisterEndpoint<Project>("https://api.example.com/projects", ep =>
+    {
+        // -- Direction --
+        ep.Direction = SyncDirection.Both;           // or PullOnly / PushOnly
+
+        // -- Network policy --
+        ep.UseMeteredConnection = false;             // wait for WiFi
+        ep.Batch = true;                             // coalesce ops per round-trip
+        ep.MaxAttempts = 8;                          // retry transient failures up to 8x
+        ep.RetryBaseDelay = TimeSpan.FromSeconds(3); // base for exponential backoff
+
+        // -- Conflicts --
+        ep.DefaultConflictPolicy = ConflictPolicy.ServerWins;
+
+        // -- Inbox throttle / scheduling --
+        // null          = manual only: PullAll / SyncJob skip; only PullNow<T> pulls it
+        // TimeSpan.Zero = always pull on every scheduled pass (the registration default)
+        // positive      = throttle: PullAll / SyncJob skip while within the window; PullNow bypasses
+        ep.MinPullInterval = TimeSpan.FromMinutes(5);
+
+        // -- Per-verb URL overrides --
+        ep.PullUrl = "https://api.example.com/projects/feed";  // GET a different URL on pull
+        ep.BatchUrl = "https://api.example.com/projects/bulk"; // POST batched ops elsewhere
+        ep.CursorParameter = "updatedSince";          // default "since"; set to null to omit
+
+        // -- Tombstones (separate server-side delete stream) --
+        ep.TombstoneUrl = "https://api.example.com/projects/deleted";
+        ep.TombstoneCursorParameter = "since";
+
+        // -- Soft-delete / expiry predicates (evaluated inside the inbox dispatch loop) --
+        ep.SoftDeletePredicate = entity => entity is Project p && p.IsArchived;
+        ep.ExpiryPredicate     = entity => entity is Project p && p.OwnerId == null;
+
+        // -- Per-endpoint request hook (runs after global ISyncInterceptor) --
+        ep.OnBeforeSend = req =>
+        {
+            req.Headers.Add("X-Trace-Id", Guid.NewGuid().ToString("N"));
+            return Task.CompletedTask;
+        };
+    });
+});
+```
+
+## Endpoint properties
+
+### Identity
+
+| Property | Default | Description |
+|---|---|---|
+| `Key` | CLR full name of `T` | Stable key persisted with every `SyncOperation`. **Changing it strands queued work.** Override only when two endpoints share a CLR type. |
+| `EntityType` | `typeof(T)` | Set automatically by `RegisterEndpoint<T>`. |
+| `Url` | from `RegisterEndpoint<T>` | The base URL. Drives `POST` (Create), `PUT /{id}` (Update), `DELETE /{id}` (Delete), and — unless overridden — inbox pulls and batched pushes. |
+
+### Direction
+
+| Direction | Behavior |
+|---|---|
+| `Both` (default) | Outbox push + inbox pull both work. |
+| `PullOnly` | `Queue<T>` throws. Use for reference / read-only data. |
+| `PushOnly` | `PullNow<T>` throws; `PullAll` silently skips. Use for telemetry / audit / sync-up queues. |
+
+### Network policy
+
+| Property | Default | Description |
+|---|---|---|
+| `UseMeteredConnection` | `true` | When `false`, the engine waits for an unmetered (WiFi) connection before sending outbox ops. |
+| `Batch` | `false` | When `true`, the outbox coalesces multiple queued ops for this endpoint into one `POST {url}/batch`. See [Batching](#batching). |
+| `MaxAttempts` | `5` | Number of send attempts before the op is permanently handed to `IDataSyncDelegate.OnError`. |
+| `RetryBaseDelay` | `2s` | Base delay for exponential backoff. The actual wait is `baseDelay * 2^(attempts - 1)` capped at 60s. The retry timestamp is persisted on the `SyncOperation`, so a process restart resumes the wait window. |
+
+### Inbox throttle / scheduling
+
+`MinPullInterval` controls how an endpoint behaves on **scheduled** pulls (`PullAll`, the `SyncJob`, and connectivity-restore triggers). `PullNow<T>` always bypasses it.
+
+| Value | Behavior |
+|---|---|
+| `TimeSpan.Zero` | **Always pull** on every scheduled pass. This is the default applied at registration. |
+| A positive `TimeSpan` | **Throttle** — when `LastPulledAt` is within this window, `PullAll` / `SyncJob` skip the endpoint. |
+| `null` | **Manual only** — scheduled pulls skip the endpoint entirely; it pulls only when you call `PullNow<T>`. |
+
+:::note
+Set `MinPullInterval = null` for endpoints you only ever want to refresh on demand (e.g. pull-to-refresh or a push-triggered `PullNow`), so the background `SyncJob` never touches them.
+:::
+| `CursorParameter` | `"since"` | Query-string parameter used to pass the persisted cursor to the server. Set to `null` to omit. |
+| `PullUrl` | `null` (uses `Url`) | Optional override for the inbox-pull URL. |
+
+### Tombstones
+
+| Property | Default | Description |
+|---|---|---|
+| `TombstoneUrl` | `null` | When set, every successful pull is followed by a GET against this URL. Each returned id is dispatched to `OnReceived` with `Verb = Delete` and `Entity = null`. |
+| `TombstoneCursorParameter` | `"since"` | Cursor query parameter for the tombstone stream. Tracked independently from `SyncCursor`. |
+
+### Soft-delete / expiry
+
+Both predicates run inside the inbox dispatch loop on the **deserialized** entity, before delegates fire. When either returns `true` for a `Create` / `Update` item, the verb is rewritten to `Delete` and `Entity` stays populated so consumers can read the final state on the way out the door.
+
+| Property | When to use |
+|---|---|
+| `SoftDeletePredicate` | Server signals deletes via a flag (`IsDeleted = true`) instead of a separate verb. |
+| `ExpiryPredicate` | Server-driven state change should evict the entity (e.g. `AssignedTo == null`). |
+
+See [Removal Strategies](/client/datasync/removal-strategies) for the full discussion.
+
+### Hooks
+
+| Property | Description |
+|---|---|
+| `OnBeforeSend` | Async hook invoked just before each request is sent. Runs **after** any global `ISyncInterceptor`, so endpoint-specific logic wins on header conflicts. On iOS / Mac Catalyst the request has no body attached (uploads stream from disk), so signers that hash the body won't work on Apple. |
+
+### Conflicts
+
+| Property | Default | Description |
+|---|---|---|
+| `DefaultConflictPolicy` | `AskDelegate` | What to do when the server returns 409 / 412. See [Conflict Resolution](/client/datasync/conflict-resolution). |
+
+## Batching
+
+When `Batch = true`, queued ops for the endpoint are coalesced into one `POST {url}/batch` request. Coalescing rules:
+
+- Trailing `Delete` wins — any preceding `Create` / `Update` for the same entity drop.
+- `Create + Update(s)` → single `Create` with the latest payload.
+- `Update + Update(s)` → single `Update` with the latest payload.
+
+Override the batch URL with `BatchUrl` if your server bundles ops at a different route. Batching applies to every transport except the Apple `NSURLSession` path, which sends one upload task per op by design.
+
+See [Server API Contracts → Batched outbox](/client/datasync/server-contracts#batched-outbox) for the expected request and response shapes.
+
+## Direction patterns
+
+### Read-only reference data
+
+```csharp
+opts.RegisterEndpoint<Country>("https://api.example.com/countries", ep =>
+{
+    ep.Direction = SyncDirection.PullOnly;
+    ep.MinPullInterval = TimeSpan.FromHours(24);
+});
+```
+
+### Telemetry / sync-up queue
+
+```csharp
+opts.RegisterEndpoint<TelemetryEvent>("https://api.example.com/telemetry", ep =>
+{
+    ep.Direction = SyncDirection.PushOnly;
+    ep.Batch = true;
+    ep.MaxAttempts = 20;        // telemetry can survive heavy backoff
+    ep.UseMeteredConnection = false;
+});
+```
+
+Just call `sync.Queue(SyncVerb.Create, telemetryEvent)` — `PullAll` will skip it silently.

@@ -85,7 +85,7 @@ const MauiProgram = (props: Props) => {
   if (has('datasync')) {
     src += `
       // Auto-picks the right transport: NSURLSession on Apple, foreground service on Android, HttpClient elsewhere.
-      // Register one endpoint per ISyncEntity type — see https://shinylib.net/datasync/entity-registration
+      // Register one endpoint per ISyncEntity type — see https://shinylib.net/client/datasync/entity-registration
       builder.Services.AddDataSync<ShinyApp.Delegates.MyDataSyncDelegate>(opts =>
       {
           opts.RegisterEndpoint<ShinyApp.Models.TodoItem>("https://api.example.com/todos");
@@ -129,7 +129,7 @@ const MauiProgram = (props: Props) => {
   }
   if (has('liveactivities')) {
     src += `
-      // iOS needs a widget extension of your own - https://shinylib.net/liveactivities/widget/
+      // iOS needs a widget extension of your own - https://shinylib.net/client/liveactivities/widget/
       // Unsupported platforms register a no-op manager, so no #if is needed in shared code.
       builder.Services.AddLiveActivities();
       // OR, when a server pushes updates (the delegate is the only way to learn the tokens):

@@ -1,36 +1,90 @@
 ---
 title: Hosting
-description: Host options, mount points, WebView permissions, hot reload and App Store review for Shiny.AppDeviceBridge
+description: The bridge server, the web app host, mount points, WebView permissions, hot reload and App Store review for Shiny.AppDeviceBridge
 ---
 
-## Options worth knowing
+## The bridge server
+
+The bridges live on **your app's own Shiny.Net.HttpServer**. `http.AddAppDeviceBridge()` puts them on it, on the same
+`ShinyHttpServerBuilder` you configure the server with — address, port, TLS, limits, authentication, endpoints of your
+own. `UseAppDeviceBridge` (from `Shiny.AppDeviceBridge.Maui`) does that for a MAUI app, starts the server with the app
+and restarts it on resume:
+
+```csharp
+builder.UseAppDeviceBridge(o => o.AppId = "field-app");
+
+// The same server, configured wherever suits — before UseAppDeviceBridge or after.
+builder.Services.AddShinyHttpServer(http =>
+{
+    http.Options.Limits.MaxRequestBodySize = 64 * 1024 * 1024;
+    http.AddResponseCompression();
+}, autoStart: false);
+```
+
+Without MAUI — a headless device, a test — it's the builder alone:
+
+```csharp
+services.AddShinyHttpServer(http => http
+    .AddAppDeviceBridge(o => o.AppId = "greenhouse")
+    .AddRpiCameraBridge());
+```
 
 | Option | Default | Why |
 | --- | --- | --- |
-| `Port` | `5780` | Fixed on purpose. localStorage, IndexedDB and cookies belong to the origin, and the port is part of the origin. |
-| `AllowPortFallback` | `true` | If the port is taken, serve on a random one, with empty web storage for that launch. |
+| `AppId` | required | Names the data directory, namespaces settings, and is what a release server knows the app by. |
+| `AllowPortFallback` | `true` | If the port is taken when the bridge server starts the server, serve on a random one, with empty web storage for that launch. |
+| `BasePath` | `/` | Serve the web app and the bridges under a path — `/kiosk/`, `/kiosk/_bridge/…`. See [Mount points](/appdevicebridge/hosting/#mount-points). |
+| `BridgePrefix` | `/_bridge` | Move the bridges when the web app wants that route for itself. |
+| `AllowedHosts` | none | Host names accepted besides loopback names and IP addresses. See [Security](/appdevicebridge/security/). |
+| `AllowAnyCallerInDebug` | `true` | A debug build lets any caller not arriving through a tunnel reach the bridges. See [Who may call the bridges](/appdevicebridge/security/#who-may-call-the-bridges). |
+| `AuthorizeBridges` | device only | Replace who may call the bridges. |
+| `MaxFileWriteBytes` | 256 MB | The largest file a bridge takes in one request. The server's request body limit is raised to at least this. |
+
+- **The port.** `UseAppDeviceBridge` listens on loopback port `5780` unless you give the server a port of your own. The
+  port is fixed on purpose: localStorage, IndexedDB and cookies belong to the origin, and the port is part of the
+  origin.
+- **The bridges guard only what they mount.** Your middleware, endpoints, authentication and fallback policy stay
+  yours, and a request for anything the bridge server didn't mount passes straight through to them.
+- **The bridge policy doesn't depend on your pipeline.** The bridges authenticate and authorize their own requests,
+  so they're protected whether or not — and wherever — you call `UseAuthentication` and `UseAuthorization`. Your own
+  endpoints need those calls; the bridges don't.
+- **The server doesn't need a WebView.** Without `Shiny.AppDeviceBridge.WebView`, the bridges answer callers on the
+  device (or anyone `AuthorizeBridges` allows), and a native call no page takes is reported as not handled.
+
+## The web app host
+
+`UseWebAppHost` (from `Shiny.AppDeviceBridge.WebView`) serves a web app from that server and shows it in
+`WebAppHostView`:
+
+| Option | Default | Why |
+| --- | --- | --- |
+| `UseBaseline(...)` | | The zip compiled into the app, served offline on first launch. |
+| `UpdateServer`, `PublicKey` | none | Where releases come from, and the key they're signed with. |
 | `CheckTimeout` | 5 s | After this, the installed version is shown anyway. |
 | `Channel` | stable | Follow a prerelease channel such as `beta`. |
 | `BlockOnRequiredUpdateFailure` | `false` | By default, a required download that fails midway is treated as offline. |
 | `ApplyOptionalUpdatesImmediately` | `false` | Swap to an optional update and reload as soon as it lands. |
-| `RemoteAccess.Enabled` | `false` | Bind past loopback. Every bridge still stays on the device until named — see [Serving the network](/appdevicebridge/security/#serving-the-network). |
-| `BasePath` | `/` | Serve everything under a path — `/kiosk/`, `/kiosk/_bridge/…`. See [Mount points](/appdevicebridge/hosting/#mount-points). |
-| `BridgePrefix` | `/_bridge` | Move the bridges when the web app wants that route for itself. |
+| `DevServer` | none | Take pages from `dotnet watch` in development. See below. |
+| `ServeWebAppRemotely` | `false` | Serve the pages to other machines too, when the server is bound past loopback. |
+| `BackgroundScript` | `background.js` | What takes native calls with no page open. |
 
 ## Mount points
 
 The app is served at `/` and the bridges at `/_bridge`. Both move:
 
 ```csharp
-o.BasePath = "/kiosk";          // http://127.0.0.1:5780/kiosk/
-o.BridgePrefix = "/_native";    // http://127.0.0.1:5780/kiosk/_native/app/info
+builder.UseAppDeviceBridge(o =>
+{
+    o.BasePath = "/kiosk";          // http://127.0.0.1:5780/kiosk/
+    o.BridgePrefix = "/_native";    // http://127.0.0.1:5780/kiosk/_native/app/info
+});
 ```
 
 - **`_host` doesn't move.** `{base}/_host/start`, `/ping` and `/config` stay directly under `BasePath`,
   because `GET {base}/_host/config` is how a page finds out where everything else is. `BridgePrefix`
   can't be `/_host` or sit under it.
 - **`<base href>` is rewritten for you.** A Blazor publish ships `<base href="/" />`, which would send
-  every asset request to the origin root. The host rewrites it — in the entry document and in whatever
+  every asset request to the origin root. The WebView host rewrites it — in the entry document and in whatever
   the SPA fallback serves — to match `BasePath`, inserting the tag if the document has none. You don't
   need to republish with `--base-href`.
 - **The page discovers the prefix, it isn't told it.** `Shiny.AppDeviceBridge.Blazor` and the injected
@@ -45,8 +99,8 @@ const info = await (await fetch(bridge + "app/info")).json();
 ```
 
 The typed clients, C# and TypeScript, discover the prefix the same way. Raw `fetch("/_bridge/...")` calls in
-your own code are the one thing that won't follow — build them from `bridge`, or keep the defaults. `/kiosk` without the trailing slash redirects to `/kiosk/`, and anything
-outside `BasePath` gets a `404`.
+your own code are the one thing that won't follow — build them from `bridge`, or keep the defaults. `/kiosk` without the trailing slash redirects to `/kiosk/`. Anything outside `BasePath` is left to the rest of your server — your own
+endpoints, or a `404`.
 
 ## Camera, microphone and location in the page
 

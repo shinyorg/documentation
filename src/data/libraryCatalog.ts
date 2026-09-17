@@ -683,7 +683,7 @@ export const categories: CategoryCopy[] = [
                     'Typed C# and TypeScript clients for every bridge',
                     'Location, Bluetooth, notifications, photos, folders, tray icons and more',
                 ],
-                packages: ['Shiny.AppDeviceBridge.Maui', 'Shiny.AppDeviceBridge.Blazor', 'Shiny.AppDeviceBridge.AspNetCore'],
+                packages: ['Shiny.AppDeviceBridge.Maui', 'Shiny.AppDeviceBridge.WebView', 'Shiny.AppDeviceBridge.Blazor', 'Shiny.AppDeviceBridge.AspNetCore'],
                 frameworks: ['maui', 'blazor'],
                 os: ['android', 'ios', 'macos', 'windows', 'linux'],
             },

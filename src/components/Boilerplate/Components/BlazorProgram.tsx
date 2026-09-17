@@ -151,7 +151,7 @@ public class Program
   if (has('datasync')) {
     src += `
         // Blazor WASM transport — HttpClient + LocalStorage. Sync runs while the tab is open.
-        // Register one endpoint per ISyncEntity type — see https://shinylib.net/datasync/entity-registration
+        // Register one endpoint per ISyncEntity type — see https://shinylib.net/client/datasync/entity-registration
         builder.Services.AddBlazorDataSync<BlazorApp.MyDataSyncDelegate>(opts =>
         {
             opts.RegisterEndpoint<BlazorApp.TodoItem>("/api/todos");

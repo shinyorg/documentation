@@ -1,0 +1,71 @@
+---
+title: Startup Tasks
+---
+
+## What Are They?
+
+Startup services run **immediately** after the dependency injection container is built. They support full constructor injection like any other service, which makes them the perfect place to hook global application events — wiring up a logout handler, warming a cache, subscribing to a message bus, or scheduling jobs.
+
+`IShinyStartupTask.Start()` is **intentionally synchronous**. The platform does not wait for your app startup to finish, so any `async` work you kick off here runs in a fire-and-forget fashion. If you block for too long, the OS can kill your app before it finishes launching.
+
+## Implementing a Startup Task
+
+```csharp
+using Shiny;
+
+namespace MyApp.Infrastructure;
+
+public class MyStartupService : IShinyStartupTask
+{
+    readonly ILogger<MyStartupService> logger;
+
+    public MyStartupService(ILogger<MyStartupService> logger)
+    {
+        this.logger = logger;
+    }
+
+    public void Start()
+    {
+        // Hook global events, warm caches, etc.
+        this.logger.LogInformation("App started");
+    }
+}
+```
+
+## Registration
+
+Tag the class with `[Singleton]` from `Shiny.Extensions.DependencyInjection` and call `services.AddGeneratedServices()` once during host build. The source generator emits a registration that exposes every interface the class implements (including `IShinyStartupTask`) — no reflection, AOT-clean.
+
+```csharp
+using Shiny;
+
+[Singleton]
+public class MyStartupService : IShinyStartupTask
+{
+    // ...
+}
+
+// wherever you build your service collection
+builder.Services.AddGeneratedServices();
+```
+
+If you prefer explicit registration:
+
+```csharp
+builder.Services.AddSingleton<MyStartupService>();
+builder.Services.AddSingleton<IShinyStartupTask>(sp => sp.GetRequiredService<MyStartupService>());
+```
+
+Either way, `Start()` runs automatically when the Shiny host runs.
+
+:::danger
+Do not block for long inside `Start()`. The platform can shut your app down if startup takes too long. Kick off any slow work on a background task and return quickly.
+:::
+
+:::tip
+You can combine startup services with persisted settings — define your settings class with `[Bind]` partial properties from `Shiny.Extensions.Stores` and Shiny will handle persistence; tag startup wiring with `[Singleton]` to register it in one go.
+:::
+
+:::tip
+If your startup task also needs to react to the app entering the foreground or background, inherit from `ShinyLifecycleTask` instead. It implements `IShinyStartupTask` **and** the platform `IApplicationLifecycle` interfaces in one base class — see [Lifecycle Hooks](/client/core/lifecycle).
+:::
