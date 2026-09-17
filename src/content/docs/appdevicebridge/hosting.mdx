@@ -66,6 +66,10 @@ services.AddShinyHttpServer(http => http
 | `ApplyOptionalUpdatesImmediately` | `false` | Swap to an optional update and reload as soon as it lands. |
 | `DevServer` | none | Take pages from `dotnet watch` in development. See below. |
 | `ServeWebAppRemotely` | `false` | Serve the pages to other machines too, when the server is bound past loopback. |
+| `ServeWebAppLocally` | `false` | Serve the pages to any caller on this device — a browser opening the loopback address — not only the WebView. |
+| `OnPrepareResponse` | none | Headers for each file of the web app, after the host's own: a cache policy for the network, a security header. |
+| `ContentTypeOverrides` | empty | Content types by extension (`.bcmap`, `.pfb`, …) for files the built-in map doesn't know. |
+| `Variants(...)`, `SelectVariant` | none | Several builds in one package at the same URLs, chosen per request. See [Client variants](#client-variants). |
 | `BackgroundScript` | `background.js` | What takes native calls with no page open. |
 
 ## Mount points
@@ -101,6 +105,62 @@ const info = await (await fetch(bridge + "app/info")).json();
 The typed clients, C# and TypeScript, discover the prefix the same way. Raw `fetch("/_bridge/...")` calls in
 your own code are the one thing that won't follow — build them from `bridge`, or keep the defaults. `/kiosk` without the trailing slash redirects to `/kiosk/`. Anything outside `BasePath` is left to the rest of your server — your own
 endpoints, or a `404`.
+
+## Moving the server at runtime
+
+
+A LAN switch or a port setting is a stop, a change and a start, on the server itself:
+
+```csharp
+await http.StopAsync();
+http.Options.Address = shareOnNetwork ? IPAddress.Any : IPAddress.Loopback;
+http.Options.Port = port;
+await http.StartAsync();
+```
+
+Nothing has to follow by hand. `AppDeviceBridgeServer.Origin` is read from the running server, so it is the new
+port as soon as the server is up (and null while it is down). The WebView's session cookie stays valid on the new
+origin, an open tunnel keeps its public address and goes on serving into the same pipeline, and a tunneled caller is
+still refused the loopback names on the new port. A page loaded from the old origin has to be reloaded from the new
+one, because web storage belongs to the origin.
+
+## Client variants
+
+
+One app can ship several builds of its web app — a phone client and a desktop client — in one package, at the same URLs.
+The host picks one for every request, documents and assets alike, because `_framework/dotnet.js` exists in both publishes
+with different bytes:
+
+```csharp
+builder.UseWebAppHost(o =>
+{
+    o.UseBaseline(typeof(App).Assembly, "webapp.zip");   // mobile/…, desktop/…
+    o.Variants("mobile", "desktop");                      // folders in the zip; the first is the default
+    o.SelectVariant = ctx =>
+        ctx.Request.Cookies["view"]
+        ?? (ctx.Request.Headers["Sec-CH-UA-Mobile"].ToString() == "?1" ? "mobile" : "desktop");
+});
+```
+
+- **One package, one version.** Every variant is a folder at the root of the zip (or under `ArchiveBasePath`), with the
+  entry document directly in it or under `wwwroot/`. A package missing any variant's entry document is refused, at
+  install and for the baseline. The device downloads the whole package; a phone's browser still only loads its own build.
+- **The selector has to be stable.** Build it from the `User-Agent`, the `Sec-CH-UA-Mobile` hint and a cookie of your
+  own. To switch a browser to the other build, set your cookie and reload. Every response carries
+  `Vary: User-Agent, Sec-CH-UA-Mobile, Cookie`, and the entry document `Accept-CH: Sec-CH-UA-Mobile`.
+- **Wrong answers are not errors.** Null, an unknown name or an exception serves the default variant, and logs a warning once.
+- **The WebView goes through the selector too.** `background.js` comes from the default variant, and the dev server
+  serves one build.
+
+Zipping two publishes into one release:
+
+```bash
+dotnet publish Client.Mobile -c Release -o out/mobile
+dotnet publish Client.Desktop -c Release -o out/desktop
+mkdir -p release/mobile release/desktop
+cp -R out/mobile/wwwroot/. release/mobile/ && cp -R out/desktop/wwwroot/. release/desktop/
+(cd release && zip -qr ../1.4.0.zip .)
+```
 
 ## Camera, microphone and location in the page
 
