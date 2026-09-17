@@ -132,6 +132,84 @@ by several centrals on Linux.
 
 `NotificationOptions` flags: `Notify`, `Indicate`, `EncryptionRequired`
 
+## Messages Longer Than One Operation
+
+A single write or notification carries at most `Mtu` bytes — 20 on a link that never negotiated more. Anything longer — a JSON command, a certificate, a scan result — has to be split, and the receiver has to know where one message ends and the next begins. `BleMessageFraming` does both, and the same format is spoken by the [central side](../ble/gatt#messages-longer-than-one-operation) (`WriteCharacteristicMessageAsync` / `NotifyCharacteristicMessages`).
+
+Every fragment starts with one header byte:
+
+| Bits | Meaning |
+|------|---------|
+| 7 | START — first fragment of a message |
+| 6 | END — last fragment of a message |
+| 0-5 | Sequence number, counting fragments within the message and wrapping at 64 |
+
+A message that fits in one fragment has both START and END set, so a short message costs one byte. The sequence number lets the receiver notice a dropped or reordered fragment and abandon the message rather than hand back garbage.
+
+:::tip
+For a generated service, set `Framed = true` on `[RequestResponseCharacteristic]` and the generator does everything below for you — see [Source Generator → Framed messages](./source-generator#framed-messages).
+:::
+
+### Sending
+
+`NotifyMessage` splits a message to one central's MTU and sends the fragments one after another, each waiting for the platform to accept the last:
+
+```csharp
+using Shiny.BluetoothLE.Hosting;
+
+await characteristic.NotifyMessage(largePayload, central, cancellationToken);
+```
+
+It addresses a single central because fragments are sized for that central. Don't send two messages to the same central on the same characteristic concurrently — their fragments would interleave and the central would discard both.
+
+### Receiving
+
+Feed each write into a `BleMessageReassembler`. It holds the partial message between writes, so keep **one per central** — never one shared between them, or two centrals' fragments interleave:
+
+```csharp
+using System.Collections.Concurrent;
+using Shiny.BluetoothLE;
+using Shiny.BluetoothLE.Hosting;
+
+var reassemblers = new ConcurrentDictionary<string, BleMessageReassembler>();
+
+cb.SetWrite(async request =>
+{
+    var reassembler = reassemblers.GetOrAdd(
+        request.Peripheral.Uuid,
+        _ => new BleMessageReassembler(maxMessageBytes: 32 * 1024)
+    );
+
+    BleMessageFrameResult frame;
+    byte[]? message;
+    lock (reassembler)
+        frame = reassembler.Push(request.Data, out message);
+
+    if (request.IsReplyNeeded)
+        request.Respond(frame is BleMessageFrameResult.Partial or BleMessageFrameResult.Complete
+            ? GattState.Success
+            : GattState.Failure);
+
+    if (frame == BleMessageFrameResult.Complete)
+    {
+        var reply = await HandleCommand(message!);
+        await request.Characteristic.NotifyMessage(reply, request.Peripheral);
+    }
+}, WriteOptions.Write);
+```
+
+| `BleMessageFrameResult` | Meaning |
+|--------|-------------|
+| `Partial` | The fragment was accepted and more are expected |
+| `Complete` | The fragment finished a message — `message` is set |
+| `Malformed` | The fragment was too short to carry a header |
+| `OutOfSequence` | A fragment was missing, reordered, or arrived with no START before it |
+| `TooLarge` | The message grew past `maxMessageBytes` (64 KB by default) |
+
+Every error has already discarded the partial message, so the next START fragment begins cleanly. A START that arrives in the middle of a message means the sender gave up and began again; the partial message is dropped. The size cap matters — without one, an unauthenticated central could stream fragments until the host runs out of memory.
+
+Inside a `[BleService]` class, `context.GetMessageReassembler(characteristicUuid, maxMessageBytes)` hands you the reassembler for that central and characteristic, held on the per-central context so it lives exactly as long as the connection.
+
 ## Managing Services
 
 ```csharp

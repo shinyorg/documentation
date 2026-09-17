@@ -15,7 +15,7 @@ const WindowsAppxManifest = (props: Props) => {
   const capabilities: string[] = [];
   const notes: React.ReactNode[] = [];
 
-  if (has('ble') || has('blehosting')) {
+  if (has('ble') || has('blehosting') || has('beacons')) {
     capabilities.push('      <DeviceCapability Name="bluetooth" />');
   }
   if (has('speech') || has('aiconversation')) {

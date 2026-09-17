@@ -199,6 +199,7 @@ export const sidebarTopics = [
       {
         label: 'Beacons',
         jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
         items: [
           { label: 'Getting Started', link: 'client/beacons/' },
           { label: 'Ranging', link: 'client/beacons/ranging' },
@@ -707,7 +708,7 @@ export const sidebarTopics = [
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', badge: { text: 'New', variant: 'success' } },
-          { label: 'Notebook', link: 'controls/notebook/', badge: { text: 'New', variant: 'success' } },
+          { label: 'Notebook', link: 'controls/notebook/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Find', link: 'controls/office-find', badge: { text: 'New', variant: 'success' } },
         ]
       },
@@ -840,8 +841,8 @@ export const sidebarTopics = [
             ]
           },
           { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
-          { label: 'ZoomPanView', link: 'controls/zoompanview/', jumpTo: true },
-          { label: 'FloatingToolbar', link: 'controls/floatingtoolbar/', jumpTo: true },
+          { label: 'ZoomPanView', link: 'controls/zoompanview/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'FloatingToolbar', link: 'controls/floatingtoolbar/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           {
             label: 'ImageEditor',
             jumpTo: true,
@@ -969,7 +970,7 @@ export const sidebarTopics = [
         items:[
           { label: 'StateView', link: 'controls/stateview/' },
           { label: 'Wizard', link: 'controls/wizard/' },
-          { label: 'Timeline', link: 'controls/timeline/', badge: { text: 'New', variant: 'success' } },
+          { label: 'Timeline', link: 'controls/timeline/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
@@ -1272,6 +1273,7 @@ export const sidebarTopics = [
       {
         label: 'App Device Bridge',
         jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Getting Started', link: 'appdevicebridge/' },
           { label: 'Hosting', link: 'appdevicebridge/hosting' },

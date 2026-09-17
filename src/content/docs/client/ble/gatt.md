@@ -85,7 +85,8 @@ Back-to-back writes are paced for you rather than dropped - await each one in tu
 ### BLOB Writes
 
 For writing data larger than a single GATT operation, use blob writes, which automatically chunk the
-stream to `peripheral.Mtu` (the usable payload). Do not pre-chunk the data yourself.
+stream to `peripheral.Mtu` (the usable payload). Do not pre-chunk the data yourself. When the peripheral
+needs to know where the data ends, send a [framed message](#messages-longer-than-one-operation) instead.
 
 ```csharp
 using var stream = File.OpenRead("data.bin");
@@ -140,6 +141,48 @@ if (ch.CanWrite()) { /* write supported */ }
 if (ch.CanWriteWithoutResponse()) { /* write without response */ }
 if (ch.CanNotifyOrIndicate()) { /* notifications supported */ }
 ```
+
+## Messages Longer Than One Operation
+
+A blob write chunks a stream, but nothing on the far side knows where it ends. When a command, reply or event can be longer than one GATT operation — a JSON command, a certificate, a scan result — and the peripheral needs it whole, use the message helpers. Each message is split to `peripheral.Mtu` with a one-byte header per fragment and put back together on the far side.
+
+The peripheral must speak the same format — a [Shiny BluetoothLE Hosting](../blehosting/gatt#messages-longer-than-one-operation) service using `[RequestResponseCharacteristic(Framed = true)]`, or `NotifyMessage` and a `BleMessageReassembler`.
+
+```csharp
+using Shiny.BluetoothLE;
+
+// subscribe first - a request/response reply comes back as notifications
+using var replies = peripheral
+    .NotifyCharacteristicMessages("service-uuid", "char-uuid")
+    .Subscribe(message =>
+    {
+        // one emission per complete message
+    });
+
+await peripheral.WriteCharacteristicMessageAsync(
+    "service-uuid",
+    "char-uuid",
+    JsonSerializer.SerializeToUtf8Bytes(command, AppJsonContext.Default.Command)
+);
+```
+
+### Writing
+
+`WriteCharacteristicMessageAsync(serviceUuid, characteristicUuid, message, withResponse, cancellationToken, timeoutMs)` writes the fragments in order. Messages to the same characteristic are sent one at a time, so concurrent callers cannot interleave fragments. `timeoutMs` (3 seconds by default) applies to each fragment's write, not the whole message. Leave `withResponse` on unless the peripheral only accepts commands.
+
+If a write fails part way through, the peripheral discards the partial message when the next message's first fragment arrives.
+
+### Receiving
+
+`NotifyCharacteristicMessages(serviceUuid, characteristicUuid, useIndicationsIfAvailable, maxMessageBytes)` is a cold observable. Each subscription subscribes to the characteristic and gets its own reassembler. A message with a dropped or reordered fragment, or one larger than `maxMessageBytes` (64 KB by default), is discarded rather than emitted, and the stream carries on with the next one.
+
+:::caution
+Don't mix these with `WriteCharacteristicAsync` or `NotifyCharacteristic` on the same characteristic. A plain write is not a valid fragment, and a plain notification subscriber sees raw fragments, header bytes included.
+:::
+
+### The Format
+
+Every fragment starts with one header byte — bit 7 START, bit 6 END, bits 0-5 a sequence number that counts fragments within the message and wraps at 64. A message that fits in one fragment has both START and END set, so a short message costs one byte. `BleMessageFraming.Encode` and `BleMessageReassembler` are public in `Shiny.BluetoothLE.Common` if you need to frame over another transport.
 
 ## Descriptors
 

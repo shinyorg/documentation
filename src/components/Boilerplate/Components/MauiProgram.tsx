@@ -54,6 +54,18 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddBluetoothLeHosting();`;
   }
+  if (has('beacons')) {
+    src += `
+      // Foreground ranging - "which beacons are near me and how far?"
+      builder.Services.AddBeaconRanging();
+
+      // Background region monitoring - "tell me when I enter or leave"
+      builder.Services.AddBeaconMonitoring<ShinyApp.Delegates.MyBeaconMonitorDelegate>();
+
+      // Optional - Eddystone frames (every platform) & becoming a beacon
+      // builder.Services.AddEddystoneScanning();
+      // builder.Services.AddBeaconBroadcasting();`;
+  }
   if (has('obd')) {
     src += `
       builder.Services.AddBluetoothLE();

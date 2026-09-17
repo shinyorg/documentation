@@ -41,13 +41,13 @@ const AndroidManifest = (props: Props) => {
   // nodes that must live inside <application>
   let appNodes = '';
 
-  if (has('ble') || has('blehosting') || has('obd')) {
+  if (has('ble') || has('blehosting') || has('obd') || has('beacons')) {
     src += addF('bluetooth_le');
     src += addP('bluetooth', 30);
     src += addP('bluetooth_admin', 30);
     src += addP('bluetooth_connect');
   }
-  if (has('ble') || has('obd')) {
+  if (has('ble') || has('obd') || has('beacons')) {
     src += `<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />`;
   }
   if (has('blehosting')) {
@@ -222,7 +222,7 @@ const AndroidManifest = (props: Props) => {
     src += addP('READ_EXTERNAL_STORAGE', 32);
   }
 
-  if (has('notifications') || has('liveactivities') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
+  if (has('notifications') || has('liveactivities') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('beacons') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
   }
   if (has('liveactivities')) {
@@ -231,8 +231,12 @@ const AndroidManifest = (props: Props) => {
            bar chip and always-on display. Android 8-15 degrades to an ordinary ongoing notification
            with a determinate progress bar. Nothing extra to declare beyond POST_NOTIFICATIONS. -->`;
   }
-  if (has('gps') || has('spatial-geofencing') || has('ble') || has('httptransfers')) {
+  if (has('gps') || has('spatial-geofencing') || has('ble') || has('beacons') || has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE');
+  }
+  if (has('beacons')) {
+    // Beacon region monitoring is a BLE scan, not a location activity - Android 14 requires the matching type
+    src += addP('FOREGROUND_SERVICE_CONNECTED_DEVICE');
   }
   if (has('gps') || has('spatial-geofencing')) {
     src += addP('FOREGROUND_SERVICE_LOCATION');

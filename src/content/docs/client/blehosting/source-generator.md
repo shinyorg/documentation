@@ -107,6 +107,30 @@ A GATT write response cannot carry a payload, so the handler's result is pushed 
 central as a notification on the same characteristic (registered `Write | Notify`). That central must
 be subscribed before writing — otherwise `OnBleResponseDropped` fires and the reply is discarded.
 
+### Framed messages
+
+A request or reply that can be longer than one GATT operation needs `Framed = true`:
+
+```csharp
+[RequestResponseCharacteristic("2A3B", Name = "Command", Framed = true, MaxMessageBytes = 16 * 1024)]
+async Task<byte[]> Exchange(byte[] message, HeartRateServiceContext context, CancellationToken cancellationToken)
+{
+    var command = JsonSerializer.Deserialize(message, AppJsonContext.Default.Command)!;
+    var result = await this.Run(command, context, cancellationToken);
+    return JsonSerializer.SerializeToUtf8Bytes(result, AppJsonContext.Default.Result);
+}
+```
+
+Each write is treated as one fragment of a [framed message](./gatt#messages-longer-than-one-operation):
+
+- Fragments are reassembled **per central** — the reassembler is kept on that central's context, so two centrals writing at once never interleave.
+- A fragment that does not finish the message is answered `GattState.Success` and the handler does not run.
+- Once the message is whole the handler runs **once**, with the `byte[]` parameter and `WriteRequest.Data` both set to the complete message.
+- The reply is split to the writing central's MTU and sent with `NotifyMessage`.
+- A malformed or out-of-sequence message, or one larger than `MaxMessageBytes` (64 KB by default), is discarded, answered `GattState.Failure`, and reported to `OnBleHandlerError` as an `InvalidDataException`.
+
+The central must speak the same format — `WriteCharacteristicMessageAsync` and `NotifyCharacteristicMessages`, described on [BluetoothLE → GATT](../ble/gatt#messages-longer-than-one-operation). The write response to the final fragment is sent after the handler returns, so a slow handler counts against the central's per-write timeout.
+
 ## The per-central context
 
 One `{ServiceClass}Context` is generated per `[BleService]` class, created lazily the first time a

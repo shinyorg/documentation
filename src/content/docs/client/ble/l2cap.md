@@ -302,6 +302,86 @@ await channel.SendFile(
 
 When `totalBytes` is `null`, `TransferProgress.IsDeterministic` is `false`, `PercentComplete` returns `-1`, and `EstimatedTimeRemaining` returns `TimeSpan.Zero`.
 
+## Channel as a Stream
+
+`AsStream()` wraps an open channel as a `System.IO.Stream`, so it can be handed to anything that reads and writes streams — `CopyToAsync`, a JSON serializer, a hash, a decoder:
+
+```csharp
+using Shiny.BluetoothLE;
+
+using var channel = await peripheral.OpenL2CapChannelAsync(psm: 0x0083, secure: false, cancellationToken: ct);
+await using var stream = channel.AsStream();
+
+await stream.WriteAsync(request, ct);
+
+await using var file = File.Create(localPath);
+await stream.CopyToAsync(file, ct); // completes when the peer closes the channel
+```
+
+The stream subscribes to `DataReceived` the moment it is created, so create it as soon as the channel opens — bytes the peer sends before anything is subscribed are lost.
+
+| Member | Description |
+|--------|-------------|
+| `MaxWriteSize` | The largest single write handed to the channel; larger writes are split. Defaults to `4096` and can be changed after creation |
+| `BytesRead` / `BytesWritten` | Running totals |
+| `Channel` | The underlying `L2CapChannel` |
+
+`L2CapChannelStream` is asynchronous only — the synchronous `Read` and `Write` throw `NotSupportedException` — and it cannot seek. `ReadAsync` returns `0` once the peer closes the channel. Disposing the stream closes the channel; pass `leaveOpen: true` to keep it.
+
+Reads go through the same buffered reader the [upload/download helpers](#file-upload--download) use, so a stream and a file transfer can take turns on one channel without losing bytes between them.
+
+## Ticketed Channels
+
+A host running [`L2CapTicketBroker`](../blehosting/l2cap#sharing-one-psm-ticket-broker) listens on one PSM for every transfer it offers. It hands out a PSM and a single-use token over an authenticated route — typically the reply to a GATT command — and a channel has to present that token before it carries anything.
+
+`OpenL2CapTicketChannel` opens the channel, presents the token, and returns the channel as a stream once the host accepts it:
+
+```csharp
+using Shiny.BluetoothLE;
+
+// psm and token came back from the peripheral, e.g. as the reply to a "capture" command
+try
+{
+    await using var stream = await peripheral.OpenL2CapTicketChannel(psm, token, cancellationToken: ct);
+
+    await using var file = File.Create(localPath);
+    await stream.CopyToAsync(file, ct); // the host closes the channel when its transfer ends
+}
+catch (L2CapTicketException ex) when (ex.Status == L2CapTicketStatus.UnknownTicket)
+{
+    // the ticket expired before the channel presented it - request the transfer again
+}
+```
+
+| Parameter | Default | Description |
+|--------|---------|-------------|
+| `psm` | — | The PSM the peripheral named alongside the ticket |
+| `token` | — | The ticket's token |
+| `secure` | `true` | Must match how the peripheral's listener was opened — `L2CapTicketBroker` defaults to `true` |
+| `maxWriteSize` | `4096` | The largest single write on the returned stream |
+| `cancellationToken` | — | Cancels the connect and the handshake |
+
+It throws `NotSupportedException` on platforms that cannot open L2CAP channels, and `L2CapTicketException` when the host refuses the ticket. `Status` says why:
+
+| `L2CapTicketStatus` | Meaning |
+|--------|---------|
+| `UnknownTicket` | The host issued no such ticket, or it expired — request the transfer again |
+| `AlreadyClaimed` | Another channel already claimed this ticket. Tokens are single use |
+| `VersionMismatch` | The two sides speak different versions of the handshake — one side needs updating |
+| `Malformed` | The host rejected the handshake |
+| `Busy` | The host is already carrying as many transfers as it will |
+
+A refused channel has already been closed. Never retry with the same token — ask the host for a new one.
+
+If you opened the channel yourself, `ClaimTicket` runs the same handshake on it:
+
+```csharp
+var channel = await peripheral.OpenL2CapChannelAsync(psm, secure: true, cancellationToken: ct);
+await using var stream = await channel.ClaimTicket(token, timeout: TimeSpan.FromSeconds(10), cancellationToken: ct);
+```
+
+`timeout` bounds the wait for the host's answer and defaults to 20 seconds. If the handshake fails for any reason, the channel is disposed.
+
 ## TransferProgress
 
 Every progress callback on this page — `SendFile`, the upload/download helpers, and the hosting file server — reports the same record, which mirrors `Shiny.Net.Http.TransferProgress`:

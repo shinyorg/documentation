@@ -67,8 +67,15 @@ const AppleInfoPlist = (props: Props) => {
         </array>
         `;
   }
-  if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
+  const usesLocationKeys = has('gps') || has('geofencing') || has('spatial-geofencing');
+  if (usesLocationKeys) {
     addKey('NSLocationAlwaysUsageDescription');
+    addKey('NSLocationAlwaysAndWhenInUseUsageDescription');
+    addKey('NSLocationWhenInUseUsageDescription');
+  }
+  // iBeacon goes through CoreLocation on Apple platforms - when-in-use for ranging, always for
+  // background region monitoring.  Skipped when the location block above already emitted them.
+  if (has('beacons') && !usesLocationKeys) {
     addKey('NSLocationAlwaysAndWhenInUseUsageDescription');
     addKey('NSLocationWhenInUseUsageDescription');
   }
@@ -81,7 +88,7 @@ const AppleInfoPlist = (props: Props) => {
         </dict>
         `;
   }
-  if (has('ble') || has('obd')) {
+  if (has('ble') || has('obd') || has('beacons')) {
     addKey('NSBluetoothAlwaysUsageDescription');
   }
   if (has('blehosting') || has('ble') || has('obd')) {
@@ -96,7 +103,7 @@ const AppleInfoPlist = (props: Props) => {
   // location has not been granted, so this is what makes the current network readable at all.
   // Skipped when the location components above already emitted it - a duplicate key makes the
   // whole plist invalid.
-  if (has('wifi') && !has('gps') && !has('geofencing') && !has('spatial-geofencing')) {
+  if (has('wifi') && !usesLocationKeys && !has('beacons')) {
     addKey('NSLocationWhenInUseUsageDescription');
   }
   if (has('discovery')) {
@@ -143,7 +150,7 @@ const AppleInfoPlist = (props: Props) => {
   if (has('faceintelligence') || has('documentintelligence')) {
     addKey('NSCameraUsageDescription');
   }
-  if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('spatial-geofencing') || has('bluetoothle') || has('blehosting')) {
+  if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('spatial-geofencing') || has('ble') || has('blehosting')) {
     src += `
         <key>UIBackgroundModes</key>
         <array>
@@ -158,7 +165,7 @@ const AppleInfoPlist = (props: Props) => {
             <string>location</string>
             `;
     }
-    if (has('bluetoothle')) {
+    if (has('ble')) {
       src += `
             <string>bluetooth-central</string>
             `;
