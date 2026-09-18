@@ -28,13 +28,15 @@ var created = await Calendar.CreateEventAsync(new NewCalendarEvent
 ```
 
 - **Errors** throw `BridgeException` with `StatusCode`, the bridge's `Code` and `IsNotSupported` for `501`.
-- **Events** are methods too: `await using var sub = await Wifi.OnChangedAsync(e => …)`.
+- **Events** are methods too: `await using var sub = await Wifi.OnChangedAsync(e => …)`. The subscription completes
+  once the host is delivering the event, and disposing the last one for an event stops its native source — see
+  [Events](/appdevicebridge/bridges/#events).
 - **Files and binaries:** a method returning `Task<Stream>` or `Task<byte[]>` reads the body raw; a
   `[BridgeBody("text/plain")]` parameter sends one.
 - **TypeScript:** `clients/typescript` holds the same clients, generated from the same assemblies by
   `tools/Shiny.AppDeviceBridge.TypeScript` — `new CalendarBridge().createEvent({ title, start, end })`. Required
-  members are required, optional parameters go in an options object with an `AbortSignal`, and events return an
-  unsubscribe function. A test fails when the committed TypeScript falls behind the C# declarations.
+  members are required, optional parameters go in an options object with an `AbortSignal`, and events return a
+  promise of an unsubscribe function: `const stop = await new WifiBridge().onChanged(e => …)`. A test fails when the committed TypeScript falls behind the C# declarations.
   It isn't on npm yet: `npm run build` in `clients/typescript` compiles it to ES modules with type declarations, which
   load with or without a bundler.
 - **Your own endpoints** can still be called untyped through `WebAppBridge.GetAsync<T>(path, typeInfo)` and
@@ -61,6 +63,28 @@ public static MauiAppBuilder AddClipboardBridge(this MauiAppBuilder builder)
 
 Use source-generated JSON contexts (`JsonTypeInfo`). The packages are trim and AOT clean, and bridges
 should stay that way.
+
+### Events
+
+An event is an `IAsyncEnumerable<T>` mapped with `MapEvent`. The host runs it once for each page stream that asks for
+the event and cancels it when that stream lets go, so a native event hooked in it is unhooked in its `finally`, whether
+the page stopped listening, disconnected, or the source threw. `WebAppEventStream.FromEvent` does the hooking:
+
+```csharp
+public void Map(WebAppBridgeRoutes routes) => routes
+    .MapEvent("clipboard.changed", ct => WebAppEventStream.FromEvent<Clip>(emit =>
+    {
+        EventHandler<EventArgs> handler = async (_, _) => emit(new Clip(await clipboard.GetTextAsync()));
+        clipboard.ClipboardContentChanged += handler;
+        return () => clipboard.ClipboardContentChanged -= handler;
+    }, ct), MyJson.Default.Clip)
+    .MapGet("", async ctx => await WebAppBridgeResults.Json(ctx, new Clip(await clipboard.GetTextAsync()), MyJson.Default.Clip));
+```
+
+Values your own code raises, such as those from a Shiny delegate the OS calls or a session the bridge runs, go through a
+`WebAppEventSource<T>`: `Publish` does nothing while no page listens, and `ListenAsync(stopped, ct)` tells you how many
+listeners remain when one leaves, which is where a bridge stops a session nobody is watching.
+`routes.Events.Source("name", typeInfo)` gets or creates one mapped to an event, for a delegate to publish into.
 
 To give it a typed client, declare the API once in a plain `net10.0` project that references
 `Shiny.AppDeviceBridge.Client`. The generator implements the interface, and the same contracts serialize on
