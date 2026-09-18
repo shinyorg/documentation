@@ -5,13 +5,16 @@ description: The bridge server, the web app host, mount points, WebView permissi
 
 ## The bridge server
 
-The bridges live on **your app's own Shiny.Net.HttpServer**. `http.AddAppDeviceBridge()` puts them on it, on the same
-`ShinyHttpServerBuilder` you configure the server with — address, port, TLS, limits, authentication, endpoints of your
-own. `UseAppDeviceBridge` (from `Shiny.AppDeviceBridge.Maui`) does that for a MAUI app, starts the server with the app
-and restarts it on resume:
+The bridges live on **your app's own Shiny.Net.HttpServer**. `http.AddAppDeviceBridge(bridge => …)` puts them on it, on
+the same `ShinyHttpServerBuilder` you configure the server with — address, port, TLS, limits, authentication, endpoints
+of your own. The delegate gets an `AppDeviceBridgeBuilder`: `Configure` for the options below, `AddBridge<T>()` for a
+bridge of your own, and one extension per bridge package. `UseAppDeviceBridge` (from `Shiny.AppDeviceBridge.Maui`) does
+that for a MAUI app: it hands out a `MauiAppDeviceBridgeBuilder` (the bridges that need MAUI extend it; the rest take
+either builder), calls `UseShiny()`, supplies the app's dispatcher as `IWebAppMainThread`, starts the server with the
+app and restarts it on resume. The web app overload, `UseAppDeviceBridge(bridge => …, webApp => …)`, does the same:
 
 ```csharp
-builder.UseAppDeviceBridge(o => o.AppId = "field-app");
+builder.UseAppDeviceBridge(bridge => bridge.Configure(o => o.AppId = "field-app"));
 
 // The same server, configured wherever suits — before UseAppDeviceBridge or after.
 builder.Services.AddShinyHttpServer(http =>
@@ -24,9 +27,9 @@ builder.Services.AddShinyHttpServer(http =>
 Without MAUI — a headless device, a test — it's the builder alone:
 
 ```csharp
-services.AddShinyHttpServer(http => http
-    .AddAppDeviceBridge(o => o.AppId = "greenhouse")
-    .AddRpiCameraBridge());
+services.AddShinyHttpServer(http => http.AddAppDeviceBridge(bridge => bridge
+    .Configure(o => o.AppId = "greenhouse")
+    .AddRpiCameraBridge()));
 ```
 
 | Option | Default | Why |
@@ -53,8 +56,8 @@ services.AddShinyHttpServer(http => http
 
 ## The web app host
 
-`UseWebAppHost` (from `Shiny.AppDeviceBridge.WebView`) serves a web app from that server and shows it in
-`WebAppHostView`:
+`UseAppDeviceBridge(bridge => …, webApp => …)` (from `Shiny.AppDeviceBridge.WebView`) serves a web app from that server
+and shows it in `WebAppHostView`. One delegate registers the bridges alone; a second configures the web app. Its options:
 
 | Option | Default | Why |
 | --- | --- | --- |
@@ -77,11 +80,11 @@ services.AddShinyHttpServer(http => http
 The app is served at `/` and the bridges at `/_bridge`. Both move:
 
 ```csharp
-builder.UseAppDeviceBridge(o =>
+builder.UseAppDeviceBridge(bridge => bridge.Configure(o =>
 {
     o.BasePath = "/kiosk";          // http://127.0.0.1:5780/kiosk/
     o.BridgePrefix = "/_native";    // http://127.0.0.1:5780/kiosk/_native/app/info
-});
+}));
 ```
 
 - **`_host` doesn't move.** `{base}/_host/start`, `/ping` and `/config` stay directly under `BasePath`,
@@ -132,11 +135,11 @@ The host picks one for every request, documents and assets alike, because `_fram
 with different bytes:
 
 ```csharp
-builder.UseWebAppHost(o =>
+builder.UseAppDeviceBridge(bridge => { … }, webApp =>
 {
-    o.UseBaseline(typeof(App).Assembly, "webapp.zip");   // mobile/…, desktop/…
-    o.Variants("mobile", "desktop");                      // folders in the zip; the first is the default
-    o.SelectVariant = ctx =>
+    webApp.UseBaseline(typeof(App).Assembly, "webapp.zip");   // mobile/…, desktop/…
+    webApp.Variants("mobile", "desktop");                      // folders in the zip; the first is the default
+    webApp.SelectVariant = ctx =>
         ctx.Request.Cookies["view"]
         ?? (ctx.Request.Headers["Sec-CH-UA-Mobile"].ToString() == "?1" ? "mobile" : "desktop");
 });
@@ -170,7 +173,7 @@ ask for the runtime permission. Say which ones the web app may use:
 
 ```csharp
 builder
-    .UseWebAppHost(o => { … })
+    .UseAppDeviceBridge(bridge => { … }, webApp => { … })
     .AllowWebPermissions(WebAppWebPermissions.Camera | WebAppWebPermissions.Microphone | WebAppWebPermissions.Geolocation);
 ```
 
@@ -205,6 +208,10 @@ dotnet watch run --launch-profile device       # listens on http://0.0.0.0:5288
 
 Start the app from your IDE as usual. Edit a `.razor` file and save, and the change appears in the app
 without rebuilding it.
+
+| Before | After saving `Home.razor` |
+| --- | --- |
+| <img src="/images/appdevicebridge/app-home.png" width="420" alt="The sample in the macOS app with its pages from dotnet watch, the heading reading 'Your web app, with a device behind it'" /> | <img src="/images/appdevicebridge/app-hot-reload.png" width="420" alt="The same app with the heading changed to 'Shipped without an app store review', and no rebuild of the native app" /> |
 
 | Target | Dev server | Hot reload |
 | --- | --- | --- |

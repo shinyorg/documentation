@@ -1,0 +1,174 @@
+---
+title: IMediaService on Blazor
+description: The Blazor media service - a modal CameraView for photo and video capture, browser file picking, and one-line barcode, document-image and AI document scans, with the same verbs and options as MAUI
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+{/* TODO: capture screenshots for the Blazor media service modal (photo, review, scan) */}
+
+The Blazor half of [`IMediaService`](/controls/cameraview/media-service): one injectable service that opens
+Shiny's own full-screen `CameraView` modal, hands back what the user captured, and returns `null` when they
+change their mind. The verbs, option names and result types match MAUI, so shared view-model code reads the
+same on both hosts. Where a browser cannot do what a phone can, the option is left out rather than accepted
+and ignored.
+
+## Install
+
+- <NugetDownloads name="Shiny.Blazor.Controls.Camera" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Camera.Ai" /> — only for AI document scans
+
+```csharp
+// Program.cs — the camera package is not part of AddShinyControls()
+builder.Services.AddShinyMediaService(o =>
+{
+    o.CompressionQuality = 85;
+    o.MaxDimension = 2048;
+    o.OutputFormat = MediaImageFormat.Jpeg;
+});
+```
+
+The modal is drawn by a host component. Render **one** in your layout, next to `<DialogHost />`:
+
+```razor
+<Shiny.Blazor.Controls.Camera.Media.MediaHost />
+```
+
+A call made without a rendered host throws, and says so. The service is **scoped**, so on Blazor Server each
+user's camera modal stays on their own screen.
+
+## Capture and gallery
+
+```razor
+@using Shiny.Blazor.Controls.Camera.Media
+@inject IMediaService Media
+
+<img src="@photoUrl" />
+<button @onclick="Capture">Proof of delivery</button>
+
+@code {
+    string? photoUrl;
+
+    async Task Capture()
+    {
+        var photo = await Media.TakePhotoAsync(new PhotoCaptureOptions
+        {
+            Title = "Proof of delivery",
+            Instructions = "Fit the whole label in frame"
+        });
+
+        if (photo is not null)
+            photoUrl = photo.ToDataUrl();   // or upload photo.Data
+    }
+}
+```
+
+| Method | Returns |
+|---|---|
+| `TakePhotoAsync(PhotoCaptureOptions?)` | `MediaPhoto?` — `Data`, `Width`, `Height`, `ContentType`, `ToDataUrl()`, `OpenRead()` |
+| `RecordVideoAsync(VideoCaptureOptions?)` | `MediaVideo?` — `Url`, `Length`, `Duration`, `OpenReadAsync()` |
+| `PickPhotoAsync(MediaPickOptions?)` | `MediaPhoto?` |
+| `PickPhotosAsync(maxCount, MediaPickOptions?)` | `IReadOnlyList<MediaPhoto>` |
+| `PickVideoAsync()` | `MediaVideo?` |
+| `RequestCameraPermissionAsync(includeMicrophone)` | `MediaPermissionStatus` |
+| `GetAvailableCamerasAsync()` | `IReadOnlyList<CameraDevice>` |
+| `IsCameraSupportedAsync()` | `bool` — false on an insecure (non-HTTPS) origin or without `getUserMedia` |
+
+Photos are downscaled and re-encoded in the browser before any byte reaches .NET, then **streamed** in
+rather than returned as one interop message. So a large capture is safe on Blazor Server, where a single
+SignalR message is capped at 32KB by default. `CompressionQuality`, `MaxDimension` and `OutputFormat` are
+nullable on each call and fall back to the service defaults.
+
+**A `MediaVideo` keeps its bytes in the browser.** `Url` plays it in a `<video>` with no copy at all;
+`OpenReadAsync()` streams it into .NET when you actually want it. Dispose it when done to free the blob.
+
+The modal: close ✕ (also Escape), flip camera, an optional effect strip (`ShowEffectPicker`), the shutter,
+an optional retake/accept review (`ShowConfirmation`, default on), and a record button with an elapsed
+readout for video. `MaxDuration` stops a recording by itself; `IncludeAudio = false` records without asking
+for the microphone.
+
+## Scanning
+
+```csharp
+// one code, then the modal closes — DetectedBarcode, the same type MAUI returns
+var code = await Media.ScanBarcodeAsync();
+
+// stream until the user taps ✓
+await foreach (var code in Media.ScanBarcodesAsync())
+    items.Add(code.Value);
+
+// QR only, aimed with a band, give up after 30 idle seconds
+var qr = await Media.ScanBarcodeAsync(
+    [BarcodeFormat.QrCode],
+    new MediaScanOptions { ScanWindow = new RectF(0.15f, 0.3f, 0.7f, 0.4f), Timeout = TimeSpan.FromSeconds(30) });
+
+// the cropped image of a page held up to the camera
+var page = await Media.ScanDocumentImageAsync();
+
+// a stack of pages — each one has to leave the frame before the next is captured
+await foreach (var p in Media.ScanDocumentImagesAsync())
+    pages.Add(p.Jpeg);
+```
+
+| Package | Verbs |
+|---|---|
+| `Shiny.Blazor.Controls.Camera` | `ScanBarcodeAsync`, `ScanBarcodesAsync`, `IsBarcodeScanningSupportedAsync`, `ScanDocumentImageAsync`, `ScanDocumentImagesAsync` |
+| `Shiny.Blazor.Controls.Camera.Ai` | `ScanDocumentAsync(IChatClient)`, `ScanDocumentAsync<T>(AiDocumentScanner<T>)`, `ScanDocumentsAsync<T>(…)` |
+
+Barcode decoding uses the browser's native `BarcodeDetector`, which ships in Chromium (Chrome, Edge,
+Android). Elsewhere the modal opens and says so. Call `IsBarcodeScanningSupportedAsync()` first to hide the
+button instead. `ScanWindow`, `ShowBoundingBox`, `FilterDuplicates`, `MaxResults`, `Timeout` (an *idle*
+timeout: each result restarts it), `ShowResultCount`, `ShowDoneButton` and `VibrateOnResult` behave as on MAUI.
+
+### Credit cards, receipts and other documents
+
+Browsers have no on-device OCR, so the per-document verbs MAUI gets from `.Camera.Documents` are covered by
+an AI model instead. The browser still does the cheap part: it waits for a document to sit steady in view,
+then sends that one cropped frame to a Microsoft.Extensions.AI vision model. It never sends every frame.
+
+```csharp
+// schema-free: type, summary and label/value fields
+var doc = await Media.ScanDocumentAsync(chatClient);
+
+// your own shape
+public record BusinessCard(string? Name, string? Company, string? Email, string? Phone);
+
+var card = await Media.ScanDocumentAsync(new AiDocumentScanner<BusinessCard>(chatClient)
+{
+    SerializerOptions = new(AppJsonContext.Default.Options)   // trim/AOT-safe in published WASM
+});
+```
+
+"Reading document…" shows over the preview while the model runs. A model call that throws ends the scan
+and rethrows to the caller, so it never looks like the user cancelled.
+
+### Your own analyzer
+
+Browser analyzers are *armed* per request rather than pushing through a callback, so a custom request
+supplies `Next`, which pulls the next batch from the modal's camera:
+
+```csharp
+await foreach (var hit in Media.ScanAsync(new MediaScanRequest<MyResult>
+{
+    Analyzer = new BarcodeAnalyzer(),
+    Next = async (ctx, ct) =>
+    {
+        var codes = await ctx.Camera.RequestBarcodesAsync(ct);
+        ctx.SetStatus("Checking…");
+        var results = await LookUpAsync(codes, ct);
+        return results;
+    },
+    DuplicateKey = r => r.Id,
+    Describe = r => r.Name
+}))
+    ...
+```
+
+## What differs from MAUI
+
+- **No OCR or face verbs, and no built-in per-document verbs.** Use the AI verbs above.
+- **No torch, zoom or flash options.** `getUserMedia` has no portable control for them.
+- **No gallery permission and no `OpenSettingsAsync`**, because browsers have neither. A capture or scan
+  returns `null` without opening if the site is already blocked. Otherwise the modal opens and the camera's
+  own prompt asks.
+- **No `ConfigureCamera` / `ConfigurePage` hooks.** Restyle the modal with `MediaHost`'s `CssClass` instead.
+- **One modal at a time.** Starting a second while one is open throws `InvalidOperationException`.

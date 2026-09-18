@@ -1,0 +1,362 @@
+---
+title: 'Introducing Shiny.AppDeviceBridge — Ship Your App on Your Schedule, Test Device Features Without the Device'
+description: "Host a Blazor WebAssembly, React or any static web app inside a .NET MAUI app. Serve it from the device, update it over the air from your own signed release server, and give it the device through typed C# and TypeScript bridges. Handle background jobs, pushes and geofences in the page or in a background script. Build it with hot reload running inside the real app, and test the bridges without a device at all using the shiny-bridge-sim terminal simulator."
+date: 2026-09-18
+authors:
+  - allanritchie
+tags:
+  - AppDeviceBridge
+  - MAUI
+  - Blazor
+  - Release
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+**Shiny.AppDeviceBridge** is a new set of libraries that put a web app, such as Blazor WebAssembly, React, Vue or
+anything else that builds to static files, inside a .NET MAUI app. The app serves the web app from the device and
+updates it from your own server. The web app gets the device through typed **bridges**: GPS, Bluetooth LE, Wi-Fi,
+notifications, health, the camera, contacts and more. It is available today in beta.
+
+<NugetBadge name="Shiny.AppDeviceBridge.Maui" showLabel={true} />
+
+It is built around four problems:
+
+1. **Store release cycles.** Every fix waits for App Store and Google Play review, and then for users to update.
+2. **Slow inner loops.** Rebuilding and redeploying a native app to see a CSS change.
+3. **Device features you can't reproduce at your desk.** A Wi-Fi network dropping, a permission the user denied, a GPS
+   walk around the block, a Bluetooth device that shows up three seconds late.
+4. **Web apps stop when the app does.** A job, a geofence or a push arrives while no page is running.
+
+## Ship on your schedule, not the store's
+
+The native app becomes a thin, stable shell: the WebView, the bridges and a public key. Your UI and most of your logic
+live in the web app, and the web app updates from **your** server.
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseAppDeviceBridge(
+        bridge => bridge
+            .Configure(o => o.AppId = "field-app")
+            .AddAppSupportBridge()
+            .AddLocationBridges()
+            .AddBluetoothLEBridge()
+            .AddWifiBridge(),
+        webApp =>
+        {
+            webApp.UseBaseline(typeof(App).Assembly, "webapp.zip", "1.0.0");   // runs offline on first launch
+            webApp.UpdateServer = new Uri("https://api.example.com/webapps");
+            webApp.PublicKey = """
+                -----BEGIN PUBLIC KEY-----
+                ...
+                -----END PUBLIC KEY-----
+                """;
+        }
+    );
+```
+
+```csharp
+public class App : Application
+{
+    protected override Window CreateWindow(IActivationState? state) => new(new WebAppHostPage());
+}
+```
+
+The server is a few lines of ASP.NET Core, and publishing a release is copying a zip into a folder:
+
+```csharp
+builder.Services.AddWebAppReleases(o =>
+{
+    o.SigningKey = builder.Configuration["WebApps:SigningKey"];   // PEM, from your secret store
+    o.ReleasesDirectory = "/srv/webapps";
+});
+
+app.MapWebAppReleases("/webapps");
+```
+
+```
+/srv/webapps/field-app/
+    app.json              { "minimumVersion": "1.2.0" }
+    1.2.0.zip
+    1.3.0-beta.1.zip
+    1.3.0-beta.1.json     { "channel": "beta", "minimumHostVersion": "2.1", "platforms": ["ios", "android"] }
+```
+
+At launch the app asks the server whether the installed version is still acceptable:
+
+- **Below `minimumVersion`:** the update is required and installs before the app shows. Use it for a broken release.
+- **A newer release:** it downloads in the background and applies on the next launch, or when the page calls
+  `POST /_bridge/host/apply-update`.
+- **A release that needs a newer native app:** skipped. `minimumHostVersion` stops a web build that depends on a new
+  bridge from reaching an app that doesn't have that bridge.
+- **Offline, or the server is down:** the app serves the newer of the bundled and installed builds. It always starts.
+
+Every release is signed with ECDSA P-256. Before it can be served, the app checks it against the public key compiled
+into the app, then checks its SHA-256 and size. Old releases are never reinstalled. The app serves the release straight
+out of its zip from a loopback [Shiny.Net.HttpServer](/httpserver/), without extracting it.
+
+Updates are optional. Without an `UpdateServer`, the app serves the zip compiled into it. That's a complete setup on
+its own, and gives you the rest of this post: hot reload, typed bridges and the simulator.
+
+### Is this allowed?
+
+Yes, within the rules both stores already publish. The downloaded content is HTML and JavaScript running in the
+platform's WebView. Apple's guideline 2.5.2 and section 3.3.1(B) of the Developer Program License Agreement allow that
+as long as updates don't change the app's primary purpose. Google Play's policy against downloading executable code
+excludes JavaScript running in a WebView. The native capabilities (the bridges) ship in the binary and go through review
+like any other code. Ship a complete baseline, and use `minimumHostVersion` rather than sending web features to an app
+that can't support them. See [App Store review](/appdevicebridge/hosting/#app-store-review).
+
+## The device, as typed clients
+
+Every native capability is a bridge: a package on the app side, and HTTP endpoints under `/_bridge` on the same origin
+as the page, plus one Server-Sent Events stream for events. Each bridge's `.Client` package declares a
+`[BridgeClient]` interface, and a source generator implements it. The native bridge serializes the same contracts, so
+the page and the device always agree on the shape of the data.
+
+```csharp
+builder.Services
+    .AddWebAppHostClient()
+    .AddWifiBridgeClient()
+    .AddGpsBridgeClient();
+```
+
+```razor
+@inject IWifiBridge Wifi
+@inject IGpsBridge Gps
+
+var network = await Wifi.GetCurrentNetworkAsync();   // null when not on Wi-Fi
+
+await using var readings = await Gps.OnReadingAsync(r =>
+{
+    position = r;
+    return Task.CompletedTask;
+});
+```
+
+Not using Blazor? The TypeScript clients in `@shinyorg/appdevicebridge` are generated from the same declarations:
+
+```ts
+import { WifiBridge } from "@shinyorg/appdevicebridge";
+
+const network = await new WifiBridge().getCurrentNetwork();
+```
+
+Where a platform has no implementation, the bridge answers `501` and `GET /_bridge/host` reports it as unsupported, so
+the page can adapt instead of crashing. Here is the Blazor sample running in the macOS (AppKit) head. Contacts, GPS,
+geofences and health are greyed out because macOS doesn't have them:
+
+<img src="/images/appdevicebridge/app-home.png" width="800" alt="The Blazor sample inside the macOS app: platform macos, 19 of 26 bridges available, with contacts, geofences, gps and health marked not on this platform" />
+
+The bridges are guarded. Every route requires `AppDeviceBridgePolicies.Bridges`, which by default admits only callers on
+the device itself, plus the WebView's launch session. Opening a bridge to a remote caller is a policy you write on
+purpose. See [Security](/appdevicebridge/security/).
+
+## Background work, with or without a page
+
+A page in a WebView only runs while the app is in front. Mobile apps do real work in the background, though: a scheduled
+sync, a geofence the user just crossed, a push, a notification tap, a download that finished overnight. AppDeviceBridge
+hands each of those to the web app, whether or not a page is open.
+
+- **A page is open and listening:** the call goes to the page, which has 2 seconds to accept it and then posts its result.
+- **No page, or it doesn't accept in time:** the call runs in `background.js` from the web app's zip, inside an embedded
+  JavaScript engine ([Jint](https://github.com/sebastienros/jint)).
+- **Never both:** once the page accepts a call, it owns it.
+
+Register the sources on the bridge builder:
+
+```csharp
+bridge => bridge
+    .AddWebAppJob("sync", job => job.WithInternet(InternetAccess.Any))
+    .AddGeofenceBridge()
+    .AddPushBridge(o => o.DispatchToWebApp = true)
+    .AddNotificationsBridge()
+```
+
+Handle them in the page, in C# from Blazor or in JavaScript from anything else:
+
+```csharp
+await nativeCalls.HandleAsync("job:sync", AppDeviceBridgeJsonContext.Default.JobRun, MyJson.Default.SyncResult, async job =>
+{
+    await SyncAsync();
+    return new SyncResult(RanIn: "page");
+});
+```
+
+And in `background.js` at the root of the zip, for when there is no page:
+
+```js
+appdevicebridge.on("job:sync", async ({ name }) => {
+    const token = await (await fetch("/_bridge/settings/secure/token")).json();
+    const data = await fetch("https://api.example.com/sync", { headers: { Authorization: `Bearer ${token}` } });
+    await fetch("/_bridge/files/data/content?path=sync.json", { method: "PUT", body: await data.text() });
+});
+```
+
+| Source | Handler |
+| --- | --- |
+| Background job | `job:{name}` |
+| GPS reading delivered in the background | `gps` |
+| Geofence transition | `geofence` |
+| Motion activity delivered in the background | `motion` |
+| Push | `push.received`, `push.entry` |
+| Notification tapped | `notification.entry` |
+| HTTP transfer finished | `transfer.completed`, `transfer.failed` |
+
+`background.js` gets `appdevicebridge.on`, `console` and `fetch`. Relative URLs go to the host's own `/_bridge`, so a
+background handler reads and writes the same settings and files the page uses, and can send a notification. It has no DOM
+and no timers, keeps no state between calls, and gets 25 seconds and 64 MB per call. It ships in the web app's zip, so
+your background logic updates over the air with everything else.
+
+A Blazor app writes its background handler in JavaScript: Jint doesn't run WebAssembly, and a hidden WebView is exactly
+what iOS suspends. The handler stores its results through the bridge, and the Blazor app reads them when it next opens.
+The OS still decides when jobs run: at best every 15 minutes on Android, and less predictably on iOS. See
+[Native calls & background](/appdevicebridge/background/).
+
+## Hot reload inside the real app
+
+In a Debug build, set `DevServer` and the app loads its pages from `dotnet watch` on your machine. The bridges,
+settings, files and session stay on the device.
+
+```csharp
+#if DEBUG
+webApp.DevServer = new Uri("http://localhost:5288");
+#endif
+```
+
+```bash
+cd MyApp.Web
+dotnet watch run --launch-profile device
+```
+
+Start the app from your IDE as usual. Edit a `.razor` file, save, and the change appears in the running app. The native
+app isn't rebuilt, and the page keeps its `http://127.0.0.1:5780` origin, so its bridge calls still reach the real
+hardware.
+
+| Before | After a save |
+| --- | --- |
+| <img src="/images/appdevicebridge/app-home.png" width="420" alt="The sample's heading reads 'Your web app, with a device behind it'" /> | <img src="/images/appdevicebridge/app-hot-reload.png" width="420" alt="The same app, same session, with the heading changed to 'Shipped without an app store review'" /> |
+
+| Target | Dev server | Hot reload |
+| --- | --- | --- |
+| Android emulator | `http://10.0.2.2:5288` (default) | yes |
+| iOS simulator, Mac Catalyst, macOS, Windows, Linux | `http://localhost:5288` (default) | yes |
+| Android over USB | `adb reverse tcp:5288 tcp:5288` | yes, with the socket ports reversed too |
+| Any device over Wi-Fi | your machine's LAN address | pages only; reload to see changes |
+
+If `dotnet watch` isn't running when the app starts, the app serves its embedded or installed build as usual. See
+[Hosting](/appdevicebridge/hosting/#developing-the-web-app-with-hot-reload).
+
+## Test device features without the device
+
+Hot reload shortens the loop, but you still need a phone that is on the right Wi-Fi, has granted the right permission,
+and is walking the right route. **`shiny-bridge-sim`** removes that dependency.
+
+<NugetBadge name="Shiny.AppDeviceBridge.Simulator" showLabel={true} />
+
+```bash
+dotnet tool install -g Shiny.AppDeviceBridge.Simulator
+shiny-bridge-sim --dev-server http://localhost:5288      # or --app ./publish/wwwroot
+```
+
+It's a terminal app that stands in for the native app. It runs the real bridge server, with the same guard, the same
+bridge policy and the same event stream. Every device bridge is replaced by a simulated one built from its
+`[BridgeClient]` interface, so it answers exactly the routes the typed clients call. You choose the answers.
+
+<img src="/images/appdevicebridge/sim-bridges.png" width="800" alt="The simulator's Bridges tab: a tree of every bridge, with the host reporting ios, and quickentry, rpicamera and tray switched off" />
+
+Open `http://127.0.0.1:5299/` in any browser. The page and the bridges share that origin, so **the page needs no
+changes**. Here is the same Blazor sample in Chrome on a Mac. It now reports iOS, and has 23 of 26 bridges, because the
+simulator says so:
+
+<img src="/images/appdevicebridge/browser-home.png" width="800" alt="The Blazor sample in Chrome, served by the simulator: platform ios, 23 of 26 bridges, contacts, geofences, gps and health all available" />
+
+### Set any answer, including the failures
+
+Pick a route and set what it returns: a value checked against its contract, a `204` null, or any error the bridges use,
+such as `501 not_supported` or `403 access_denied`, with an optional delay. The page's client gets a `BridgeException`
+with that status and code, just as it would from a real device. Test the permission-denied screen, the loading spinner
+and the "not on Wi-Fi" state without touching a phone.
+
+| The route in the simulator | What the page gets |
+| --- | --- |
+| <img src="/images/appdevicebridge/sim-route.png" width="420" alt="The wifi GET current route editor in the simulator, answering a Harbourfront Café network" /> | <img src="/images/appdevicebridge/browser-wifi.png" width="420" alt="The sample's Wi-Fi page in the browser showing the Harbourfront Café network the simulator returned" /> |
+
+You can also fire any event at the page, switch a whole bridge off to see its `501` path, and change the platform the
+host reports.
+
+### Trails: play a walk, replay a failure
+
+A trail is a timed script of those steps. A `.gpx` file plays as a GPS walk at its recorded pace. Each point is fired as
+a `gps.reading` event and becomes what `GET gps/current` answers, so pages that poll and pages that listen see the same
+walk. Ctrl+R records what you do in the Bridges tab as a trail you can replay.
+
+| Playing a GPX ride | The page receiving it |
+| --- | --- |
+| <img src="/images/appdevicebridge/sim-trails.png" width="420" alt="The Trails tab playing the Harbourfront ride, step 10 of 36" /> | <img src="/images/appdevicebridge/browser-location.png" width="420" alt="The sample's Location page showing a live GPS reading with heading and speed from the trail" /> |
+
+```json
+{
+  "name": "Lose Wi-Fi",
+  "steps": [
+    { "delayMs": 0,    "event": "wifi.changed", "payload": { "current": null } },
+    { "delayMs": 0,    "bridge": "wifi", "route": "GET current", "mode": "null" },
+    { "delayMs": 5000, "bridge": "wifi", "route": "POST connection", "mode": "error", "status": 409, "code": "conflict" },
+    { "delayMs": 2000, "bridge": "ble", "supported": false }
+  ]
+}
+```
+
+### See every call
+
+The Traffic tab shows every request the page made and the response it got, with full headers and bodies. It uses the
+same recorder as the in-app [traffic monitor](/appdevicebridge/hosting/#traffic-monitor), which you can open over the
+web app in a Debug build.
+
+<img src="/images/appdevicebridge/sim-traffic.png" width="800" alt="The Traffic tab filtered to /_bridge/app, showing GET info returning an iPhone 17 Pro to a request from Chrome on macOS" />
+
+### In CI
+
+Ctrl+S saves a **scenario**: the platform, the bridges switched off, every route and event you changed, and every trail.
+Run it without the TUI in a pipeline and point your browser tests at it:
+
+```bash
+shiny-bridge-sim --scenario offline.scenario.json --trail walk.gpx --play walk --speed 4 --headless
+```
+
+### Or use the real hardware from your desk
+
+In a Debug build, the default bridge policy admits any caller that isn't coming through a tunnel. You can point a
+browser, `curl` or a script on your laptop at the phone's LAN address and drive the **real** GPS, camera or Bluetooth
+radio. The camera bridge goes further: a page anywhere can open the device's camera, watch a live MJPEG viewfinder and
+take photos. The desktop heads (Windows, macOS through AppKit, Linux through GTK4) run the same web app with the
+bridges those platforms support, on the machine you're already using.
+
+## Platforms
+
+Android, iOS, Mac Catalyst and Windows, plus the [maui-labs](https://github.com/dotnet/maui-labs) macOS (AppKit) and
+Linux (GTK4) heads. A bridge either works on a platform or answers `501` there. The simulator runs anywhere .NET 10 does.
+
+| Package | What it does |
+| --- | --- |
+| <NugetBadge name="Shiny.AppDeviceBridge.Maui" showLabel={true} /> | `UseAppDeviceBridge(bridge => …)`: the bridge server, started with the app, and the bridge builder, with `UseShiny()` and the UI thread done for you |
+| <NugetBadge name="Shiny.AppDeviceBridge.WebView" showLabel={true} /> | `UseAppDeviceBridge(bridge => …, webApp => …)`, `WebAppHostPage`: the web app in a WebView, over-the-air updates, the dev server proxy |
+| <NugetBadge name="Shiny.AppDeviceBridge.Blazor" showLabel={true} /> | `AddWebAppHostClient()`: the page-side client for Blazor WebAssembly |
+| <NugetBadge name="Shiny.AppDeviceBridge.AspNetCore" showLabel={true} /> | `AddWebAppReleases`, `MapWebAppReleases`: the signed release server |
+| <NugetBadge name="Shiny.AppDeviceBridge.Simulator" showLabel={true} /> | `shiny-bridge-sim`: the terminal simulator |
+| `Shiny.AppDeviceBridge.{Bridge}` | one package per bridge: AppSupport, Locations, BluetoothLE, Wifi, Notifications, Push, Health, Camera, Photos, Contacts, Calendar, Speech, Discovery, OBD, Desktop and more |
+| `@shinyorg/appdevicebridge` | the TypeScript clients |
+
+The full list is on the [Getting Started](/appdevicebridge/) page.
+
+## Get started
+
+- [Getting Started](/appdevicebridge/): the packages, the app and the page
+- [Updates](/appdevicebridge/updates/): the release server and the update rules
+- [Hosting](/appdevicebridge/hosting/): hot reload, mount points, WebView permissions and App Store review
+- [Simulator](/appdevicebridge/simulator/): every key, option and trail format
+- [Native calls & background](/appdevicebridge/background/): jobs, pushes, geofences and `background.js`
+- [Security](/appdevicebridge/security/): the bridge policy and remote access
+
+The repository's `samples/` folder has the Blazor sample shown here, running in every MAUI head, plus a release server
+and a simulator scenario with a GPX ride along Toronto's harbourfront.

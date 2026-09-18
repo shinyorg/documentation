@@ -608,6 +608,7 @@ export const sidebarTopics = [
           { label: 'AI Document Scanner', link: 'controls/cameraview/ai' },
           { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize' },
           { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
+          { label: 'Blazor Media Service', link: 'controls/cameraview/media-service-blazor' },
         ]
       },
       {
@@ -765,6 +766,7 @@ export const sidebarTopics = [
           { label: 'Dialog Service', link: 'controls/dialogs/', jumpTo: true },
           { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true, platform: 'maui' },
           { label: 'Media Service', link: 'controls/cameraview/media-service', jumpTo: true, platform: 'maui', badge: { text: 'New', variant: 'success' } },
+          { label: 'Media Service', link: 'controls/cameraview/media-service-blazor', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
         ]
       },
       {
