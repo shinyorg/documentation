@@ -1,0 +1,144 @@
+---
+title: Simulator
+description: Test a web app against every bridge from a terminal — set what each route answers, fire events, play GPS trails, and watch the traffic
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Simulator" />
+
+`shiny-bridge-sim` is a terminal app that stands in for the native app. It serves every bridge the library ships, but each
+one answers with values **you** choose: a Wi-Fi network that drops mid-sync, a permission the user denied, a BLE device
+that appears three seconds late, a GPS walk around the block. Nothing has to be deployed to a phone, and the setup can be
+saved as a file and replayed in CI.
+
+```bash
+dotnet tool install -g Shiny.AppDeviceBridge.Simulator
+
+# your page's dev server — dotnet watch, Vite — served on the simulator's origin
+shiny-bridge-sim --dev-server http://localhost:5288
+
+# or a built app
+shiny-bridge-sim --app ./bin/Release/net10.0/publish/wwwroot
+```
+
+Open the printed address (`http://127.0.0.1:5299/` by default) in a browser. The page and the bridges share that origin,
+so a page built with `Shiny.AppDeviceBridge.Blazor` or the TypeScript client finds the bridges on its own. **The page needs
+no changes.**
+
+## How it works
+
+The simulator runs the real bridge server on Shiny.Net.HttpServer: the same guard, the same `AppDeviceBridgePolicies.Bridges`
+policy, the same event stream, and the real `host`, `settings` and `files` bridges. Every device bridge is replaced by a
+simulated one, built from its `[BridgeClient]` interface, which is the same declaration the C# and TypeScript clients are
+generated from. So the simulator answers exactly the routes, query parameters and bodies those clients send, and a new
+bridge appears in it as soon as its interface is added to the catalog.
+
+Every route starts out answering with a sample of its contract, generated from the bridge's source-generated JSON
+metadata. Property names, casing and enum spelling are exactly what the page's client reads. A value you set is checked
+against the contract before it's used, so the simulator never sends something the real bridge couldn't.
+
+Security is unchanged from an app's release build. The server listens on loopback only and admits callers on this machine.
+
+## The terminal UI
+
+| Tab | What it's for |
+| --- | --- |
+| **Bridges** | A tree of the host, every bridge, its routes and its events. Pick a route to set its answer, an event to fire it, a bridge to switch it off. |
+| **Traffic** | Every request the page made and what it got back, with a filter, a record switch and the full headers and bodies. The same recorder as the MAUI [traffic monitor](/appdevicebridge/hosting/#traffic-monitor). |
+| **Trails** | Timed scripts: load a `.gpx` walk or a `.trail.json`, record one, play several at once, change the speed, loop. |
+| **Activity** | What happened: values changed, events fired, trail steps played. |
+
+A route can answer with:
+
+- **Value (200)**: the JSON you give, or a file for a route that returns bytes (a photo, a camera snapshot). With no file, a small placeholder image is sent.
+- **Null (204)**: what the page's client reads as `null`, such as no current Wi-Fi network.
+- **Error**: any 4xx or 5xx with the bridge's error body. The presets are `501 not_supported`, `403 access_denied`, `400 bad_request`, `404 not_found`, `409 conflict` and `500 bridge_failed`. The page sees a `BridgeException` with that status and `Code`.
+
+Each route can also wait before it answers, to show the page's loading state or trip its timeout. Switching a whole bridge
+off makes every route answer `501` and `GET /_bridge/host` report it as unsupported, which is the bridge on a platform
+without it. The host node sets the platform the page is told it's on.
+
+**Sticky writes** (on by default): a `PUT` or `POST` whose body is the contract its `GET` returns, such as `PUT wifi/radio` or
+`POST gps/listener`, becomes that `GET`'s answer, so the page reads back what it wrote.
+
+| Key | |
+| --- | --- |
+| Enter / Esc | into the selected editor / back to the tree |
+| F5 | apply a route, fire an event, play or stop a trail |
+| Alt+1 … Alt+4 | switch tabs |
+| Ctrl+L | load a trail |
+| Ctrl+R | start or stop recording a trail |
+| Ctrl+S / Ctrl+O | save / apply a scenario |
+| F1 / Ctrl+Q | help / quit |
+
+## Placeholders
+
+A value or payload may hold placeholders, filled in each time it is sent, so saved values stay current:
+
+| Placeholder | Sent as |
+| --- | --- |
+| `"$now"` | the current time, ISO 8601 |
+| `"$now-5m"`, `"$now+30s"`, `"$now+2h"`, `"$now-1d"` | the current time, offset |
+| `"$uuid"` | a new GUID |
+
+Only a whole string value is a placeholder; `"at $now"` is sent as written.
+
+## Trails
+
+A trail is a list of steps, each after a delay from the one before: fire an event, set what a route answers, or switch a
+bridge on or off.
+
+```json
+{
+  "name": "Lose Wi-Fi",
+  "steps": [
+    { "delayMs": 0,    "event": "wifi.changed", "payload": { "current": null } },
+    { "delayMs": 0,    "bridge": "wifi", "route": "GET current", "mode": "null" },
+    { "delayMs": 5000, "bridge": "wifi", "route": "POST connection", "mode": "error", "status": 409, "code": "conflict" },
+    { "delayMs": 2000, "bridge": "ble", "supported": false }
+  ]
+}
+```
+
+A `.gpx` file (a track, a route or waypoints) loads as a GPS walk at its recorded pace, or one point a second when it has
+no times. Each point is fired as `gps.reading`, with heading and speed worked out from the points around it, and also
+becomes what `GET gps/current` and `GET gps/last` answer, so a page that polls sees the same walk as one that listens.
+
+**Recording** (Ctrl+R) turns what you do in the Bridges tab into a trail with the time between each step. Save it with
+**Save…** and it replays the same way every time.
+
+## Scenarios and CI
+
+Ctrl+S saves a scenario: the platform, every bridge switched off, every route and event payload that differs from its
+sample, and every trail. Start with it again, or run without the TUI in a test pipeline:
+
+```bash
+shiny-bridge-sim --scenario offline.scenario.json --trail walk.gpx --play walk --speed 4 --headless
+```
+
+`--headless` serves, applies, plays and writes the activity and every request to the console until Ctrl+C.
+
+| Option | |
+| --- | --- |
+| `--app <dir>` | serve a built web app: a published Blazor `wwwroot`, or any folder with `index.html` |
+| `--dev-server <url>` | serve a dev server's pages on the bridges' origin |
+| `--port <n>` | loopback port, `5299` by default, `0` for any free one |
+| `--platform <name>` | `android`, `ios`, `maccatalyst`, `macos`, `windows` or `linux` |
+| `--app-id <id>` | the app id `GET /_bridge/host` reports |
+| `--scenario <file>` | apply a scenario on start |
+| `--trail <file>` | load a `.gpx` or `.trail.json`; repeatable |
+| `--play <name>` | play a loaded trail on start; repeatable |
+| `--speed <n>` | playback speed for `--play` |
+| `--data <dir>` | where the real settings and files bridges keep data; a temporary folder by default |
+| `--headless` | no TUI |
+
+## The sample
+
+The repository's Blazor sample runs against the simulator unchanged:
+
+```bash
+dotnet run --project samples/Sample.Blazor --launch-profile browser   # http://localhost:5288
+shiny-bridge-sim --dev-server http://localhost:5288 \
+  --scenario samples/simulator/sample.scenario.json --trail samples/simulator/harbourfront.gpx
+```

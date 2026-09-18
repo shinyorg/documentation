@@ -1283,6 +1283,7 @@ export const sidebarTopics = [
           { label: 'Bridges', link: 'appdevicebridge/bridges' },
           { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
           { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
+          { label: 'Simulator', link: 'appdevicebridge/simulator' },
           { label: 'Release Notes', link: 'appdevicebridge/release-notes' }
         ]
       },
