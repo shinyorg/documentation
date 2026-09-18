@@ -435,46 +435,39 @@ export default defineConfig({
           showRotateIndicator: true,
           announcements: [
             {
-              id: 'mauishell-7',
-              content: 'Shiny MAUI Shell v7 - App Links, App Shortcuts, & Navigation Interception!',
+              id: 'appdevicebridge-10',
+              content: 'App Device Bridge - Release Updates without the AppStore on .NET!',
               variant: 'tip',
-              link: { text: 'Shortcut me to it', href: '/mauishell/' },
-              dismissable: false   
-            },
-            {
-              id: 'controls-13',
-              content: 'Shiny Controls 1.3 - View & Edit Word, Excel, & PowerPoints - GANTT Charts & More!',
-              variant: 'tip',
-              link: { text: 'For Free!?!', href: '/controls/' },
+              link: { text: 'WHAT??!', href: '/appdevicebridge/' },
               dismissable: false
             },
             {
               id: 'controls-14',
-              content: 'Shiny Controls 1.4 - Diagrams & Floor Plans',
+              content: 'Shiny Controls 1.4 - Diagrams, Floor Plans, Kanban, & MORE!',
               variant: 'tip',
-              link: { text: 'Let\'s Plan!', href: '/controls/' },
+              link: { text: 'Seriously!?!', href: '/controls/' },
               dismissable: false
-            }, 
+            },
             {
-              id: 'httpserver-11',
-              content: 'Shiny.Net.HttpServer v1.1 - tvOS Support',
-              variant: 'tip',
-              link: { text: 'Let me see!', href: '/httpserver/' },
-              dismissable: false
-            },            
-            {
-              id: 'docdb-v13',
-              content: 'Document DB v13 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & More!',
+              id: 'docdb-v14',
+              content: 'Document DB v14 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & JOINS!',
               variant: 'tip',
               link: { text: 'SHOW ME!!', href: '/documentdb/' },
               dismissable: false
             },
             {
               id: 'client-v560',
-              content: 'Shiny Client v5.6.0 - tvOS Support, Live Activities, & Beacons are back!',
+              content: 'Shiny Client v5.7.1 - tvOS Support, Live Activities, & Beacons are back!',
               variant: 'tip',
               link: { text: 'Live It Up!', href: '/client/ble' },
               dismissable: false
+            },
+            {
+              id: 'mauishell-7',
+              content: 'Shiny MAUI Shell v7 - App Links, App Shortcuts, & Navigation Interception!',
+              variant: 'tip',
+              link: { text: 'Shortcut me to it', href: '/mauishell/' },
+              dismissable: false   
             }
           ]
         }),
