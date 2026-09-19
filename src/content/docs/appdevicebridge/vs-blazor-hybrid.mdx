@@ -1,0 +1,112 @@
+---
+title: vs. Blazor Hybrid
+description: How AppDeviceBridge differs from .NET MAUI Blazor Hybrid, and the trade-offs of each, to help you pick the right model for an app
+---
+
+.NET MAUI already ships a way to put Blazor inside a native app: **Blazor Hybrid** (`BlazorWebView`). AppDeviceBridge
+looks similar at first, since both are a web UI in a WebView inside a MAUI app, but they are built on different models.
+Which one fits depends on how often your UI changes, who builds it, and how much native code it needs to call.
+
+## The two models
+
+**Blazor Hybrid** runs your Razor components as **native .NET inside the app process**. There is no WebAssembly. The
+WebView only draws the HTML, and the components call MAUI APIs and your services directly through dependency
+injection. The UI is compiled into the app binary.
+
+**AppDeviceBridge** runs a **real web app**, such as Blazor WebAssembly, React, Vue or anything that builds to static
+files, the same way a browser would. A loopback HTTP server in the app serves it from a signed zip. The page reaches the
+device through **bridges**: same-origin HTTP endpoints under `/_bridge` plus a Server-Sent Events stream, with typed C#
+and TypeScript clients. The native app is a thin, stable shell, and the web app updates from your own server.
+
+```
+Blazor Hybrid                         AppDeviceBridge
+┌─ MAUI app ──────────────────────┐   ┌─ MAUI app ──────────────────────────────────┐
+│ BlazorWebView (renders HTML)    │   │ WebView ─▶ http://127.0.0.1 (your web app)  │
+│   ▲ render batches              │   │   │ fetch /_bridge/*  ·  SSE events         │
+│ Razor components (native .NET)  │   │   ▼                                         │
+│   └─▶ MAUI / Shiny APIs via DI  │   │ Bridge server ─▶ MAUI / Shiny APIs          │
+│ UI ships inside the app binary  │   │ Web app zip ◀─ signed OTA update server     │
+└─────────────────────────────────┘   └─────────────────────────────────────────────┘
+```
+
+## At a glance
+
+| | Blazor Hybrid | AppDeviceBridge |
+| --- | --- | --- |
+| UI technology | Razor components only | Anything that builds to static files: Blazor WASM, React, Vue, Svelte, plain HTML |
+| Where the UI code runs | Native .NET, in the app process | In the WebView (WebAssembly for Blazor, JavaScript for the rest) |
+| Calling device features | Direct C# calls, in-process | Typed clients over local HTTP and SSE |
+| Shipping a UI change | New app build, store review, user updates | Publish a signed release to your server; required or optional, applied at launch |
+| Same code in a browser | Via a shared Razor Class Library and a separate web host | The same build runs in a browser; unsupported bridges answer `501` |
+| Testing device behavior without a device | Mock your services yourself | [`shiny-bridge-sim`](/appdevicebridge/simulator/) scripts answers, errors, events and GPX walks |
+| Mixing native MAUI controls on screen | Yes, in the same page | The page is web; native screens are yours to add in the shell |
+| Startup cost | No WASM runtime to load | Blazor WASM loads its runtime from the device (no network, but not free) |
+| Platforms | Android, iOS, Mac Catalyst, Windows | Those plus macOS (AppKit) and Linux (GTK4) via maui-labs, and headless bridges without MAUI |
+
+## Blazor Hybrid
+
+**Pros**
+
+- **Full native .NET.** Components run on the device's .NET runtime, with no WebAssembly interpreter and no
+  download size to think about, and they can use any NuGet package or platform API.
+- **No boundary to design.** Any service in DI is one `@inject` away. There are no contracts, no serialization and no
+  HTTP round trip on each call.
+- **One debugger.** Breakpoints in Razor components and native code work in the same session.
+- **Native and web UI together.** A MAUI page can put a `BlazorWebView` next to native controls.
+- **Nothing listening.** There's no local server, so there's no port for other callers to probe.
+
+**Cons**
+
+- **Every UI change is a store release.** A typo fix still waits for review and for users to update.
+- **Blazor only.** A React or Vue team, or an existing web app, can't reuse its work.
+- **Tied to the app.** The UI assumes it's running in-process, so running the same experience in a plain browser means
+  abstracting your services and hosting it again.
+- **Testing device behavior is up to you.** A denied permission, a dropped Wi-Fi network or a Bluetooth device that
+  shows up late all need mocks you write yourself.
+
+## AppDeviceBridge
+
+**Pros**
+
+- **Ship on your schedule.** Push fixes and features to users without an app store release. Updates can be required
+  (downloaded before the app shows) or optional (applied next launch), and each one is
+  [ECDSA-signed and verified](/appdevicebridge/updates/) against a key compiled into the app.
+- **Any web stack.** Blazor WebAssembly, React, Vue or plain HTML. The typed clients come in both
+  [C# and TypeScript](/appdevicebridge/clients/), generated from the same contracts.
+- **One web app for everywhere.** The same build runs in the app, in a desktop browser, or served to other devices
+  through a [tunnel](/appdevicebridge/security/#through-a-tunnel), with the device features lighting up where they're
+  available.
+- **Device testing without a device.** The [simulator](/appdevicebridge/simulator/) serves every bridge with answers,
+  errors and events you control, and GPX trails play back as GPS walks. `--headless` runs the same scenarios in CI.
+- **Fast inner loop in the real app.** In debug builds the app loads pages from `dotnet watch` through the
+  [dev server](/appdevicebridge/hosting/), so hot reload runs inside the device app.
+- **Background work for web code.** Jobs, pushes and geofences are handled by the page or by
+  [`background.js`](/appdevicebridge/background/) when no page is open.
+- **A clear, auditable boundary.** Device access is limited to the bridges you add, and all of it sits behind one
+  [bridge policy](/appdevicebridge/security/).
+- **More heads.** macOS (AppKit), Linux (GTK4), and bridges running headless on devices such as a Raspberry Pi.
+
+**Cons**
+
+- **Blazor WASM is slower than native .NET.** Its runtime has to load at startup and CPU-heavy code runs slower.
+  AOT-compiling the WASM helps but makes the download bigger.
+- **Each device call is an HTTP round trip.** Calls are async and JSON-serialized. That's fine for GPS, Bluetooth LE
+  or a settings read, but chatty high-frequency calls should be batched or streamed over the events channel.
+- **You only get what a bridge exposes.** Anything the bridges don't cover means writing a bridge of your own with
+  `bridge.AddBridge<T>()` and a `[BridgeClient]` contract.
+- **More moving parts.** There's a release server to run, a signing key to protect, and a loopback server in the app.
+  The bridge policy and launch session lock it down by default, but it's still more surface than an in-process call.
+- **Store policy still applies.** Both stores allow web content downloaded into a WebView, but updates can't change
+  the app's primary purpose or get around review. Check the current App Store Review Guidelines (2.5.2, 4.7) and
+  Google Play's Device and Network Abuse policy for your app.
+
+## Which one?
+
+Choose **Blazor Hybrid** when the app is .NET all the way down, the UI changes about as often as the native code, you
+need heavy compute or a lot of fine-grained native calls in the UI, or you want native and web controls side by side.
+
+Choose **AppDeviceBridge** when the UI changes much more often than the shell, when a web team, or an existing web app,
+owns the UI, when the same app has to run in a browser too, or when you want to test device behavior without hardware.
+
+They also combine. A MAUI app can use native pages or a `BlazorWebView` for the parts that must stay in-process, and
+[`WebAppHostView`](/appdevicebridge/hosting/) for the parts that should update over the air.

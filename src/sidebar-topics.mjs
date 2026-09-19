@@ -1287,6 +1287,7 @@ export const sidebarTopics = [
         badge: { text: 'New', variant: 'success' },
         items:[
           { label: 'Getting Started', link: 'appdevicebridge/' },
+          { label: 'vs. Blazor Hybrid', link: 'appdevicebridge/vs-blazor-hybrid' },
           { label: 'Hosting', link: 'appdevicebridge/hosting' },
           { label: 'Updates', link: 'appdevicebridge/updates' },
           { label: 'Security', link: 'appdevicebridge/security' },
