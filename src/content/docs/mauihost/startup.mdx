@@ -1,0 +1,170 @@
+---
+title: Startup Service
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+<PlatformSupport frameworks={["maui"]} />
+
+`IStartupService` installs the running app into the operating system's startup list: launch at login on
+Windows and macOS, and on Linux either launch at login for a GUI app or a systemd service for headless code.
+It's safe to call from cross-platform code. Mobile reports `NotSupported` rather than throwing.
+
+## Registration
+
+```csharp
+using Shiny;
+
+builder.AddStartupService(opts =>
+{
+    opts.Identifier = "my-app";            // Windows Run value / Linux .desktop file or systemd unit name
+    opts.DisplayName = "My App";           // Linux desktop entry Name / systemd Description
+    opts.Arguments.Add("--autostart");     // Windows + Linux (macOS can't pass arguments)
+});
+```
+
+An `IServiceCollection` overload exists too, for an AppKit app with no `MauiAppBuilder` or a plain
+Generic Host worker:
+
+```csharp
+services.AddStartupService(opts => opts.Identifier = "my-app");
+```
+
+## Usage
+
+```csharp
+public class StartupToggle(IStartupService startup)
+{
+    public async Task Toggle(bool enable)
+    {
+        if (!startup.IsSupported)
+            return;
+
+        var state = enable
+            ? await startup.Register()
+            : await startup.Unregister();
+
+        if (state is StartupServiceState.RequiresApproval or StartupServiceState.DisabledByUser)
+            await startup.OpenSettings();   // the user has the final say in the OS UI
+    }
+}
+```
+
+:::caution
+`Register` returns the state the OS settled on, which is often not `Enabled`. Bind your UI to the returned
+state (or a fresh `GetState`) and never cache it, because the user can switch the entry off outside your app.
+:::
+
+| State | Meaning |
+|-------|---------|
+| `NotSupported` | The platform (or the chosen Linux mode on this host) has no startup list this library can manage |
+| `NotRegistered` | Not in the startup list |
+| `Enabled` | Registered and will start |
+| `DisabledByUser` | Registered, but switched off in Task Manager / Login Items / the `.desktop` file / `systemctl disable` |
+| `DisabledByPolicy` | Blocked by group policy, MDM, or a masked systemd unit |
+| `RequiresApproval` | macOS only. Submitted, waiting for approval in System Settings |
+
+## Platform behaviour
+
+| Platform | Mechanism | Notes |
+|----------|-----------|-------|
+| Windows (unpackaged, `WindowsPackageType=None`) | `HKCU\…\CurrentVersion\Run` | Honours `ExecutablePath`/`Arguments`. Reports `DisabledByUser` when switched off in Task Manager. `OpenSettings` opens `ms-settings:startupapps` |
+| Windows (MSIX packaged) | Not supported | MSIX virtualizes `HKCU` writes, so a `Run` entry never reaches the shell |
+| macOS 13+ (Mac Catalyst and AppKit) | `SMAppService.MainApp` | Registers the running app bundle. The first registration commonly returns `RequiresApproval`; `OpenSettings` opens Login Items |
+| Linux | Chosen by `LinuxMode` (below) | Honours `ExecutablePath`/`Arguments`. `OpenSettings` returns false |
+| iOS / Android / macOS 12 and earlier | Not supported | `IsSupported` is false |
+
+## Linux: GUI app or service
+
+On Linux, `StartupServiceOptions.LinuxMode` sets whether the process starts as a **GUI app** at login or
+as a **general service**:
+
+| `LinuxStartupMode` | Kind | Unit / entry | Starts |
+|--------------------|------|--------------|--------|
+| `XdgAutostart` (default) | GUI | `~/.config/autostart/{Identifier}.desktop` | At desktop login, on any XDG-compliant desktop, systemd or not |
+| `SystemdGraphicalSession` | GUI | `~/.config/systemd/user/{Identifier}.service`, `WantedBy=graphical-session.target` | Once the desktop session is up; stopped when the session ends |
+| `SystemdUser` | Service | `~/.config/systemd/user/{Identifier}.service`, `WantedBy=default.target` | When the user's service manager starts: first login, or at boot with `loginctl enable-linger <user>` |
+| `SystemdSystem` | Service | `/etc/systemd/system/{Identifier}.service`, `WantedBy=multi-user.target` | At boot, with no login. Requires root |
+
+The systemd modes give you what XDG autostart can't:
+
+- **Crash restarts.** `Restart=on-failure` with `RestartSec=5` is written by default (`RestartOnFailure = false` turns it off). A clean exit isn't restarted.
+- **Logging.** stdout and stderr go to the journal: `journalctl [--user] -u {Identifier}`.
+- **Control.** `systemctl [--user] status|start|stop|restart {Identifier}`.
+
+### What gets written
+
+```ini
+[Unit]
+Description=My App
+PartOf=graphical-session.target      # SystemdGraphicalSession only
+After=graphical-session.target       # (SystemdSystem: After=network.target)
+
+[Service]
+Type=simple
+ExecStart="/opt/my-app/MyApp" "--autostart"
+WorkingDirectory=/opt/my-app
+User=myworker                        # SystemdSystem + LinuxServiceUser only
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=graphical-session.target    # default.target / multi-user.target for the service modes
+```
+
+`WorkingDirectory` defaults to `AppContext.BaseDirectory` (override with `StartupServiceOptions.WorkingDirectory`),
+and `DOTNET_ROOT` is carried into the unit when it's set, so a framework-dependent app on a private runtime
+install still starts.
+
+### Behaviour
+
+- `Register` writes the unit, then runs `systemctl [--user] daemon-reload` and `enable`. It does **not** start
+  the unit, so a GUI app registering itself never spawns a second copy. The unit runs from the next login or
+  boot. To start it immediately, run `systemctl [--user] start {Identifier}`.
+- `Unregister` runs `disable`, deletes the unit, and runs `daemon-reload`.
+- `GetState` maps `systemctl is-enabled`: `enabled` → `Enabled`, `disabled` → `DisabledByUser`,
+  `masked` → `DisabledByPolicy`. A masked unit is never overwritten.
+- `Identifier` must be a valid unit name: letters, digits, and `:` `_` `.` `-`. Spaces and `@` throw `InvalidOperationException`.
+- `SystemdSystem` `Register`/`Unregister` throw `InvalidOperationException` unless the process runs as root.
+- Switching `LinuxMode` doesn't remove the previous mode's entry. Call `Unregister` under the old mode first.
+
+:::note
+`IsSupported` is false for the systemd modes when the host isn't systemd-booted (no `/run/systemd/system`),
+when the user modes have no per-user service manager (`$XDG_RUNTIME_DIR/systemd`), or inside a Flatpak or
+Snap sandbox, which can't reach the host's service manager.
+:::
+
+:::caution
+`SystemdGraphicalSession` relies on the session reaching `graphical-session.target`. GNOME and KDE Plasma
+do. Bare window managers (sway, i3, Hyprland) only do if configured, and otherwise the app silently never
+starts. `XdgAutostart` is the safer default for a GUI app. The two service modes have no display, so
+don't use them for a GUI app.
+:::
+
+### Installing a worker as a service
+
+Because `AddStartupService` works on plain `IServiceCollection`, a Generic Host worker can install itself:
+
+```csharp
+var builder = Host.CreateApplicationBuilder(args);
+builder.Services.AddSystemd();               // optional: Microsoft.Extensions.Hosting.Systemd
+builder.Services.AddHostedService<Worker>();
+builder.Services.AddStartupService(opts =>
+{
+    opts.Identifier = "my-worker";
+    opts.DisplayName = "My Worker";
+    opts.LinuxMode = LinuxStartupMode.SystemdSystem;
+    opts.LinuxServiceUser = "myworker";      // runs as root when unset
+});
+var host = builder.Build();
+
+// sudo ./my-worker --install
+if (args.Contains("--install"))
+{
+    var state = await host.Services.GetRequiredService<IStartupService>().Register();
+    Console.WriteLine($"Service: {state}");
+    return;
+}
+await host.RunAsync();
+```
+
+Use `LinuxStartupMode.SystemdUser` instead when the worker should run as the current user without root.
