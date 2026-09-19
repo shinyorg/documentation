@@ -15,7 +15,8 @@
  *   data-countup                                                  count "40M+" up from zero on reveal
  *   data-velocity                                                 CSS marquees speed up with scrolling
  *                                                                 and run backwards when scrolling up
- *   data-spotlight                                                soft light that follows the cursor
+ *   data-spotlight                                                soft light that follows the cursor,
+ *                                                                 or is pinned under the finger on touch
  *
  * `data-countup` rather than shinysoft's `data-count`: the hero already owns `data-count` for its
  * own fact counters.
@@ -289,12 +290,118 @@ function initSpotlight() {
   );
 }
 
+/* ----------------------------------------------------- touch spotlight */
+
+/**
+ * Touch has no hover position, so the light is pinned where the finger lands instead, in
+ * viewport coordinates. Cards pick it up under the finger, then glide beneath that fixed point
+ * as the page coasts after a flick, and the glow fades once scrolling settles.
+ */
+function initTouchSpotlight() {
+  // How far outside a card's edge the light still reaches it, so the glow slides in, not pops.
+  const REACH = 120;
+  const SETTLE = 240;
+  const visible = new Set<HTMLElement>();
+  const lit = new Set<HTMLElement>();
+  let lightX = 0;
+  let lightY = 0;
+  let touching = false;
+  let queued = false;
+  let idleTimer = 0;
+
+  const observer = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const el = entry.target as HTMLElement;
+      if (entry.isIntersecting) visible.add(el);
+      else visible.delete(el);
+    }
+  });
+  document.querySelectorAll<HTMLElement>('[data-spotlight]').forEach((el) => observer.observe(el));
+
+  const paint = () => {
+    queued = false;
+    for (const el of visible) {
+      const rect = el.getBoundingClientRect();
+      const x = lightX - rect.left;
+      const y = lightY - rect.top;
+      const near = x > -REACH && x < rect.width + REACH && y > -REACH && y < rect.height + REACH;
+      if (near) {
+        el.style.setProperty('--mx', `${x}px`);
+        el.style.setProperty('--my', `${y}px`);
+        if (!lit.has(el)) {
+          lit.add(el);
+          el.classList.add('is-lit');
+        }
+      } else if (lit.has(el)) {
+        // Leave --mx/--my where they were so the glow fades in place rather than jumping.
+        lit.delete(el);
+        el.classList.remove('is-lit');
+      }
+    }
+  };
+
+  const schedule = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(paint);
+  };
+
+  const settle = () => {
+    window.clearTimeout(idleTimer);
+    idleTimer = window.setTimeout(() => {
+      if (touching) return;
+      lit.forEach((el) => el.classList.remove('is-lit'));
+      lit.clear();
+    }, SETTLE);
+  };
+
+  const follow = (e: TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    lightX = t.clientX;
+    lightY = t.clientY;
+    schedule();
+  };
+
+  document.addEventListener(
+    'touchstart',
+    (e) => {
+      touching = true;
+      window.clearTimeout(idleTimer);
+      follow(e);
+    },
+    { passive: true },
+  );
+  document.addEventListener('touchmove', follow, { passive: true });
+
+  const release = (e: TouchEvent) => {
+    touching = e.touches.length > 0;
+    settle();
+  };
+  document.addEventListener('touchend', release, { passive: true });
+  document.addEventListener('touchcancel', release, { passive: true });
+
+  // Momentum scrolling carries on after the finger lifts; keep lighting cards as they pass.
+  window.addEventListener(
+    'scroll',
+    () => {
+      if (!touching && !lit.size) return;
+      schedule();
+      settle();
+    },
+    { passive: true },
+  );
+}
+
 /* --------------------------------------------------------------- boot */
 
 function boot() {
   if (finePointer) {
     root.classList.add('can-hover');
     initSpotlight();
+  } else if (motion) {
+    root.classList.add('can-touch');
+    initTouchSpotlight();
   }
 
   if (!motion) return;
