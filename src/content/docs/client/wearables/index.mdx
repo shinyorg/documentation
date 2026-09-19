@@ -1,0 +1,220 @@
+---
+title: Wearables
+description: Talk to a companion Apple Watch or Wear OS app — live messages with replies, shared context, queued transfers and files
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Wearables" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios"]} />
+
+`Shiny.Wearables` talks to the companion app on a paired **Apple Watch** (WatchConnectivity) or **Wear OS** device (the Data Layer) through one API. Everything is bytes addressed by a path, in four shapes:
+
+| Shape | What it is for | iOS | Wear OS |
+|---|---|---|---|
+| **Message** | A live request that waits on the companion's reply. The watch must be reachable; nothing queues. | `sendMessage` + reply handler | `MessageClient.sendRequest` |
+| **Context** | The latest state ("the current plan"). Only the newest value is kept. | `updateApplicationContext` | data item at `/shiny/context` |
+| **Transfer** | Queued data, delivered in order even if the watch is out of range or its app is closed. | `transferUserInfo` | data item at `/shiny/transfer/{id}` |
+| **File** | A queued file with string metadata. | `transferFile` | data item with an asset at `/shiny/file/{id}` |
+
+The same package runs **inside a .NET Wear OS app** too — there, the "wearable" it talks to is the phone. watchOS apps are written in Swift; see [the protocol](#protocol-for-swift-and-kotlin-companions) below.
+
+## Setup
+
+```csharp
+// MauiProgram.cs
+builder.Services.AddWearables<MyWearableDelegate>();
+// or, without a delegate
+builder.Services.AddWearables();
+```
+
+On iOS and Android this registers `IWearableManager`. Everywhere else nothing is registered, so resolve it as optional (`services.GetService<IWearableManager>()`) in shared code.
+
+### iOS
+
+- The `WCSession` is activated at startup, not on first use: WatchConnectivity delivers what arrived while the app was closed as soon as the session activates, and only to a delegate that is already set. Call `AddWearables` during app startup.
+- **iPad is not supported** — `WCSession.IsSupported` is false there and `GetStatus()` reports `IsSupported = false`.
+- Mac Catalyst, macOS and tvOS have no paired watch; the package has no target for them.
+
+### Android / Wear OS
+
+- The phone app and the watch app must share the **same application id and signing key**, or the Data Layer will not connect them.
+- The companion is found by the **`shiny_wearable` capability**. Shiny advertises it for your app automatically at startup. A Kotlin companion declares it in `res/values/wear.xml`:
+
+  ```xml
+  <resources>
+      <string-array name="android_wear_capabilities">
+          <item>shiny_wearable</item>
+      </string-array>
+  </resources>
+  ```
+
+- Inbound traffic arrives through `ShinyWearableListenerService`, which Google Play services binds for anything under `/shiny` — including while your app is not running. No manifest edits are needed.
+- A device without the Wear OS app or Play services reports `IsSupported = false`.
+
+## Using It
+
+```csharp
+public class WatchViewModel(IWearableManager wearables)
+{
+    public async Task Sync()
+    {
+        var status = await wearables.GetStatus();
+        if (!status.IsAppInstalled)
+            return;
+
+        // live — needs IsReachable; throws WearableException(NotReachable) otherwise
+        if (status.IsReachable)
+        {
+            var reply = await wearables.SendMessage("workout/start", Encoding.UTF8.GetBytes("""{"kind":"run"}"""));
+        }
+
+        // latest state — delivered when the watch can take it
+        await wearables.UpdateContext(Encoding.UTF8.GetBytes("""{"plan":"5k"}"""));
+
+        // queued, in order
+        var id = await wearables.Transfer("log", Encoding.UTF8.GetBytes("[1,2,3]"));
+
+        // queued file — leave it in place until OnTransferCompleted reports the id
+        var fileId = await wearables.TransferFile("maps/offline", "/path/to/city.bin", new Dictionary<string, string> { ["zoom"] = "14" });
+
+        var pending = await wearables.GetPendingTransfers();
+        await wearables.CancelTransfer(fileId);
+
+        var theirs = await wearables.GetReceivedContext();
+    }
+}
+```
+
+Paths are app-defined: `sync`, `workout/start`. Leading and trailing slashes are trimmed; whitespace, `?` and `#` are rejected. Keep messages small — about 64 KB on iOS, 100 KB on Wear OS.
+
+| `WearableErrorCode` | When |
+|---|---|
+| `NotSupported` | No wearable API on this device |
+| `NotReachable` | `SendMessage` with no reachable wearable running the companion app |
+| `Failed` | The platform refused or failed the operation |
+
+## The Delegate
+
+Everything the watch sends goes to your `IWearableDelegate`, in the foreground or background. Derive from `WearableDelegate` and override what you need:
+
+```csharp
+public class MyWearableDelegate : WearableDelegate
+{
+    // what you return is the reply the watch gets
+    public override Task<byte[]?> OnMessageReceived(WearableMessage message)
+        => Task.FromResult<byte[]?>(message.Path == "ping" ? Encoding.UTF8.GetBytes("pong") : null);
+
+    public override Task OnContextReceived(WearableContext context) => Task.CompletedTask;
+
+    public override Task OnTransferReceived(WearableTransfer transfer) => Task.CompletedTask;
+
+    // the file is already in the app's data directory — you own it now
+    public override Task OnFileReceived(WearableFile file)
+    {
+        File.Move(file.LocalPath, Path.Combine(FileSystem.AppDataDirectory, file.FileName), true);
+        return Task.CompletedTask;
+    }
+
+    public override Task OnTransferCompleted(WearableTransferResult result) => Task.CompletedTask;
+
+    public override Task OnStatusChanged(WearableStatus status) => Task.CompletedTask;
+}
+```
+
+With several delegates registered, each is asked for a reply in turn and **the first non-null reply wins**; the watch gets an empty reply if none answers. A delegate that throws is logged and skipped. The other callbacks run on every delegate.
+
+Received files are moved to `{AppData}/Shiny.Wearables/{transferId}/{fileName}` before `OnFileReceived` runs (on iOS the platform deletes its copy the moment the callback returns). File names from the sender are reduced to their last segment, so a sender cannot write outside that folder.
+
+On Wear OS, `OnTransferCompleted` fires when the receiver deletes the data item — its delivery receipt — so the result carries the id but an empty `Path`.
+
+## Protocol for Swift and Kotlin Companions
+
+The wire format is in `WearableProtocol`. A companion written natively speaks it like this.
+
+### watchOS (Swift)
+
+| Shape | Watch sends / receives |
+|---|---|
+| Message | `["path": String, "data": Data]`; reply `["data": Data]` |
+| Context | `["data": Data]` |
+| Transfer | `["id": String, "path": String, "data": Data]` |
+| File | `transferFile(url, metadata: ["id", "path", "name", "metadata": [String: String]])` |
+
+```swift
+import WatchConnectivity
+
+final class PhoneLink: NSObject, WCSessionDelegate {
+    func send(_ path: String, _ json: Data) async throws -> Data {
+        try await withCheckedThrowingContinuation { cont in
+            WCSession.default.sendMessage(["path": path, "data": json],
+                replyHandler: { reply in cont.resume(returning: reply["data"] as? Data ?? Data()) },
+                errorHandler: { cont.resume(throwing: $0) })
+        }
+    }
+
+    // messages from the phone always carry a reply handler — always call it
+    func session(_ session: WCSession, didReceiveMessage message: [String: Any],
+                 replyHandler: @escaping ([String: Any]) -> Void) {
+        let path = message["path"] as? String ?? ""
+        replyHandler(["data": handle(path, message["data"] as? Data ?? Data())])
+    }
+
+    func session(_ session: WCSession, didReceiveApplicationContext ctx: [String: Any]) { /* ctx["data"] */ }
+    func session(_ session: WCSession, didReceiveUserInfo info: [String: Any] = [:]) { /* info["path"], info["data"] */ }
+    func session(_ session: WCSession, activationDidCompleteWith s: WCSessionActivationState, error: Error?) {}
+}
+```
+
+### Wear OS (Kotlin)
+
+| Shape | Data Layer |
+|---|---|
+| Message | `sendRequest(node, "/shiny/message/{path}", bytes)`; the reply is the RPC result |
+| Context | `PutDataMapRequest.create("/shiny/context")` with `data` byte array |
+| Transfer | urgent item `/shiny/transfer/{id}` with `id`, `path`, `data`; the receiver deletes it once handled |
+| File | urgent item `/shiny/file/{id}` with `id`, `path`, `name`, `metadata` (DataMap of strings) and the `file` asset |
+
+```kotlin
+// ask the phone
+val node = Wearable.getCapabilityClient(ctx)
+    .getCapability("shiny_wearable", CapabilityClient.FILTER_REACHABLE).await().nodes.first()
+val reply: ByteArray = Wearable.getMessageClient(ctx)
+    .sendRequest(node.id, "/shiny/message/sync", json.toByteArray()).await()
+
+// answer the phone
+class PhoneListener : WearableListenerService() {
+    override fun onRequest(nodeId: String, path: String, request: ByteArray): Task<ByteArray>? =
+        Tasks.forResult(handle(path.removePrefix("/shiny/message/"), request))
+
+    override fun onDataChanged(events: DataEventBuffer) {
+        events.filter { it.type == DataEvent.TYPE_CHANGED }.forEach {
+            val item = it.dataItem
+            val map = DataMapItem.fromDataItem(item).dataMap
+            when {
+                item.uri.path == "/shiny/context" -> onContext(map.getByteArray("data"))
+                item.uri.path!!.startsWith("/shiny/transfer/") -> {
+                    onTransfer(map.getString("path"), map.getByteArray("data"))
+                    Wearable.getDataClient(this).deleteDataItems(item.uri) // the phone's delivery receipt
+                }
+            }
+        }
+    }
+}
+
+// queue a transfer to the phone
+val id = UUID.randomUUID().toString().replace("-", "")
+val req = PutDataMapRequest.create("/shiny/transfer/$id").apply {
+    dataMap.putString("id", id); dataMap.putString("path", "log"); dataMap.putByteArray("data", bytes)
+}.setUrgent().asPutDataRequest()
+Wearable.getDataClient(ctx).putDataItem(req)
+```
+
+Declare the listener service with intent filters for `MESSAGE_RECEIVED`, `REQUEST_RECEIVED` and `DATA_CHANGED`, data scheme `wear`, host `*` and path prefix `/shiny`.

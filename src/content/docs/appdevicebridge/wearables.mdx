@@ -1,0 +1,146 @@
+---
+title: Wearables
+description: The companion Apple Watch or Wear OS app for a Shiny.AppDeviceBridge web app — status, live messages with replies, shared context, queued transfers and files
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Wearables" />
+
+The wearables bridge connects the web app to its companion app on a paired **Apple Watch** (WatchConnectivity) or
+**Wear OS** device (the Data Layer). It's built on [Shiny.Wearables](/client/wearables/) 5.8. The watch doesn't run
+the web app: the page talks to the phone, and the phone talks to your native watch app.
+
+| Mode | What it's for | Bridge |
+| --- | --- | --- |
+| Live message | request and reply while the watch is reachable | `POST /_bridge/wearables/messages` |
+| Context | the latest shared state; only the newest value is kept | `GET/PUT /_bridge/wearables/context` |
+| Transfer | queued data, delivered in order even when the watch is away | `POST /_bridge/wearables/transfers` |
+| File | a queued file from a file root | `POST /_bridge/wearables/files` |
+| Status | paired, companion app installed, reachable | `GET /_bridge/wearables`, `wearables.status` |
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS | WatchConnectivity (`WCSession`). Not on iPad. |
+| Android | the Wear OS Data Layer (Google Play services). The device needs the Wear OS app. |
+| Mac Catalyst, macOS, Windows, Linux | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Wearables
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddWearablesBridge(),
+    webApp => { /* … */ }
+);
+```
+
+`AddWearablesBridge()` also registers Shiny's wearable service with the bridge's delegate, so there's nothing else to call.
+
+| `WearablesBridgeOptions` | Default | |
+| --- | --- | --- |
+| `Root` | `data` | the file root that files from the watch are saved into |
+| `Folder` | `wearables` | the folder inside `Root`; each file lands in `{Folder}/{id}/{name}` |
+| `RegisterWearableService` | `true` | turn off to call `services.AddWearables(…)` yourself; the bridge's delegate is added either way |
+
+**The companion app** speaks Shiny.Wearables' protocol: `path`/`data` dictionaries over WatchConnectivity, and paths
+under `/shiny` plus the `shiny_wearable` capability on Wear OS. On Wear OS the phone and watch apps must share the
+application id and signing key. The [Shiny Wearables docs](/client/wearables/) cover the protocol in full, with Swift
+and Kotlin examples.
+
+## JSON on the wire
+
+What the page sends reaches the watch as UTF-8 JSON text. What the watch sends reaches the page as JSON. When it isn't
+JSON, it arrives as a base64 string with `binary: true`, so nothing is dropped.
+
+## From the page
+
+```csharp
+// Program.cs (Blazor WebAssembly)
+builder.Services.AddWebAppHostClient().AddWearablesBridgeClient();
+```
+
+```csharp
+@inject IWearablesBridge Watch
+
+var status = await Watch.GetStatusAsync();
+if (status.Reachable)
+{
+    var reply = await Watch.SendMessageAsync(new WearableMessageRequest("workout/start", JsonSerializer.SerializeToElement(new { kind = "run" })));
+}
+
+await Watch.UpdateContextAsync(new WearableContextUpdate(JsonSerializer.SerializeToElement(new { plan = "5k" })));
+var ticket = await Watch.TransferAsync(new WearableTransferRequest("log", JsonSerializer.SerializeToElement(entries)));
+```
+
+```ts
+import { WearablesBridge } from "@shinyorg/appdevicebridge";
+
+const watch = new WearablesBridge();
+const { reachable } = await watch.getStatus();
+if (reachable) {
+    const { data } = await watch.sendMessage({ path: "workout/start", data: { kind: "run" } });
+}
+await watch.updateContext({ data: { plan: "5k" } });
+const stop = await watch.onTransferCompleted(done => console.log(done.id, done.succeeded));
+```
+
+- **Messages never queue.** When no watch is reachable, `sendMessage` fails with `409` (`not_reachable`). Keep
+  messages small: about 64 KB on iOS and 100 KB on Wear OS. Use a transfer for anything that must arrive.
+- **Queued sends return immediately.** Context, transfers and files hand back a `{ id }`. `wearables.completed`
+  reports that id when the send is delivered, fails or is cancelled. `GET /_bridge/wearables/transfers` lists what's
+  still pending, and `DELETE /_bridge/wearables/transfers/{id}` cancels it.
+- **Errors:** `501 not_supported` (no wearable API), `409 not_reachable`, `502 wearable_failed` (the platform refused),
+  `400` for a bad path or body.
+
+## The watch calling the web app
+
+What the watch sends goes to the web app's handlers: the page if it's listening, `background.js` otherwise. The
+platform wakes the phone app for it. A `wearables.message` handler's **return value is the reply** the watch gets.
+
+```js
+// background.js — answers the watch even when no page is open
+appdevicebridge.on("wearables.message", async ({ path, data }) => {
+    if (path === "steps")
+        return { today: await (await fetch("/_bridge/settings/local/steps")).json() };
+    return null;
+});
+
+appdevicebridge.on("wearables.transfer", async ({ path, data }) => {
+    await fetch("/_bridge/files/data/append?path=watch-log.jsonl", { method: "POST", body: JSON.stringify(data) + "\n" });
+});
+```
+
+| Handler | Payload |
+| --- | --- |
+| `wearables.message` | `{ path, data, binary, nodeId, expectsReply }`; the return value is the reply |
+| `wearables.context` | `{ data, binary, nodeId }` |
+| `wearables.transfer` | `{ id, path, data, binary, nodeId }` |
+| `wearables.file` | `{ id, path, fileName, file: { root, path }, size, metadata, nodeId }` |
+
+The same payloads are also events (`wearables.message`, `wearables.context`, `wearables.transfer`, `wearables.file`),
+along with `wearables.status` and `wearables.completed`. The events are for a page that only displays traffic.
+Answer a message from a handler, not from an event.
+
+## Files
+
+Files move through the [file roots](/appdevicebridge/storage/), so the page can't send anything it couldn't already
+read.
+
+- **Sending:** `POST /_bridge/wearables/files` with `{ path, file: { root, path }, metadata? }`. The file must be in a
+  root on disk. The platform reads it while it transfers, so leave it in place until `wearables.completed`
+  reports its id. It answers `404` when the file isn't there.
+- **Receiving:** files from the watch are saved to `data/wearables/{id}/{name}` (set by `Root` and `Folder`). The
+  handler and event get them as a `BridgeFile` to read, move or delete through the files bridge. Names are reduced to
+  one safe path segment, so a sender can't write outside that folder.
+
+## Security
+
+The wearables routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by
+default. This bridge doesn't change the default policy, the host-name check or the launch session. See
+[Security](/appdevicebridge/security/).

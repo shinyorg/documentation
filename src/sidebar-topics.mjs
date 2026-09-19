@@ -268,6 +268,15 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Wearables',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'client/wearables/' },
+          { label: 'Release Notes', link: 'client/release-notes' }
+        ]
+      },
+      {
         label: 'Screen Recording',
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },
@@ -1283,6 +1292,7 @@ export const sidebarTopics = [
           { label: 'Security', link: 'appdevicebridge/security' },
           { label: 'Typed Clients', link: 'appdevicebridge/clients' },
           { label: 'Bridges', link: 'appdevicebridge/bridges' },
+          { label: 'Wearables', link: 'appdevicebridge/wearables' },
           { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
           { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
           { label: 'Simulator', link: 'appdevicebridge/simulator' },

@@ -248,6 +248,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'windows', 'linux', 'macos'],
             },
             {
+                label: 'Wearables',
+                tagline: 'Talk to your Apple Watch or Wear OS companion app',
+                summary: 'One API over WatchConnectivity and the Wear OS Data Layer: live messages with replies, shared context, queued transfers and files, delivered to a delegate even when the app is in the background.',
+                highlights: [
+                    'Live messages answered by a delegate',
+                    'Latest-value context and queued transfers',
+                    'File transfers both ways',
+                    'iOS and Android, including .NET Wear OS apps',
+                ],
+                packages: ['Shiny.Wearables'],
+                frameworks: ['maui', 'dotnet'],
+                os: ['android', 'ios'],
+            },
+            {
                 label: 'Screen Recording',
                 tagline: 'Record the screen to MP4, with microphone and system audio',
                 summary: "Capture the screen with each platform's native recorder, with the microphone and the device's own audio mixed in where the OS allows it.",
