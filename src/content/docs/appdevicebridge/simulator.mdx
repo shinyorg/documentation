@@ -59,6 +59,7 @@ A route can answer with:
 - **Value (200)**: the JSON you give, or a file for a route that returns bytes (a photo, a camera snapshot). With no file, a small placeholder image is sent.
 - **Null (204)**: what the page's client reads as `null`, such as no current Wi-Fi network.
 - **Error**: any 4xx or 5xx with the bridge's error body. The presets are `501 not_supported`, `403 access_denied`, `400 bad_request`, `404 not_found`, `409 conflict` and `500 bridge_failed`. The page sees a `BridgeException` with that status and `Code`.
+- **A sequence of values**: one per call, the last repeating once they run out — a route that changes as the page polls it. A trail step and a scenario write it as `values` instead of `value`.
 
 | The route in the simulator | What the page gets |
 | --- | --- |
@@ -149,6 +150,68 @@ shiny-bridge-sim --scenario offline.scenario.json --trail walk.gpx --play walk -
 | `--speed <n>` | playback speed for `--play` |
 | `--data <dir>` | where the real settings and files bridges keep data; a temporary folder by default |
 | `--headless` | no TUI |
+| `--mcp` | serve the MCP control endpoint so an agent can drive the simulator |
+| `--mcp-token <t>` | the token that endpoint requires; generated and printed by default |
+| `--mcp-stdio` | speak MCP on stdin/stdout for an agent that starts the simulator itself; implies `--headless` |
+
+## Driving it from an AI agent
+
+`--mcp` puts a [Model Context Protocol](https://modelcontextprotocol.io) server on the simulator's own origin, so a coding
+agent can set what each bridge answers, fire events, play trails and read what the page actually requested — while you
+watch it happen in the terminal. Every change an agent makes is written to the **Activity** tab beside your own, and the
+header shows `mcp` while the endpoint is open.
+
+```bash
+shiny-bridge-sim --dev-server http://localhost:5288 --mcp
+```
+
+It prints a configuration to paste into an MCP client:
+
+```json
+{
+  "mcpServers": {
+    "shiny-bridge-sim": {
+      "type": "http",
+      "url": "http://127.0.0.1:5299/_sim/mcp",
+      "headers": { "Authorization": "Bearer <the printed token>" }
+    }
+  }
+}
+```
+
+The same configuration is written to `mcp.json` in the simulator's data directory. For an agent that would rather start
+the simulator itself, `--mcp-stdio` speaks the protocol on stdin and stdout — the page is still served over HTTP, and
+everything the simulator would have printed goes to stderr.
+
+### What an agent can do
+
+| | |
+| --- | --- |
+| **Look** | `get_status`, `list_bridges`, `describe_bridge`, `get_route` — every route with a generated **sample of its contract**, which is the shape a value has to have |
+| **Set** | `set_route`, `set_route_sequence`, `reset_route`, `set_bridge_supported`, `set_platform`, `set_sticky_writes` |
+| **Raise** | `fire_event`, `set_event_payload` — `fire_event` returns how many page streams it reached, so an event that went nowhere says so |
+| **Script** | `list_trails`, `load_trail`, `load_trail_file`, `play_trail`, `pause_trail`, `stop_trail`, `remove_trail` |
+| **Save** | `apply_scenario`, `apply_scenario_file`, `capture_scenario` — capture hands back the whole setup to check in as a reproduction |
+| **Watch** | `get_traffic`, `get_activity`, `clear_traffic`, `set_recording`, `wait_for_request`, `wait_for_quiet` |
+
+`wait_for_request` is what makes an agent's loop deterministic rather than a guess: set what a route answers, then wait
+for the page to ask for it, instead of sleeping and hoping. Only requests made after the call count.
+
+A value an agent sets is checked against the bridge's contract exactly as one you type is, so an agent cannot make the
+simulator send the page something a real device could not — and the refusal names the contract it should have matched.
+
+### Security
+
+The control endpoint rewrites what the device answers, so it is off unless you ask for it, and three things stand between
+it and anything that should not reach it:
+
+- The connection must be local, untunneled and name loopback — the same check the bridges themselves use.
+- The request must carry the token printed at startup.
+- Any request carrying an `Origin` header at all is refused. **This is what keeps the page out.** The endpoint is on the
+  origin the page is served from, so a page could otherwise fetch it and quietly rewrite the very device answers it is
+  being tested against. Browsers send `Origin` on the `POST` that MCP needs; native MCP clients send none.
+
+`--mcp-stdio` mounts no HTTP endpoint and needs no token: an agent speaking over stdio already has the process.
 
 ## The sample
 
