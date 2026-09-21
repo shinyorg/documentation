@@ -286,6 +286,16 @@ export const sidebarTopics = [
           { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
+      {
+        label: 'Gamepads',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'client/gamepad/' },
+          { label: 'Platform Setup', link: 'client/gamepad/platform' },
+          { label: 'Release Notes', link: 'client/release-notes' }
+        ]
+      },
     ]
   },
   {

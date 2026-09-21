@@ -275,6 +275,20 @@ export const categories: CategoryCopy[] = [
                 frameworks: ['maui', 'dotnet', 'blazor'],
                 os: ['android', 'ios', 'tvos', 'windows', 'linux', 'macos'],
             },
+            {
+                label: 'Gamepads',
+                tagline: 'Read game controllers, with rumble, battery, motion and light bars',
+                summary: 'Sticks, triggers and buttons from one API on every platform, named by position so "A" is the bottom face button on an Xbox, PlayStation and Nintendo pad alike.',
+                highlights: [
+                    'State snapshots for a render loop, events for menus',
+                    'Radial deadzones that rescale, not per-axis cuts',
+                    'Rumble, battery, gyroscope and light bars, gated per controller',
+                    'Android, iOS, tvOS, Mac Catalyst, macOS, Windows, Linux and Blazor WebAssembly',
+                ],
+                packages: ['Shiny.Gamepad'],
+                frameworks: ['maui', 'dotnet', 'blazor'],
+                os: ['android', 'ios', 'tvos', 'windows', 'linux', 'macos'],
+            },
         ],
     },
     {

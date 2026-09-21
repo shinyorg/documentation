@@ -59,6 +59,44 @@ On iOS and Android this registers `IWearableManager`. Everywhere else nothing is
 - Inbound traffic arrives through `ShinyWearableListenerService`, which Google Play services binds for anything under `/shiny` — including while your app is not running. No manifest edits are needed.
 - A device without the Wear OS app or Play services reports `IsSupported = false`.
 
+## Watch Status
+
+A UI asks two different questions about a watch, and each needs its own flag:
+
+| Question | Flag | Survives the watch being off or out of range? |
+|---|---|---|
+| Does this user have a watch set up? — show "send to watch" at all | `status.IsConfigured` | **Yes** |
+| Is the watch here right now? — a "connected" indicator, live messages | `status.IsReachable` | No |
+
+`IsConfigured` is `IsPaired && IsAppInstalled`. Both halves are persistent: a watch that is switched off, charging in another room or out of Bluetooth range is still paired and still has the app, so a feature gated on `IsConfigured` does not appear and disappear as the user walks around the house. `IsReachable` is the opposite — it is true only while a live message can actually be sent.
+
+**`IsSupported` is neither.** It says whether this platform has a wearable API at all, and is false only on a platform with none — not iOS or Android, an iPad, or an Android device without Play services. A phone with no watch reports `IsSupported = true`.
+
+`status.Nodes` lists every watch the platform knows about, **connected or not**, so a watch that is away can still be named in the UI. Each `WearableNode` carries:
+
+- `IsConnected` — the platform can reach it, over Bluetooth or (on Wear OS) the cloud
+- `IsNearby` — it is directly connected over Bluetooth
+- `HasApp` — it runs the companion app
+
+A Wear OS watch reached through the cloud is `IsConnected` but not `IsNearby`. Transfers and context still go through it, but it does not count toward `IsReachable`, because a live message would take seconds. On iOS the two flags are the same — WatchConnectivity has no cloud route.
+
+**One thing Wear OS cannot see:** a paired watch that has *never* had the companion app installed and is currently away. A watch is found either because it is connected or because it advertises the companion app's capability, and one that is neither is invisible to the Data Layer.
+
+`GetStatus()` is asynchronous, and changes arrive through `IWearableDelegate.OnStatusChanged` — raised on pair and unpair, the app being installed or removed, and reachability changes. Cache the last status there rather than calling `GetStatus()` from a binding, and seed it once at startup:
+
+```csharp
+public class WatchStatusDelegate(WatchStatusState state) : WearableDelegate
+{
+    public override Task OnStatusChanged(WearableStatus status)
+    {
+        state.Update(status);
+        return Task.CompletedTask;
+    }
+}
+```
+
+The delegate runs off the UI thread; marshal before updating anything bound to the UI.
+
 ## Using It
 
 ```csharp

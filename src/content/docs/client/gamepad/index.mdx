@@ -1,0 +1,312 @@
+---
+title: Gamepads
+description: Read game controllers on Android, iOS, tvOS, Mac Catalyst, macOS, Windows, Linux and Blazor WebAssembly — sticks, triggers and buttons, with rumble, battery, motion and light bars
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+Read game controllers from one API, on every platform Shiny runs on. Built on `Shiny.Core`, so it
+runs in any Shiny host — MAUI, Blazor, a console app, a tvOS app or a headless Raspberry Pi.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Gamepad" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet", "blazor"]} os={["android", "ios", "tvos", "windows", "linux", "macos"]} />
+
+## Read this first
+
+Three things decide most of what you build with this, and none of them are obvious from the API.
+
+**Buttons are named by position, not by the label printed on the pad.** `GamepadButton.A` is the
+*bottom face button* everywhere: A on an Xbox pad, Cross on a PlayStation pad, and **B on a Nintendo
+pad**, whose face buttons are physically mirrored. `GamepadButton.Y` is the top one. This is the only
+mapping under which "A jumps" means the same thing on every controller, and it is what every platform
+SDK underneath already normalises to. `IGamepad.Kind` exists so you can draw the right glyph — it
+changes nothing about reading input.
+
+**Stick Y is positive upwards.** Android, Linux and the browser all report it positive *downwards*
+natively; each backend flips it, so a stick pushed away from the player always reads positive. Don't
+flip it again.
+
+**Everything past sticks and buttons is per-controller, not per-platform.** The same DualSense
+reports motion and a light bar over USB on Linux and neither of them in a browser, because what is
+missing is the API rather than the hardware. So every controller publishes a
+**`GamepadCapabilities`** flags property, and anything unavailable throws
+`GamepadNotSupportedException` naming the flag *and the platform reason*.
+
+## Setup
+
+```bash
+# Android, iOS, tvOS, Mac Catalyst, macOS, Windows
+dotnet add package Shiny.Gamepad
+
+# Linux desktop or Raspberry Pi — instead of the above
+dotnet add package Shiny.Gamepad.Linux
+
+# Blazor WebAssembly — instead of the above
+dotnet add package Shiny.Gamepad.Blazor
+```
+
+```csharp
+builder.Services.AddGamepads();
+```
+
+The Linux and Blazor packages register a real implementation under the **same** `AddGamepads` name
+on the same target framework, so reference one of them *instead of* the base package rather than
+alongside it. For a server, console or test host with no controller API at all, register
+`AddNotSupportedGamepads()` — it reports no controllers, forever, and never throws.
+
+**No permission, entitlement or manifest entry is needed on any platform.** Controllers are not a
+privacy surface. Two things look like permissions and are not — the browser's anti-fingerprinting
+rule and Linux device node access — both covered in [Platform Setup](/client/gamepad/platform).
+
+## Finding controllers
+
+```csharp
+public class GameLoop(IGamepadManager manager)
+{
+    IGamepad? pad;
+
+    public async Task Start(CancellationToken ct)
+    {
+        manager.Connected += (_, e) => this.pad ??= e.Gamepad;
+        manager.Disconnected += (_, e) =>
+        {
+            if (this.pad?.Id == e.Gamepad.Id)
+                this.pad = null;
+        };
+
+        // this call starts the watch — nothing happens until it has run once
+        var pads = await manager.GetGamepads(ct);
+        this.pad = pads.FirstOrDefault();
+    }
+}
+```
+
+`GetGamepads` is the only asynchronous step. Everything a frame needs after it — `GetState()` above
+all — is synchronous.
+
+Registering the service touches no hardware: a console host that resolves `IGamepadManager` and
+never asks for a controller opens no device node, hooks no activity and subscribes to no
+notification centre.
+
+```csharp
+// the usual opening move for a game — returns at once if one is already on
+var pad = await manager.WaitForGamepad(ct);
+
+// "press any button to start"
+await pad.WaitForButton(ct: ct);
+```
+
+## Reading a controller
+
+There are two ways, and you generally want both. They are derived from the same state on every
+platform, so they cannot disagree with each other.
+
+### A snapshot, for a render loop
+
+```csharp
+var state = pad.GetState();
+
+var movement = state.GetMovement();   // left stick, 0.15 deadzone applied
+var look = state.GetLook();           // right stick
+
+if (state.IsPressed(GamepadButton.A))
+    Jump();
+
+// several buttons means ALL of them — a chord
+if (state.IsPressed(GamepadButton.LeftShoulder | GamepadButton.RightShoulder))
+    Reload();
+
+// ... and IsAnyPressed means either
+if (state.IsAnyPressed(GamepadButton.Start | GamepadButton.Select))
+    OpenMenu();
+
+Accelerate(state.RightTrigger);       // 0 to 1
+var direction = state.DPad;           // the D-pad as a stick, so it drives the same code
+```
+
+`GamepadState` is an immutable value, not a view, so two of them can be compared to work out what
+the player did. It never blocks, and it is safe to call after a disconnect — it keeps returning the
+last state seen, so a render loop needs no guard.
+
+### Events, for menus and UI
+
+```csharp
+pad.ButtonChanged += (_, e) =>
+{
+    if (e.Button == GamepadButton.Start && e.IsPressed)
+        OpenMenu();
+
+    // e.State is the whole pad at that instant, for reading modifiers
+    if (e.Button == GamepadButton.A && e.IsPressed && e.State.IsPressed(GamepadButton.LeftShoulder))
+        AlternateAction();
+};
+
+pad.AxisChanged += (_, e) =>
+{
+    if (e.Axis == GamepadAxis.LeftStickY && e.Value > 0.5f && e.PreviousValue <= 0.5f)
+        MoveSelectionUp();
+};
+```
+
+**One event per button, never a combined mask.** Two buttons pressed in the same frame raise two
+events — a handler switching on `e.Button` would otherwise silently miss the second.
+
+Events are raised on whatever thread the platform delivered input on: the main thread on Android and
+in the browser, a background queue on Apple, the reader thread on Linux, the poll timer on Windows.
+**Marshal before touching UI.**
+
+```csharp
+pad.ButtonChanged += (_, e) => MainThread.BeginInvokeOnMainThread(() => this.Handle(e));
+```
+
+## Deadzones
+
+`GetState()` never applies one, because the right value depends on the game. A resting thumbstick
+does not read zero.
+
+```csharp
+var movement = state.LeftStick.WithDeadzone(0.15f);
+```
+
+`WithDeadzone` is **radial** — it looks at how far the stick is pushed overall — and **rescales**
+what is left so the value still reaches 1 at full deflection.
+
+Both halves matter:
+
+- Deadzoning each axis independently is the classic bug that makes a stick feel like it has eight
+  directions. Pushed hard up and slightly right, the small X is discarded while the large Y
+  survives, and the stick snaps to the compass points.
+- Cutting without rescaling makes the value jump from 0 straight to the deadzone the moment the
+  stick leaves the dead area, so slow movement is impossible.
+
+`Magnitude` can slightly exceed 1 in the diagonals — most hardware reports a square range rather
+than a circular one, so a stick held to a corner reads about 1.41. Clamp if that matters.
+
+## Axis events and the change threshold
+
+```csharp
+manager.AxisChangeThreshold = 0.05f;   // default 0.02
+```
+
+This is **not** a deadzone. It is how far an axis must move to be worth an *event*, measured against
+the value that axis **last reported** — not against the previous state. That distinction matters: a
+stick swept slowly, a few thousandths per frame, would never cross a per-frame threshold and would
+appear frozen to an event consumer.
+
+An axis landing exactly on centre, +1 or −1 always reports, whatever the threshold, because
+swallowing the return to zero leaves the player walking into a wall.
+
+It has no effect on `GetState()`, which is always raw. Raise it for menu navigation, lower it for a
+racing game's steering.
+
+## Rumble
+
+```csharp
+if (pad.Supports(GamepadCapabilities.Vibration))
+{
+    // sets a LEVEL that holds until changed
+    await pad.SetVibration(new GamepadVibration(LowFrequency: 0.7f, HighFrequency: 0.2f));
+
+    // ... and do not forget this
+    await pad.SetVibration(GamepadVibration.Off);
+}
+
+// one-shot bump: sets the level, waits, clears it — even if cancelled
+await pad.Pulse(0.8f, TimeSpan.FromMilliseconds(120));
+```
+
+The two handle motors are not the same part:
+
+- **`LowFrequency`** is the heavy off-centre weight in the left handle — a low rumble you feel in
+  the palm, for impacts and engines.
+- **`HighFrequency`** is the smaller, faster weight in the right handle — a buzz, for clicks and
+  surface texture.
+
+Driving both at once reads as "everything is shaking", which is rarely what a moment calls for.
+
+`LeftTrigger` and `RightTrigger` reach motors inside the triggers and need
+`GamepadCapabilities.TriggerVibration`. Where that is missing they are **ignored** rather than folded
+into the handles — a trigger effect that silently becomes a whole-pad rumble is worse than one that
+does nothing.
+
+**Always stop the motors.** A controller left rumbling keeps going after the app is backgrounded on
+some platforms, and until its battery dies on others.
+
+## Battery, motion and light
+
+```csharp
+if (pad.Supports(GamepadCapabilities.Battery))
+{
+    var battery = await pad.GetBattery();
+    // battery.Level is 0–1 or null; battery.State is Charging / Discharging / Full / Wired / Unknown
+}
+
+if (pad.Supports(GamepadCapabilities.Motion))
+{
+    await pad.SetMotionEnabled(true);    // off by default everywhere — the sensors cost battery
+
+    pad.MotionChanged += (_, e) => Aim(e.Motion.AngularVelocityX, e.Motion.AngularVelocityY);
+    var latest = pad.GetMotion();        // the polling counterpart; null until a sample arrives
+
+    await pad.SetMotionEnabled(false);
+}
+
+if (pad.Supports(GamepadCapabilities.Light))
+    await pad.SetLight(GamepadLight.FromRgb(0, 128, 255));
+```
+
+Battery is reported coarsely — four steps is common, and some controllers only ever say "fine" or
+"nearly empty". Treat the level as a gauge to draw, not a number to do arithmetic on.
+
+Acceleration **includes gravity**: a controller resting on a table reads about 1g on whichever axis
+points up, not zero. Subtract a low-passed average to get the part the player caused. Rotation is
+radians per second, acceleration is in g, and the axes follow the controller's own body.
+
+## Identifying controllers
+
+```csharp
+pad.Name              // the platform's name for it — often generic ("Wireless Controller")
+pad.Kind              // Xbox / PlayStation / Nintendo / Steam / Remote / Standard — for glyphs only
+pad.PlayerIndex       // the slot the platform assigned, from 1, or null
+pad.Id                // unique among connected controllers
+pad.SupportedButtons  // tells "not pressed" apart from "not present"
+```
+
+`Id` is always unique among the controllers connected right now. Whether it **survives a reconnect**
+depends on the platform, and `GamepadCapabilities.PersistentId` says which: Windows
+(`NonRoamableId`) and Linux (the controller's MAC or serial) can name a specific physical pad across
+reboots; the Apple, Android and browser APIs hand out a fresh identity every time.
+
+**Never key saved per-player settings on `Id` without checking that flag first.**
+
+A disconnected `IGamepad` stays valid but inert — `IsConnected` turns false, `GetState()` keeps
+working, and everything else throws `GamepadDisconnectedException`. A controller that comes back is a
+**new instance**, not the old one revived.
+
+## Multiple players
+
+```csharp
+// PlayerIndex is the platform's opinion, and is null on Windows and in the browser
+var p1 = await manager.GetGamepadForPlayer(1);
+
+// assign your own slots where the platform assigns none
+var assignments = new Dictionary<string, int>();
+manager.Connected += (_, e) => assignments[e.Gamepad.Id] = assignments.Count + 1;
+manager.Disconnected += (_, e) => assignments.Remove(e.Gamepad.Id);
+```
+
+## Exceptions
+
+| Exception | Meaning |
+|---|---|
+| `GamepadNotSupportedException` | The controller or the platform lacks the capability. Carries the `Capability` flag and names the platform reason |
+| `GamepadDisconnectedException` | The controller went away. `GetState()` is exempt and keeps working |
+| `GamepadException` | Anything else — the platform refused, or a device node could not be opened |
+
+Next: [Platform Setup](/client/gamepad/platform) for what each backend can and cannot do, and the
+two things that look like permissions but are not.

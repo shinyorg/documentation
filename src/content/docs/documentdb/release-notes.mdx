@@ -33,6 +33,43 @@ change, because the ciphertext was tested against the plaintext document in memo
 where each predicate is translated to SQL.
 </RN>
 
+<RN type="fix">
+**A merge write no longer drops a document out of the spatial index.** `Upsert` and `Update(patch: true)` are RFC 7396
+merges, so a property the patch omits keeps its stored value — but the spatial sidecar was rebuilt from the patch alone.
+A patch that did not carry the mapped geometry looked like a document with no location, and its index row was deleted
+while the polygon stayed in the body, making the document silently invisible to `GeoIntersects`, `GeoWithinDistance` and
+every other spatial query until the next full write. Merges now leave the index alone when the patch omits the geometry,
+matching how blobs already behaved; a write that carries the whole document (`Insert`, `Update`, and
+`Upsert(patchIfUpdate: false)`) still drops the row when the geometry is genuinely cleared. **Providers:** the relational
+ones, which maintain a spatial sidecar — SQLite, SQLCipher, DuckDB, PostgreSQL, CockroachDB, MySQL, MariaDB, SQL Server
+and Oracle. MongoDB and Cosmos DB index the document body natively and were never affected.
+</RN>
+
+<RN type="fix">
+**`Upsert(patchIfUpdate: false)` and `Update(patch: true)` now write blob payloads.** Both paths skipped blob
+maintenance entirely outside a session: the bytes were silently discarded, and the body was left holding metadata for a
+sidecar row that was never written (with an unstamped, empty `Key`), so the blob could not be read back. Both now
+prepare and sync blobs like every other write — the replace path prunes rows the new body no longer claims, the merge
+path keeps rows its patch does not mention. The session/unit-of-work equivalents were already correct. **Providers:**
+the relational ones, the only ones that implement these two overloads.
+</RN>
+
+<RN type="fix">
+**A merge patch no longer wipes the stored embedding, and a cleared one now leaves the vector index.** A mapped
+vector is a `ReadOnlyMemory<float>` — a non-nullable struct — so an unset embedding serialized as `[]` rather than
+`null` and survived the merge's null-stripping. `Upsert` and `Update(patch: true)` therefore overwrote the stored
+embedding with an empty array whenever the patch didn't carry one, while the index write read that same emptiness as
+"not supplied" and kept the old vector: the document body and the vector index disagreed after a write that was only
+meant to change a neighbouring field. The empty array is now dropped from the patch alongside nulls, so a merge keeps
+both. Separately, nothing on any write path ever removed a vector — clearing an embedding and saving left the stale
+index row behind forever, so the document kept its old position in similarity search. A write that carries the whole
+document (`Insert`, `Update`, `Upsert(patchIfUpdate: false)`) now drops the index row when the embedding is empty, and
+the JSON write lane follows the same split (a merge leaves the row, an explicit `null` on a whole-document write clears
+it) — which also fixes the matching case for **spatial**, where a JSON-lane replace with a null location left its index
+row behind. **Providers:** the relational ones plus Cosmos DB, MongoDB and Redis (the body-overwrite half applied to all
+of them; the index-prune half to every store with a vector sidecar).
+</RN>
+
 ## 13.5 - September 13, 2026
 
 <RN type="breaking">

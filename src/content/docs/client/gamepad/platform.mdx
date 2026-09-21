@@ -1,0 +1,230 @@
+---
+title: Gamepads | Platform Setup
+description: What each gamepad backend can and cannot do — GameController, Windows.Gaming.Input, Android InputDevice, Linux evdev and the W3C Gamepad API
+---
+
+No platform gates game controllers behind a permission, an entitlement or a manifest entry. What
+does differ is which extras each API exposes, and two platforms have a constraint that looks like a
+permission and is not.
+
+## What each platform can do
+
+| | Rumble | Trigger rumble | Battery | Motion | Light | Persistent id |
+|---|---|---|---|---|---|---|
+| **Android** 12+ | ✅ | — | ✅ | ✅ | ✅ | — |
+| **Android** below 12 | — | — | — | — | — | — |
+| **iOS / tvOS / Mac Catalyst / macOS** | ✅ | ✅ | ✅ | ✅ | ✅ | — |
+| **Windows** | ✅ | ✅ | ✅ | — | — | ✅ |
+| **Linux** | ✅ | — | ✅ | ✅ | ✅ | ✅ |
+| **Blazor WebAssembly** | ✅ | — | — | — | — | — |
+
+Every row is also **per controller**: a DualSense reports motion and a light bar on Linux and
+neither in a browser, and an Xbox pad has no light bar anywhere. Read
+`IGamepad.Capabilities` off the instance — never infer it from the target framework.
+
+## Android
+
+Backed by `InputDevice` for enumeration, and by the focused activity's window callback for input.
+
+**Android has no API to ask a controller what it is doing.** Input arrives only as `KeyEvent`s and
+`MotionEvent`s dispatched to whatever has focus. A library that wants to see that input either asks
+the app to forward every event by hand, or intercepts it — this package intercepts, at the window
+callback, which sits above the whole view hierarchy so a gamepad press is seen even where a text
+field or a scroll view would have swallowed it. The hook follows the current activity through
+Shiny's activity lifecycle, so it survives configuration changes and multi-activity navigation with
+nothing required from the app.
+
+**Events are observed and passed straight on by default.** The D-pad still moves focus, B still goes
+back, and an on-screen keyboard still works — which is right for an app that uses a controller
+alongside its normal UI, and wrong for a game, where the D-pad moving focus around the view
+hierarchy is exactly the bug:
+
+```csharp
+if (manager is AndroidGamepadManager android)
+    android.ConsumeEvents = true;
+```
+
+Only events from a gamepad source are affected either way; touches and the keyboard are untouched.
+
+Two consequences of input being activity-scoped, which are Android's and not this library's:
+
+- A controller pressed while the app is backgrounded is not seen. A button held as the player
+  switches apps is cleared on focus loss, rather than staying stuck down — the key-up went to
+  whatever took focus.
+- A controller that is connected but has never been touched reports every stick centred until the
+  player moves it.
+
+**Rumble, battery, lights and motion sensors all arrive with API 31.** Below that the controller
+reports none of them even where the hardware has them, because there is no way to reach them.
+Rumble uses `VibratorManager` rather than the older single-motor `InputDevice.Vibrator`, so that
+`LowFrequency` and `HighFrequency` genuinely drive different motors.
+
+## iOS, tvOS, Mac Catalyst and macOS
+
+Backed by GameController — **one implementation for all four platforms**. The AppKit/UIKit split does
+not reach down to controllers, so macOS gets the same code as iOS rather than a separate IOKit HID
+backend. Connects and disconnects arrive as notifications, so nothing polls.
+
+Add these to `Info.plist`:
+
+```xml
+<key>GCSupportsControllerUserInteraction</key>
+<true/>
+<key>GCSupportedGameControllers</key>
+<array>
+  <dict>
+    <key>ProfileName</key>
+    <string>ExtendedGamepad</string>
+  </dict>
+</array>
+```
+
+Neither is required to read input, but without them the system keeps some buttons — the Home button
+above all — for itself.
+
+**Rumble runs through Core Haptics, because Apple exposes no motors.** It exposes haptic localities
+— left handle, right handle, each trigger — driven by the same engine as a phone's Taptic Engine. To
+behave like the "set a level and leave it running" contract every other platform has, each locality
+runs a single continuous haptic event of infinite duration, and changing the rumble strength sends a
+dynamic intensity parameter to the player already running. Starting a fresh pattern per change would
+be audible: Core Haptics ramps a new event in, so a value updated every frame would stutter rather
+than swell. A controller with one shared motor is driven from the stronger of the two values rather
+than left silent.
+
+**The Siri Remote on tvOS is a controller too.** It arrives as a `GCMicroGamepad` — no sticks, no
+triggers, two buttons — and is reported as `GamepadKind.Remote` with its analog touch surface mapped
+onto the left stick, so menu code written for a gamepad works on it unchanged.
+
+## Windows
+
+Backed by `Windows.Gaming.Input`. Needs **Windows 10 1903 or later**.
+
+**This is the only genuinely polled backend.** `Windows.Gaming.Input` has no input callback at all —
+`GetCurrentReading()` is the whole API — so a timer reads every connected controller at
+`manager.PollInterval` and the readings become state changes and events. The read is a shared-memory
+fetch rather than a device round trip, so 60Hz costs very little.
+
+```csharp
+manager.PollInterval = TimeSpan.FromMilliseconds(8);   // for a game rendering above 60Hz
+```
+
+A poll slower than the frame rate shows up as input lag; raise it in a menu to save battery.
+
+**Controllers report nothing while the app is not in the foreground.** A minimised or background
+window reads every stick centred and every button up — not the player's last input, and not an
+error. There is no way to ask this API for background input.
+
+**No motion and no light bar.** The API exposes neither, whatever the controller underneath can do;
+reaching a DualSense's gyro or light bar on Windows means speaking HID to it directly, which is a
+different library.
+
+The connected list is reconciled on every poll as well as from the static `GamepadAdded` and
+`GamepadRemoved` events, because those are delivered through the app's message pump — a console
+host, a background thread or a window that has not pumped recently would miss them entirely.
+
+## Linux
+
+Backed by **evdev**, directly: ioctls to `/dev/input/event*` with no `libevdev` dependency, and
+inotify on `/dev/input` for hotplug. No udev, no D-Bus and no daemon, so it works the same on a
+headless Pi as on a full desktop, and on X11, Wayland or no display server at all.
+
+Most of `/dev/input` is not a controller — the power button, the lid switch, the keyboard and the
+touchpad live there too. A node qualifies only if it reports the kernel's gamepad button
+(`BTN_SOUTH`) and at least one absolute axis, which is the same test libmanette and SDL apply.
+
+### Permissions
+
+**Reading controllers needs read access to `/dev/input/event*`.** On most distributions that means
+the user is in the `input` group; a desktop session usually gets it through logind's seat ACLs, and
+a headless service usually does not. If `evtest` as root sees a controller and your app does not,
+that is the cause:
+
+```bash
+ls -l /dev/input/event*
+sudo usermod -aG input "$USER"   # log out and back in
+```
+
+**Rumble additionally needs *write* access** to the same node, because uploading a force-feedback
+effect is a write. The node is opened read-write when permitted and read-only otherwise, so a
+controller always works — it just reports no `GamepadCapabilities.Vibration` where the permission is
+missing.
+
+**The light bar needs write access to its sysfs LED**, under `/sys/class/leds`, which is root-owned
+by default:
+
+```
+ACTION=="add", SUBSYSTEM=="leds", KERNEL=="*:rgb:indicator", \
+  RUN+="/bin/chgrp input /sys/class/leds/%k/multi_intensity", \
+  RUN+="/bin/chmod g+w /sys/class/leds/%k/multi_intensity"
+```
+
+Battery readings and motion sensors need no extra permission — both come from world-readable sysfs
+attributes.
+
+### Motion sensors
+
+A controller with an IMU appears as **two** event nodes: the gamepad, and an accelerometer flagged
+with `INPUT_PROP_ACCELEROMETER`. They are paired by their shared HID parent in sysfs, so the gyro is
+offered on the controller it belongs to rather than showing up as a second controller.
+
+## Blazor WebAssembly
+
+Backed by the W3C Gamepad API.
+
+**A controller is invisible to the page until the player presses something on it.** That is the
+specification's anti-fingerprinting rule — the list of what is plugged in is a fingerprinting signal
+— and there is no permission to ask for and no way around it. A page that has never seen a gesture
+on a controller is told there is no controller.
+
+**Design the first screen accordingly:** show *"press any button on your controller"*, never *"no
+controller found"*. The two states look identical from .NET, so distinguish a browser that cannot do
+this at all with a probe:
+
+```csharp
+if (manager is BlazorGamepadManager blazor)
+{
+    var probe = await blazor.Probe();
+    if (!probe.Supported)
+        ShowUnsupportedBrowserMessage();
+}
+```
+
+**The reading loop lives in JavaScript**, on `requestAnimationFrame`. The Gamepad API has no input
+event — `navigator.getGamepads()` returns a snapshot and the page reads it every frame — so driving
+it from .NET would mean an interop call per frame per controller whether or not anything moved.
+Instead the browser side compares each snapshot with the last and calls back only when something
+changed, batching every changed controller into one call. A player holding a controller still costs
+zero interop.
+
+Because of that, `manager.PollInterval` is **ignored** here: the loop is paced by the display's
+refresh, which is also how often the browser updates the snapshot.
+
+`IGamepad.GetState()` returns the last state that loop saw, so it can be up to one frame old. The
+API offers nothing fresher.
+
+**Vibration needs `vibrationActuator`**, which Chrome and Edge implement and Firefox and Safari do
+not; it is reported per controller through `GamepadCapabilities.Vibration`. The browser has no
+"run until stopped" effect — its effects carry a duration — so a level above zero is re-armed on a
+timer, which reads as continuous.
+
+**Battery, motion and lights are not in the specification** and are never available.
+
+A controller the browser has not normalised (its `mapping` is not `"standard"`) is still reported,
+with its buttons mapped by index. That is a guess, and the wrong one for some hardware, but
+reporting the controller and getting some buttons wrong is more useful than pretending it is not
+there.
+
+## Plain .NET hosts
+
+```csharp
+services.AddNotSupportedGamepads();
+```
+
+For a server, console or test host that resolves `IGamepadManager` from a shared library but has no
+controller API underneath. It reports no controllers, forever, and never raises a connection event.
+Nothing throws — code written against the real thing already has to cope with "no controller is
+plugged in", so reporting exactly that needs no second code path.
+
+It is deliberately named differently from `AddGamepads` because the Linux and Blazor packages
+register a real implementation under that name on this same target framework; sharing it would make
+every call from a project referencing one of them ambiguous.

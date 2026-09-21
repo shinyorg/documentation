@@ -351,10 +351,33 @@ If you provide your own `sqlite-vec` binary, statically link it and register via
 
 | Operation | Vector sync |
 |---|---|
-| Insert / Update / Upsert | Extracts the mapped vector and upserts into the sidecar |
+| Insert / Update / `Upsert(patchIfUpdate: false)` | Extracts the mapped vector and upserts into the sidecar; an empty embedding clears the row |
+| `Upsert` / `Update(patch: true)` (merge) | Upserts the embedding when the patch carries one; leaves the stored vector and its row alone when it doesn't |
 | BatchInsert | Vector upserts run inside the same transaction so a vector write failure rolls the batch back |
 | Remove | Deletes the sidecar row |
 | Clear | Truncates the sidecar for the type |
 | `IDocumentSession` | Vector queries inside a unit throw `NotSupportedException` — run them against the store |
 
 A vector field that's left at default (zero-length `ReadOnlyMemory<float>`) is skipped on the write path — the document is stored without an embedding. Dimension mismatches throw `ArgumentException` with the document Id and expected/actual dimension so the failure is easy to diagnose.
+
+### Merge writes and the embedding
+
+`ReadOnlyMemory<float>` is a non-nullable struct, so an unset embedding serializes as `[]` rather than `null`.
+A merge (`Upsert`, `Update(patch: true)`) drops that empty array from the patch, exactly as it drops nulls — so a
+partial patch keeps the stored embedding in the document body *and* its index row, and you never have to re-send a
+vector just to change a neighbouring field:
+
+```csharp
+await store.Upsert(new Article { Id = id, Title = "New title" });   // embedding untouched
+```
+
+The corollary is that a merge can't *clear* an embedding. To do that, use a write that carries the whole document —
+its empty embedding is then a genuine "no vector" and drops the index row too:
+
+```csharp
+article.Embedding = default;
+await store.Update(article);                       // or: store.Upsert(article, patchIfUpdate: false)
+```
+
+In the [JSON write lane](/documentdb/json-collections/) the same split applies, with the body's own spelling: a merge
+patch that omits the member leaves the vector alone, while an explicit `null` on a whole-document write clears it.
