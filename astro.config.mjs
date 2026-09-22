@@ -450,14 +450,14 @@ export default defineConfig({
             },
             {
               id: 'docdb-v14',
-              content: 'Document DB v14 - MCP Server, REST API, Field Level Encryption, Transactional Outbox, & JOINS!',
+              content: 'Document DB 14 - Joins & Easy Doc Metadata!',
               variant: 'tip',
-              link: { text: 'SHOW ME!!', href: '/documentdb/' },
+              link: { text: 'Join Me Too!', href: '/documentdb/' },
               dismissable: false
             },
             {
-              id: 'client-v560',
-              content: 'Shiny Client v5.7.1 - tvOS Support, Live Activities, & Beacons are back!',
+              id: 'client-v580',
+              content: 'Shiny Client 5.8 - GamePads & Watch Libraries!',
               variant: 'tip',
               link: { text: 'Live It Up!', href: '/client/ble' },
               dismissable: false
