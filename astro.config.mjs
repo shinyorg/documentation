@@ -5,7 +5,6 @@ import starlightBlog from 'starlight-blog';
 import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 import starlightSidebarTopics from 'starlight-sidebar-topics';
-import starlightAnnouncement from 'starlight-announcement'
 import { sidebarTopics, sidebarTopicsOptions, cleanTopicsForStarlight } from './src/sidebar-topics.mjs';
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
@@ -24,6 +23,61 @@ const giscusConfig = {
   lang: 'en',
 };
 
+// The announcement bar under the header. Rendered by `src/components/Banner.astro`,
+// which reads this through Vite's `define` below.
+//
+// Each entry is `{ id, title, description, href, cta? }`:
+//   id          stable slug; it is what a visitor's "dismiss" is remembered
+//               against, so changing it makes the announcement reappear for
+//               everyone — do that when you rewrite one substantially.
+//   title       short and fixed: it never scrolls and never shrinks.
+//   description any length — too long to fit and the bar scrolls it marquee-style
+//               rather than wrapping, so the bar's height never changes.
+//   cta         optional link text before the arrow (hidden on narrow screens).
+//
+// An empty array hides the bar; a single entry shows it without rotation or dots.
+const announcementConfig = {
+  // How long a non-scrolling announcement stays up before the next one.
+  rotateMs: 6000,
+  items: [
+    {
+      id: 'appdevicebridge-10',
+      title: 'App Device Bridge',
+      description: 'Release updates without the AppStore on .NET!',
+      href: '/appdevicebridge/',
+      cta: 'WHAT??!',
+    },
+    {
+      id: 'controls-14',
+      title: 'Shiny Controls 1.4',
+      description: 'Diagrams, Floor Plans, Kanban, & MORE!',
+      href: '/controls/',
+      cta: 'Seriously!?!',
+    },
+    {
+      id: 'docdb-v14',
+      title: 'Document DB 14',
+      description: 'Joins & Easy Doc Metadata!',
+      href: '/documentdb/',
+      cta: 'Join Me Too!',
+    },
+    {
+      id: 'client-v580',
+      title: 'Shiny Client 5.8',
+      description: 'GamePads & Watch Libraries!',
+      href: '/client/ble',
+      cta: 'Live It Up!',
+    },
+    {
+      id: 'mauishell-7',
+      title: 'Shiny MAUI Shell v7',
+      description: 'App Links, App Shortcuts, & Navigation Interception!',
+      href: '/mauishell/',
+      cta: 'Shortcut me to it',
+    },
+  ],
+};
+
 
 export default defineConfig({
   site: 'https://www.shinylib.net',
@@ -32,6 +86,8 @@ export default defineConfig({
     define: {
       // Exposed to components as `import.meta.env.GISCUS` at build time.
       'import.meta.env.GISCUS': JSON.stringify(giscusConfig),
+      // Same deal for the announcement bar — `src/components/Banner.astro`.
+      'import.meta.env.ANNOUNCEMENTS': JSON.stringify(announcementConfig),
     },
   },
   redirects: {
@@ -426,51 +482,11 @@ export default defineConfig({
         // Renders nothing: the finder is the only search control on the site.
         // Pagefind stays enabled so the finder has an index to query.
         Search: './src/components/Search.astro',
+        // Our own announcement bar (title + description, marquee when long).
+        // Content is `announcementConfig` at the top of this file.
+        Banner: './src/components/Banner.astro',
       },
       plugins:[
-        //https://frostybee.github.io/starlight-announcement/
-        starlightAnnouncement({
-          displayMode: 'rotate', 
-          rotateInterval: 5000,
-          showRotateIndicator: true,
-          announcements: [
-            {
-              id: 'appdevicebridge-10',
-              content: 'App Device Bridge - Release Updates without the AppStore on .NET!',
-              variant: 'tip',
-              link: { text: 'WHAT??!', href: '/appdevicebridge/' },
-              dismissable: false
-            },
-            {
-              id: 'controls-14',
-              content: 'Shiny Controls 1.4 - Diagrams, Floor Plans, Kanban, & MORE!',
-              variant: 'tip',
-              link: { text: 'Seriously!?!', href: '/controls/' },
-              dismissable: false
-            },
-            {
-              id: 'docdb-v14',
-              content: 'Document DB 14 - Joins & Easy Doc Metadata!',
-              variant: 'tip',
-              link: { text: 'Join Me Too!', href: '/documentdb/' },
-              dismissable: false
-            },
-            {
-              id: 'client-v580',
-              content: 'Shiny Client 5.8 - GamePads & Watch Libraries!',
-              variant: 'tip',
-              link: { text: 'Live It Up!', href: '/client/ble' },
-              dismissable: false
-            },
-            {
-              id: 'mauishell-7',
-              content: 'Shiny MAUI Shell v7 - App Links, App Shortcuts, & Navigation Interception!',
-              variant: 'tip',
-              link: { text: 'Shortcut me to it', href: '/mauishell/' },
-              dismissable: false   
-            }
-          ]
-        }),
         starlightBlog({
           authors: {
             allanritchie: {
@@ -482,20 +498,6 @@ export default defineConfig({
           }
         }),
         starlightSidebarTopics(cleanTopicsForStarlight(sidebarTopics), sidebarTopicsOptions),
-        // Must come after `starlightAnnouncement`, which sets `components.Banner`
-        // unconditionally and would otherwise clobber this. See `Banner.astro`:
-        // it re-wraps the plugin's banner in `data-pagefind-ignore` so the
-        // announcement copy stays out of every page's search index.
-        {
-          name: 'shiny-banner-pagefind-ignore',
-          hooks: {
-            'config:setup': ({ updateConfig, config }) => {
-              updateConfig({
-                components: { ...config.components, Banner: './src/components/Banner.astro' },
-              });
-            },
-          },
-        },
       ],
     }),
   ],

@@ -1,24 +1,674 @@
 ---
 /**
- * Banner — the rotating announcement bar, kept out of the search index.
+ * Banner — the site's own announcement bar (replaces `starlight-announcement`).
  *
- * `starlight-announcement` overrides Starlight's own `Banner`, and Starlight
- * renders the banner *inside* `<main data-pagefind-body>`. Starlight's default
- * Banner carries `data-pagefind-ignore` for exactly this reason; the plugin's
- * replacement does not, so without this wrapper every one of the ~670 pages
- * indexes all ten announcement strings — "OBD" would match the whole site, and
- * every full-text excerpt would open with banner copy.
+ * Shape: a fixed `title` pill + a `description`. The bar's height is pinned to
+ * `--announce-h` and every slide is absolutely positioned inside it, so
+ * rotating between announcements — and a description of any length — can never
+ * change the bar's height. The page below it does not jitter.
  *
- * The plugin sets `components.Banner` unconditionally in its `config:setup`,
- * clobbering a plain override — so `astro.config.mjs` re-points `Banner` here
- * from a plugin listed *after* it (plugins are applied in array order).
+ * When a description is wider than the space it has, the slide gets
+ * `.is-marquee`: a second copy of the text is revealed and the track scrolls
+ * one copy-width at a constant speed, looping seamlessly. Otherwise the text
+ * simply sits there. Measurement happens on the client (fonts + width both
+ * matter), so the server-rendered markup is the non-scrolling state.
  *
- * `display: contents` keeps the box tree identical to the unwrapped banner;
- * Pagefind still honours the attribute.
+ * Each announcement can be dismissed on its own: the × drops the one currently
+ * showing, remembers it in `localStorage`, and moves on to the next. Once every
+ * announcement has been dismissed the bar stops rendering entirely.
+ *
+ * Starlight renders the banner *inside* `<main data-pagefind-body>`, so the
+ * root carries `data-pagefind-ignore` — without it all ~670 pages would index
+ * the announcement copy and every search excerpt would open with it.
+ *
+ * `astro.config.mjs` points Starlight's `Banner` component slot here.
  */
-import AnnouncementBanner from 'starlight-announcement/components/AnnouncementBanner.astro';
+import StarlightBanner from '@astrojs/starlight/components/Banner.astro';
+
+// Content lives in `announcementConfig` in astro.config.mjs and is injected via
+// Vite's `define` as `import.meta.env.ANNOUNCEMENTS` — the same wiring giscus uses.
+const { rotateMs, items: announcements } = import.meta.env.ANNOUNCEMENTS;
+
+const rotates = announcements.length > 1;
 ---
 
-<div data-pagefind-ignore style="display: contents">
-  <AnnouncementBanner />
-</div>
+{/* Still honour a page's own `banner:` frontmatter — that is Starlight's feature, not ours. */}
+<StarlightBanner />
+
+{announcements.length > 0 && (
+  <div
+    class="announce"
+    data-pagefind-ignore
+    data-announce
+    data-rotate-ms={rotates ? String(rotateMs) : undefined}
+    role="region"
+    aria-label="Announcements"
+  >
+    <div class="stage">
+      {announcements.map((a: any, i: number) => (
+        <a
+          class:list={['slide', { 'is-active': i === 0 }]}
+          href={a.href}
+          data-slide
+          data-announce-id={a.id}
+          aria-hidden={i === 0 ? undefined : 'true'}
+          tabindex={i === 0 ? undefined : -1}
+        >
+          <span class="title">{a.title}</span>
+          <span class="desc" data-desc>
+            <span class="track" data-track>
+              <span class="copy" data-copy>{a.description}</span>
+              <span class="copy" data-copy aria-hidden="true">{a.description}</span>
+            </span>
+          </span>
+          {a.cta && <span class="cta">{a.cta}</span>}
+          <span class="arrow" aria-hidden="true">
+            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" />
+            </svg>
+          </span>
+        </a>
+      ))}
+    </div>
+
+    <div class="controls">
+      {rotates && (
+        <nav class="dots" data-dots aria-label="Choose announcement">
+          {announcements.map((a: any, i: number) => (
+            <button
+              type="button"
+              class:list={['dot', { 'is-on': i === 0 }]}
+              data-dot
+              data-announce-id={a.id}
+              aria-label={`${a.title} (${i + 1} of ${announcements.length})`}
+              aria-pressed={i === 0 ? 'true' : 'false'}
+            />
+          ))}
+        </nav>
+      )}
+      {/* Dismisses whichever announcement is showing — it sits outside the
+          slides because a <button> may not live inside the slide's <a>. */}
+      <button type="button" class="close" data-close aria-label="Dismiss this announcement">
+        <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <path d="m4 4 8 8M12 4l-8 8" />
+        </svg>
+      </button>
+    </div>
+  </div>
+)}
+
+{/* Runs while the bar is still being parsed, so an announcement dismissed on a
+    previous visit is gone before the first paint rather than blinking away
+    after hydration. Deliberately not a module script: those are deferred. */}
+{announcements.length > 0 && (
+  <script is:inline>
+    (function () {
+      var bar = document.currentScript.previousElementSibling;
+      while (bar && !bar.hasAttribute('data-announce')) bar = bar.previousElementSibling;
+      if (!bar) return;
+
+      var dismissed;
+      try {
+        dismissed = JSON.parse(localStorage.getItem('shiny-announcements-dismissed') || '[]');
+      } catch (e) {
+        return;
+      }
+      if (!Array.isArray(dismissed) || dismissed.length === 0) return;
+
+      var hidden = 0;
+      var slides = bar.querySelectorAll('[data-slide]');
+      slides.forEach(function (slide) {
+        if (dismissed.indexOf(slide.dataset.announceId) === -1) return;
+        hidden++;
+        slide.classList.add('is-dismissed', 'was-dismissed');
+        slide.classList.remove('is-active');
+        slide.setAttribute('aria-hidden', 'true');
+        slide.setAttribute('tabindex', '-1');
+        var dot = bar.querySelector('[data-dot][data-announce-id="' + slide.dataset.announceId + '"]');
+        if (dot) dot.classList.add('is-dismissed');
+      });
+
+      if (hidden === slides.length) {
+        bar.classList.add('is-empty');
+        return;
+      }
+
+      // Promote the first survivor, so the bar is never briefly blank.
+      var first = bar.querySelector('[data-slide]:not(.is-dismissed)');
+      if (first && !first.classList.contains('is-active')) {
+        first.classList.add('is-active');
+        first.removeAttribute('aria-hidden');
+        first.removeAttribute('tabindex');
+        var firstDot = bar.querySelector('[data-dot][data-announce-id="' + first.dataset.announceId + '"]');
+        bar.querySelectorAll('[data-dot]').forEach(function (d) {
+          var on = d === firstDot;
+          d.classList.toggle('is-on', on);
+          d.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+      }
+    })();
+  </script>
+)}
+
+<style>
+  .announce {
+    /* The one number that keeps the page still. Everything inside is absolutely
+       positioned or clipped to it. */
+    --announce-h: 2.9rem;
+    /* Blank space between the two marquee copies. */
+    --marquee-gap: 4rem;
+    --announce-pad: clamp(0.75rem, 3vw, 1.5rem);
+    /* Room held open on BOTH sides for the dots and the dismiss button, which
+       float over the right edge. Reserving it symmetrically is what keeps the
+       announcement centred on the bar rather than centred on whatever is left
+       over beside the controls. Just the × by default; dots widen it below. */
+    --controls-reserve: 2.5rem;
+
+    --announce-pill-bg: linear-gradient(118deg, #6A3DF0, #8B5CF6);
+    --announce-pill-fg: #fff;
+    --announce-wash: linear-gradient(
+      90deg,
+      rgba(106, 61, 240, 0.13),
+      rgba(15, 191, 122, 0.10) 52%,
+      rgba(166, 217, 0, 0.14)
+    );
+
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    box-sizing: border-box;
+    height: var(--announce-h);
+    padding: 0 var(--announce-pad);
+    overflow: hidden;
+    background-color: var(--sl-color-bg-nav);
+    background-image: var(--announce-wash);
+    font-size: var(--sl-text-xs);
+    line-height: 1;
+  }
+
+  /* Echoes the gradient rule under the site header, so the bar reads as part of
+     the same chrome rather than a bolted-on ribbon. */
+  .announce::after {
+    content: '';
+    position: absolute;
+    inset: auto 0 0;
+    height: 2px;
+    background-image: linear-gradient(
+      90deg,
+      var(--shiny-purple-vivid),
+      var(--shiny-green-vivid),
+      var(--shiny-lime-vivid)
+    );
+    opacity: 0.6;
+  }
+
+  :global(:root[data-theme='dark']) .announce {
+    --announce-pill-bg: linear-gradient(118deg, #9B7BFF, #B9A3FF);
+    --announce-pill-fg: #16112e;
+    --announce-wash: linear-gradient(
+      90deg,
+      rgba(124, 77, 255, 0.22),
+      rgba(43, 229, 160, 0.13) 52%,
+      rgba(207, 250, 18, 0.13)
+    );
+  }
+
+  /* `data-rotate-ms` is present only when there is more than one announcement,
+     i.e. only when dots are rendered. */
+  .announce[data-rotate-ms] {
+    --controls-reserve: 6.5rem;
+  }
+
+  /* Every announcement dismissed — the bar is done for good. */
+  .announce.is-empty {
+    display: none;
+  }
+
+  .stage {
+    position: relative;
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+  }
+
+  /* Every slide occupies the full stage; only opacity changes. Stacking them
+     rather than swapping them is what makes the height constant. */
+  .slide {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.6rem;
+    /* The reserve belongs HERE, not on `.stage`: `inset: 0` resolves against an
+       ancestor's *padding* box, so padding on the stage would not inset the
+       slide at all — the text would run under the controls and, worse, would
+       measure as fitting in space it doesn't have and never start scrolling. */
+    padding-inline: var(--controls-reserve);
+    text-decoration: none;
+    color: var(--sl-color-white);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.4s ease;
+  }
+
+  .slide.is-active {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  /* `flex: none` is the point of the title: it never shrinks and never
+     scrolls, so the bar always opens with the same fixed, readable label.
+     The description is what gives way when space runs short. */
+  .title {
+    flex: none;
+    min-width: 0;
+    max-width: 50%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0.32rem 0.62rem;
+    border-radius: 999px;
+    background-image: var(--announce-pill-bg);
+    color: var(--announce-pill-fg);
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+
+  /* `0 1 auto` keeps the CTA tucked against the end of the sentence instead of
+     flung to the far edge; it still shrinks (and so marquees) when space runs out. */
+  .desc {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-weight: 500;
+    color: var(--sl-color-gray-1);
+  }
+
+  /* Soften both ends so text scrolls out of view instead of being guillotined. */
+  .slide.is-marquee .desc {
+    mask-image: linear-gradient(90deg, transparent, #000 0.85rem, #000 calc(100% - 0.85rem), transparent);
+  }
+
+  .track {
+    display: flex;
+    align-items: center;
+    gap: var(--marquee-gap);
+    white-space: nowrap;
+    will-change: transform;
+  }
+
+  .copy {
+    flex: none;
+  }
+
+  /* The duplicate exists only to make the loop seamless. */
+  .copy[aria-hidden] {
+    display: none;
+  }
+
+  .slide.is-marquee .copy[aria-hidden] {
+    display: block;
+  }
+
+  /* Bound to `.is-active` so leaving and re-entering a slide restarts the
+     scroll from the top of the sentence. */
+  .slide.is-active.is-marquee .track {
+    animation-name: announce-marquee;
+    animation-duration: var(--marquee-dur, 14s);
+    animation-timing-function: linear;
+    animation-delay: 1.2s;
+    animation-iteration-count: infinite;
+  }
+
+  @keyframes announce-marquee {
+    from { transform: translate3d(0, 0, 0); }
+    to { transform: translate3d(calc(var(--marquee-shift, 0px) * -1), 0, 0); }
+  }
+
+  /* Reading beats motion: hovering or tabbing in holds everything still. */
+  .announce:hover .track,
+  .announce:focus-within .track {
+    animation-play-state: paused;
+  }
+
+  .cta {
+    flex: none;
+    font-weight: 700;
+    color: var(--sl-color-text-accent);
+  }
+
+  .arrow {
+    flex: none;
+    display: flex;
+    color: var(--sl-color-text-accent);
+    transition: transform 0.2s ease;
+  }
+
+  .slide:hover .cta,
+  .slide:focus-visible .cta {
+    text-decoration: underline;
+  }
+
+  .slide:hover .arrow {
+    transform: translateX(3px);
+  }
+
+  .slide:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: -3px;
+    border-radius: 0.4rem;
+  }
+
+  .controls {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: var(--announce-pad);
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+  }
+
+  .dots {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+  }
+
+  /* A dismissed announcement leaves no trace: no slide, no dot. */
+  .slide.is-dismissed,
+  .dot.is-dismissed {
+    display: none;
+  }
+
+  .close {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.5rem;
+    height: 1.5rem;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background-color: transparent;
+    color: var(--sl-color-gray-3);
+    cursor: pointer;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  .close:hover {
+    background-color: color-mix(in srgb, var(--sl-color-white) 12%, transparent);
+    color: var(--sl-color-white);
+  }
+
+  .close:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 1px;
+  }
+
+  .dot {
+    position: relative;
+    width: 6px;
+    height: 6px;
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background-color: color-mix(in srgb, var(--sl-color-white) 30%, transparent);
+    cursor: pointer;
+    transition: background-color 0.2s ease, transform 0.2s ease;
+  }
+
+  /* The dot is 6px; the thing you have to hit is not. */
+  .dot::before {
+    content: '';
+    position: absolute;
+    inset: -8px -5px;
+  }
+
+  .dot:hover {
+    background-color: color-mix(in srgb, var(--sl-color-white) 55%, transparent);
+  }
+
+  .dot.is-on {
+    background-color: var(--shiny-purple-vivid);
+    transform: scale(1.4);
+  }
+
+  .dot:focus-visible {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 3px;
+  }
+
+  @media (max-width: 50rem) {
+    .announce {
+      --announce-h: 2.6rem;
+      gap: 0.5rem;
+      font-size: 0.75rem;
+    }
+    /* A phone has no width to spare on a decorative centre: hold space only on
+       the right, where the controls actually are, and start the text at the left. */
+    .slide {
+      justify-content: flex-start;
+      padding-inline: 0 var(--controls-reserve);
+    }
+    .cta { display: none; }
+    /* The only place the title is allowed to give ground: a phone has no room
+       for a long one, so cap it and ellipsize rather than crowd out the news. */
+    .title { max-width: min(55%, 13rem); }
+  }
+
+  @media print {
+    .announce { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .slide { transition: none; }
+    .close { transition: none; }
+    /* Nothing scrolls on its own, so hand the overflow to the reader instead of
+       clipping it: one copy, swipeable, no scrollbar furniture in a 46px bar. */
+    .slide.is-marquee .copy[aria-hidden] { display: none; }
+    .slide.is-marquee .desc { overflow-x: auto; scrollbar-width: none; }
+    .slide.is-marquee .desc::-webkit-scrollbar { display: none; }
+    .slide.is-active.is-marquee .track { animation: none; }
+    .arrow { transition: none; }
+  }
+</style>
+
+<script>
+  /**
+   * Three jobs: decide which descriptions need to scroll, rotate the slides,
+   * and dismiss them one at a time.
+   *
+   * The scroll decision can only be made once fonts have loaded and the real
+   * width is known, so it re-runs on resize (and on `fonts.ready`). Nothing it
+   * does changes the bar's height.
+   *
+   * Dismissals that happened on an earlier visit have already been applied by
+   * the inline script in the markup above; this picks up from that state.
+   */
+  const MARQUEE_SPEED = 55; // px per second — slow enough to read at a glance.
+  const MARQUEE_DELAY_MS = 1200; // matches `animation-delay` above.
+  const MAX_DWELL_MS = 14000; // never hold one slide longer than this.
+  const DISMISS_KEY = 'shiny-announcements-dismissed';
+
+  function readDismissed(): string[] {
+    try {
+      const raw = JSON.parse(localStorage.getItem(DISMISS_KEY) || '[]');
+      return Array.isArray(raw) ? raw : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function initAnnouncements() {
+    const bar = document.querySelector<HTMLElement>('[data-announce]');
+    if (!bar || bar.classList.contains('is-empty')) return;
+
+    const dotsNav = bar.querySelector<HTMLElement>('[data-dots]');
+    const closeBtn = bar.querySelector<HTMLButtonElement>('[data-close]');
+
+    // `slides`/`dots` are the *live* ones: anything already dismissed is gone
+    // from rotation entirely, so `current` never lands on a hidden slide.
+    const slides = Array.from(bar.querySelectorAll<HTMLElement>('[data-slide]:not(.is-dismissed)'));
+    const dots = slides
+      .map((slide) => bar.querySelector<HTMLButtonElement>(`[data-dot][data-announce-id="${slide.dataset.announceId}"]`))
+      .filter((dot): dot is HTMLButtonElement => dot !== null);
+    if (slides.length === 0) return;
+
+    const baseDwell = Number(bar.dataset.rotateMs) || 6000;
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let current = Math.max(0, slides.findIndex((slide) => slide.classList.contains('is-active')));
+    let paused = false;
+    let timer: number | undefined;
+
+    /** Does this description fit? If not, turn it into a marquee and size the loop. */
+    function measure(slide: HTMLElement) {
+      const viewport = slide.querySelector<HTMLElement>('[data-desc]');
+      const copies = slide.querySelectorAll<HTMLElement>('[data-copy]');
+      if (!viewport || copies.length < 2) return;
+
+      slide.classList.remove('is-marquee');
+      delete slide.dataset.dwell;
+      slide.style.removeProperty('--marquee-shift');
+      slide.style.removeProperty('--marquee-dur');
+
+      // 1px of slack keeps sub-pixel rounding from starting a pointless scroll.
+      if (copies[0].offsetWidth <= viewport.clientWidth + 1) return;
+
+      slide.classList.add('is-marquee');
+      // Distance from the start of one copy to the start of the next — one full
+      // loop, gap included, which is what makes the wrap invisible.
+      const shift = copies[1].offsetLeft - copies[0].offsetLeft;
+      if (shift <= 0) {
+        slide.classList.remove('is-marquee');
+        return;
+      }
+
+      const durationMs = (shift / MARQUEE_SPEED) * 1000;
+      slide.style.setProperty('--marquee-shift', `${Math.round(shift)}px`);
+      slide.style.setProperty('--marquee-dur', `${(durationMs / 1000).toFixed(2)}s`);
+      // Hold the slide long enough to read the whole sentence once, within reason.
+      slide.dataset.dwell = String(Math.min(durationMs + MARQUEE_DELAY_MS, MAX_DWELL_MS));
+    }
+
+    function measureAll() {
+      slides.forEach(measure);
+    }
+
+    function show(index: number) {
+      current = (index + slides.length) % slides.length;
+      slides.forEach((slide, i) => {
+        const on = i === current;
+        slide.classList.toggle('is-active', on);
+        if (on) {
+          slide.removeAttribute('aria-hidden');
+          slide.removeAttribute('tabindex');
+        } else {
+          slide.setAttribute('aria-hidden', 'true');
+          slide.setAttribute('tabindex', '-1');
+        }
+      });
+      dots.forEach((dot, i) => {
+        dot.classList.toggle('is-on', i === current);
+        dot.setAttribute('aria-pressed', i === current ? 'true' : 'false');
+      });
+      // The × acts on whatever is showing, so say which one that is.
+      const title = slides[current].querySelector('.title')?.textContent?.trim();
+      closeBtn?.setAttribute('aria-label', title ? `Dismiss the ${title} announcement` : 'Dismiss this announcement');
+    }
+
+    /** Drop the announcement on screen, for good, and move to the next. */
+    function dismissCurrent() {
+      const slide = slides[current];
+      const id = slide.dataset.announceId;
+      if (id) {
+        const stored = readDismissed();
+        if (!stored.includes(id)) {
+          stored.push(id);
+          try {
+            localStorage.setItem(DISMISS_KEY, JSON.stringify(stored));
+          } catch {
+            // Private mode / storage disabled — it just won't stick across visits.
+          }
+        }
+      }
+
+      slide.classList.add('is-dismissed');
+      slide.classList.remove('is-active');
+      dots[current]?.classList.add('is-dismissed');
+      slides.splice(current, 1);
+      dots.splice(current, 1);
+
+      if (slides.length === 0) {
+        window.clearTimeout(timer);
+        bar.classList.add('is-empty');
+        return;
+      }
+
+      // One left: nothing to choose between any more.
+      if (dotsNav && slides.length < 2) dotsNav.hidden = true;
+
+      show(current); // `current` now points at what followed the dismissed one.
+      schedule();
+    }
+
+    function schedule() {
+      window.clearTimeout(timer);
+      if (paused || reduced || slides.length < 2 || document.hidden) return;
+      const dwell = Number(slides[current].dataset.dwell) || baseDwell;
+      timer = window.setTimeout(() => {
+        show(current + 1);
+        schedule();
+      }, dwell);
+    }
+
+    function pause() {
+      paused = true;
+      window.clearTimeout(timer);
+    }
+
+    function resume() {
+      paused = false;
+      schedule();
+    }
+
+    // WCAG 2.2.2 — anything that moves on its own stops while it is being read.
+    bar.addEventListener('mouseenter', pause);
+    bar.addEventListener('mouseleave', resume);
+    bar.addEventListener('focusin', pause);
+    bar.addEventListener('focusout', (e) => {
+      if (!bar.contains(e.relatedTarget as Node)) resume();
+    });
+    document.addEventListener('visibilitychange', () => (document.hidden ? pause() : resume()));
+
+    dots.forEach((dot) => {
+      dot.addEventListener('click', () => {
+        // A dot's position shifts as other announcements get dismissed, so look
+        // it up at click time rather than closing over the index.
+        const index = dots.indexOf(dot);
+        if (index === -1) return;
+        show(index);
+        schedule();
+      });
+    });
+
+    closeBtn?.addEventListener('click', dismissCurrent);
+
+    if (dotsNav && slides.length < 2) dotsNav.hidden = true;
+    show(current);
+
+    measureAll();
+    // Web fonts land after first paint and change text width.
+    document.fonts?.ready.then(measureAll).catch(() => {});
+    // Only the bar's own width matters, and re-measuring never resizes it, so
+    // this cannot feed back into itself.
+    new ResizeObserver(measureAll).observe(bar);
+
+    schedule();
+  }
+
+  initAnnouncements();
+</script>

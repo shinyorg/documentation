@@ -54,6 +54,41 @@ Each library demo lives in its own sibling repo and deploys to its own GitHub Pa
 
 Each WASM demo is deployed by its own `.github/workflows/deploy-blazor-sample.yml` in the sibling repo: triggers on push to that repo's active branch (paths-scoped to the sample + relevant src), publishes the WASM app, rewrites `<base href>` to `/<repo-name>/`, and uploads to GitHub Pages. DocumentDb is the exception — its GitHub Pages site is retired and the playground is the `shinyorg/ShinyDocDbMyAdmin:demo` container, deployed from the DocumentDb repo's `admin-image.yml`.
 
+## Announcement bar
+
+The green/brand bar under the header is ours (it replaced the `starlight-announcement`
+plugin). Two files:
+
+- **`src/announcements.ts`** — the content. Each entry is `{ id, title, description, href, cta? }`.
+  Edit this and nothing else to change what the bar says. An empty array hides the bar; a
+  single entry shows it without rotation or dots.
+- **`src/components/Banner.astro`** — the bar itself, wired in as Starlight's `Banner`
+  component override in `astro.config.mjs`.
+
+Three things it guarantees, all deliberate:
+
+- **The height never changes.** It is pinned to `--announce-h` and every announcement is
+  absolutely positioned inside it, so rotating slides — or a description of any length —
+  cannot move the page below. Don't add anything that wraps.
+- **Long descriptions scroll instead of wrapping.** On the client the bar measures each
+  description; one that doesn't fit gets `.is-marquee`, which reveals a duplicate copy and
+  scrolls the pair at a constant 55px/s. The slide also stays up long enough to read the
+  whole sentence once. The `title` is never scrolled or shrunk (except capped with an
+  ellipsis on phones) — it's the fixed label.
+
+- **Announcements are dismissed one at a time.** The × drops whichever one is showing,
+  remembers its `id` in `localStorage` under `shiny-announcements-dismissed`, and moves to
+  the next; when the last one goes, the bar stops rendering. An inline (non-deferred) script
+  right after the bar's markup re-applies stored dismissals while the page is still parsing,
+  so a dismissed announcement never blinks into view on the next visit. To un-dismiss
+  everything for testing, clear that key. Giving an announcement a new `id` also brings it
+  back for everyone — worth doing if you rewrite one substantially.
+
+Rotation and scrolling both stop on hover, on keyboard focus, while the tab is hidden, and
+under `prefers-reduced-motion` (the dots still work). The bar carries `data-pagefind-ignore`
+because Starlight renders it inside `<main data-pagefind-body>` — without it every page
+would index the announcement copy.
+
 ## Comments (giscus)
 
 Blog posts get a [giscus](https://giscus.app) comment widget rendered after the article body. Any docs page can opt in by adding `comments: true` to its frontmatter.
