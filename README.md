@@ -57,13 +57,15 @@ Each WASM demo is deployed by its own `.github/workflows/deploy-blazor-sample.ym
 ## Announcement bar
 
 The green/brand bar under the header is ours (it replaced the `starlight-announcement`
-plugin). Two files:
+plugin). Two places:
 
-- **`src/announcements.ts`** — the content. Each entry is `{ id, title, description, href, cta? }`.
-  Edit this and nothing else to change what the bar says. An empty array hides the bar; a
-  single entry shows it without rotation or dots.
+- **`announcementConfig` in `astro.config.mjs`** — the content, alongside `giscusConfig` and
+  reaching the component the same way (Vite `define` → `import.meta.env.ANNOUNCEMENTS`). Each
+  entry is `{ id, title, description, href, cta? }`. Edit this and nothing else to change what
+  the bar says. An empty `items` array hides the bar; a single entry shows it without rotation
+  or dots.
 - **`src/components/Banner.astro`** — the bar itself, wired in as Starlight's `Banner`
-  component override in `astro.config.mjs`.
+  component override in the same file.
 
 Three things it guarantees, all deliberate:
 
@@ -74,7 +76,13 @@ Three things it guarantees, all deliberate:
   description; one that doesn't fit gets `.is-marquee`, which reveals a duplicate copy and
   scrolls the pair at a constant 55px/s. The slide also stays up long enough to read the
   whole sentence once. The `title` is never scrolled or shrunk (except capped with an
-  ellipsis on phones) — it's the fixed label.
+  ellipsis on a very small phone) — it's the fixed label. Re-measured on resize, so the
+  scroll starts and stops as the window changes.
+
+  The space held open for the dots and the × lives on `.slide`, **not** on `.stage`:
+  `inset: 0` resolves against an ancestor's *padding* box, so padding on the stage would not
+  inset the slide at all — the text would run under the controls and, worse, would measure as
+  fitting in room it doesn't have and never start scrolling.
 
 - **Announcements are dismissed one at a time.** The × drops whichever one is showing,
   remembers its `id` in `localStorage` under `shiny-announcements-dismissed`, and moves to
@@ -84,8 +92,12 @@ Three things it guarantees, all deliberate:
   everything for testing, clear that key. Giving an announcement a new `id` also brings it
   back for everyone — worth doing if you rewrite one substantially.
 
+Below 50rem the content anchors left and only reserves space on the right, and below 30rem the
+dots hide altogether — on a phone they cost more width than they earn, and rotation and the ×
+still work without them.
+
 Rotation and scrolling both stop on hover, on keyboard focus, while the tab is hidden, and
-under `prefers-reduced-motion` (the dots still work). The bar carries `data-pagefind-ignore`
+under `prefers-reduced-motion` (where a long description becomes swipeable instead). The bar carries `data-pagefind-ignore`
 because Starlight renders it inside `<main data-pagefind-body>` — without it every page
 would index the announcement copy.
 
