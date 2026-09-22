@@ -88,7 +88,8 @@ a command around it.
 
 | Property | Default | Notes |
 | --- | --- | --- |
-| `RootPath` | required | Everything is resolved inside it; nothing outside it is reachable |
+| `RootPath` | required | Everything is resolved inside it; nothing outside it is reachable. Not needed with `FileSystem` |
+| `FileSystem` | `null` | What to serve when it is not one directory — see [below](#serving-something-that-is-not-a-directory) |
 | `AllowWrite` | `false` | `PUT`, `MKCOL`, `PROPPATCH`, `COPY`, `LOCK` |
 | `AllowDelete` | `false` | `DELETE`. `MOVE` needs this **and** `AllowWrite` |
 | `EnableLocking` | `true` | Class 2. See below — this one is not really optional |
@@ -104,6 +105,53 @@ a command around it.
 | `DefaultContentType` | `application/octet-stream` | Downloads only |
 | `DisplayName` | `null` | The root collection's `displayname` |
 | `PropertyStore` | in memory | Where dead properties live |
+
+## Serving something that is not a directory
+
+`RootPath` is a directory on disk, served through `PhysicalWebDavFileSystem`. When what a mount
+should show is not one directory — an app whose storage is a view over several roots, folders a
+platform only lets it reach through its own API, a photo library that is not files at all — implement
+`IWebDavFileSystem` and assign it to `FileSystem` instead:
+
+```csharp
+app.MapWebDav("/dav", o =>
+{
+    o.FileSystem = new MyStorageFileSystem(storage);
+    o.AllowWrite = true;
+    o.AllowDelete = true;
+})
+.RequireAuthorization();
+```
+
+The mount keeps the protocol — hrefs, depths, locks, the `If` header, the multistatus XML — and every
+option above still applies on top: hidden files, `Filter`, the write and delete switches, the limits.
+The file system only answers what is there. Nine members:
+
+| Member | Notes |
+| --- | --- |
+| `GetEntry(path)` | What is at a path, or null. Must answer for the root, `""` |
+| `GetChildren(path)` | A collection's members, in any order — the mount sorts them |
+| `OpenReadAsync` | A seekable stream serves ranges, and its `Length` wins over the entry's |
+| `WriteAsync` | Create or replace. The stream throws a 413 past `MaxUploadBytes`; let it propagate |
+| `CreateDirectoryAsync`, `DeleteAsync` | |
+| `MoveAsync`, `CopyAsync` | The destination never exists — an overwrite has already deleted it |
+| `GetQuota(path)` | RFC 4331 figures, or null to leave them out |
+
+Paths are relative to the mount, `/`-separated, and already checked: decoded, free of `.` and `..`,
+and past the hidden-file rule and `Filter`. Anything only the file system can know — a link that
+leads out of whatever it treats as its root — is its own to refuse.
+
+A `WebDavEntry`'s `Name` is the segment it is addressed by, and `DisplayName` is what a client is
+shown when that differs — a folder at `@Work` shown as "Work". `ETag`, `ContentType`, `IsHidden` and
+`IsLink` are optional; an unset `ETag` is built from the length and modification time, the same shape
+the static file handler uses.
+
+To refuse something, throw `WebDavException` with the status the client should see. The mount also
+answers `UnauthorizedAccessException` with 403, `FileNotFoundException` and
+`DirectoryNotFoundException` with 404, and any other `IOException` with 409 — the ones `System.IO`
+throws, so a file system over files rarely has to translate anything. `GetEntry` and `GetChildren`
+are synchronous on purpose: an `If` header is evaluated synchronously, and a `PROPFIND` asks once per
+resource it describes.
 
 ## Leave locking on
 
