@@ -1,0 +1,246 @@
+---
+title: Maps & Directions
+description: Vector maps online or from downloaded regions, pins, lines and areas in Blazor, and turn-by-turn directions computed online or on the device
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Maps" />
+<NugetBadge name="Shiny.AppDeviceBridge.Maps.Blazor" />
+<NugetBadge name="Shiny.AppDeviceBridge.Maps.Valhalla" />
+
+The maps and directions bridges give the web app a vector map that works **online by default and offline where the
+user downloaded a region**, and directions the same way. The page asks for one set of tile URLs and one route endpoint;
+where the answer comes from is decided in the native app.
+
+| | Online | Offline |
+| --- | --- | --- |
+| **Map tiles** | read from your [PMTiles](https://docs.protomaps.com/pmtiles/) archive a range at a time, or any `{z}/{x}/{y}` tile service | from a region the user downloaded, or tiles already seen online |
+| **Labels and icons** | glyphs and sprites fetched once and kept | the region catalog's asset pack |
+| **Directions** | a [Valhalla](https://github.com/valhalla/valhalla) server: your own, or a hosted one such as Stadia Maps | Valhalla running on the phone over a region's downloaded road network |
+
+The map data is [OpenStreetMap](https://www.openstreetmap.org/copyright) in the [Protomaps](https://docs.protomaps.com/basemaps/downloads)
+schema; the bridge reports the attribution the licence requires.
+
+| Package | What it is |
+| --- | --- |
+| `Shiny.AppDeviceBridge.Maps` | the bridges: `/_bridge/maps` and `/_bridge/directions`, region downloads, the online router |
+| `Shiny.AppDeviceBridge.Maps.Valhalla` | on-device directions: valhalla-mobile's engine for Android and iOS |
+| `Shiny.AppDeviceBridge.Maps.Client` | contracts and typed clients: `IMapsBridge`, `IDirectionsBridge` (`MapsBridge`, `DirectionsBridge` in TypeScript) |
+| `Shiny.AppDeviceBridge.Maps.Blazor` | `<BridgeMap>`: MapLibre GL JS, bundled so it draws offline, with pins, shapes, drawing and routes |
+| `Shiny.AppDeviceBridge.AspNetCore` | `MapMapPacks()`: the signed region catalog and its files, beside your web app releases |
+| `Shiny.AppDeviceBridge.MapPacks` | `shiny-map-packs`: builds regions — the map cut from a planet, the road network built with Valhalla |
+
+## Platforms
+
+| | Android | iOS | Mac Catalyst | macOS | Windows | Linux |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| Tiles, glyphs, sprites, regions | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Online directions | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| On-device directions | ✅ | ✅ | online only | online only | online only | online only |
+
+Where the device can't route, `Auto` requests go online and `Device` requests answer `503 offline_unavailable`.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Maps
+dotnet add package Shiny.AppDeviceBridge.Maps.Valhalla   # on-device directions, Android and iOS
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge
+        .AddMapsBridge(o =>
+        {
+            // Online tiles: a PMTiles archive on any server that answers Range requests (a CDN, S3, R2), or a template.
+            o.OnlineTiles = "https://maps.example.com/planet.pmtiles";
+            o.OnlineMaxZoom = 15;
+
+            // Downloadable regions, signed like your web app releases — usually with the same key.
+            o.Catalog = new Uri("https://releases.example.com/maps/catalog");
+            o.CatalogPublicKey = publicKeyPem;
+
+            // Online directions: a Valhalla route endpoint.
+            o.Directions.OnlineRouteUrl = new Uri("https://api.stadiamaps.com/route/v1");
+            o.Directions.ApiKey = stadiaKey;
+        })
+        .AddOnDeviceDirections(),
+    webApp => { /* … */ }
+);
+```
+
+`AddMapsBridge` can be called more than once; every call configures the same options, so a shared project can set the
+sources and one head add what only it needs.
+
+| `MapsOptions` | Default | |
+| --- | --- | --- |
+| `OnlineTiles` | none | a `.pmtiles` URL, or a template with `{z}`, `{x}`, `{y}` |
+| `OnlineMaxZoom` | `15` | the highest zoom the tiles carry; MapLibre scales past it |
+| `Catalog`, `CatalogPublicKey` | none | the region catalog, and the key it must be signed with; the key is required with a catalog |
+| `CatalogLifetime` | 6 hours | how long a fetched catalog is used |
+| `OnlineAssets` | Protomaps' basemaps-assets | where glyphs and sprites come from until the asset pack is installed |
+| `TileCacheBytes` | 256 MB | online tiles kept for offline use, least recently used first to go |
+| `DownloadStallTimeout` | 30 s | a download with no data for this long is dropped and resumed |
+| `DownloadAttempts` | `5` | resumes in a row that make no progress before a download fails |
+| `ConfigureRequest` | none | headers for tile, asset and catalog requests |
+| `HttpMessageHandlerFactory` | `HttpClientHandler` | the handler for outgoing requests |
+| `Directions.OnlineRouteUrl`, `ApiKey`, `ConfigureRequest`, `Timeout` | none, none, none, 30 s | the online router |
+
+**The page never sees these.** Tile URLs with keys, the router's address and its key stay in the native app; the page
+gets bridge URLs. The bridges are protected by [the bridge policy](/appdevicebridge/security/) like every other.
+
+:::caution[macOS: pass NSURLSession]
+On iOS and Mac Catalyst `HttpClientHandler` is NSURLSession. On macOS it's .NET's own handler, whose TLS stops at 1.2,
+and servers that only accept TLS 1.3 refuse it — FOSSGIS's public Valhalla is one. On the macOS head:
+`bridge.AddMapsBridge(o => o.HttpMessageHandlerFactory = () => new NSUrlSessionHandler());`
+:::
+
+## The map in Blazor
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Maps.Blazor
+```
+
+```csharp
+builder.Services
+    .AddWebAppHostClient()
+    .AddBridgeMaps();   // the maps and directions clients
+```
+
+```razor
+@inject IDirectionsBridge Directions
+
+<BridgeMap @ref="map" Latitude="39.74" Longitude="-104.99" Zoom="11" Style="height: 60vh"
+           OnClick="Clicked" OnDrawn="Drawn" OnPinMoved="Moved" />
+
+@code {
+    BridgeMap map = null!;
+
+    async Task Clicked(MapClick click)
+    {
+        if (click.IsPinMode)
+            await map.AddPinAsync(new MapPin($"pin-{Guid.NewGuid():n}", click.Position, "Dropped", Draggable: true));
+    }
+
+    Task Drawn(MapDrawn shape) => map.AddShapeAsync(new MapShape($"shape-{Guid.NewGuid():n}", shape.Kind, shape.Points)).AsTask();
+
+    async Task Route(GeoPoint from, GeoPoint to)
+    {
+        var route = await Directions.RouteAsync(new DirectionsRequest(
+            [new RouteStop(from.Latitude, from.Longitude), new RouteStop(to.Latitude, to.Longitude)]));
+        await map.ShowRouteAsync(route);   // the line with a casing, start and end pins, fitted
+    }
+}
+```
+
+| `BridgeMap` | |
+| --- | --- |
+| `AddPinAsync(MapPin)`, `RemovePinAsync` | markers, draggable, with a popup label |
+| `AddShapeAsync(MapShape)`, `RemoveShapeAsync` | lines and areas, drawn above the roads and below the labels |
+| `AddCircleAsync(id, center, radiusMetres)` | a circle, as a 64-point area |
+| `ShowRouteAsync(DirectionsRoute)` | a route from the directions bridge |
+| `SetDrawModeAsync(MapDrawMode)` | `Pin`: clicks report a place for a pin. `Line`, `Polygon`: clicks add points and a double-click finishes, raising `OnDrawn` |
+| `FlyToAsync`, `FitBoundsAsync`, `FitAllAsync`, `ClearAsync` | the view and the overlays |
+| `SnapshotAsync()` | the map as drawn, pins included, as a PNG `data:` URL |
+| `OnReady`, `OnClick`, `OnDrawn`, `OnPinClicked`, `OnPinMoved`, `OnMoved` | events |
+| `Flavor`, `Language` | the Protomaps style (`light`, `dark`, `white`, `grayscale`, `black`) and label language |
+
+MapLibre GL JS 6 and the Protomaps style are in the package, not loaded from a CDN, so the map draws with no connection.
+Any other vector-tile renderer can use the bridge too: `GET /_bridge/maps` returns the tile, glyph and sprite URLs.
+
+## Regions
+
+A region is a province, a state or a city, and has up to two parts:
+
+- **Map**: the region's vector tiles, a PMTiles archive. Colorado to zoom 14 is 247 MB.
+- **Directions**: the region's road network for on-device routing, a Valhalla tile extract. Colorado's is about 480 MB.
+
+The catalog also carries an **asset pack** — the label fonts and icons, about 6 MB — installed with the first region.
+
+```csharp
+var catalog = await maps.GetRegionsAsync();                                   // what can be downloaded, and what is
+await maps.InstallAsync("colorado", new MapPackInstallRequest(Directions: true));
+await maps.OnDownloadAsync(d => { /* Queued, Downloading, Verifying, Installed, Failed, Cancelled */ return Task.CompletedTask; });
+await maps.RemoveDirectionsAsync("colorado");                                 // keep the map, route online
+await maps.RemoveAsync("colorado");
+```
+
+Every part is **checked against the catalog's signature** before it's used: the size and SHA-256 of the file, and the
+region's id and bounds, signed with ECDSA P-256 like [web app releases](/appdevicebridge/updates/) but under a scheme of
+its own, so neither signature can pass for the other. A download that doesn't match is discarded. An interrupted
+download — the app killed, a connection that goes quiet — resumes from where it stopped. A newer build of an installed
+part shows as `updateAvailable`, and installing again downloads only what changed. Regions are kept out of iCloud backups.
+
+Offline, `GET /_bridge/maps/regions` answers from the last catalog and what's installed, with `catalogReachable: false`.
+
+### Publishing regions
+
+The release server serves regions from a directory:
+
+```csharp
+builder.Services.AddMapPacks(o =>
+{
+    o.SigningKey = builder.Configuration["WebApps:SigningKey"];
+    o.PacksDirectory = "/srv/maps";
+});
+
+app.MapMapPacks("/maps");   // GET /maps/catalog, GET /maps/files/{name} with Range
+```
+
+`shiny-map-packs` builds that directory. It needs the [pmtiles CLI](https://github.com/protomaps/go-pmtiles/releases),
+and for directions Valhalla's tools or Docker:
+
+```bash
+dotnet tool install -g Shiny.AppDeviceBridge.MapPacks
+
+shiny-map-packs region colorado --name Colorado --bbox=-109.06,36.99,-102.04,41.0 \
+  --planet https://build.protomaps.com/20260922.pmtiles \
+  --osm https://download.geofabrik.de/north-america/us/colorado-latest.osm.pbf \
+  --out /srv/maps
+shiny-map-packs assets --out /srv/maps
+shiny-map-packs list --out /srv/maps
+```
+
+`--polygon file.geojson` cuts along a border instead of a rectangle; `--maxzoom` sets the detail (14 is street level,
+and every zoom roughly doubles the size). Publishing is copying files: each part's version is the start of its hash.
+
+:::note[Road networks and the engine version]
+On-device directions run the Valhalla that valhalla-mobile ships (3.6.3 in this release), and it only reads road
+networks built by the same version. `shiny-map-packs --valhalla docker` uses the matching image; installed tools must be
+that version too.
+:::
+
+## Directions
+
+```csharp
+var route = await directions.RouteAsync(new DirectionsRequest(
+    [new RouteStop(39.7392, -104.9903), new RouteStop(40.0150, -105.2705)],
+    TravelMode.Car,             // Bicycle, Walking, Truck
+    DistanceUnits.Kilometers,   // for the instruction text; numbers are always metres and seconds
+    Language: "en-US",
+    Source: DirectionsSource.Auto,
+    Avoid: new RouteAvoid(Tolls: true)));
+
+route.Source;       // Device or Online
+route.Distance;     // metres
+route.Duration;     // seconds
+route.Shape;        // [[lon, lat], …], GeoJSON order
+route.Legs[0].Maneuvers[0];   // Kind, Instruction, VerbalInstruction, Distance, Duration, StreetNames, ShapeIndex
+```
+
+| `Source` | |
+| --- | --- |
+| `Auto` | on the device when a downloaded road network covers every stop, online otherwise — and online when the device finds no route near a region's edge |
+| `Device` | on the device only |
+| `Online` | online only |
+
+| Failure | |
+| --- | --- |
+| `400 bad_request` | fewer than 2 or more than 20 stops, a stop off the map, a bad language tag |
+| `404 no_route` | no road connects the stops |
+| `503 offline_unavailable` | the device can't route it and the online router can't be reached |
+| `501 not_supported` | no online router configured and no on-device engine on this platform |
+
+On the device a route takes tens of milliseconds; the first in a session also starts the engine. On iOS the package
+unpacks the time zone database Valhalla needs into `Library/tzdata` on first use.
