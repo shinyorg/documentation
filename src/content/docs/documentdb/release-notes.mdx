@@ -8,6 +8,64 @@ import RN from '/src/components/ReleaseNote.astro';
 ## 14.0 - TBD
 
 <RN type="feature">
+**`DocumentMetadata` — store-owned timestamps on the document.** Declare a `DocumentMetadata` property
+(`public DocumentMetadata? Metadata { get; set; }`) and the store fills in `CreatedAt`, `UpdatedAt` and `IsPersisted` from
+the timestamps it already keeps next to the body — on every read, and on the instance you pass to `Insert`/`Update`/`Upsert`
+after the write (no re-read). No mapping call: the property is found by type, and the store news it up when it is null.
+It is never written into the body, and `Where`/`OrderBy` on `x.Metadata.CreatedAt`/`UpdatedAt` (and the string grammar's
+`Metadata.CreatedAt`) run against the envelope. **Providers:** all of them — pushed down on the relational providers, MongoDB,
+Amazon DocumentDB, Cosmos DB, Firestore, Azure Table and DynamoDB; evaluated in memory on Redis, RavenDB, LiteDB and IndexedDB.
+See [Document Metadata](/documentdb/metadata).
+</RN>
+
+<RN type="fix">
+**`array.Contains(x.Field)` works again on every provider.** C# 14 binds `values.Contains(item)` on an array to
+`MemoryExtensions.Contains` over an implicit span conversion, which no translator recognized — every provider threw
+(`Cannot extract value from expression 'op_Implicit(…)'` on the relational stores, `Specified method is not supported`
+elsewhere). The call is now rewritten to the same `IN` the `List<T>.Contains` and `WhereIn` forms produce, in `Where`,
+global query filters, joins and the store-level filter parameters. A `List<T>` was never affected.
+</RN>
+
+<RN type="fix">
+**Static values in a predicate are evaluated like captured ones.** `Where(x => x.Due < DateTime.UtcNow)` or
+`x.Stamp > DateTimeOffset.MinValue` threw `Member expression 'DateTime.UtcNow' is not supported` — only locals and fields
+captured by the lambda were recognized as constants. A static field or property is now read once when the query is
+built. Arithmetic over captured values alone (`year - 1`) is also folded to a constant, so Cosmos DB — which has no
+arithmetic node — no longer rejects it.
+</RN>
+
+<RN type="fix">
+**Firestore cursor pages now honor the whole filter.** `ToCursorPage` pushed equality clauses into the native query
+but never applied the rest: a range predicate (`Where(x => x.Age >= 30)`) or a global query filter (including soft
+delete) was silently ignored, so pages contained documents the query excluded. Each page is now filled from successive
+native keyset batches with only the documents that pass the full predicate.
+</RN>
+
+<RN type="fix">
+**Firestore no longer pushes down a member of a value as a field path.** `Where(x => x.Name.Length == 5)` (or a date part,
+or `x.Tags.Count`) was sent to Firestore as a filter on a `name.Length` field that doesn't exist, returning nothing.
+Only members of the stored object graph push down; the rest is evaluated client-side.
+</RN>
+
+<RN type="fix">
+**Concurrent Firestore inserts of the same id now resolve to one winner.** Under contention Firestore can reject a create
+with `ABORTED` (the emulator does so reliably), which surfaced as an `RpcException` instead of the duplicate-id
+`InvalidOperationException`. The create is retried on `ABORTED`, so exactly one succeeds and the rest see `ALREADY_EXISTS`.
+</RN>
+
+<RN type="fix">
+**Cosmos DB `ToQueryString()` works as the first call on a store.** With default serializer options the store had no
+type-info resolver until something serialized through it, so rendering a query before any read or write threw
+`NotSupportedException`. The default options now carry the reflection resolver up front, as the relational store's do.
+</RN>
+
+<RN type="fix">
+**Redis `SubscribeChanges` no longer throws on a connection without `allowAdmin`.** Turning on keyspace notifications
+issues `CONFIG SET`, which the client refuses with a `RedisCommandException` that the best-effort fallback didn't catch — so
+subscribing failed outright instead of logging and relying on `notify-keyspace-events` being enabled server-side.
+</RN>
+
+<RN type="feature">
 **Joins across document types.** `store.Query<Order>().Join<Customer>((o, c) => o.CustomerId == c.Id)` pairs two
 document types in one engine query — inner or `JoinKind.Left` — with `Where` over either side or both (including
 comparisons between the two documents), `OrderBy`, `Paginate`, and `Select` into any shape (named, anonymous or

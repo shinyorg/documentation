@@ -1059,6 +1059,7 @@ export const sidebarTopics = [
           { label: 'Query Filters', link: 'documentdb/query-filters' },
           { label: 'Multi-Tenancy', link: 'documentdb/multi-tenancy' },
           { label: 'Soft Delete', link: 'documentdb/soft-delete' },
+          { label: 'Document Metadata', link: 'documentdb/metadata' },
           { label: 'Transactional Outbox', link: 'documentdb/outbox' },
           { label: 'Field-Level Encryption', link: 'documentdb/encryption' },
           { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },

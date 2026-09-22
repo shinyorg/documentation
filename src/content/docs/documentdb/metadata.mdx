@@ -1,0 +1,132 @@
+---
+title: Document Metadata
+---
+
+Every provider already records when a document was first written and when it last changed — the `CreatedAt` and
+`UpdatedAt` the store keeps next to the body (relational columns, or the envelope fields on the document providers).
+Declare a `DocumentMetadata` property and those values show up on the document itself, on every read and after
+every write:
+
+```csharp
+public class Order
+{
+    public string Id { get; set; } = "";
+    public decimal Total { get; set; }
+    public DocumentMetadata? Metadata { get; set; }
+}
+
+var order = new Order { Id = "o1", Total = 42 };
+await store.Insert(order);
+order.Metadata!.CreatedAt;      // stamped by the write — no re-read needed
+
+var loaded = await store.Get<Order>("o1");
+loaded!.Metadata!.UpdatedAt;    // stamped from the store on read
+```
+
+There is no mapping call. The store finds the property by its type, so name it whatever you like — `Metadata`, `Audit`,
+`Stamps`. Queries use that name: with `public DocumentMetadata? Audit { get; set; }` the string grammar is
+`Where($"Audit.CreatedAt > {t}")` (C# or JSON name, case-insensitive).
+
+## What's on it
+
+| Member | Meaning |
+|---|---|
+| `CreatedAt` | When the document was first written. |
+| `UpdatedAt` | When the document was last written. |
+| `IsPersisted` | `true` once the store has stamped this instance (a read or a successful write). `false` on an instance you constructed yourself, and on [temporal snapshots](#temporal-history). |
+
+The setters are internal: application code reads these values, only the store writes them.
+
+## The store news it up
+
+A document the store hands back **never has a null `Metadata`** — if the property is null on load, the store creates
+the object and assigns it. You don't need `= new()` and you don't need null checks on stored documents. The same
+applies after a write: `Insert`, `Update` and `Upsert` assign and stamp the instance you passed in.
+
+Because the store assigns it, the property must be settable — `{ get; set; }`, `{ get; init; }`, or a non-public
+setter marked `[JsonInclude]`. A get-only property is rejected: at startup for a type you configured with
+`ConfigureDocument<T>` (or declared on a `DocumentContext`), otherwise on first use. A type may declare at most one
+`DocumentMetadata` property.
+
+Declaring it nullable (`DocumentMetadata?`) is the honest shape: an object you've created but not yet saved has no
+metadata until the first write stamps it.
+
+## Never stored in the body
+
+The envelope is the only copy. The store strips the property before it writes the JSON body, so the timestamps can't
+drift out of step, and raw-JSON reads (`ToJsonList`, `WriteJsonArrayTo`, `ToJsonCursorPage`) return the body as
+stored — without `metadata`.
+
+Outside the store the object serializes normally, so an API that returns the document returns its timestamps:
+
+```json
+{ "id": "o1", "total": 42, "metadata": { "createdAt": "2026-09-21T14:03:11.2841930+00:00", "updatedAt": "…" } }
+```
+
+A `metadata` member sent back by a client is ignored — the store never writes it.
+
+## Querying
+
+`Where` and `OrderBy` on `CreatedAt`/`UpdatedAt` run against the envelope, not the body:
+
+```csharp
+var stale = await store.Query<Order>()
+    .Where(x => x.Metadata!.UpdatedAt < DateTimeOffset.UtcNow.AddDays(-30))
+    .OrderBy(x => x.Metadata!.CreatedAt)
+    .ToList();
+
+// the string grammar resolves the same path
+var recent = await store.Query<Order>().Where($"Metadata.CreatedAt > {since}").ToList();
+var newest = await store.Query<Order>().OrderBy("Metadata.CreatedAt", "desc").ToList();
+```
+
+Comparisons are by instant: a cutoff with a non-UTC offset matches the same rows as its UTC equivalent. On the
+relational providers the predicate compares the `CreatedAt`/`UpdatedAt` columns directly (they are not indexed by default — add an index if you filter on them heavily).
+`IsPersisted` is not stored and can't be queried.
+
+Projections work too — `Select(x => new { x.Id, x.Metadata!.UpdatedAt })` and `Project("Id, Metadata.UpdatedAt")`.
+Because the timestamps aren't in the body a SQL `json_object` projection reads, a relational projection that touches
+metadata filters, orders and pages in SQL and shapes the rows client-side.
+
+### Where the comparison runs
+
+| Provider | Metadata `Where` / `OrderBy` |
+|---|---|
+| SQLite, SQLCipher, DuckDB, PostgreSQL, CockroachDB, MySQL, MariaDB, SQL Server, Oracle | In SQL, on the `CreatedAt` / `UpdatedAt` columns |
+| MongoDB, Amazon DocumentDB | In the query, on the envelope's `createdAt` / `updatedAt` fields |
+| Cosmos DB | In the query, on `c.createdAt` / `c.updatedAt` |
+| Firestore | Pushed down as a filter on `_meta.createdAt` / `_meta.updatedAt` (Firestore's one-range-field rule still applies) |
+| Azure Table, DynamoDB | Pushed into the OData filter / filter expression on the `CreatedAt` / `UpdatedAt` attributes |
+| Redis, RavenDB, LiteDB, IndexedDB | Evaluated in memory over the candidates, which are stamped before the filter runs |
+
+Every provider returns the same results — the difference is only where the work happens.
+
+## Writes and precision
+
+The value stamped on the instance you wrote is exactly the value a later read returns. Each write takes one timestamp
+at the precision the backend stores (microseconds on the relational engines, milliseconds on BSON-date stores) and
+uses it for both.
+
+| Write | `CreatedAt` | `UpdatedAt` |
+|---|---|---|
+| `Insert`, `BatchInsert` | set | set |
+| `Update`, `Update(patch: true)` | kept as your instance had it | set |
+| `Upsert` | set when the provider knows the insert branch ran; otherwise kept as your instance had it | set |
+
+A relational native upsert (`ON CONFLICT` / `MERGE`) doesn't report which branch it took, so a fresh object upserted
+over an existing row shows the stored `CreatedAt` only after it's re-read. A write cancelled by an
+[interceptor](/documentdb/interceptors#replacing-a-write-ctxcancel) stamps nothing.
+
+## Temporal history
+
+History rows are snapshots of the body, with no envelope of their own. `History`, `AsOf`, `AsOfAll`,
+`ChangesByActor` and `ChangesBetween` new the property up (so it's still never null) but leave it unstamped —
+`IsPersisted` is `false`. `Restore` keeps the live document's `CreatedAt` and stamps `UpdatedAt` with the restore write.
+
+## Where it isn't populated
+
+- **JSON collections** (`IJsonDocumentCollection`) and raw-JSON terminals return the body only — there's no typed
+  object to stamp.
+- **Native change-feed payloads** that carry only the body get a new, unstamped instance.
+- A `DocumentMetadata` on a **nested object** is plain data: only the root document carries envelope metadata, and a
+  nested one can't be queried.
