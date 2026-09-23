@@ -42,6 +42,9 @@ const BlazorProgram = (props: Props) => {
   if (has('blazorhost')) {
     usings.add('Shiny');
   }
+  const usesBlazorControls = props.components.some(c => c.blazorNuget === 'Shiny.Blazor.Controls');
+  if (usesBlazorControls) usings.add('Shiny.Blazor.Controls');
+  if (has('gamepad') || has('gamepad-controls')) usings.add('Shiny');
 
   const usingBlock = [...usings].map(u => `using ${u};`).join('\n');
 
@@ -68,6 +71,12 @@ public class Program
   if (has('stores')) {
     src += `
         builder.Services.AddShinyStores();`;
+  }
+  if (usesBlazorControls) {
+    src += `
+        // Toast, Dialogs, splash screen, walkthrough, docking, file drop & the on-screen keyboard in one call.
+        // Every registration is a TryAdd, so the individual AddShiny* calls below compose with it.
+        builder.Services.AddShinyControls();`;
   }
   if (has('docking')) {
     src += `
@@ -159,6 +168,22 @@ public class Program
         builder.Services.AddHttpClient(RestSyncTransport.HttpClientName, c =>
             c.BaseAddress = new Uri(builder.HostEnvironment.BaseAddress)
         );`;
+  }
+  if (has('gamepad-controls')) {
+    src += `
+        // On-screen + physical controllers together as IGamepadManager (Scoped) - replaces AddGamepads()
+        builder.Services.AddShinyGamepad();`;
+  }
+  else if (has('gamepad')) {
+    src += `
+        // W3C Gamepad API - the browser reveals a controller only after a button is pressed on it
+        builder.Services.AddGamepads();`;
+  }
+  if (has('appdevicebridge')) {
+    src += `
+        // Typed clients for the native bridges when this app is hosted by a MAUI App Device Bridge.
+        // Add one Add{Bridge}BridgeClient() per bridge package - https://shinylib.net/appdevicebridge/clients
+        builder.Services.AddWebAppHostClient();`;
   }
   // Reflector is attribute-based only, no builder registration needed
 

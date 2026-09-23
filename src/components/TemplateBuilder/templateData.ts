@@ -7,34 +7,34 @@ import type { TemplateKind } from './templateFiles';
  */
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
-    shinyMediator: '6.8.0',
-    shinyShell: '6.3.2',
-    shinyControls: '1.2.0',
+    shinyMediator: '6.9.0-beta-0001',
+    shinyShell: '7.0.1',
+    shinyControls: '1.5.0-beta-0004',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '5.5.0',
-    shinyConfiguration: '5.5.0',
+    shinyClient: '5.8.0-beta-0005',
+    shinyConfiguration: '5.8.0-beta-0005',
     shinyLocalization: '2.0.1',
-    shinyStores: '5.1.5',
-    shinyReflector: '5.1.5',
-    shinyDI: '5.1.5',
+    shinyStores: '5.3.0',
+    shinyReflector: '5.3.0',
+    shinyDI: '5.3.0',
     shinySpatial: '2.0.0',
-    shinyContactStore: '5.5.0',
-    shinyCalendar: '5.5.0',
+    shinyContactStore: '5.8.0-beta-0005',
+    shinyCalendar: '5.8.0-beta-0005',
     shinySpeech: '3.0.0-beta-0030',
     shinyAiConversation: '3.0.0-beta-0030',
     shinyMusic: '4.1.0',
     shinyHealth: '2.0.1',
-    shinyDocumentDb: '13.4.0',
-    shinyHttpServer: '1.0.4',
-    shinyDataSync: '5.5.0',
-    shinyObd: '1.1.0',
+    shinyDocumentDb: '14.0.0',
+    shinyHttpServer: '1.3.0',
+    shinyDataSync: '5.8.0-beta-0005',
+    shinyObd: '1.2.1-beta-0001',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
     shinyRecognition: '1.0.0-beta-0006',
-    shinyMauiHosting: '5.1.5',
-    shinyWebHosting: '5.1.5',
-    shinyBlazorHosting: '5.1.5',
+    shinyMauiHosting: '5.3.0',
+    shinyWebHosting: '5.3.0',
+    shinyBlazorHosting: '5.3.0',
 
     // MAUI tooling
     devflow: '0.1.0-preview.12.26368.2',

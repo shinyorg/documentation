@@ -1,0 +1,76 @@
+---
+/**
+ * Every Shiny NuGet package referenced anywhere in the docs (blog excluded) or offered by the
+ * App/Lib Builders. The list is collected at build time; versions and download counts are fetched
+ * live in the browser by NugetCatalogTable so the page never goes stale between deploys.
+ */
+import { ShinyComponents } from '../consts';
+import NugetCatalogTable, { type CatalogPackage } from './NugetCatalogTable';
+
+const docs = import.meta.glob('/src/content/docs/**/*.{md,mdx}', { query: '?raw', import: 'default', eager: true }) as Record<string, string>;
+
+// name="..." on NugetBadge / NugetDownloads, plus install instructions in code blocks
+const PATTERNS = [
+    /\bname="(Shiny\.[A-Za-z0-9.]*[A-Za-z0-9])"/g,
+    /dotnet add package (Shiny\.[A-Za-z0-9.]*[A-Za-z0-9])/g,
+    /PackageReference Include="(Shiny\.[A-Za-z0-9.]*[A-Za-z0-9])"/g,
+    /Install-Package (Shiny\.[A-Za-z0-9.]*[A-Za-z0-9])/g,
+];
+
+/** '/src/content/docs/client/ble/index.mdx' -> '/client/ble/' */
+const toUrl = (file: string) => {
+    let p = file.replace('/src/content/docs/', '').replace(/\.mdx?$/, '');
+    p = p.replace(/(^|\/)index$/, '');
+    return '/' + (p ? p.toLowerCase() + '/' : '');
+};
+
+/** Lower is better when picking the page to link a package to. */
+const pageRank = (url: string) =>
+    (url.includes('release-notes') ? 1000 : 0) + url.split('/').length * 10 + url.length / 100;
+
+const packages = new Map<string, { id: string; pages: Set<string> }>();
+const add = (id: string, page?: string) => {
+    const key = id.toLowerCase();
+    let entry = packages.get(key);
+    if (!entry) {
+        entry = { id, pages: new Set() };
+        packages.set(key, entry);
+    }
+    if (page) entry.pages.add(page);
+};
+
+for (const [file, raw] of Object.entries(docs)) {
+    if (file.startsWith('/src/content/docs/blog/')) continue;
+    const url = toUrl(file);
+    for (const re of PATTERNS) {
+        for (const m of raw.matchAll(re)) add(m[1], url);
+    }
+}
+
+for (const c of ShinyComponents) {
+    for (const id of [c.nuget, c.blazorNuget, c.aspnetNuget, c.linuxNuget, ...(c.additionalNugets ?? []).map(x => x.nuget)]) {
+        if (id?.startsWith('Shiny.')) add(id);
+    }
+}
+
+/** Groups packages into library families for display. */
+const family = (id: string): string => {
+    const s = id.split('.');
+    if (/^Shiny\.(Maui|Blazor)\.Controls/.test(id) || id.startsWith('Shiny.Controls.') || id === 'Shiny.Maui.TableView') return 'Controls';
+    if (s[1] === 'Extensions' && s[2]) return s[2] === 'Push' ? 'Push (Server)' : `Extensions`;
+    if (s[1] === 'Net' && s[2]) return s[2] === 'HttpServer' ? 'HTTP Server' : `Net.${s[2]}`;
+    if (s[1] === 'Mobile' && s[2]) return s[2];
+    if (s[1] === 'Maui' && s[2]) return `MAUI ${s[2]}`;
+    if (s[1] === 'SqliteDocumentDb') return 'DocumentDb';
+    if (['Core', 'Hosting'].includes(s[1])) return 'Core';
+    return s[1];
+};
+
+const items: CatalogPackage[] = [...packages.values()]
+    .map(p => {
+        const pages = [...p.pages].sort((a, b) => pageRank(a) - pageRank(b));
+        return { id: p.id, family: family(p.id), doc: pages[0] };
+    })
+    .sort((a, b) => a.family.localeCompare(b.family) || a.id.localeCompare(b.id));
+---
+<NugetCatalogTable packages={items} client:load />

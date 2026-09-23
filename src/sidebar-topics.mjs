@@ -161,6 +161,7 @@ export const sidebarTopics = [
       },
       { label: 'AI Skills', link: 'foundation/ai-skills' },
       { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps' },
+      { label: 'NuGets', link: 'foundation/nugets' },
       { label: 'Getting Help', link: 'foundation/support' },
     ],
   },

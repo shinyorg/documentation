@@ -107,6 +107,13 @@ public static class MauiProgram
         // when the user presses record. Flatpak sandboxes are not supported.
         builder.Services.AddScreenRecorder();`;
   }
+  if (has('gamepad')) {
+    src += `
+        // evdev directly - /dev/input/event* with inotify hotplug, no udev or D-Bus. A desktop session
+        // usually has read access already; a headless service needs the 'input' group -
+        // see https://shinylib.net/client/gamepad/platform
+        builder.Services.AddGamepads();`;
+  }
   // Reflector is attribute-based only
 
   src += `

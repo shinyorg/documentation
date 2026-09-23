@@ -3,7 +3,7 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-export const DEFAULT_VERSION: string = "5.7.0";
+export const DEFAULT_VERSION: string = "5.8.0-beta-0005";
 /** Recognition IQ (shinyorg/recogintelligence) — Face / Voice / Document Intelligence ship together. */
 export const RECOGNITION_VERSION: string = "1.0.0-beta-0006";
 
@@ -77,11 +77,11 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'server',        title: 'Server & Cloud',              span: 12, color: '#14B8A6', tint: '#CCFBF1', tintDark: '#0C3B36' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'serialization', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'screenrecorder', 'controls', 'diagram', 'floorplan', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk', 'addressentry', 'applayout', 'autocomplete', 'badge', 'button', 'captcha', 'carousel', 'carousel-gallery', 'colorpicker', 'countrypicker', 'datagrid', 'dialogs', 'expander', 'fab', 'file-drop', 'frostedglass', 'layout', 'media-picker-button', 'modal', 'motion-icons', 'overlay', 'parallax-collection-view', 'passwordstrength', 'progressbar', 'progressline', 'quick-entry', 'rangeslider', 'ribbon', 'securitypin', 'sheetview', 'shinyimage', 'signaturepad', 'skeleton', 'slider', 'splashscreen', 'staggered-grid', 'stateview', 'textentry', 'toast', 'toolbar-tabbar', 'tooltip', 'treeview', 'virtualized-grid', 'walkthrough', 'wizard', 'office', 'spreadsheet', 'document-viewer', 'document-editor', 'slide-editor', 'mediaelement', 'speechaddins', 'theme-aurora', 'theme-material', 'theme-ocean', 'theme-terminal', 'httptransfers', 'documentdb-ai', 'button-group', 'chip-group', 'floatingtoolbar', 'gantt', 'kanban', 'tag-entry', 'timeline', 'zoompanview', 'notebook'];
-export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'wifi', 'screenrecorder', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'serialization', 'httpserver', 'documentdb-ai'];
-export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'serialization', 'extensions-push', 'documentdb', 'documentdb-sqlcipher', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost', 'documentdb-ai'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'serialization', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'screenrecorder', 'controls', 'diagram', 'floorplan', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk', 'addressentry', 'applayout', 'autocomplete', 'badge', 'button', 'captcha', 'carousel', 'carousel-gallery', 'colorpicker', 'countrypicker', 'datagrid', 'dialogs', 'expander', 'fab', 'file-drop', 'frostedglass', 'layout', 'media-picker-button', 'modal', 'motion-icons', 'overlay', 'parallax-collection-view', 'passwordstrength', 'progressbar', 'progressline', 'quick-entry', 'rangeslider', 'ribbon', 'securitypin', 'sheetview', 'shinyimage', 'signaturepad', 'skeleton', 'slider', 'splashscreen', 'staggered-grid', 'stateview', 'textentry', 'toast', 'toolbar-tabbar', 'tooltip', 'treeview', 'virtualized-grid', 'walkthrough', 'wizard', 'office', 'spreadsheet', 'document-viewer', 'document-editor', 'slide-editor', 'mediaelement', 'speechaddins', 'theme-aurora', 'theme-material', 'theme-ocean', 'theme-terminal', 'httptransfers', 'documentdb-ai', 'button-group', 'chip-group', 'floatingtoolbar', 'gantt', 'kanban', 'tag-entry', 'timeline', 'zoompanview', 'notebook', 'gamepad', 'gamepad-controls', 'appdevicebridge'];
+export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'wifi', 'screenrecorder', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'serialization', 'httpserver', 'documentdb-ai', 'gamepad'];
+export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'serialization', 'extensions-push', 'documentdb', 'documentdb-sqlcipher', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost', 'documentdb-ai', 'appdevicebridge'];
 export const ASPNET_ONLY_IDS = ['extensions-push', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost'];
-export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost', 'applayout', 'captcha', 'carousel', 'layout', 'modal', 'sheetview', 'splashscreen', 'toolbar-tabbar'];
+export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost', 'applayout', 'captcha', 'carousel', 'layout', 'modal', 'sheetview', 'splashscreen', 'toolbar-tabbar', 'osk'];
 
 export type AndroidConfig = {
     usesJobs?: boolean;
@@ -238,6 +238,26 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
+        // iOS (WatchConnectivity) + Android (Wear OS Data Layer) only - nothing is registered elsewhere.
+        "id": "wearables",
+        "nuget": "Shiny.Wearables",
+        "description": "Wearables (Apple Watch & Wear OS)",
+        "category": "hardware",
+        "version": DEFAULT_VERSION
+    },
+    {
+        // Like ScreenRecorder, Blazor and Linux ship their own implementation under the same
+        // AddGamepads() name, so they replace the base package rather than adding to it.
+        "id": "gamepad",
+        "nuget": "Shiny.Gamepad",
+        "blazorNuget": "Shiny.Gamepad.Blazor",
+        "linuxNuget": "Shiny.Gamepad.Linux",
+        "macOsSupported": true,
+        "description": "Gamepads",
+        "category": "hardware",
+        "version": DEFAULT_VERSION
+    },
+    {
         "id": "notifications",
         "nuget": "Shiny.Notifications",
         "linuxNuget": "Shiny.Notifications.Linux",
@@ -326,6 +346,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
+        // Build-time only - generates the Android manifest + iOS Info.plist entries from
+        // <MauiPermission> items, which the Project File tab derives from the other selections.
+        "id": "permissions",
+        "nuget": "Shiny.Permissions.MSBuild",
+        "description": "MSBuild Permissions",
+        "category": "mauiapp",
+        "version": "1.0.0-beta-0009"
+    },
+    {
         "id": "shell",
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
@@ -338,14 +367,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Shiny Controls",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "controls-desktop",
         "nuget": "Shiny.Maui.Controls.Desktop",
         "description": "Desktop Controls",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "tableview",
@@ -353,7 +382,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TableView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -362,7 +391,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Scheduler",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -371,7 +400,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "FloatingPanel",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -379,7 +408,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "FontPicker",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -388,7 +417,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "PillView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -397,7 +426,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageViewer",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -406,7 +435,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ImageEditor",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -415,7 +444,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ChatView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -424,7 +453,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Markdown",
         "description": "Markdown",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "mermaiddiagrams",
@@ -432,7 +461,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.MermaidDiagrams",
         "description": "Mermaid Diagrams",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "barcodes",
@@ -440,7 +469,17 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Barcodes",
         "description": "Barcodes",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
+    },
+    {
+        // On-screen virtual gamepad. Registers Shiny.Gamepad's platform manager itself (and wraps it),
+        // so it must NOT be combined with a bare AddGamepads() call.
+        "id": "gamepad-controls",
+        "nuget": "Shiny.Maui.Controls.Gamepad",
+        "blazorNuget": "Shiny.Blazor.Controls.Gamepad",
+        "description": "Virtual Gamepad",
+        "category": "controls",
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "cameraview",
@@ -448,14 +487,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Camera",
         "description": "CameraView",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "camera-motion",
         "nuget": "Shiny.Maui.Controls.Camera.Motion",
         "description": "CameraView Motion Analyzer",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -463,7 +502,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Barcode",
         "description": "CameraView Barcode Analyzer",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -471,7 +510,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Face",
         "description": "CameraView Face Analyzer",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -479,7 +518,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Documents",
         "description": "CameraView Document Analyzers (invoice, receipt, licence, passport, cards)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -488,7 +527,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Camera.Ai",
         "description": "CameraView AI Document Scanner & Photo Stylizer",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -496,7 +535,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Camera.Ocr",
         "description": "CameraView OCR Analyzer",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -504,7 +543,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls.Desktop",
         "description": "Tray Icon (Desktop)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -513,16 +552,16 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Docking (Desktop)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
         "id": "osk",
-        "nuget": "Shiny.Maui.Controls.Desktop",
+        "nuget": "Shiny.Blazor.Controls",
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "On-Screen Keyboard (Touch / Kiosk)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -531,7 +570,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "AddressEntry",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -540,7 +579,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "AppLayout",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -549,7 +588,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "AutoCompleteEntry",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -558,7 +597,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "BadgeView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -567,7 +606,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ShinyButton",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -576,7 +615,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Captcha",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -585,7 +624,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Carousel",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -594,7 +633,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "CarouselGallery",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -603,7 +642,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ColorPicker",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -612,7 +651,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "CountryPicker",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -621,7 +660,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "DataGrid",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -630,7 +669,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ButtonGroup",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -639,7 +678,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ChipGroup",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -648,7 +687,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "FloatingToolbar",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -657,7 +696,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Gantt",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -666,7 +705,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Kanban",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -675,7 +714,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TagEntry",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -684,7 +723,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Timeline",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -693,7 +732,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ZoomPanView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -702,7 +741,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Dialogs",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -710,7 +749,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "DurationPicker",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -719,7 +758,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Expander & Accordion",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -728,7 +767,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Fab & FabMenu",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -736,7 +775,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "Feedback Service",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -745,7 +784,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "File Drop",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -753,7 +792,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "Flyout",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -762,7 +801,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "FrostedGlassView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -771,7 +810,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Stacks & Grid",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -780,7 +819,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "MediaPickerButton",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -789,7 +828,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Modal",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -798,7 +837,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Motion Icons",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -806,7 +845,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "NavigationPage",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -815,7 +854,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Overlay & LoadingOverlay",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -824,7 +863,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ParallaxCollectionView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -833,7 +872,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "PasswordStrength",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -842,7 +881,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ProgressBar",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -851,16 +890,16 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ProgressLine",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
         "id": "quick-entry",
-        "nuget": "Shiny.Maui.Controls",
+        "nuget": "Shiny.Maui.Controls.Desktop",
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Quick Entry",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -869,7 +908,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "RangeSlider",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -878,7 +917,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Ribbon",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -887,7 +926,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "SecurityPin",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -896,7 +935,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "SheetView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -905,7 +944,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "ShinyImage",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -914,7 +953,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "SignaturePad",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -923,7 +962,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "SkeletonView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -932,7 +971,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Slider",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -941,7 +980,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Splash Screen",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -950,7 +989,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "StaggeredGrid",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -959,7 +998,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "StateView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -967,7 +1006,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Controls",
         "description": "TabbedPage",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -976,7 +1015,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TextEntry",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -985,7 +1024,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Toast",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -994,7 +1033,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Toolbar & TabBar",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1003,7 +1042,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Tooltip",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1012,7 +1051,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "TreeView",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1021,7 +1060,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "VirtualizedGrid",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1030,7 +1069,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Walkthrough",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1039,7 +1078,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls",
         "description": "Wizard",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1048,7 +1087,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Office Documents (Word, Excel, PowerPoint)",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "spreadsheet",
@@ -1056,7 +1095,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Spreadsheet (.xlsx viewer/editor)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1065,7 +1104,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Document Viewer (.docx)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1074,7 +1113,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Slide Viewer (.pptx)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1083,7 +1122,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Notebook (OneNote-style canvas)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1092,7 +1131,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Document Editor (.docx)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1101,7 +1140,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Office",
         "description": "Slide Editor (.pptx)",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1110,7 +1149,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.MediaElement",
         "description": "MediaElement (audio & video playback)",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "speechaddins",
@@ -1118,21 +1157,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.SpeechAddins",
         "description": "Speech Add-ins (speech-to-text tools)",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "keyframe",
         "nuget": "Shiny.Maui.Controls.Keyframe",
         "description": "Keyframe Animation",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "keyframe-export",
         "nuget": "Shiny.Maui.Controls.Keyframe.Export",
         "description": "Keyframe Animation - Frame/GIF Export",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1141,7 +1180,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Diagram",
         "description": "Diagram (graph, org chart, flowchart)",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "floorplan",
@@ -1149,7 +1188,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.FloorPlan",
         "description": "Floor Plan / Seating Chart",
         "category": "controls",
-        "version": "1.4.0"
+        "version": "1.5.0-beta-0004"
     },
     {
         "id": "theme-aurora",
@@ -1157,7 +1196,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Themes.Aurora",
         "description": "Aurora Theme Pack",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1166,7 +1205,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Themes.Material",
         "description": "Material Theme Pack",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1175,7 +1214,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Themes.Ocean",
         "description": "Ocean Theme Pack",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1184,7 +1223,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Blazor.Controls.Themes.Terminal",
         "description": "Terminal Theme Pack",
         "category": "controls",
-        "version": "1.4.0",
+        "version": "1.5.0-beta-0004",
         "hideFromAppBuilder": true
     },
     {
@@ -1193,7 +1232,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Extensions.Stores.Web",
         "description": "Key/Value Stores",
         "category": "storage",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         "id": "localization",
@@ -1210,7 +1249,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.DocumentDb.Sqlite",
         "description": "Document DB (SQLite)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-ai",
@@ -1219,126 +1258,126 @@ export const ShinyComponents: ShinyComponent[] = [
         "aspnetNuget": "Shiny.DocumentDb.Extensions.AI",
         "description": "Document DB - AI Tools",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-sqlcipher",
         "nuget": "Shiny.DocumentDb.Sqlite.SqlCipher",
         "description": "Document DB (SqlCipher)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-sqlserver",
         "nuget": "Shiny.DocumentDb.SqlServer",
         "description": "Document DB (SQL Server)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-mysql",
         "nuget": "Shiny.DocumentDb.MySql",
         "description": "Document DB (MySQL)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-postgresql",
         "nuget": "Shiny.DocumentDb.PostgreSql",
         "description": "Document DB (PostgreSQL)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-cosmosdb",
         "nuget": "Shiny.DocumentDb.CosmosDb",
         "description": "Document DB (Cosmos DB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-mongodb",
         "nuget": "Shiny.DocumentDb.MongoDb",
         "description": "Document DB (MongoDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-litedb",
         "nuget": "Shiny.DocumentDb.LiteDb",
         "description": "Document DB (LiteDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-duckdb",
         "nuget": "Shiny.DocumentDb.DuckDb",
         "description": "Document DB (DuckDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-oracle",
         "nuget": "Shiny.DocumentDb.Oracle",
         "description": "Document DB (Oracle)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-mariadb",
         "nuget": "Shiny.DocumentDb.MariaDb",
         "description": "Document DB (MariaDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-cockroachdb",
         "nuget": "Shiny.DocumentDb.CockroachDb",
         "description": "Document DB (CockroachDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-azuretable",
         "nuget": "Shiny.DocumentDb.AzureTable",
         "description": "Document DB (Azure Table Storage)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-dynamodb",
         "nuget": "Shiny.DocumentDb.DynamoDb",
         "description": "Document DB (Amazon DynamoDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-amazondocumentdb",
         "nuget": "Shiny.DocumentDb.DocumentDb",
         "description": "Document DB (Amazon DocumentDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-redis",
         "nuget": "Shiny.DocumentDb.Redis",
         "description": "Document DB (Redis Stack)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-ravendb",
         "nuget": "Shiny.DocumentDb.RavenDb",
         "description": "Document DB (RavenDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-firestore",
         "nuget": "Shiny.DocumentDb.Firestore",
         "description": "Document DB (Google Firestore)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "documentdb-indexeddb",
@@ -1346,21 +1385,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.DocumentDb.IndexedDb",
         "description": "Document DB (IndexedDB)",
         "category": "storage",
-        "version": "14.0.0-beta-0003"
+        "version": "14.0.0"
     },
     {
         "id": "reflector",
         "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
         "category": "foundation",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
         "category": "foundation",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         // One package everywhere - the mode lists below are what gate where it shows up.
@@ -1369,7 +1408,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "macOsSupported": true,
         "description": "AOT-safe JSON Serialization",
         "category": "foundation",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         "id": "spatial",
@@ -1482,6 +1521,22 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": "3.0.0-beta-0030"
     },
     {
+        "id": "speechopenai",
+        "nuget": "Shiny.Speech.OpenAI",
+        "description": "Speech - OpenAI",
+        "category": "intelligence",
+        "version": "3.0.0-beta-0030"
+    },
+    {
+        // Adapts whichever ISpeechToText / ITextToSpeech is registered to Microsoft.Extensions.AI's
+        // ISpeechToTextClient / ITextToSpeechClient.
+        "id": "speechmicrosoftai",
+        "nuget": "Shiny.Speech.MicrosoftAI",
+        "description": "Speech - Microsoft.Extensions.AI Clients",
+        "category": "intelligence",
+        "version": "3.0.0-beta-0030"
+    },
+    {
         "id": "datasync",
         "nuget": "Shiny.Data.Sync",
         "blazorNuget": "Shiny.Data.Sync.Blazor",
@@ -1494,14 +1549,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.MauiHosting",
         "description": "MAUI Hosting",
         "category": "mauiapp",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         "id": "webhost",
         "nuget": "Shiny.Extensions.WebHosting",
         "description": "Web Hosting",
         "category": "server",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         // The SERVER side that sends push - not Shiny.Push, which is the on-device client.
@@ -1522,7 +1577,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "blazorNuget": "Shiny.Extensions.BlazorHosting",
         "description": "Blazor App Support (device/browser info, culture & time-zone changes)",
         "category": "server",
-        "version": "5.2.1"
+        "version": "5.3.0"
     },
     {
         // Runs anywhere .NET runs, which is the point of it — including inside a MAUI app, where
@@ -1535,7 +1590,18 @@ export const ShinyComponents: ShinyComponent[] = [
         "macOsSupported": true,
         "description": "HTTP Server (HTTP/1.1, HTTP/2 & HTTP/3, WebSockets, SSE, tunnelling)",
         "category": "server",
-        "version": "1.2.1"
+        "version": "1.3.0"
+    },
+    {
+        // Three sides of one system: the MAUI app hosts the web app + bridges (WebView package),
+        // the Blazor WASM page calls the bridges, and an ASP.NET server hands out signed releases.
+        "id": "appdevicebridge",
+        "nuget": "Shiny.AppDeviceBridge.WebView",
+        "blazorNuget": "Shiny.AppDeviceBridge.Blazor",
+        "aspnetNuget": "Shiny.AppDeviceBridge.AspNetCore",
+        "description": "App Device Bridge (web app host + native bridges)",
+        "category": "server",
+        "version": "1.0.0-beta.35"
     }
 ];
 
@@ -1565,7 +1631,7 @@ export const Data = {
     },
 
     usesHosting(compos: ShinyComponent[]): boolean {
-        const hostingIds = ['ble', 'blehosting', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'spatial-geofencing', 'httptransfers', 'notifications', 'notifications-ai', 'push', 'liveactivities', 'screenrecorder', 'datasync', 'calendarstore', 'calendarstore-ai'];
+        const hostingIds = ['ble', 'wearables', 'gamepad', 'gamepad-controls', 'blehosting', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'spatial-geofencing', 'httptransfers', 'notifications', 'notifications-ai', 'push', 'liveactivities', 'screenrecorder', 'datasync', 'calendarstore', 'calendarstore-ai'];
         return compos.some(x => hostingIds.includes(x.id));
     },
 

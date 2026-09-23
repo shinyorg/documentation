@@ -125,6 +125,32 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>";
     }
 
+    // Shiny.Permissions.MSBuild presets, derived from the other selections.
+    // https://shinylib.net/permissions/
+    if (isMaui && Data.hasComponent('permissions', props.components)) {
+        const presets: [string, string[]][] = [
+            ['BluetoothLE', ['ble', 'blehosting', 'beacons', 'obd']],
+            ['LocationBackground', ['gps']],
+            ['Location', ['locations-ai']],
+            ['Geofencing', ['geofencing', 'spatial-geofencing']],
+            ['Push', ['push', 'pushfirebase', 'pushazure']],
+            ['Microphone', ['speech', 'voiceintelligence']],
+            ['Contacts', ['contactstore', 'contactstore-ai']],
+            ['Calendar', ['calendarstore', 'calendarstore-ai']],
+            ['Camera', ['cameraview', 'camera-motion', 'camera-barcode', 'camera-face', 'camera-documents', 'camera-ai', 'camera-ocr']],
+        ];
+        const selected = presets.filter(([, ids]) => ids.some(id => Data.hasComponent(id, props.components)));
+        pr += "\r\n<!-- Shiny.Permissions.MSBuild generates the AndroidManifest + Info.plist entries before Build -->\r\n";
+        pr += "<ItemGroup>\r\n";
+        if (selected.length === 0) {
+            pr += "\t<!-- <MauiPermission Include=\"Camera\" /> -->\r\n";
+        }
+        selected.forEach(([preset]) => {
+            pr += `\t<MauiPermission Include="${preset}" />\r\n`;
+        });
+        pr += "</ItemGroup>\r\n";
+    }
+
     if (isMaui) {
         pr += "\r\n<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios' OR $([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">";
         pr += "\r\n\t<BundleResource Include=\"Platforms\\iOS\\PrivacyInfo.xcprivacy\" LogicalName=\"PrivacyInfo.xcprivacy\" />";
