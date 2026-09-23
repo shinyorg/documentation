@@ -3,7 +3,8 @@ title: Document Metadata
 ---
 
 Every provider already records when a document was first written and when it last changed — the `CreatedAt` and
-`UpdatedAt` the store keeps next to the body (relational columns, or the envelope fields on the document providers).
+`UpdatedAt` the store keeps next to the body (relational columns, or the envelope fields on the document providers) —
+and, with shared-table multi-tenancy, which tenant owns it.
 Declare a `DocumentMetadata` property and those values show up on the document itself, on every read and after
 every write:
 
@@ -33,6 +34,7 @@ There is no mapping call. The store finds the property by its type, so name it w
 |---|---|
 | `CreatedAt` | When the document was first written. |
 | `UpdatedAt` | When the document was last written. |
+| `TenantId` | The tenant that owns the document when the store uses [shared-table multi-tenancy](#multi-tenancy) (`TenantIdAccessor`); `null` otherwise. |
 | `IsPersisted` | `true` once the store has stamped this instance (a read or a successful write). `false` on an instance you constructed yourself, and on [temporal snapshots](#temporal-history). |
 
 The setters are internal: application code reads these values, only the store writes them.
@@ -63,7 +65,24 @@ Outside the store the object serializes normally, so an API that returns the doc
 { "id": "o1", "total": 42, "metadata": { "createdAt": "2026-09-21T14:03:11.2841930+00:00", "updatedAt": "…" } }
 ```
 
-A `metadata` member sent back by a client is ignored — the store never writes it.
+`tenantId` is written only when it's set. A `metadata` member sent back by a client is ignored — the store never writes it.
+
+## Multi-tenancy
+
+With shared-table multi-tenancy (`DocumentStoreOptions.TenantIdAccessor`), `TenantId` reports the tenant the document
+is stored under — on every read (`Get`, queries, joins, session reads) and on the instance you just wrote. Every read
+and write is already scoped to the current tenant, so this is always the tenant the accessor returned for that
+operation:
+
+```csharp
+var order = new Order { Id = "o1" };
+await store.Insert(order);
+order.Metadata!.TenantId;   // "acme" — the tenant this write was scoped to
+```
+
+`TenantId` can't be queried — a `Where` on it throws, since every query is already filtered to the current tenant. It
+is `null` on a store without `TenantIdAccessor`, including [tenant-per-database routing](/documentdb/multi-tenancy)
+(where the store itself holds no tenant column) and every non-relational provider, which doesn't support shared-table tenancy.
 
 ## Querying
 
@@ -82,7 +101,7 @@ var newest = await store.Query<Order>().OrderBy("Metadata.CreatedAt", "desc").To
 
 Comparisons are by instant: a cutoff with a non-UTC offset matches the same rows as its UTC equivalent. On the
 relational providers the predicate compares the `CreatedAt`/`UpdatedAt` columns directly (they are not indexed by default — add an index if you filter on them heavily).
-`IsPersisted` is not stored and can't be queried.
+`IsPersisted` is not stored and can't be queried; `TenantId` can't be queried either (see [Multi-tenancy](#multi-tenancy)).
 
 Projections work too — `Select(x => new { x.Id, x.Metadata!.UpdatedAt })` and `Project("Id, Metadata.UpdatedAt")`.
 Because the timestamps aren't in the body a SQL `json_object` projection reads, a relational projection that touches
@@ -121,7 +140,7 @@ over an existing row shows the stored `CreatedAt` only after it's re-read. A wri
 
 History rows are snapshots of the body, with no envelope of their own. `History`, `AsOf`, `AsOfAll`,
 `ChangesByActor` and `ChangesBetween` new the property up (so it's still never null) but leave it unstamped —
-`IsPersisted` is `false`. `Restore` keeps the live document's `CreatedAt` and stamps `UpdatedAt` with the restore write.
+`IsPersisted` is `false` and `TenantId` is `null`. `Restore` keeps the live document's `CreatedAt` and stamps `UpdatedAt` with the restore write.
 
 ## Where it isn't populated
 
