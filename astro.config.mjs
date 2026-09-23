@@ -48,11 +48,11 @@ const announcementConfig = {
       cta: 'WHAT??!',
     },
     {
-      id: 'controls-14',
-      title: 'Shiny Controls 1.4',
-      description: 'Diagrams, Floor Plans, Kanban, & MORE!',
+      id: 'controls-15',
+      title: 'Shiny Controls 1.5',
+      description: 'Diagrams, Floor Plans, Kanban, & GamePads!',
       href: '/controls/',
-      cta: 'Seriously!?!',
+      cta: 'What!?!',
     },
     {
       id: 'docdb-v14',

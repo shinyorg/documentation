@@ -1,0 +1,137 @@
+---
+title: Slide Editor | Slides, Layouts & Notes
+description: Add, duplicate, delete and reorder slides in a .pptx deck — undoable, confirmed before a delete, and safe with sections
+---
+
+**Home ▸ Slides** carries five commands: **New slide**, **Duplicate**, **Delete**, **Earlier** and
+**Later**. All five are undoable, and all of them are on the shared `SlideEditorController` for a host
+that builds its own chrome.
+
+```csharp
+var c = editorView.Controller!;
+
+c.NewSlide();            // after the current slide, and opens it
+c.DuplicateSlide();      // the copy goes straight after the original
+c.DeleteSlide();         // never asks — the view does
+c.MoveSlideEarlier();    // or MoveSlideLater(), or MoveSlide(from, to)
+
+c.CanDeleteSlide;
+c.CanMoveSlideEarlier;
+c.CanMoveSlideLater;
+```
+
+## New slide
+
+A new slide takes the **current slide's layout** — a deck is built slide after slide of the same kind
+— except after a title slide, where it takes the master's **Title and Content** layout instead. That is
+PowerPoint's rule too. <kbd>Ctrl</kbd>+<kbd>M</kbd> adds one on Blazor.
+
+It arrives with the layout's placeholders, empty. Each shows its prompt — **Click to add title**,
+**Click to add text** — inside a dashed outline, laid out in the placeholder's own size, font and bullet,
+so the prompt sits exactly where the first keystroke will. A layout that wrote its own prompt text is
+quoted instead.
+
+The prompts are editing chrome, not content: the viewer and the slide show never draw them, a search
+never finds them, and the one the caret is inside disappears. Date, footer and slide-number
+placeholders are left off, the way PowerPoint leaves them off.
+
+## Duplicate
+
+The copy's XML is the original's; its pictures, charts and media are **shared** with the original —
+two relationships to one part, which is how PowerPoint stores a picture pasted twice. The notes page is
+the exception: it points back at its slide, so the copy gets a notes page of its own. Editing the copy
+never changes the original.
+
+## Delete asks first
+
+Both toolbars confirm before deleting, with **Cancel** focused so an Enter that lands on the dialog is
+the harmless answer:
+
+> **Delete slide 3?**
+> "Roadmap" and everything on it will be removed from the deck. You can undo this.
+
+Turn it off with `ConfirmSlideDelete="false"`, or put the app's own dialog in its place — the callback
+gets the index of the slide about to go and returns whether to delete it:
+
+```razor
+<SlideEditorView Deck="deck"
+                 ConfirmDeleteSlide="@(i => Dialogs.Confirm("Delete slide?", $"Slide {i + 1} will be removed.", "Delete", "Cancel"))" />
+```
+
+```csharp
+slideEditorView.ConfirmDeleteSlide = i =>
+    dialogs.Confirm("Delete slide?", $"Slide {i + 1} will be removed.", "Delete", "Cancel");
+```
+
+On MAUI the built-in confirmation is the page's alert. With no page to show it on, nothing is deleted —
+a confirmation that silently never appears must not become a delete that silently always happens.
+
+`SlideEditorController.DeleteSlide` itself never asks: confirmation belongs to whatever knows how to
+ask. If you put your own button over a bare `SlideEditor`, confirm before you call it —
+`RequestDeleteSlide()` (Blazor) and `RequestDeleteSlideAsync()` (MAUI) run the view's own flow.
+
+## Undo brings back the same slide — even after a save
+
+A deleted slide's part stays in the live package, out of the running order, and is stripped from the
+**saved copy** only. Undo therefore puts back the very same slide — its pictures, its notes, its
+relationships — rather than a reconstruction of it, and that holds after the deck has been saved. The
+file on disk never carries it.
+
+## Reordering
+
+**Drag a thumbnail in the slide rail.** An insertion line shows where it will land, the rail scrolls
+itself near either edge, and the drop is one undoable move; a small wobble is still a tap, which just
+opens the slide. **Earlier** and **Later** swap the current slide with its neighbour; `MoveSlide(from, to)` moves one
+anywhere, with `to` counted after the slide has been taken out. The editor follows the slide it moved.
+
+## Sections and custom shows
+
+A deck with sections must list every slide in exactly one of them, in running order — PowerPoint
+repairs a file that does not. A new or moved slide joins the section of the slide it now follows, a
+deleted one leaves its section, and a custom show loses its reference to a deleted slide. Undo restores
+all of it exactly, including a slide moved back into the section it left.
+
+## After any change
+
+Every structural change — an undo and a redo included — clears the shape selection and goes to the
+slide it happened at. A selection is an index into the slide that was showing; after a reorder it would
+name a shape on a different slide. `SlideDeck.SlidesChanged` reports each change, with the slide to go
+to, for a host keeping an index of its own. A viewer sharing the deck clamps its index when the slide
+it was showing is deleted.
+
+## The slide rail
+
+A column of thumbnails to the left of the slide — `ShowSlideRail`, on by default, hidden below 600px
+where there is room for one column. Tap to open, drag to reorder. It follows the editor, so a slide
+reached by the arrows, a search or New slide scrolls into view. The behaviour is the shared
+`SlideRailController`, identical on both hosts; `SlideRail` is also usable on its own.
+
+## Layouts
+
+**Home ▸ Slides ▸ Layout** lists the master's layouts with the current one checked. Picking one re-lays
+the slide: placeholders match the new layout's by index, then type, and take its position; one with
+content and nowhere to go is pinned where it was drawn; an empty one without a match goes; the new
+layout's unmatched placeholders arrive empty, with their prompts. **New slide with layout** adds a slide
+on a chosen layout.
+
+```csharp
+foreach (var layout in c.Layouts) { /* Name, Index, IsCurrent */ }
+c.SetLayout(c.Layouts[1]);
+c.NewSlide(c.Layouts[1]);
+```
+
+## Speaker notes
+
+The **Notes** button in the status bar (or `ShowNotes`) opens a notes box under the slide. It writes through as you
+type, and a run of edits undoes as one step. A slide with no notes page gets one, and a deck with no
+notes master gets one too — with a copy of the slide master's theme — so the file still opens cleanly
+in PowerPoint.
+
+```csharp
+c.Notes;            // the current slide's notes, or null
+c.SetNotes("...");
+```
+
+## Not implemented
+
+- **Hiding** a slide from the show.

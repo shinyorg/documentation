@@ -727,8 +727,9 @@ export const sidebarTopics = [
           { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Lists', link: 'controls/document-editor/lists', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Objects & Highlighting', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Objects, Groups & Tables', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slides, Layouts & Notes', link: 'controls/slide-editor/slides', badge: { text: 'New', variant: 'success' } },
           { label: 'Notebook', link: 'controls/notebook/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Find', link: 'controls/office-find', badge: { text: 'New', variant: 'success' } },
         ]
@@ -895,6 +896,15 @@ export const sidebarTopics = [
           },
           { label: 'Speech Add-ins', link: 'controls/speech-addins/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Captcha', link: 'controls/captcha/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
+          {
+            label: 'Gamepad',
+            jumpTo: true,
+            badge: { text: 'New', variant: 'success' },
+            items: [
+              { label: 'Getting Started', link: 'controls/gamepad/' },
+              { label: 'Layouts & Customizing', link: 'controls/gamepad/customizing' },
+            ]
+          },
         ]
       },
       {

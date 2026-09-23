@@ -1,0 +1,212 @@
+---
+title: Gamepad
+description: An on-screen gamepad for .NET MAUI and Blazor — NES, SNES, Xbox/PlayStation, twin-stick and arcade layouts as a game overlay or an inline controller. It is a real Shiny.Gamepad IGamepad, so game code reads it exactly like hardware.
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside, Tabs, TabItem } from '@astrojs/starlight/components';
+
+`GamepadView` draws a touch controller — d-pads, analog sticks, face buttons, shoulders and triggers —
+and lets the player hold several of them at once. Lay it over a game as a full-screen overlay, or place
+it inline like any other control.
+
+**It is a real controller.** `GamepadView.Gamepad` is a [Shiny.Gamepad](/client/gamepad/) `IGamepad` whose
+`Kind` is `GamepadKind.Virtual`. With the registration below it is also listed by `IGamepadManager`
+next to any physical controller. Game code written against Shiny.Gamepad needs no changes to be played
+with it: `GetState()`, `ButtonChanged`, `AxisChanged`, `SetVibration` and `WaitForButton` all work.
+
+- <NugetDownloads name="Shiny.Maui.Controls.Gamepad" />
+- <NugetDownloads name="Shiny.Blazor.Controls.Gamepad" />
+- <NugetDownloads name="Shiny.Controls.Gamepad.Shared" />
+
+<PlatformSupport frameworks={["maui", "blazor"]} />
+
+{/* TODO: capture screenshots for gamepad */}
+
+The shared package is the engine both hosts use: layouts, hit testing, and the stick and d-pad
+arithmetic. It is referenced for you; install it directly only to build your own renderer.
+
+## Setup
+
+<Tabs syncKey="host">
+<TabItem label=".NET MAUI">
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseShinyGamepad();
+```
+
+`UseShinyGamepad()` registers the multi-touch handler for iOS and Android, plus a
+`VirtualGamepadManager` that reports on-screen and physical controllers together as `IGamepadManager`.
+The view is in the usual `http://shiny.net/maui/controls` XAML namespace, so no extra `xmlns` is needed.
+
+</TabItem>
+<TabItem label="Blazor">
+
+```csharp
+builder.Services.AddShinyGamepad();
+```
+
+```razor
+@using Shiny.Gamepad
+@using Shiny.Controls.Gaming
+@using Shiny.Blazor.Controls.Gaming
+```
+
+Everything is registered **Scoped**, the browser's physical-controller manager included. On Blazor
+Server a singleton would share one user's pad with every connected user.
+
+</TabItem>
+</Tabs>
+
+<Aside type="caution" title="Call it instead of AddGamepads()">
+`UseShinyGamepad()` and `AddShinyGamepad()` register Shiny.Gamepad's platform manager themselves and
+wrap it. Don't also call Shiny.Gamepad's `AddGamepads()` — called afterwards, it replaces the wrapper,
+and the on-screen pad drops out of `GetGamepads()`. The view itself keeps working.
+</Aside>
+
+<Aside type="note" title="Physical controllers on Android">
+Shiny.Gamepad reads Android controllers through Shiny's activity hooks, so they only appear when the app
+also calls `UseShiny()` (Shiny.Hosting.Maui). Without it the on-screen pad works normally and physical
+controllers are simply not reported — a trace line says why.
+</Aside>
+
+## Overlay or inline
+
+`Sizing` picks how the layout fits the view:
+
+- **`Anchored`** (default) — each element sits at a fixed offset from a corner or edge at its natural
+  size, times `ControllerScale`. The d-pad stays under the left thumb in portrait and landscape. Use it
+  for an overlay covering the game.
+- **`Uniform`** — the layout is arranged on its own design canvas and scaled to fit, with a controller
+  body behind it (`ShowBody`). Use it for a controller placed inline on a page.
+
+With `PassThrough` (on by default), a touch that lands on no element falls through to whatever is
+beneath — the game gets every tap that misses the controller. On Blazor that is CSS `pointer-events`, on
+Android a declined `ACTION_DOWN`, and on iOS `PointInside`.
+
+<Tabs syncKey="host">
+<TabItem label=".NET MAUI">
+
+```xml
+<Grid>
+    <!-- the game -->
+    <GraphicsView x:Name="Game" Drawable="{Binding Drawable}" />
+
+    <!-- the controller, over it -->
+    <shiny:GamepadView x:Name="Pad"
+                       Preset="Snes"
+                       HideWhenControllerConnected="True"
+                       IdleOpacity="0.4" />
+</Grid>
+```
+
+</TabItem>
+<TabItem label="Blazor">
+
+```razor
+<div style="position:relative; height:100vh">
+    <canvas @ref="game" style="position:absolute; inset:0"></canvas>
+
+    <div style="position:absolute; inset:0; pointer-events:none">
+        <GamepadView @ref="pad"
+                     Preset="GamepadPreset.Snes"
+                     HideWhenControllerConnected="true"
+                     IdleOpacity="0.4" />
+    </div>
+</div>
+```
+
+</TabItem>
+</Tabs>
+
+## Presets and face styles
+
+| `Preset` | Elements |
+|---|---|
+| `Nes` | D-pad, B and A, Select and Start |
+| `Snes` | D-pad, Y/X/B/A diamond, L and R, Select and Start |
+| `Standard` (default) | Two sticks, d-pad, face diamond, bumpers, triggers, View/Menu and Home — the Xbox / PlayStation / Switch Pro layout |
+| `TwinStick` | Two sticks and a pause button |
+| `Arcade` | One stick and six buttons in two staggered rows |
+
+`FaceStyle` relabels the buttons without changing what they report: `Xbox` (coloured A/B/X/Y, LB/RT,
+View/Menu), `PlayStation` (drawn cross, circle, square and triangle; L1/R2; Create/Options), `Nintendo`
+(B/A/Y/X, L/ZR, −/+), `SuperNintendo` (the Super Famicom's four colours) and `Nes`. Leave it `null` for
+the preset's own style.
+
+<Aside type="note" title="Buttons are positional">
+As in Shiny.Gamepad, `GamepadButton.A` is always the **bottom** face button and `B` the **right** one,
+whatever is printed on them. The SNES "B" reports `GamepadButton.A` and its "A" reports `B`. The NES's
+left "B" reports `A` and its right "A" reports `B`. That matches what a physical SNES-style or Switch
+controller reports, so one set of game code handles both.
+</Aside>
+
+## Reading input
+
+Read the controller the way a game reads any controller — poll it every frame:
+
+```csharp
+var state = Pad.Gamepad.GetState();
+var move = state.GetMovement();          // left stick, with a deadzone
+var dpad = state.DPad;                   // -1..1 on each axis
+if (state.IsPressed(GamepadButton.A))
+    player.Jump();
+```
+
+Or listen for changes. `ButtonChanged` and `AxisChanged` on the view are raised on the UI thread (MAUI
+events, Blazor `OnButtonChanged` / `OnAxisChanged` callbacks). The same events on `Gamepad` itself are
+raised on the input thread, as they are for hardware.
+
+Sticks report -1 to 1 with **Y positive up**, as every Shiny.Gamepad backend does. Triggers report 0 or
+1 and fold into `Buttons` while held.
+
+With the registration above, the pad is also in `IGamepadManager.GetGamepads()`. It raises `Connected`
+when the view appears and `Disconnected` when it goes. A MAUI view that is shown again hands out a new
+`VirtualGamepad` with the same `GamepadId`, the way a physical controller comes back as a new object.
+Set `PlayerIndex` to seat it as a given player.
+
+## Touch behaviour
+
+- **Multi-touch.** A thumb on a stick while the other presses a button. Native on iOS and Android.
+  Other MAUI platforms (Mac Catalyst, Windows, AppKit, GTK) read a single pointer, which suits a
+  mouse. Blazor uses pointer events and is multi-touch in every mobile browser.
+- **Sticks and d-pads capture their finger** until it lifts, so a thumb drifting off the edge keeps
+  steering. `DPadMode` is `EightWay` (default) or `FourWay`, and the centre of the d-pad is neutral.
+- **Buttons can be rolled across.** A thumb between two neighbouring buttons presses both, and sliding
+  moves the press — rolling across NES B and A behaves as it does on the real pad.
+- **Stick click.** Double-tap a stick and hold to press L3/R3 (`StickClickEnabled`).
+- **Floating sticks.** `GamepadElement.IsFloating` re-centres a stick wherever the thumb lands within
+  `FloatingZone` of it, and it springs home on release.
+- **Turbo.** `GamepadElement.IsTurbo` rapid-fires a held button at `TurboRate` presses per second.
+
+## Haptics and vibration
+
+| Property | Default | When it ticks |
+|---|---|---|
+| `ButtonHapticFeedback` | `true` | A non-directional button is pressed — face, shoulders, triggers, Start/Select, Home |
+| `DirectionalHapticFeedback` | `false` | The d-pad takes a new direction (off by default — a rolling thumb would buzz) |
+
+Turbo repeats never tick. On Blazor both use `navigator.vibrate`, which Android browsers implement and
+iOS Safari does not.
+
+`Gamepad.SetVibration(...)` from game code runs the device's own motor, and `GamepadCapabilities.Vibration`
+is reported only where one is reachable. On Android the app needs the `VIBRATE` permission. On iOS a
+buzz has a fixed length. In the browser, Android only.
+
+## Stepping aside
+
+- `HideWhenControllerConnected` hides the pad, and lets every touch through, while a physical
+  controller is connected. It comes back when the controller goes. In a browser, a controller only
+  becomes visible after the player presses a button on it.
+- `IdleOpacity` fades the pad after `IdleDelay` without a touch (`1`, the default, disables fading).
+  It comes back to full at the next touch.
+
+<Aside type="note" title="Blazor Server">
+Every pointer is a round trip to the server, so on Blazor Server the knob — and every input the game
+reads — lags by the connection's latency. WebAssembly and Hybrid have no such cost.
+</Aside>
+
+Next: [Layouts & Customizing](/controls/gamepad/customizing/) — custom layouts, the drag-and-pinch
+editor, saving layouts, and colours.
