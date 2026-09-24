@@ -34,6 +34,7 @@ Always run `npm run build` after non-trivial content/config changes — MDX erro
 - Each doc page starts with frontmatter (`title:` required). Add `comments: true` to opt a page into the giscus widget.
 - `.mdx` is used when a page needs components; plain `.md` otherwise.
 - Release-note `<RN>` entries that contain a code fence need their opening/closing tags on their own lines, or the MDX build fails.
+- User-visible strings in `.astro` components go in `src/content/i18n/en.json` and are read with `Astro.locals.t('component.key')`; internal `href`s go through `localeHref` (`src/i18n/url.ts`). Only English exists today — see `I18N_PLAN.md`.
 - This is a docs repo, not the library source — when documenting Shiny APIs, verify against the real library/sample code in the sibling `shinyorg/*` repos rather than inventing API surface.
 
 ## How to update

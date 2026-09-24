@@ -1,12 +1,15 @@
 import { defineCollection, z } from 'astro:content';
-import { docsLoader } from '@astrojs/starlight/loaders';
-import { docsSchema } from '@astrojs/starlight/schema';
+import { docsLoader, i18nLoader } from '@astrojs/starlight/loaders';
+import { docsSchema, i18nSchema } from '@astrojs/starlight/schema';
 import { blogSchema } from 'starlight-blog/schema'
 import type { Loader, LoaderContext } from 'astro/loaders';
 
 const baseSchema = docsSchema({
   extend: (context) => blogSchema(context).extend({
     comments: z.boolean().optional(),
+    // Set on machine-translated pages: sha256 of the English source they were translated
+    // from, so a changed English page can be spotted as stale. See I18N_PLAN.md.
+    translatedFrom: z.string().optional(),
   })
 });
 
@@ -53,7 +56,8 @@ export const collections = {
   docs: defineCollection({
     loader: embargoedDocsLoader(),
     schema: baseSchema
-  })
-  // docs: defineCollection({ schema: docsSchema() }),
-  // i18n: defineCollection({ type: 'data', schema: i18nSchema() }),
+  }),
+  // UI strings for custom components, one JSON file per language in src/content/i18n/
+  // (`en.json`, …), read with `Astro.locals.t('key')`. Also overrides Starlight's own strings.
+  i18n: defineCollection({ loader: i18nLoader(), schema: i18nSchema() }),
 };

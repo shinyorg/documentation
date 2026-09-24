@@ -1,10 +1,12 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
+import { extraLangs } from '../i18n/locales.mjs';
 
 const SITE = 'https://www.shinylib.net';
 const PROJECT_NAME = 'Shiny.NET';
 
-const EXCLUDE_PATTERNS = [/^blog\//, /^404$/];
+// Translated pages (`<lang>/...`) are left out: these endpoints are English-only.
+const EXCLUDE_PATTERNS = [/^blog\//, /^404$/, ...extraLangs.map((lang) => new RegExp(`^${lang}/`))];
 
 // Strip MDX-only constructs (imports, JSX components) so the output is
 // plain markdown that's friendly to LLM consumption.

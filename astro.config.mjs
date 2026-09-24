@@ -6,6 +6,8 @@ import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 import starlightSidebarTopics from 'starlight-sidebar-topics';
 import { sidebarTopics, sidebarTopicsOptions, cleanTopicsForStarlight } from './src/sidebar-topics.mjs';
+import { defaultLang, locales } from './src/i18n/locales.mjs';
+import { sidebarLabelTranslations } from './src/i18n/sidebarLabels.mjs';
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
 
@@ -34,6 +36,10 @@ const giscusConfig = {
 //   description any length — too long to fit and the bar scrolls it marquee-style
 //               rather than wrapping, so the bar's height never changes.
 //   cta         optional link text before the arrow (hidden on narrow screens).
+//   href        site-absolute links get the current locale prefix (e.g. `/fr/…`).
+//
+// `title`, `description` and `cta` take a plain string, or a per-language record
+// such as `{ en: 'Shiny Controls 1.5', fr: '…' }`; a missing language falls back to `en`.
 //
 // An empty array hides the bar; a single entry shows it without rotation or dots.
 const announcementConfig = {
@@ -418,6 +424,9 @@ export default defineConfig({
     mdx(),
     starlight({
       title: 'Shiny.NET',
+      // English at the root, other languages under `/<lang>/` — see src/i18n/locales.mjs.
+      defaultLocale: 'root',
+      locales,
       // Pagefind builds a static full-text index into `dist/pagefind` at build
       // time. The header has no search box of its own (see the `Search`
       // override below) — the finder queries this index directly.
@@ -497,7 +506,7 @@ export default defineConfig({
             }
           }
         }),
-        starlightSidebarTopics(cleanTopicsForStarlight(sidebarTopics), sidebarTopicsOptions),
+        starlightSidebarTopics(cleanTopicsForStarlight(sidebarTopics, sidebarLabelTranslations, defaultLang), sidebarTopicsOptions),
       ],
     }),
   ],

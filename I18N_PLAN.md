@@ -7,6 +7,25 @@ Add French to the site while keeping English as the default and all current URLs
 - **English-only:** release notes (32 files, ~150k words), the blog, `llms.txt`/`llms-full.txt` and the App/Lib/Template Builder UIs.
 
 
+## Status
+**Phases 1–2 infrastructure is done, English only.** French is not switched on yet. The only locale is English at the root, so Starlight renders no language picker, and the built pages have the same visible content as before.
+- **Locales:** `src/i18n/locales.mjs` is the one place a language is added. `astro.config.mjs` reads `defaultLocale`/`locales` from it, and the `llms*` endpoints exclude every extra language.
+- **Schema:** `src/content.config.ts` has the `i18n` collection (`i18nLoader` + `i18nSchema`) and `translatedFrom` on the docs schema.
+- **UI strings:** about 170 component UI strings are in `src/content/i18n/en.json`. Components read them with `Astro.locals.t`.
+  - Interpolated values use single-brace `{name}` tokens that the component replaces, not i18next `{{ }}`.
+  - Client scripts get their strings through `data-*` attributes.
+- **Sidebar labels:** `cleanTopicsForStarlight` merges `i18n/sidebar.<lang>.json` (loaded by `src/i18n/sidebarLabels.mjs`) into topic label records and item `translations`. `localizedLabel` (`src/i18n/label.ts`) uses the same dictionaries for HomepageNav, JumpTo, LibraryExplorer and LibraryCatalog.
+- **Links:** internal hrefs in components go through `localeHref` (`src/i18n/url.ts`).
+- **Banner and Giscus:** announcements accept `{ en, fr }` records, and Giscus takes `lang` from the route.
+
+**Still open when French is added:**
+- The Phase 1 "things to check" (blog fallback, topic link prefixes, forked sidebar, language picker).
+- The finder's `/playground/index.html` topic link would get a `/fr` prefix but is a static file.
+- Marketing copy in `src/data/libraryCatalog.ts` and `NugetCatalogTable.tsx` strings are still English.
+- `RecentPostsBanner` formats dates with `en-US`.
+- `featuredInHomenav` notes are looked up in the sidebar dictionary, so include them in `sidebar.<lang>.json`.
+- Phases 3–5 have not started.
+
 ## Phase 1: Enable Starlight i18n (English at root, French under `/fr/`)
 - `astro.config.mjs`: add `defaultLocale: 'root'` and `locales: { root: { label: 'English', lang: 'en' }, fr: { label: 'Français', lang: 'fr' } }` to `starlight({...})`.
   - English stays at `/`, so none of the ~290 redirects change.

@@ -1,12 +1,14 @@
 import type { APIRoute } from 'astro';
 import { getCollection } from 'astro:content';
+import { extraLangs } from '../i18n/locales.mjs';
 
 const SITE = 'https://www.shinylib.net';
 const PROJECT_NAME = 'Shiny.NET';
 const DESCRIPTION =
   'A suite of powerful .NET libraries for mobile, desktop, and server applications. Includes Shiny Client (mobile/desktop services), Shiny Mediator, MAUI, Controls, Document DB, Spatial, Aspire integrations, and more.';
 
-const EXCLUDE_PATTERNS = [/^blog\//, /^404$/];
+// Translated pages (`<lang>/...`) are left out: these endpoints are English-only.
+const EXCLUDE_PATTERNS = [/^blog\//, /^404$/, ...extraLangs.map((lang) => new RegExp(`^${lang}/`))];
 
 interface Group {
   label: string;

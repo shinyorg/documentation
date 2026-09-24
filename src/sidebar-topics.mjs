@@ -1431,7 +1431,14 @@ const PLATFORM_BADGES = {
   blazor: { text: 'Blazor', variant: 'note' },
 };
 
-export function cleanTopicsForStarlight(topics) {
+/**
+ * `labelTranslations` maps a language to an English-label → translated-label dictionary,
+ * e.g. `{ fr: { 'Getting Started': 'Premiers pas' } }` (loaded from `i18n/sidebar.<lang>.json`).
+ * English labels stay as they are; each translation rides along the way Starlight expects —
+ * a `{ en, fr }` label record on topics, a `translations` map on everything below them.
+ * Labels missing from a dictionary simply fall back to English.
+ */
+export function cleanTopicsForStarlight(topics, labelTranslations = {}, defaultLang = 'en') {
   const stripHomeNavOnly = (nodes) =>
     nodes
       .filter(node => !node.homeNavOnly)
@@ -1452,7 +1459,28 @@ export function cleanTopicsForStarlight(topics) {
       return next;
     });
 
-  return JSON.parse(JSON.stringify(applyPlatformBadges(stripHomeNavOnly(topics)), (key, value) => {
+  const translationsFor = (label) => {
+    const translations = {};
+    for (const [lang, dictionary] of Object.entries(labelTranslations)) {
+      if (dictionary[label]) translations[lang] = dictionary[label];
+    }
+    return translations;
+  };
+
+  const applyLabelTranslations = (nodes, isTopic) =>
+    nodes.map(node => {
+      const next = node.items ? { ...node, items: applyLabelTranslations(node.items, false) } : { ...node };
+      const translations = translationsFor(node.label);
+      if (Object.keys(translations).length) {
+        if (isTopic) next.label = { [defaultLang]: node.label, ...translations };
+        else next.translations = { ...translations, ...node.translations };
+      }
+      return next;
+    });
+
+  const cleaned = applyLabelTranslations(applyPlatformBadges(stripHomeNavOnly(topics)), true);
+
+  return JSON.parse(JSON.stringify(cleaned, (key, value) => {
     if (key === 'jumpTo') return undefined;
     if (key === 'expandInHomenav') return undefined;
     if (key === 'flattenInHomenav') return undefined;
