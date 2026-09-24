@@ -1,0 +1,182 @@
+---
+title: Screen Recorder
+description: Record the device's screen from a Shiny.AppDeviceBridge web app — a video filed into a file root, with the microphone or system audio, pause and resume, a time limit and an event for every ending
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.ScreenRecorder" />
+
+The screen recorder bridge records **the device's** screen to a video and saves it in a
+[file root](/appdevicebridge/storage/), where the page can play, upload or delete it. It's built on
+[Shiny.ScreenRecorder](/client/screenrecorder/).
+
+In a browser, a page records the screen with `getDisplayMedia`. The WebViews on iOS and Android don't offer it, and
+desktop WebViews vary, so a page inside the app uses this bridge instead. A page running in a normal browser can keep
+using `getDisplayMedia`, or `Shiny.ScreenRecorder.Blazor`.
+
+## Platforms
+
+| Platform | Backed by | What's recorded | Asks the user |
+| --- | --- | --- | --- |
+| Android | MediaProjection | the whole screen | every recording, with the system's consent dialog |
+| iOS, Mac Catalyst | ReplayKit | this app only | once, with ReplayKit's prompt |
+| macOS | ScreenCaptureKit | the whole screen | once, for Screen Recording permission in System Settings |
+| Windows | Windows.Graphics.Capture | the whole screen | **no**: it only draws a yellow border. See [Confirming a recording](#confirming-a-recording) |
+| Linux | xdg-desktop-portal ScreenCast | the whole screen | every recording, with the compositor's picker |
+
+The page chooses nothing about *what* is recorded. It's always the primary display, or the app itself on iOS and Mac
+Catalyst. Picking a display or window is left out on purpose, because listing them would give the page every other app's
+window titles.
+
+What each device can do beyond recording differs too. `GET /_bridge/screenrecorder` lists it in `capabilities`:
+
+| Capability | Request field | Notes |
+| --- | --- | --- |
+| `Recording` | | missing where nothing can record, such as Linux without a portal or an encoder |
+| `PauseResume` | `pause` / `resume` routes | not on macOS 15's capture path |
+| `Microphone` | `includeMicrophone` | not on Windows |
+| `SystemAudio` | `includeSystemAudio` | everything playing on macOS and Linux; only the app's own audio on iOS and Android; none on Windows |
+| `CursorToggle` | `showCursor: false` | desktops only; touch screens have no pointer |
+| `FrameRateControl` | `frameRate` | a ceiling from 1 to 240; a still screen produces no frames |
+| `BitrateControl` | `videoBitrate` | bits a second |
+| `Downscaling` | `maxWidth` | worth setting on Retina displays and modern phones |
+
+A request for something that isn't listed answers `501` before anyone is asked anything, rather than recording without it.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.ScreenRecorder
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddScreenRecorderBridge(o => o.MaxDuration = TimeSpan.FromMinutes(10)),
+    webApp => { /* … */ }
+);
+```
+
+`AddScreenRecorderBridge()` also registers Shiny.ScreenRecorder's recorder for the platform, or the portal recorder on
+Linux, so there's nothing else to call.
+
+| `ScreenRecorderBridgeOptions` | Default | |
+| --- | --- | --- |
+| `Root` | `data` | the file root recordings are saved into |
+| `Folder` | `screen-recordings` | the folder inside `Root`; each recording is `REC_<yyyyMMdd-HHmmss>.mp4` and never overwrites another |
+| `MaxDuration` | 1 hour | the longest any recording runs; longer requests are shortened to it, and `null` removes the limit |
+| `ConfirmStart` | `null` | asked on the main thread before every recording; return `false` to refuse it |
+| `RegisterScreenRecorder` | `true` | turn off to register your own `IScreenRecorder` |
+
+### Platform setup
+
+- **Android:** `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_MEDIA_PROJECTION`, plus `RECORD_AUDIO` for the microphone.
+  The recorder's service and consent activity merge into the manifest automatically. Word the recording's notification
+  with an `IScreenRecordingNotificationDelegate`.
+- **iOS and Mac Catalyst:** `NSMicrophoneUsageDescription` for the microphone. The app has to be in the foreground.
+- **macOS:** the OS prompts for Screen Recording permission itself. Add `NSMicrophoneUsageDescription` for the
+  microphone, and `com.apple.security.device.audio-input` when sandboxed.
+- **Windows:** Windows 10 1903 or later. Packaged apps declare the `graphicsCapture` capability.
+- **Linux:** xdg-desktop-portal with ScreenCast (GNOME, KDE Plasma, wlroots), and GStreamer
+  (`gstreamer1.0-tools gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-pipewire`) or, on X11, `ffmpeg`.
+  Without them, the bridge reports no capabilities and answers `501`. Flatpak hosts aren't supported.
+
+## From the page
+
+```csharp
+// Program.cs (Blazor WebAssembly)
+builder.Services.AddWebAppHostClient().AddScreenRecorderBridgeClient();
+```
+
+```csharp
+@inject IScreenRecorderBridge Recorder
+
+var status = await Recorder.GetStatusAsync();
+if (status.Capabilities.Contains(ScreenRecorderCapability.Recording))
+{
+    await using var ended = await Recorder.OnEndedAsync(e => Show(e.Reason, e.Recording));
+
+    // Returns once frames are being written, which is after the user answers any consent dialog.
+    await Recorder.StartAsync(new ScreenRecordingRequest(
+        IncludeMicrophone: status.Capabilities.Contains(ScreenRecorderCapability.Microphone),
+        MaxDurationSeconds: 120
+    ));
+
+    // …
+
+    var recording = await Recorder.StopAsync();   // recording.File is a BridgeFile for the files bridge
+}
+```
+
+```ts
+import { ScreenRecorderBridge } from "@shinyorg/appdevicebridge";
+
+const recorder = new ScreenRecorderBridge();
+const stop = await recorder.onEnded(e => console.log(e.reason, e.recording?.file.path));
+
+await recorder.start({ maxWidth: 1280, maxDurationSeconds: 120 });
+const { file, durationSeconds } = await recorder.stop();
+video.src = `/_bridge/files/${file.root}/content?path=${encodeURIComponent(file.path)}`;
+```
+
+| Route | |
+| --- | --- |
+| `GET /_bridge/screenrecorder` | capabilities, `state`, `elapsedSeconds`, `maxDurationSeconds`, `lastRecording`; never prompts |
+| `POST /_bridge/screenrecorder/access` | `{ includeMicrophone, includeSystemAudio }` → `{ access }`. Android can't grant the screen ahead of time and reports `Unknown`, so treat anything but `Denied` as worth trying |
+| `POST /_bridge/screenrecorder/recording` | starts; answers with the status once recording |
+| `DELETE /_bridge/screenrecorder/recording` | stops, finishes the file and saves it; answers with the recording |
+| `POST /_bridge/screenrecorder/recording/cancel` | ends it and keeps nothing; fine when nothing is recording |
+| `POST /_bridge/screenrecorder/recording/pause`, `…/resume` | where `PauseResume` is listed |
+
+| Event | |
+| --- | --- |
+| `screenrecorder.status` | every state change (`Idle`, `Starting`, `Recording`, `Paused`, `Stopping`), with the whole status |
+| `screenrecorder.ended` | every ending: `{ reason, recording, message }` |
+
+- **Errors:** `501 not_supported` (the device can't record, or can't honour a setting), `409 recording_busy` (one at a
+  time, including a recording the app started itself), `409 not_recording` (stop, pause or resume with nothing
+  running), `403 permission_denied` (the user declined), `403 declined` (`ConfirmStart` said no), `400` for a bad
+  body.
+- **Stopping takes a moment.** Finishing the file and writing its index isn't instant on a long recording. A page that
+  gives up waiting doesn't interrupt it.
+
+## When the device ends a recording
+
+The page isn't the only one that can stop a recording. The user can stop it from Android's notification, the macOS menu
+bar or the compositor. The OS can interrupt it for a call or a locked screen. `MaxDuration` can run out. Each of these
+ends the recording on the device. Whatever could be salvaged is saved just as a stop would have saved it, and
+`screenrecorder.ended` reports it:
+
+| `reason` | `recording` |
+| --- | --- |
+| `Stopped` | always: the page stopped it |
+| `Cancelled` | never |
+| `MaxDurationReached` | always: the file is complete |
+| `RevokedByUser` | usually |
+| `InterruptedBySystem`, `TargetLost` | when something could be kept |
+| `EncoderFailed` | rarely; `message` says what went wrong |
+| `Unknown` | when something could be kept |
+
+Listen for `screenrecorder.ended` rather than assuming a stop will find a recording running. A stop that comes too late
+answers `409 not_recording`, and the recording is already in `lastRecording`.
+
+## Confirming a recording
+
+This bridge records the whole screen on four of the five platforms, so it's the widest device access any bridge gives.
+Every route requires the [bridge policy](/appdevicebridge/security/), which by default admits callers on this device
+only. Every platform except Windows also asks the user itself.
+
+On Windows, give the user a say with `ConfirmStart`:
+
+```csharp
+bridge.AddScreenRecorderBridge(o => o.ConfirmStart = async (request, ct) =>
+    await Application.Current!.Windows[0].Page!.DisplayAlertAsync(
+        "Record your screen?",
+        request.IncludeMicrophone ? "The web app wants to record your screen and microphone." : "The web app wants to record your screen.",
+        "Record",
+        "Don't allow"
+    ));
+```
+
+Keep `MaxDuration` set. It's what stops a recording that a page started and then forgot, for example after the page
+navigated away or crashed.

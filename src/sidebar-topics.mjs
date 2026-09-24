@@ -1317,6 +1317,7 @@ export const sidebarTopics = [
           { label: 'Typed Clients', link: 'appdevicebridge/clients' },
           { label: 'Bridges', link: 'appdevicebridge/bridges' },
           { label: 'Wearables', link: 'appdevicebridge/wearables' },
+          { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder' },
           { label: 'Maps & Directions', link: 'appdevicebridge/maps' },
           { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
           { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
