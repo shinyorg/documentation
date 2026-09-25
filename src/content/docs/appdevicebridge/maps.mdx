@@ -17,6 +17,7 @@ where the answer comes from is decided in the native app.
 | --- | --- | --- |
 | **Map tiles** | read from your [PMTiles](https://docs.protomaps.com/pmtiles/) archive a range at a time, or any `{z}/{x}/{y}` tile service | from a region the user downloaded, or tiles already seen online |
 | **Labels and icons** | glyphs and sprites fetched once and kept | the region catalog's asset pack |
+| **Traffic** | flow from TomTom, HERE or Azure Maps, incidents from TomTom, or providers of your own | empty |
 | **Directions** | a [Valhalla](https://github.com/valhalla/valhalla) server: your own, or a hosted one such as Stadia Maps | Valhalla running on the phone over a region's downloaded road network |
 
 The map data is [OpenStreetMap](https://www.openstreetmap.org/copyright) in the [Protomaps](https://docs.protomaps.com/basemaps/downloads)
@@ -86,6 +87,8 @@ sources and one head add what only it needs.
 | `ConfigureRequest` | none | headers for tile, asset and catalog requests |
 | `HttpMessageHandlerFactory` | `HttpClientHandler` | the handler for outgoing requests |
 | `Directions.OnlineRouteUrl`, `ApiKey`, `ConfigureRequest`, `Timeout` | none, none, none, 30 s | the online router |
+| `Traffic` | none | live traffic flow: `TomTomTrafficProvider`, `HereTrafficProvider`, `AzureMapsTrafficProvider`, or an `ITrafficProvider` of your own. See [Traffic](#traffic) |
+| `TrafficIncidents` | none | live incidents: `TomTomIncidentProvider`, or an `ITrafficIncidentProvider` of your own |
 
 **The page never sees these.** Tile URLs with keys, the router's address and its key stay in the native app; the page
 gets bridge URLs. The bridges are protected by [the bridge policy](/appdevicebridge/security/) like every other.
@@ -143,11 +146,107 @@ builder.Services
 | `SetDrawModeAsync(MapDrawMode)` | `Pin`: clicks report a place for a pin. `Line`, `Polygon`: clicks add points and a double-click finishes, raising `OnDrawn` |
 | `FlyToAsync`, `FitBoundsAsync`, `FitAllAsync`, `ClearAsync` | the view and the overlays |
 | `SnapshotAsync()` | the map as drawn, pins included, as a PNG `data:` URL |
+| `ShowTraffic`, `SetTrafficAsync(bool)`, `HasTraffic` | the live traffic flow layer, when the app configured a provider. See [Traffic](#traffic) |
+| `ShowIncidents`, `SetIncidentsAsync(bool)`, `HasIncidents` | live incidents: lines, and markers that show their details when tapped |
 | `OnReady`, `OnClick`, `OnDrawn`, `OnPinClicked`, `OnPinMoved`, `OnMoved` | events |
 | `Flavor`, `Language` | the Protomaps style (`light`, `dark`, `white`, `grayscale`, `black`) and label language |
 
 MapLibre GL JS 6 and the Protomaps style are in the package, not loaded from a CDN, so the map draws with no connection.
 Any other vector-tile renderer can use the bridge too: `GET /_bridge/maps` returns the tile, glyph and sprite URLs.
+
+## Traffic
+
+Two live layers draw over the roads. **Flow** colours each road by how fast traffic is moving: green, orange, then red
+compared to free flow, with closed roads in dark red, or the provider's own colours for image tiles. **Incidents** mark
+accidents, jams, roadworks, closures and weather. Each shows as a dashed line along the affected road and a marker
+coloured by kind, and tapping a marker shows its description and delay. Each layer comes from a provider set in the
+native app, and the two are independent, so one provider's flow works with another's incidents. The page gets bridge
+URLs, never a provider's address or key. Both layers are live, so offline they're simply empty.
+
+| Provider | Layer | Tiles | Key |
+| --- | --- | --- | --- |
+| `TomTomTrafficProvider(key)` | flow | vector, coloured by the map | TomTom, with the Traffic API |
+| `HereTrafficProvider(key)` | flow | 512 px images in HERE's colours | HERE, with traffic tiles |
+| `AzureMapsTrafficProvider(key)` or `(clientId, getAccessToken)` | flow | 512 px images in Azure's colours | Azure Maps shared key, or Microsoft Entra ID |
+| `TomTomIncidentProvider(key)` | incidents | vector: lines and markers | TomTom, the same key as flow |
+
+```csharp
+bridge.AddMapsBridge(o =>
+{
+    o.Traffic = new TomTomTrafficProvider(tomTomKey)
+    {
+        MinZoom = 6,                          // default: no tiles are fetched below this
+        Refresh = TimeSpan.FromMinutes(2)     // default: how long a tile is kept, and how often the page refetches
+    };
+    o.TrafficIncidents = new TomTomIncidentProvider(tomTomKey) { Language = "en-GB" };   // MinZoom 8 by default
+
+    // Or HERE's flow, only drawing trouble: MinTrafficCongestion is free (default), heavy, queuing or blocked.
+    // o.Traffic = new HereTrafficProvider(hereKey) { MinTrafficCongestion = "heavy" };
+
+    // Or Azure Maps, with a shared key or Entra ID. Style picks the tileset: Relative (default), RelativeDark, Delay,
+    // ReducedSensitivity or Absolute.
+    // o.Traffic = new AzureMapsTrafficProvider(azureKey) { Style = AzureMapsTrafficStyle.RelativeDark };
+    // o.Traffic = new AzureMapsTrafficProvider(azureMapsClientId, ct => GetEntraTokenAsync(ct));
+});
+```
+
+```razor
+<BridgeMap ShowTraffic="traffic" ShowIncidents="incidents" … />
+<button disabled="@(!map.HasTraffic)" @onclick="() => traffic = !traffic">Traffic</button>
+<button disabled="@(!map.HasIncidents)" @onclick="() => incidents = !incidents">Incidents</button>
+```
+
+`MapsOptions.Traffic` and `TrafficIncidents` can also be changed while the app runs, for example to let the user pick a
+provider or enter their own key. A change takes effect from the next tile, and a map created after it (or `GET
+/_bridge/maps` read again) sees the new layers. The sample's Map page does exactly this: a small bridge of its own keeps the
+keys in the device's secure store and never sends them back to the page.
+
+`ShowTraffic` and `ShowIncidents` can change at any time, and `SetTrafficAsync(bool)` and `SetIncidentsAsync(bool)` do
+the same from code. `HasTraffic` and `HasIncidents` say whether the app configured a provider for each. Every tile
+counts against the provider's quota, and every tile on screen is fetched again after `Refresh`, so raise `MinZoom` or
+`Refresh` to spend less of it.
+
+:::note[Azure Maps]
+`AzureMapsTrafficProvider` uses the Render service's `Get Map Tile` with the `microsoft.traffic.*` raster tilesets.
+These replace the Traffic v1 tiles, which Microsoft retires on 31 March 2028. Microsoft doesn't publish the layout of
+its vector traffic tilesets, so this provider draws the raster ones. Azure Maps requires its attribution wherever its
+tiles are drawn, and the layer reports it for the map to show.
+:::
+
+Any other source is two members. Flow:
+
+```csharp
+public interface ITrafficProvider
+{
+    // Vector: SourceLayer and SpeedRatioProperty (current / free-flow speed, 0–1), optionally ClosedProperty.
+    // Raster: TileSize; the images are drawn as they are.
+    TrafficLayer Layer { get; }
+
+    // Null where there's nothing. The HttpClient is the maps bridge's own, built from HttpMessageHandlerFactory.
+    Task<TrafficTile?> GetTileAsync(int z, int x, int y, HttpClient http, CancellationToken ct);
+}
+```
+
+Incidents are vector tiles. The provider names the layers holding lines and points, and the property holding its own
+incident type. `Kinds` maps each value of that property to a `TrafficIncidentKind` (`Accident`, `Congestion`,
+`RoadWorks`, `RoadClosed`, `LaneClosed`, `Weather`, `Hazard`, `BrokenDownVehicle`), and anything not listed is `Other`:
+
+```csharp
+public interface ITrafficIncidentProvider
+{
+    // KindProperty + Kinds; optionally LineSourceLayer, PointSourceLayer, DescriptionProperty, DelayProperty (seconds),
+    // ClusterSizeProperty (a marker standing for several incidents shows the count).
+    TrafficIncidentLayer Layer { get; }
+
+    Task<TrafficTile?> GetTileAsync(int z, int x, int y, HttpClient http, CancellationToken ct);
+}
+```
+
+The bridge serves `GET /_bridge/maps/traffic/{z}/{x}/{y}` and `GET /_bridge/maps/incidents/{z}/{x}/{y}`. It keeps each
+tile for its layer's `Refresh` and answers `204` outside the layer's zooms, where the provider has nothing, or when it
+can't be reached. Failures are not kept. With no provider for a layer, its route answers `501` and `GET /_bridge/maps`
+reports `traffic: null` or `incidents: null`. Every platform. Traffic doesn't change routes: directions still come from
+Valhalla without live speeds.
 
 ## Regions
 
