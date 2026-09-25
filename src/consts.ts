@@ -788,6 +788,22 @@ export const ShinyComponents: ShinyComponent[] = [
         "hideFromAppBuilder": true
     },
     {
+        "id": "flex-layout",
+        "nuget": "Shiny.Maui.Controls",
+        "description": "ShinyFlexLayout",
+        "category": "controls",
+        "version": "1.5.0-beta-0004",
+        "hideFromAppBuilder": true
+    },
+    {
+        "id": "yoga-layout",
+        "nuget": "Shiny.Maui.Controls",
+        "description": "YogaLayout",
+        "category": "controls",
+        "version": "1.5.0-beta-0004",
+        "hideFromAppBuilder": true
+    },
+    {
         "id": "flyout",
         "nuget": "Shiny.Maui.Controls",
         "description": "Flyout",

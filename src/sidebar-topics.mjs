@@ -908,6 +908,8 @@ export const sidebarTopics = [
           },
         ]
       },
+      { label: 'ShinyFlexLayout', link: 'controls/flex-layout/', jumpTo: true, platform: 'maui', badge: { text: 'New', variant: 'success' } },
+      { label: 'YogaLayout', link: 'controls/yoga-layout/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
       {
         label: 'Layout',
         platform: 'blazor',
