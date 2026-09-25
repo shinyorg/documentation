@@ -65,6 +65,9 @@ builder.UseAppDeviceBridge(
             // Online directions: a Valhalla route endpoint.
             o.Directions.OnlineRouteUrl = new Uri("https://api.stadiamaps.com/route/v1");
             o.Directions.ApiKey = stadiaKey;
+
+            // Addresses into stops: OpenStreetMap's Nominatim, which asks every app to name itself.
+            o.Directions.Geocoder = new NominatimGeocoder("MyApp/1.0 (support@example.com)");
         })
         .AddOnDeviceDirections(),
     webApp => { /* … */ }
@@ -86,11 +89,12 @@ sources and one head add what only it needs.
 | `DownloadAttempts` | `5` | resumes in a row that make no progress before a download fails |
 | `ConfigureRequest` | none | headers for tile, asset and catalog requests |
 | `HttpMessageHandlerFactory` | `HttpClientHandler` | the handler for outgoing requests |
-| `Directions.OnlineRouteUrl`, `ApiKey`, `ConfigureRequest`, `Timeout` | none, none, none, 30 s | the online router |
+| `Directions.OnlineRouteUrl`, `ApiKey`, `ConfigureRequest`, `Timeout` | none, none, none, 30 s | the online router; `Timeout` also bounds a geocoder search |
+| `Directions.Geocoder` | none | addresses into stops: `NominatimGeocoder`, or an `IGeocoder` of your own. See [Addresses](#addresses) |
 | `Traffic` | none | live traffic flow: `TomTomTrafficProvider`, `HereTrafficProvider`, `AzureMapsTrafficProvider`, or an `ITrafficProvider` of your own. See [Traffic](#traffic) |
 | `TrafficIncidents` | none | live incidents: `TomTomIncidentProvider`, or an `ITrafficIncidentProvider` of your own |
 
-**The page never sees these.** Tile URLs with keys, the router's address and its key stay in the native app; the page
+**The page never sees these.** Tile URLs with keys, the router's and the geocoder's addresses and keys stay in the native app; the page
 gets bridge URLs. The bridges are protected by [the bridge policy](/appdevicebridge/security/) like every other.
 
 :::caution[macOS: pass NSURLSession]
@@ -271,6 +275,16 @@ its own, so neither signature can pass for the other. A download that doesn't ma
 download — the app killed, a connection that goes quiet — resumes from where it stopped. A newer build of an installed
 part shows as `updateAvailable`, and installing again downloads only what changed. Regions are kept out of iCloud backups.
 
+`InstallAsync` returns at once: `Installed` when the device already has the catalog's build, `Queued` otherwise. A
+download's `maps.download` events can arrive before that reply does, so a page that shows progress keeps the newest
+event rather than overwriting it with the reply:
+
+```csharp
+downloads.Remove(region.Id);
+var reply = await maps.InstallAsync(region.Id, new MapPackInstallRequest(Directions: true));
+downloads.TryAdd(region.Id, reply);   // an event already recorded is newer
+```
+
 Offline, `GET /_bridge/maps/regions` answers from the last catalog and what's installed, with `catalogReachable: false`.
 
 ### Publishing regions
@@ -340,6 +354,55 @@ route.Legs[0].Maneuvers[0];   // Kind, Instruction, VerbalInstruction, Distance,
 | `404 no_route` | no road connects the stops |
 | `503 offline_unavailable` | the device can't route it and the online router can't be reached |
 | `501 not_supported` | no online router configured and no on-device engine on this platform |
+
+### Addresses
+
+`GeocodeAsync` turns what the user typed into places, best first, through the app's geocoder, so a page can route
+between addresses instead of pins:
+
+```csharp
+var from = (await directions.GeocodeAsync("Union Station, Denver")).Places[0];
+var to = (await directions.GeocodeAsync("Aspen, Colorado", limit: 5, language: "en-US")).Places[0];
+
+var route = await directions.RouteAsync(new DirectionsRequest([
+    new RouteStop(from.Latitude, from.Longitude, from.Name),
+    new RouteStop(to.Latitude, to.Longitude, to.Name)
+]));
+```
+
+Each `GeocodedPlace` has a `Name`, the full `Address`, `Latitude`, `Longitude` and, for a place with an extent, `Bounds`
+as `[west, south, east, north]`. The result's `Attribution` is the credit the service requires; show it with the results.
+`GET /_bridge/directions` says whether the app has a geocoder (`geocoding`). Geocoding is always online.
+
+`NominatimGeocoder` uses [Nominatim](https://nominatim.org/), OpenStreetMap's geocoder. The public server is for light use:
+its [policy](https://operations.osmfoundation.org/policies/nominatim/) asks for an application that identifies itself —
+the constructor's User-Agent — at most one request a second, and no searching as the user types. The geocoder spaces its
+requests by `MinimumInterval` (one second), so search when the user asks. `BaseAddress` points it at your own Nominatim
+or a hosted one, and `Countries` limits results to a list of ISO country codes. For another service, implement
+`IGeocoder`; it gets the bridge's `HttpClient`. `Directions.Geocoder` can be replaced while the app runs.
+
+| Failure | |
+| --- | --- |
+| `400 bad_request` | an empty query or one over 200 characters, a limit outside 1–20, a bad language tag |
+| `502 geocoder_error` | the geocoder answered with something that isn't a list of places |
+| `503 geocoder_unavailable` | the geocoder can't be reached |
+| `501 not_supported` | no geocoder configured |
+
+#### Downloading a trip
+
+To make a trip work offline, route it online, then download every region it passes through with its road network. The
+sample's Map page does this with the region's bounds:
+
+```csharp
+var catalog = await maps.GetRegionsAsync();
+var along = catalog.Regions.Where(r => route.Shape.Any(p =>
+    p[0] >= r.Bounds[0] && p[0] <= r.Bounds[2] && p[1] >= r.Bounds[1] && p[1] <= r.Bounds[3]));
+
+foreach (var region in along)
+    await maps.InstallAsync(region.Id, new MapPackInstallRequest(Directions: true));
+```
+
+Bounds are rectangles, so a route near a border can also pull in a neighbour it only clips.
 
 On the device a route takes tens of milliseconds; the first in a session also starts the engine. On iOS the package
 unpacks the time zone database Valhalla needs into `Library/tzdata` on first use.
