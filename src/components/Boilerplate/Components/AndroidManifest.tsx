@@ -65,7 +65,7 @@ const AndroidManifest = (props: Props) => {
     src += addP('ACCESS_FINE_LOCATION');
   }
 
-  if (has('contactstore')) {
+  if (has('contactstore') || has('contactstore-ai')) {
     src += addP('READ_CONTACTS');
     src += addP('WRITE_CONTACTS');
   }

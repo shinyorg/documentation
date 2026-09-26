@@ -47,7 +47,7 @@ const AppleInfoPlist = (props: Props) => {
         `;
   };
   
-  if (has('contactstore')) {
+  if (has('contactstore') || has('contactstore-ai')) {
     addKey('NSContactsUsageDescription');
   }
   if (has('calendarstore') || has('calendarstore-ai')) {

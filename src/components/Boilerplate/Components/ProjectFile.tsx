@@ -83,6 +83,15 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasContacts = nugets.find(x => x.nuget === "Shiny.Contacts" || x.nuget === "Shiny.Contacts.Extensions.AI") !== undefined;
+    if (isMaui && hasContacts) {
+        // Mac Catalyst turns the App Sandbox on by default - without this entitlement RequestAccess
+        // returns Denied and the system prompt never appears
+        pr += "\r\n<ItemGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'maccatalyst'\">\r\n";
+        pr += "\t<CustomEntitlements Include=\"com.apple.security.personal-information.addressbook\" Type=\"Boolean\" Value=\"true\" />\r\n";
+        pr += "</ItemGroup>\r\n";
+    }
+
     const hasDiscovery = nugets.find(x => x.nuget === "Shiny.Net.Discovery") !== undefined;
     if (isMaui && hasDiscovery) {
         pr += "\r\n<!--\r\n";

@@ -1446,6 +1446,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Contacts",
         "description": "Contact Store",
         "category": "devicedata",
+        "macOsSupported": true,
         "version": DEFAULT_VERSION
     },
     {
@@ -1453,6 +1454,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Contacts.Extensions.AI",
         "description": "Contact Store - AI Tools",
         "category": "devicedata",
+        "macOsSupported": true,
         "version": DEFAULT_VERSION
     },
     {

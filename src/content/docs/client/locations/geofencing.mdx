@@ -24,7 +24,7 @@ evaluate regions on your backend, then notify the user via Web Push
 (`Shiny.Push.Blazor`).
 :::
 
-Geofencing lets your app react when a user enters or exits a geographic area — even when the app is not running. Unlike GPS tracking, geofencing is managed by the operating system and is highly battery efficient, making it ideal for location-triggered background tasks.
+Geofencing lets your app react when a user enters, exits, or stays in (dwells in) a geographic area — even when the app is not running. Unlike GPS tracking, geofencing is managed by the operating system and is highly battery efficient, making it ideal for location-triggered background tasks.
 
 ## Platform Notes
 
@@ -33,6 +33,7 @@ Geofencing lets your app react when a user enters or exits a geographic area —
 | Max Regions | 60 | 20 | Unlimited |
 | Background Support | Yes | Yes | Yes |
 | Google Play Fallback | GPS-direct when unavailable | N/A | N/A |
+| Dwell | Native (loitering delay) | Calculated by Shiny - usually reported at exit | Timer in Shiny |
 
 :::note[Region Limits]
 Each platform enforces a maximum number of simultaneously monitored geofence regions. Android supports up to 60, iOS supports up to 20, and Windows has no limit. If you need to monitor more regions than the platform allows, consider using [Spatial Geofencing](/spatial/geofencing) which has no region limits.
@@ -71,6 +72,11 @@ public class MyGeofenceDelegate : IGeofenceDelegate
         else if (newStatus == GeofenceState.Exited)
         {
             this.logger.LogInformation("Exited region: {Region}", region.Identifier);
+        }
+        else if (newStatus == GeofenceState.Dwelling)
+        {
+            // only for regions with a DwellTime - see "Dwell" below
+            this.logger.LogInformation("Dwelling in region: {Region}", region.Identifier);
         }
     }
 }
@@ -142,7 +148,10 @@ var region = new GeofenceRegion(
     SingleUse: false,       // true = auto-remove after first trigger
     NotifyOnEntry: true,    // fire delegate on enter
     NotifyOnExit: true      // fire delegate on exit
-);
+)
+{
+    DwellTime = TimeSpan.FromMinutes(5) // optional - fire delegate after staying inside this long
+};
 ```
 
 | Parameter | Type | Default | Description |
@@ -150,9 +159,61 @@ var region = new GeofenceRegion(
 | `Identifier` | `string` | required | Unique ID for the region |
 | `Center` | `Position` | required | Latitude/longitude of the circle center |
 | `Radius` | `Distance` | required | Radius of the circular geofence |
-| `SingleUse` | `bool` | `false` | Automatically stop monitoring after first trigger |
+| `SingleUse` | `bool` | `false` | Automatically stop monitoring after first trigger (after the dwell, when `DwellTime` is set) |
 | `NotifyOnEntry` | `bool` | `true` | Fire delegate when entering the region |
 | `NotifyOnExit` | `bool` | `true` | Fire delegate when exiting the region |
+| `DwellTime` | `TimeSpan?` | `null` | Fire delegate with `GeofenceState.Dwelling` once the device has stayed inside this long. Set with an object initializer |
+
+### Dwell
+
+A dwell reports that the user has *stayed* in a region, not just passed through it. Set `DwellTime` and handle
+`GeofenceState.Dwelling` in your delegate. It is independent of the entry/exit flags, so a region can report only the dwell:
+
+```csharp
+await geofenceManager.StartMonitoring(new GeofenceRegion(
+    "coffee-shop",
+    new Position(43.6532, -79.3832),
+    Distance.FromMeters(100),
+    NotifyOnEntry: false,
+    NotifyOnExit: false
+)
+{
+    DwellTime = TimeSpan.FromMinutes(5)
+});
+```
+
+Entry and exit are always tracked, whatever the flags say. The flags only decide what reaches your delegate. Leaving before the
+dwell time is up means no `Dwelling`. On Android, iOS and GPS-direct, if the device is already inside when monitoring starts,
+no `Entered` is reported, but that time counts toward the dwell.
+
+No GPS or extra permission is involved. When `Dwelling` arrives differs by platform:
+
+| | Android | Windows | iOS |
+|---|---|---|---|
+| Dwell source | Native loitering delay | Shiny timer | Shiny: calculated at exit, or a timer while the app runs |
+| `Dwelling` arrives | While still inside | While still inside | Usually at exit, just before `Exited` |
+
+For someone at the gym for 45 minutes with a 20-minute `DwellTime`:
+
+| Time | Android | Windows | iOS |
+|---|---|---|---|
+| 0:00 walk in | `Entered` | `Entered` | `Entered` |
+| 0:20 | `Dwelling` | `Dwelling` | nothing, unless the app is running |
+| 0:45 walk out | `Exited` | `Exited` | `Dwelling`, then `Exited` |
+
+:::note[Why iOS is different]
+iOS has no native dwell, and suspends your app a few seconds after each region event, so nothing can count down the dwell
+time in the background. Shiny records when the device entered (persisted, so it survives the app being terminated) and, when
+iOS wakes the app for the exit, reports `Dwelling` just before `Exited` if the stay lasted the dwell time. On iOS 18+ the
+stay is measured from the times iOS saw each crossing, so a late wake-up doesn't inflate it.
+
+If the app happens to be running when the dwell time is up (in the foreground, or your own background GPS session),
+`Dwelling` is reported then, while the user is still inside, and not repeated at exit. Coming back to the foreground also
+catches up on a dwell that came due while the app was suspended.
+
+So on iOS, `Dwelling` reliably tells you the user stayed, but usually not until they leave. If you need to act while
+they're still there, that works on Android and Windows but can't be guaranteed on iOS.
+:::
 
 ### Querying State
 
@@ -177,6 +238,8 @@ You can also explicitly opt into GPS-direct mode:
 ```csharp
 services.AddGpsDirectGeofencing<MyGeofenceDelegate>();
 ```
+
+This also registers the GPS manager if you haven't called `AddGps`. GPS-direct mode supports entry, exit, dwell and `SingleUse`.
 
 :::caution[Battery Impact]
 GPS-direct geofencing runs the GPS in **realtime background mode** which is significantly more battery intensive than native OS geofencing. Only use this when native geofencing is unavailable or when your app already requires continuous GPS tracking.

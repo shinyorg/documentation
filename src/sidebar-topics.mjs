@@ -236,6 +236,7 @@ export const sidebarTopics = [
           { label: 'GPS', link: 'client/locations/gps' },
           { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
           { label: 'Geofencing', link: 'client/locations/geofencing' },
+          { label: 'Reverse Geocoding', link: 'client/locations/geocoding', badge: { text: 'New', variant: 'success' } },
           { label: 'Motion Activity', link: 'client/locations/motionactivity' },
           { label: 'AI Tools', link: 'client/locations/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
