@@ -126,6 +126,7 @@ Both are no-ops if the transfer doesn't exist, and `Resume` only acts on a trans
 
 - **Downloads** resume from where they left off. The partial file on disk is preserved while paused (it is only deleted by `Cancel`), and the transfer continues via an HTTP `Range` request (or native session resume on Apple).
 - **Uploads** are stopped but are **not resumable** in general - resuming an upload **restarts it from the beginning**. The exception is iOS/Mac Catalyst, where the native `NSUrlSessionTask` is suspended and resumed in place.
+- **tus uploads** (`TransferType.UploadTus`) resume from the offset the server reports on every platform except Blazor. See [Resumable Uploads (tus)](/client/httptransfers/tus/).
 
 ### Platform support
 

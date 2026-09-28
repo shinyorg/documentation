@@ -118,6 +118,94 @@ o.ConfigureOperation = (operation, endpoint) =>
 };
 ```
 
+## One document per API version
+
+With [API versioning](/httpserver/api-versioning/), put a `{documentName}` token in the pattern:
+
+```csharp
+app.MapOpenApi("/openapi/{documentName}.json", o => o.Title = "Widgets");
+```
+
+`/openapi/v1.json` and `/openapi/v2.json` each describe one version — the name is the version as
+`ApiVersioningOptions.FormatGroupName` writes it, or any text `ApiVersion` parses, so `/openapi/1.0.json`
+works too. The token may share its segment with literal text, as here. Each version's document holds
+the endpoints serving that version plus every unversioned and version-neutral one; `info.version` is
+the API version; operations the version deprecates are marked `deprecated`. A `{version:apiVersion}`
+route segment is written as the version (`/api/v2/users`) rather than as a parameter. An unknown name
+is a 404, and each document is built on first request and cached, like the single one.
+
+For one fixed version, set `o.ApiVersion = new ApiVersion(2, 0)`; to build one in code,
+`OpenApiDocumentBuilder.BuildJson(app, options, new ApiVersion(2, 0))`.
+`OpenApiDocumentBuilder.GetApiVersions(app)` lists every version served — what a UI's version picker
+needs.
+
+## An API reference page with Scalar
+
+```csharp
+app.MapOpenApi();
+app.MapScalarApiReference();   // → /scalar
+```
+
+`/scalar` serves an interactive reference for the document, built with [Scalar](https://scalar.com).
+It lists every operation and its schemas, and a client on the page sends real requests to the server.
+
+No UI is bundled with the library. The server sends a few hundred bytes of HTML, and the *browser*
+loads Scalar's script from its CDN. The app ships no JavaScript and grows by nothing, which matters
+on a device where every megabyte is download size. The page is built on the first request and
+excludes itself from the document.
+
+With [one document per API version](#one-document-per-api-version), point it at the same pattern.
+Scalar lists the versions in a picker, with the newest selected:
+
+```csharp
+app.MapOpenApi("/openapi/{documentName}.json");
+app.MapScalarApiReference(configure: o => o.DocumentUrl = "/openapi/{documentName}.json");
+```
+
+Configuration uses Scalar's own names, and anything left unset keeps Scalar's default:
+
+```csharp
+app.MapScalarApiReference("/docs", o =>
+{
+    o.Title = "Widgets API";
+    o.Theme = ScalarTheme.Purple;
+    o.DefaultHttpClient = ("csharp", "httpclient");   // Scalar starts on curl otherwise
+    o.PreferredSecurityScheme = "bearer";
+    o.AdditionalConfiguration["hideSearch"] = true;   // any key this class doesn't name
+});
+```
+
+| Option | Scalar key | Notes |
+| --- | --- | --- |
+| `ScriptUrl` | — | Where the browser loads Scalar from. The CDN's latest build by default |
+| `DocumentUrl` | `url` / `sources` | `/openapi.json` by default; a `{documentName}` pattern lists every version |
+| `Documents` / `AddDocument` | `sources` | Explicit documents, e.g. several APIs or one hosted elsewhere |
+| `Theme`, `Layout` | `theme`, `layout` | |
+| `DarkMode`, `ForceColorMode`, `HideDarkModeToggle` | `darkMode`, `forceDarkModeState`, `hideDarkModeToggle` | |
+| `HideModels`, `HideClientButton`, `ShowSidebar`, `DefaultOpenAllTags` | same names | |
+| `DefaultHttpClient` | `defaultHttpClient` | `(targetKey, clientKey)` |
+| `PreferredSecurityScheme` | `authentication.preferredSecurityScheme` | |
+| `CustomCss`, `Favicon`, `SearchHotKey`, `WithDefaultFonts` | same names | |
+| `ProxyUrl`, `BaseServerUrl` | `proxyUrl`, `baseServerURL` | |
+| `AdditionalConfiguration` | anything | Written as given, and wins over the properties above |
+
+It is an ordinary route, so `.RequireAuthorization()` straight after it protects the page. Protect the
+document route too: the page only points at the document, and anyone who can fetch the document can
+read it. Never put a token or secret in `AdditionalConfiguration`, because anyone who can load the page
+can read its configuration.
+
+<Aside type="caution" title="The browser needs to reach the CDN">
+The script loads in whichever browser opens the page, not on the server. That is fine on a normal
+network. A laptop and a phone on a LAN with no internet will get a blank page. Download Scalar's
+standalone build (`@scalar/api-reference`, `dist/browser/standalone.js`), serve it as a
+[static file](/httpserver/static-files/), and set `o.ScriptUrl = "/scalar.js"`. Do the same to pin a
+version, or put the version in the CDN URL (`…/@scalar/api-reference@<version>`).
+
+A strict `Content-Security-Policy` from the [security headers](/httpserver/antiforgery/) middleware,
+such as `SelfOnlyContentSecurityPolicy`, blocks both the CDN script and the page's inline configuration
+script. The policy has to allow the script's origin and inline scripts for the page to work.
+</Aside>
+
 ## Limits
 
 - **OpenAPI 3.0.3 only.**
@@ -128,10 +216,3 @@ o.ConfigureOperation = (operation, endpoint) =>
 - **A trailing optional route parameter becomes two paths**, because OpenAPI has no way to say a path
   segment is optional and the route genuinely matches two URLs.
 
-<Aside type="note" title="No UI is bundled">
-The document is served; pointing Swagger UI or Scalar at it is up to the host. Embedding one would
-mean shipping a megabyte of someone else's JavaScript in a library whose whole premise is being
-dependency-light — and on a device, that megabyte is the app's download size.
-
-If you want one anyway, serve it as [static files](/httpserver/static-files/) alongside the document.
-</Aside>

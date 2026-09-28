@@ -1,0 +1,235 @@
+---
+title: Resumable Uploads (tus)
+description: Uploads that survive a dropped connection — the tus 1.0.0 protocol, so a phone that loses signal half way resumes from the last byte the server kept instead of starting again
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A plain [upload](/httpserver/files/) is all or nothing. A phone sends 180 MB of a 200 MB video, the
+train goes into a tunnel, and the whole thing starts again from zero — on the same flaky connection
+that just failed. [tus](https://tus.io) is the open protocol for doing better: the client creates the
+upload, sends it in `PATCH`es to the URL it got back, and after any failure asks with `HEAD` how many
+bytes the server has and carries on from there. The server keeps every byte it received, including the
+ones from the request that was cut off.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Tus
+```
+
+```csharp
+using Shiny.Net.HttpServer.Tus;
+
+app.MapTus("/files", o =>
+{
+    o.Store = new DiskTusStore(Path.Combine(FileSystem.AppDataDirectory, "uploads"));
+    o.MaxSize = 4L * 1024 * 1024 * 1024;       // Tus-Max-Size: 4 GB
+    o.Expiration = TimeSpan.FromDays(1);        // unfinished uploads are swept after a day idle
+    o.OnUploadCompleteAsync = async ctx =>
+    {
+        var name = ctx.Upload.Metadata.GetValueOrDefault("filename") ?? ctx.Upload.Id;
+        await using var file = await ctx.OpenReadAsync();
+        // move it somewhere permanent, record it, process it...
+    };
+})
+.RequireAuthorization();
+```
+
+Any tus client talks to it — nothing about the server is Shiny-specific on the wire.
+
+## Clients
+
+**Browser — [tus-js-client](https://github.com/tus/tus-js-client)** (or [Uppy](https://uppy.io), which
+uses it):
+
+```js
+import * as tus from 'tus-js-client';
+
+const upload = new tus.Upload(file, {
+    endpoint: 'https://device.example/files',
+    chunkSize: 16 * 1024 * 1024,             // below the server's MaxRequestBodySize — see below
+    retryDelays: [0, 1000, 3000, 5000, 10000],
+    metadata: { filename: file.name, filetype: file.type },
+    onProgress: (sent, total) => console.log(`${(sent / total * 100).toFixed(1)}%`),
+    onSuccess: () => console.log('done')
+});
+
+// Picks up where a previous page load left off, from the URL tus-js-client kept in localStorage.
+const previous = await upload.findPreviousUploads();
+if (previous.length) upload.resumeFromPreviousUpload(previous[0]);
+upload.start();
+```
+
+**.NET — [TusDotNetClient](https://github.com/gerdus/tus-dotnet-client)**, from a console app, a
+service or another MAUI app:
+
+```csharp
+var client = new TusClient();
+var file = new FileInfo("clip.mp4");
+
+var url = await client.CreateAsync("https://device.example/files", file, ("filename", file.Name));
+await client.UploadAsync(url, file, chunkSize: 5); // MB per PATCH
+```
+
+Mobile tus clients (TUSKit on iOS, tus-android-client) work the same way.
+
+## What it implements
+
+tus **1.0.0** core, with every extension a client is likely to ask for:
+
+| Extension | What it gives the client |
+| --- | --- |
+| core | `HEAD` for the offset, `PATCH` with `application/offset+octet-stream` at `Upload-Offset` |
+| `creation` | `POST` with `Upload-Length` (and `Upload-Metadata`) makes an upload; `Location` is its URL |
+| `creation-with-upload` | The first chunk rides along with the `POST`, saving a round trip |
+| `creation-defer-length` | `Upload-Defer-Length: 1` — size unknown at the start (a recording in progress); stated on a later `PATCH` |
+| `termination` | `DELETE` removes an upload |
+| `expiration` | `Upload-Expires` on responses, and a sweep that deletes abandoned uploads |
+| `checksum` | `Upload-Checksum` with `sha1`, `sha256` or `md5`; a mismatch is `460` and none of that `PATCH` is kept |
+| `concatenation` | `Upload-Concat: partial` pieces uploaded in parallel, joined by `final;<urls>` |
+
+`OPTIONS` answers discovery (`Tus-Version`, `Tus-Extension`, `Tus-Max-Size`,
+`Tus-Checksum-Algorithm`) without needing `Tus-Resumable`; every other request must send
+`Tus-Resumable: 1.0.0` or it gets `412` with `Tus-Version`. `X-HTTP-Method-Override: PATCH` (or
+`DELETE`, `HEAD`) on a `POST` to an upload is honoured, for environments that only let `GET` and
+`POST` out — tus-js-client's `overridePatchMethod`.
+
+Errors are [problem details](/httpserver/errors/) with the status tus specifies — `409` for an offset
+that does not match, `415` for the wrong content type, `413` past `MaxSize` or the upload's length,
+`410` for an upload that expired, `423` when another request holds it. A tus client reads the status;
+the body is for your logs.
+
+## What happens when the connection drops
+
+This is the reason the package exists, so it is worth being precise:
+
+- **Bytes are written as they arrive**, a buffer at a time, straight to the store — a request body is
+  never held in memory, however large. The disk store flushes each chunk to the OS, so a process that
+  is killed mid-request loses nothing it had been sent.
+- **A request that ends early keeps what it delivered.** The client's next `HEAD` reports that offset,
+  and its next `PATCH` starts there.
+- **A request with `Upload-Checksum` that ends early keeps nothing**, because the part that arrived is
+  a prefix of something that was hashed whole and there is nothing to check it against. The same goes
+  for a checksum that does not match (`460`) and a body that runs past the upload's length (`413`).
+- **A stalled request does not lock the client out.** Only one request touches an upload at a time —
+  that is what stops two `PATCH`es interleaving. But when a phone loses signal, the server usually
+  cannot tell yet: the old request is still waiting on a socket that will never deliver. So when the
+  client comes back, its `HEAD` asks that request to stop; it keeps what it had, lets go, and the
+  `HEAD` answers with the settled offset. `LockReleaseTimeout` (3 s) bounds the wait; set it to
+  `TimeSpan.Zero` to answer `423 Locked` immediately instead and never interrupt anything.
+- **It survives a restart.** `DiskTusStore` has no separate offset counter — the offset *is* the data
+  file's length — so an app that is killed and relaunched answers the next `HEAD` with exactly the
+  bytes on disk.
+
+On HTTP/1.1 an abandoned request's connection is closed (the rest of its body would otherwise be read
+as the next request). On HTTP/2 and HTTP/3 only that stream ends, so a client that resumes on the
+connection it already has is not cut off by its own previous attempt.
+
+<Aside type="caution" title="Per-request size">
+`MaxSize` bounds the whole upload. Each `PATCH` is separately bounded by the server's
+[`Limits.MaxRequestBodySize`](/httpserver/configuration/) (30 MB by default), and a request over it is
+refused before the handler sees it. Give the client a chunk size below that — tus-js-client's
+`chunkSize`, TusDotNetClient's `chunkSize` — or raise the limit. Smaller chunks also mean less to
+resend if a `Upload-Checksum` is in play.
+</Aside>
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `Store` | required | Where uploads live — a `DiskTusStore`, or your own `ITusStore` |
+| `MaxSize` | `null` | Largest upload, advertised as `Tus-Max-Size`. `413` at creation past it |
+| `Expiration` | `null` | How long an **unfinished** upload survives after its last write. Sliding; completed uploads never expire |
+| `CleanupInterval` | 15 min | How often expired uploads are swept |
+| `LockReleaseTimeout` | 3 s | How long a request waits for another on the same upload to let go (see above) |
+| `AllowDeferredLength` | `true` | `creation-defer-length` |
+| `AllowTermination` | `true` | `DELETE`; off answers `405` |
+| `AllowConcatenation` | `true` | `Upload-Concat` |
+| `OnBeforeCreateAsync` | `null` | Authorize or validate before anything is stored — see below |
+| `OnUploadCompleteAsync` | `null` | Runs once, when the last byte is stored |
+| `TimeProvider` | system | The clock expiry runs on; replace it in tests |
+
+### Validating before creation
+
+`OnBeforeCreateAsync` sees the declared length, the parsed metadata and the `HttpContext` (so
+`ctx.HttpContext.User`), and can refuse the upload before a byte is stored:
+
+```csharp
+o.OnBeforeCreateAsync = ctx =>
+{
+    if (ctx.Metadata.GetValueOrDefault("filetype") is not ("video/mp4" or "image/jpeg"))
+        ctx.Reject(StatusCodes.Status415UnsupportedMediaType, "Videos and photos only.");
+
+    return ValueTask.CompletedTask;
+};
+```
+
+`Upload-Metadata` is `key base64value` pairs; `TusMetadata` decodes them — the indexer gives UTF-8
+text, `GetBytes(key)` the raw bytes, and `Header` the original header. It is whatever the client chose
+to say: a `filename` of `../../etc/passwd` is a string, not a path to write to.
+
+### When an upload completes
+
+`OnUploadCompleteAsync` runs inside the request that delivered the last byte, before the client hears
+back — once per upload. Partial uploads do not raise it; the final upload they are joined into does.
+The upload stays in the store afterwards; with `DiskTusStore`, `GetFilePath(id)` is where it is, so it
+can be moved rather than copied, and `ctx.Store.DeleteAsync(id, …)` removes it once it has been taken
+care of.
+
+### Expiry
+
+With `Expiration` set, `Upload-Expires` goes out on creation and on every `PATCH`, and every write
+pushes it forward — only an upload that stops making progress expires. A request for one that has
+expired gets `410 Gone` and it is deleted. A sweep removes the rest: on a timer while the server is
+running, and nudged by request traffic. On a phone, where the server may be stopped whenever the app is
+in the background, the mount builder can run it from your own scheduler:
+
+```csharp
+var tus = app.MapTus("/files", o => { … });
+
+// later, from a background job
+var removed = await tus.RemoveExpiredUploadsAsync();
+```
+
+## Security, CORS and the rest of the pipeline
+
+`MapTus` returns a builder that applies a policy to every route it made — creation, `HEAD`, `PATCH`,
+`DELETE` and the override `POST` alike — the same way the [WebDAV](/httpserver/webdav/) mount does:
+`.RequireAuthorization()`, `.RequireCors()`, `.RequireRateLimiting()`, `.RequireIpFilter()`,
+`.ForEach(…)`. The routes are left out of the [OpenAPI](/httpserver/openapi/) document.
+
+A browser client needs CORS to allow tus's request headers and to **expose** its response headers —
+script cannot read `Upload-Offset` or `Location` otherwise, and the client cannot resume or even start.
+`WithTusHeaders()` adds both:
+
+```csharp
+app.UseCors(p => p.WithOrigins("https://app.example.com").WithTusHeaders());
+```
+
+If a policy allows the origin but forgets to expose them, the tus endpoint adds them to
+`Access-Control-Expose-Headers` itself — it never widens a policy, only completes one that already
+said yes.
+
+Upload URLs are absolute, built from the request's scheme and `Host`, so behind a
+[tunnel](/httpserver/tunneling/) or a proxy that forwards `Host` the client is handed the public URL.
+
+## Writing a store
+
+`ITusStore` is nine members — create, get, append, set length, set expiry, concatenate, open, delete
+and list-expired. The endpoint serialises requests per upload before calling in, so a store needs no
+locking of its own for that. The one contract that matters is `AppendAsync`:
+
+- the stream **ending** early is normal — keep every byte read and return the offset they reach;
+- the stream **throwing** means this append must not count — roll back to the starting offset and let
+  the exception out.
+
+The endpoint produces both from the request (an interrupted body ends; a checksum mismatch throws), so
+a store never has to know about either. Throw `TusException` with 409 for an offset that no longer
+matches, and 404 for an upload that is gone.
+
+## Scope
+
+HTTP/1.1, HTTP/2 and HTTP/3 alike, and through every [tunnel](/httpserver/tunneling/) — the endpoint
+only sees requests. Tested end to end over HTTP/1.1, cleartext HTTP/2 and the in-memory transport
+tunnels use; HTTP/3 goes through the same handler but has no end-to-end test. Not implemented:
+`concatenation-unfinished` (a final upload is built from parts that are all complete), and `GET` on an
+upload — read a finished file through `OnUploadCompleteAsync`, or serve it yourself.

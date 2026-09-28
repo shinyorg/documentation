@@ -1,0 +1,258 @@
+---
+title: Automatic HTTPS (ACME)
+description: Certificates from Let's Encrypt, ZeroSSL or any ACME CA, issued, renewed and swapped into the running server with no restart
+---
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["net"]} os={["macos", "windows", "linux"]} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Acme
+```
+
+Certificates come from Let's Encrypt, ZeroSSL or any other RFC 8555 CA with nothing else running
+alongside the server: no certbot, no cron job, no reverse proxy. The package orders the certificate,
+answers the CA's challenge from this same server, stores the result, renews it before it expires, and
+swaps each new certificate into the running server without a restart.
+
+It uses only the cryptography built into .NET (`ECDsa`, `CertificateRequest`, `SslStreamCertificateContext`).
+There is no BouncyCastle or Certes dependency, and it is trim and AOT clean like the rest of the server.
+
+<Aside type="caution" title="Who this is for">
+This is for a **desktop, server or Linux host with public DNS**. The CA has to reach the server at every
+name on the certificate, on port 80 for HTTP-01 or on port 443 for TLS-ALPN-01. A phone almost never
+qualifies: it sits behind carrier NAT with no public address and no DNS name, so the CA has nothing to
+connect to. On a device, use a [self-signed certificate with pinning](/httpserver/tls/#self-signed-certificates),
+or a [tunnel](/httpserver/tunneling/) that terminates TLS for you.
+</Aside>
+
+## Quick start
+
+```csharp
+using Shiny.Net.HttpServer.Acme;
+
+var builder = HttpServer.CreateBuilder();
+
+builder.Options.Listen(IPAddress.Any, 80);                               // HTTP-01 is always port 80
+builder.Options.Listen(IPAddress.Any, 443).Https = new HttpsOptions();   // no certificate: ACME supplies it
+
+builder.AddAcme(o =>
+{
+    o.Domains = ["example.com", "www.example.com"];
+    o.Email = "ops@example.com";
+    o.AcceptTermsOfService = true;
+    o.DirectoryUrl = AcmeDirectories.LetsEncryptStaging;   // until it works, then remove this line
+});
+
+var app = builder.Build();
+app.MapGet("/", ctx => ctx.Response.WriteAsync("hello over real TLS"));
+await app.RunAsync();
+```
+
+Any HTTPS endpoint that has **no certificate of its own** serves the ACME certificate. An endpoint that
+already has a `Certificate` or `CertificateSelector` is left alone. To use ACME on it anyway, keeping
+its certificate as a fallback, call `https.UseAcme(manager)` on it.
+
+Once the server is running, a background loop takes over:
+
+1. It loads the stored certificate, if there is one that covers every configured name and has not
+   expired. A restart does not order a new certificate.
+2. If there is none, it registers or finds the ACME account and orders one. For each name it serves the
+   challenge, asks the CA to validate it, and waits for the result. Then it finalizes the order with a
+   CSR and downloads the certificate chain.
+3. It stores the certificate and installs it. The next TLS handshake gets it.
+4. It sleeps until renewal time, checking every 12 hours.
+
+Until the first certificate arrives, TLS handshakes on the ACME endpoints are refused. They are logged at
+debug level as a refused handshake, not as a server fault. The cleartext endpoint serves normally
+throughout.
+
+## Challenges
+
+| | HTTP-01 (default) | TLS-ALPN-01 |
+| --- | --- | --- |
+| The CA connects to | `http://{name}:80/.well-known/acme-challenge/{token}` | `{name}:443`, offering only ALPN `acme-tls/1` |
+| Needs | a cleartext endpoint reachable on **port 80** | the ACME HTTPS endpoint reachable on **port 443** |
+| IP address names | yes | no (SNI cannot carry an address) |
+| Enable with | `o.Challenges = AcmeChallengeTypes.Http01` | `o.Challenges = AcmeChallengeTypes.TlsAlpn01` |
+
+The ports are fixed by the protocol. The CA always connects to 80 or 443, whatever port you would rather
+use. Binding somewhere else is fine as long as a router or proxy forwards 80 or 443 to it. The server logs
+at start when HTTP-01 is enabled and nothing is bound to port 80.
+
+**HTTP-01** is answered by middleware that `AddAcme` adds to the pipeline. It only answers tokens it is
+currently validating. Anything else under `/.well-known/acme-challenge/` goes on down the pipeline as
+usual. The middleware goes in where `AddAcme`'s configuration runs, so register ACME before
+authentication or an IP filter that would turn the CA's anonymous GET away. An HTTPS redirect in front of
+it is fine, because the CA follows it.
+
+**TLS-ALPN-01** (RFC 8737) needs the server to answer a TLS handshake with a special certificate when a
+client offers `acme-tls/1`. .NET does not tell a server which ALPN protocols the client offered, so the
+core now reads the ClientHello first, inspects it, and replays it to the real handshake
+(`HttpsOptions.ChallengeResponder`, below). While TLS-ALPN-01 is enabled, that costs one small extra read
+per connection. When it is off, nothing changes.
+
+A CA gives one attempt per authorization, so the client cannot fall back from one challenge to the other
+in the middle of an order. If both are enabled, HTTP-01 is preferred when the CA offers it. Wildcards
+(`*.example.com`) need DNS-01, which needs write access to your DNS, so they are refused up front with a
+message saying so.
+
+## Options
+
+| `AcmeOptions` | Default | Notes |
+| --- | --- | --- |
+| `Domains` | — | One certificate covers them all; the first is the subject. IDNs are converted; IP addresses are accepted (RFC 8738) |
+| `Email` | `null` | Account contact. Expiry and incident notices go here |
+| `AcceptTermsOfService` | `false` | Must be `true`. The error names the terms URL from the CA's directory |
+| `DirectoryUrl` | `AcmeDirectories.LetsEncrypt` | Also `LetsEncryptStaging`, `ZeroSsl`, or any CA's directory URL |
+| `ExternalAccountBinding` | `null` | `new AcmeExternalAccountBinding(keyId, hmacKey)`, required by ZeroSSL |
+| `Challenges` | `Http01` | Flags: `Http01`, `TlsAlpn01` |
+| `KeyAlgorithm` | `EcdsaP256` | `EcdsaP384`, or `Rsa` with `RsaKeySize` (2048) |
+| `Profile` | `null` | Certificate profile for CAs that offer them, such as Let's Encrypt's `shortlived` |
+| `StorePath` | `{LocalApplicationData}/Shiny.HttpServer/acme` | Used by the default store |
+| `Store` | `null` | A custom `IAcmeCertificateStore` |
+| `RenewAfterLifetimeFraction` | `2/3` | 60 days into a 90-day certificate |
+| `UseRenewalInfo` | `true` | ACME Renewal Information (RFC 9773) when the CA offers it |
+| `RenewalCheckInterval` | 12 hours | Jittered ±10% |
+| `RetryDelay` / `MaxRetryDelay` | 10 min / 12 h | Exponential backoff with jitter; a CA's `Retry-After` is never undercut |
+| `PollInterval` | 2 s | Used when the CA sends no `Retry-After` |
+| `OrderTimeout` | 5 min | One issuance, end to end |
+| `BackchannelHttpHandler` | `null` | For a proxy, or a CA that is not on the internet |
+
+<Aside type="tip" title="Staging first">
+Let's Encrypt production has real rate limits: five failed validations per name per hour, and five
+duplicate certificates per week. Get the setup working against `AcmeDirectories.LetsEncryptStaging`,
+whose certificates are signed by a root nobody trusts, then switch. Staging and production are stored
+separately, so switching orders a fresh certificate.
+</Aside>
+
+### ZeroSSL and other EAB CAs
+
+```csharp
+builder.AddAcme(o =>
+{
+    o.Domains = ["example.com"];
+    o.AcceptTermsOfService = true;
+    o.DirectoryUrl = AcmeDirectories.ZeroSsl;
+    o.ExternalAccountBinding = new AcmeExternalAccountBinding("EAB KID from the dashboard", "EAB HMAC key");
+});
+```
+
+External Account Binding (RFC 8555 §7.3.4) ties the ACME account to your account at the CA. The HMAC
+key is the base64url string the dashboard shows. It is used once, to sign the account registration.
+If the CA's directory says EAB is required and none is configured, the error says so before anything
+is sent.
+
+## Renewal
+
+A certificate is renewed at two thirds of its lifetime, minus up to 2% jitter that is stable for each
+certificate, so that servers started together do not all renew in the same minute. When the CA's
+directory offers **ACME Renewal Information** (RFC 9773, which Let's Encrypt offers), the CA's suggested
+window takes precedence. The loop picks a random moment inside that window once, and names the certificate
+being replaced in the new order. That is how a CA gets a certificate it is about to revoke replaced before
+it is revoked. If the CA publishes an explanation URL, it is logged as a warning.
+
+A failed issuance is retried with exponential backoff and jitter, from `RetryDelay` up to
+`MaxRetryDelay`. The old certificate stays in service the whole time, and the log says when it
+expires. Each failure is logged at **error** level with the CA's own problem detail, which for a failed
+validation usually names the exact URL or address it could not reach.
+
+### Hot swap
+
+Every HTTPS endpoint wired to ACME asks for its certificate on **every handshake**, so installing a new
+one is a single reference assignment. New connections get the new certificate immediately. Connections
+already open keep the one they negotiated, and nothing is dropped or restarted.
+
+```csharp
+var acme = app.GetAcmeCertificateManager();
+
+acme.CertificateChanged += (_, certificate) =>
+    logger.LogInformation("Now serving {Thumbprint}, expires {NotAfter}", certificate.Thumbprint, certificate.NotAfter);
+
+await acme.RenewAsync();                 // force a new certificate now: key compromise, new names
+await acme.EnsureCertificateAsync();     // load, or order if missing or due; await it at startup
+```
+
+`acme.Certificate`, `acme.CertificateContext` and `acme.NextRenewal` report the current state.
+
+### HTTP/3
+
+The QUIC listener asks the same way, so it follows renewals too:
+
+```csharp
+await app.ListenHttp3Async(o =>
+{
+    o.Address = IPAddress.Any;
+    o.Port = 443;
+    o.UseAcme(app);
+});
+```
+
+TLS-ALPN-01 is never answered over QUIC, because RFC 8737 validates over TCP only. Run the TCP endpoint on
+443 as well, which you need for `Alt-Svc` anyway.
+
+## Storage
+
+The default `DirectoryAcmeCertificateStore` keeps:
+
+```
+{StorePath}/{ca-host}-{hash}/account.json    account key (PKCS#8) and account URL
+{StorePath}/{ca-host}-{hash}/{name}.pfx      certificate, private key and chain (PKCS#12, no password)
+```
+
+Each CA directory URL gets its own folder, so staging and production never mix. The certificate file
+name includes a hash of the configured names, so changing `Domains` orders a new certificate instead of
+loading one that no longer covers them.
+
+On Linux and macOS, files are created with mode `0600` and directories with `0700`. The mode is set at
+creation, not changed afterwards, so the key is never readable by anyone else. Writes go to a temporary
+file and are renamed into place, so a crash never leaves a partly written key. On Windows the files
+inherit the folder's ACL. The default location under the service account's profile is private to that
+account, but choose `StorePath` carefully.
+
+<Aside type="caution">
+Persistence is not optional. A server that forgets its certificate orders a new one on every start.
+A crash loop spends Let's Encrypt's five-per-week duplicate limit in minutes, and the site then has no
+TLS for days. In a container, put `StorePath` on a volume.
+</Aside>
+
+For a database, a secret manager or storage shared between instances, implement `IAcmeCertificateStore`.
+It has four methods: load and save the account, and load and save a PKCS#12 blob. Set it as `o.Store`.
+Everything it holds contains private keys.
+
+## Without a container
+
+```csharp
+await using var acme = new AcmeCertificateManager(new AcmeOptions
+{
+    Domains = ["example.com"],
+    AcceptTermsOfService = true
+});
+
+var server = new HttpServer(options);
+server.UseAcme(acme);      // challenge middleware, endpoint wiring, renewal loop tied to Running
+await server.StartAsync();
+```
+
+`acme.StartRenewal()` and `acme.StopRenewalAsync()` drive the loop directly if you are not using
+`UseAcme`.
+
+## The core hooks it uses
+
+Two general-purpose additions to `HttpsOptions` make this possible. Either can be used without the ACME
+package:
+
+| `HttpsOptions` | What it is for |
+| --- | --- |
+| `CertificateContextSelector` | `Func<string?, SslStreamCertificateContext?>`, read on every handshake with the SNI name. It carries **intermediates explicitly**: `SslStream` only sends intermediates it can find in a machine store, which on Linux and in containers usually means none. Swapping what it returns replaces the certificate on a running server. Checked before `CertificateSelector` and `Certificate`, and `null` falls through to them. `Http3Options` has the same property. |
+| `ChallengeResponder` | `Func<TlsClientHello, TlsChallengeResponse?>`. It sees the SNI name and the ALPN list from the ClientHello before the handshake. If it returns a response, the handshake completes with that certificate and protocol and then the connection closes without carrying HTTP. |
+
+## Scope
+
+- TCP HTTPS endpoints (HTTP/1.1 and HTTP/2 over ALPN) and the HTTP/3 listener serve the ACME
+  certificate. Both follow renewals.
+- Tunnels (`ITunnelProvider`, the relay, SSH and Azure Relay) terminate TLS at the far end, so they
+  never see this certificate. A tunnel's public name already has one.
+- No DNS-01 challenge, no wildcards, and no revocation or account key rollover API.

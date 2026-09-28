@@ -1,0 +1,320 @@
+---
+title: API Versioning
+description: Several versions of one route side by side, chosen by URL segment, query string, header or media type — Asp.Versioning's shape, decided at compile time
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.MapGet("/users", ListV1).HasApiVersion(1.0);
+app.MapGet("/users", ListV2).HasApiVersion(2.0);
+```
+
+`GET /users?api-version=1.0` reaches `ListV1`; `?api-version=2.0` reaches `ListV2`. Two endpoints on
+the same method and template, which the router otherwise refuses as a duplicate, coexist as long as
+they serve different versions — and the request picks one.
+
+The public shape is Asp.Versioning's on purpose: `ApiVersion`, `[ApiVersion]`, `[MapToApiVersion]`,
+`ApiVersionReader.Combine(...)`, `AssumeDefaultVersionWhenUnspecified`, `ReportApiVersions`, the
+`api-supported-versions` header and the error codes are all where an ASP.NET Core developer expects
+them. The difference is underneath: versions on generated endpoints are read by the source generator
+and emitted as metadata, so nothing is discovered by reflection at startup and the whole thing is trim
+and AOT clean.
+
+## Configuring
+
+Nothing has to be registered to version an endpoint — the defaults apply. `AddApiVersioning` changes
+them:
+
+```csharp
+builder.AddApiVersioning(o =>
+{
+    o.DefaultApiVersion = new ApiVersion(1, 0);
+    o.AssumeDefaultVersionWhenUnspecified = true;
+    o.ReportApiVersions = true;
+    o.ApiVersionReader = ApiVersionReader.Combine(
+        new UrlSegmentApiVersionReader(),
+        new QueryStringApiVersionReader("api-version"),
+        new HeaderApiVersionReader("api-version"),
+        new MediaTypeApiVersionReader("v"));
+});
+```
+
+There is no `UseApiVersioning()` middleware to remember with a container. Choosing a version decides
+*which endpoint* a request reaches, which is routing's job, so it happens inside routing — before
+authorization, CORS, rate limiting and anything else that reads endpoint metadata, all of which see
+the version's endpoint. A server built without a container configures it on the server instead:
+
+```csharp
+var app = new HttpServer();
+app.UseApiVersioning(o => o.AssumeDefaultVersionWhenUnspecified = true);
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `DefaultApiVersion` | `1.0` | The version assumed when none is given and assuming is on |
+| `AssumeDefaultVersionWhenUnspecified` | `false` | Off, a request naming no version is a 400. Turn it on when versioning an API whose clients already send nothing |
+| `ApiVersionSelector` | `null` | What to assume instead of `DefaultApiVersion`. `CurrentImplementationApiVersionSelector` picks the newest non-prerelease version the route serves |
+| `ApiVersionReader` | query `api-version`, then URL segment | Where the version is read from |
+| `ReportApiVersions` | `false` | Adds `api-supported-versions` / `api-deprecated-versions` to versioned responses |
+| `UnsupportedApiVersionStatusCode` | `400` | Some APIs prefer 404 — the resource does not exist at that version |
+| `Policies` | none | Deprecation and sunset dates and links, per version |
+| `SubstituteApiVersionInUrl` | `true` | OpenAPI: write `/api/v2/users` rather than `/api/{version}/users` in a version's document |
+| `FormatGroupName` | `v` + short form | `v1`, `v1.1`, `v2026-01-15` — the URL segment and the OpenAPI document name |
+
+A second `AddApiVersioning` call adds to the same options rather than replacing them.
+
+## Versions
+
+`ApiVersion` is `major[.minor][-status]`, a date, or both:
+
+| Text | Meaning |
+| --- | --- |
+| `1`, `1.0`, `v1` | The same version — a missing minor is a zero minor |
+| `2.1` | Major 2, minor 1 |
+| `1.0-beta` | A pre-release; sorts before `1.0` |
+| `2026-01-15` | A date ("group") version |
+| `2026-01-15.1.0-rc1` | Both |
+
+```csharp
+new ApiVersion(1, 0);          // 1.0
+new ApiVersion(2.1);           // 2.1
+new ApiVersion(new DateOnly(2026, 1, 15));
+ApiVersion.Parse("v2");        // 2
+```
+
+It implements `ISpanParsable<ApiVersion>`, `IComparable` and equality operators. `ToString()` is the
+full form (`1.0`); `ToString("S")` drops a zero minor (`1`), which is what a URL wants.
+
+## Reading the requested version
+
+| Reader | Reads |
+| --- | --- |
+| `QueryStringApiVersionReader("api-version")` | `?api-version=2.0` — several names may be given |
+| `HeaderApiVersionReader("api-version")` | `api-version: 2.0` — comma-separated values count as several |
+| `MediaTypeApiVersionReader("v")` | `Accept: application/json; v=2.0`, and the same on `Content-Type` |
+| `UrlSegmentApiVersionReader()` | The route segment carrying the `apiVersion` constraint |
+
+`ApiVersionReader.Combine(...)` reads from all of them at once. A request may state its version in
+more than one place as long as they agree — `?api-version=2` and `api-version: 2.0` are the same
+version; `?api-version=1.0` with `api-version: 2.0` is **ambiguous** and answered 400.
+
+`IApiVersionReader` is one method, `IReadOnlyList<string> Read(HttpRequest request)`, for a reader of
+your own. It returns the raw text; validation and agreement are decided once, afterwards.
+
+### URL segments
+
+```csharp
+app.MapGet("/api/{version:apiVersion}/users", ListV1).HasApiVersion(1.0);
+app.MapGet("/api/{version:apiVersion}/users", ListV2).HasApiVersion(2.0);
+```
+
+`/api/v1/users`, `/api/1.0/users` and `/api/v2/users` all match: the
+[`apiVersion` constraint](/httpserver/routing/#constraints) accepts a leading `v`. That is also why
+Asp.Versioning's `v{version:apiVersion}` is not needed — and not accepted, because this router does not
+mix literal text and a parameter in one segment. Writing it is a registration error (and a build error
+on a generated endpoint) that tells you to write `{version:apiVersion}` instead.
+
+A segment that is not a version at all (`/api/latest/users`) fails the constraint and is a 404; a
+version the route does not serve (`/api/v3/users`) matched the route and is a 400.
+
+Routing reads the segment itself, so a handler does not need a `version` parameter, and the generator
+does not warn about the token going unbound.
+
+## Declaring versions
+
+### Raw routes
+
+`HasApiVersion`, `HasDeprecatedApiVersion`, `MapToApiVersion` and `IsApiVersionNeutral` apply to the
+most recently mapped route, like `RequireIpFilter` and `Describe`:
+
+```csharp
+app.MapGet("/users", ListV1).HasApiVersion(1.0).HasDeprecatedApiVersion(0.9);
+app.MapGet("/users", ListV2).HasApiVersion(2.0);
+```
+
+Each takes an `ApiVersion`, a `double`, or a string.
+
+### Version sets
+
+A set declares an API's versions once, and every endpoint using it reports all of them — so a client
+on 1.0 learns from any response that 2.0 exists:
+
+```csharp
+var weather = app.NewApiVersionSet("weather")
+    .HasDeprecatedApiVersion(0.9)
+    .HasApiVersion(1.0)
+    .HasApiVersion(2.0)
+    .Build();
+
+app.MapGet("/weather", Forecast).WithApiVersionSet(weather);                         // 0.9 and 1.0
+app.MapGet("/weather", ForecastV2).WithApiVersionSet(weather).MapToApiVersion(2.0);  // 2.0
+```
+
+`MapToApiVersion` narrows a route to some of its set's versions. A route that maps a version
+explicitly **wins** over one that serves it only because its set declares it — the first route above
+serves 2.0 as well, and loses it to the second. Two routes claiming the same version with the same
+standing are refused at registration.
+
+### Groups and modules
+
+On an `IEndpointRouteBuilder` — a group, a module, or the builder a generated class is mounted on —
+the same calls return a builder that stamps its versions on every route mapped through it, and on
+every group under it:
+
+```csharp
+app.MapGroup("/api/{version:apiVersion}", api =>
+{
+    var v1 = api.HasApiVersion(1.0);
+    v1.MapGet("/users", ListV1);
+
+    var v2 = api.HasApiVersion(2.0);
+    v2.MapGet("/users", ListV2);
+    v2.MapGroup("/admin").MapGet("/audit", Audit);   // also 2.0
+});
+```
+
+`WithApiVersionSet(set)` works the same way. Each route gets its own copy, so `.MapToApiVersion()` on
+one route does not narrow its neighbours.
+
+### Generated endpoints
+
+```csharp
+[Route("/users")]
+[ApiVersion("0.9", Deprecated = true)]
+[ApiVersion("1.0")]
+[ApiVersion("2.0")]
+public class UserEndpoints
+{
+    [Get] public UserV1[] List() => …;                            // 0.9 and 1.0
+
+    [Get] [MapToApiVersion("2.0")] public UserV2[] ListV2() => …;  // 2.0
+}
+```
+
+| Attribute | Effect |
+| --- | --- |
+| `[ApiVersion("1.0")]` / `[ApiVersion(1.0)]` | On a class, declares a version of the API. On a method, also scopes the method to it. Repeatable |
+| `Deprecated = true` | The version still works, and is reported and documented as deprecated |
+| `[MapToApiVersion("2.0")]` | Scopes a method to a version its class declares. Repeatable |
+| `[ApiVersionNeutral]` | Serves every version identically, or none |
+
+The generator checks all of it at build time:
+
+- **SWS030** (error) — a version that does not parse.
+- **SWS031** (warning) — `[MapToApiVersion]` names a version nothing declares. It is served but not
+  reported.
+- **SWS005** (error) — two methods of one route claim the same version. Methods on one route with
+  different versions are not duplicates.
+
+### Version-neutral endpoints
+
+`[ApiVersionNeutral]`, `.IsApiVersionNeutral()`: the endpoint accepts any version or none and is
+never answered 400 for one — a health check under a versioned prefix, say. An endpoint with no
+versions at all behaves the same way; adding versioning to an app changes nothing for routes that do
+not declare any.
+
+## Which endpoint answers
+
+For a route with versions:
+
+1. The readers run. Text that is not a version is **400 `InvalidApiVersion`**; two different
+   versions are **400 `AmbiguousApiVersion`**.
+2. No version at all is **400 `ApiVersionUnspecified`** — unless a version-neutral endpoint shares the
+   route, or `AssumeDefaultVersionWhenUnspecified` supplies one.
+3. The endpoint mapping the version explicitly is chosen, then one serving it implicitly, then a
+   version-neutral one. None is **400 `UnsupportedApiVersion`** (or
+   `UnsupportedApiVersionStatusCode`).
+
+Errors are [problem details](/httpserver/errors/) with the same `type` URIs and `code` extension
+Asp.Versioning uses, so a client written against an ASP.NET Core API recognises them unchanged:
+
+```json
+{
+  "type": "https://docs.api-versioning.org/problems#unsupported",
+  "title": "Unsupported API version",
+  "status": 400,
+  "detail": "The HTTP resource that matches the request URI '/users' does not support the API version '3.0'.",
+  "code": "UnsupportedApiVersion"
+}
+```
+
+The handler reads the version it was dispatched at with `ctx.GetRequestedApiVersion()` — what the
+request asked for, or the default it was given.
+
+## Reporting and retiring versions
+
+With `ReportApiVersions` on, every response from a versioned route — errors included — says what the
+route offers:
+
+```
+api-supported-versions: 1.0, 2.0
+api-deprecated-versions: 0.9
+```
+
+A version deprecated in one declaration but supported in another counts as supported.
+
+Deprecation and sunset policies go further, telling a client *when*:
+
+```csharp
+builder.AddApiVersioning(o =>
+{
+    o.Policies.Deprecate(1.0)
+        .Effective(new DateTimeOffset(2026, 6, 1, 0, 0, 0, TimeSpan.Zero))
+        .Link("https://example.com/api/v1-deprecation");
+
+    o.Policies.Sunset(1.0)
+        .Effective(new DateTimeOffset(2026, 12, 31, 23, 59, 59, TimeSpan.Zero))
+        .Link("https://example.com/api/retirement", title: "Retirement schedule");
+});
+```
+
+A response served at 1.0 then carries:
+
+```
+Deprecation: @1780272000
+Sunset: Thu, 31 Dec 2026 23:59:59 GMT
+Link: <https://example.com/api/v1-deprecation>; rel="deprecation"; type="text/html"
+Link: <https://example.com/api/retirement>; rel="sunset"; type="text/html"; title="Retirement schedule"
+```
+
+`Deprecation` is RFC 9745's structured date, and may be in the future to announce a deprecation
+before it takes effect; `Sunset` is RFC 8594's HTTP-date. A policy with no `Effective` date sends only
+its links — both headers are dates, and inventing one would tell clients something untrue. Policies
+are keyed by the version being served, so a 2.0 response carries none of 1.0's.
+
+<Aside type="note" title="Sunset is advice, not enforcement">
+Nothing stops answering at the sunset date. Retiring a version is removing its endpoints — which, since
+routes can be [unmapped while the server runs](/httpserver/routing/#changing-routes-while-running), can
+be a scheduled job rather than a deployment.
+</Aside>
+
+## OpenAPI
+
+Map the document with a `{documentName}` token and each version gets its own:
+
+```csharp
+app.MapOpenApi("/openapi/{documentName}.json");
+```
+
+`/openapi/v1.json` and `/openapi/v2.json` (or `/openapi/1.0.json`) each describe one version: the
+endpoints serving it, plus the unversioned and version-neutral ones, with `info.version` set to the
+API version. Operations the version deprecates are flagged `deprecated`, and a version that is
+deprecated across the API says so in its description. A `{version:apiVersion}` segment is written as
+the version itself — `/api/v2/users` — with no path parameter left to describe. A name no endpoint
+serves is a 404. See [OpenAPI](/httpserver/openapi/#one-document-per-api-version).
+
+## Protocols
+
+Version selection is part of routing, so it applies identically to HTTP/1.1, HTTP/2, HTTP/3 and
+tunnelled requests; the tests run it over HTTP/1.1 and HTTP/2, on sockets and in memory.
+
+## Limits
+
+- **Versions of a route share one template.** `GET /users/{id:int}` at 1.0 and `GET /users/{id}` at
+  2.0 are two different routes, and the trie picks between them before the version is looked at.
+- **No `v{version:apiVersion}` mixed segment** — write `{version:apiVersion}`, which also matches `v2`.
+- **Removing a route by method and template** (`app.Unmap("GET", "/users")`) removes every version of
+  it. Remove one version with the `RouteEndpoint` that `MapRoute` returned.
+- **No API explorer beyond OpenAPI.** `OpenApiDocumentBuilder.GetApiVersions(app)` lists the versions
+  served, for a UI's version picker.

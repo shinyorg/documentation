@@ -1,6 +1,6 @@
 ---
 title: Shiny.DocumentDb
-description: A document type as a complete HTTP resource — list, by-id, count, create, replace, merge-patch, delete and a live SSE tail — without ASP.NET Core
+description: A document type as a complete HTTP resource — list, by-id, count, create, replace, merge patch or JSON Patch, delete and a live SSE tail — without ASP.NET Core
 ---
 
 import NugetBadge from '/src/components/NugetBadge.tsx';
@@ -40,12 +40,12 @@ That maps eight routes:
 | | |
 | --- | --- |
 | `GET /orders` | List, with filtering, sorting, paging and sparse fieldsets |
-| `GET /orders/{id}` | One document, with an `ETag` |
+| `GET /orders/{id}` | One document, with an `ETag` (and `Accept-Patch` when writes are mapped) |
 | `GET /orders/count` | A count, honouring the same filter |
 | `GET /orders/stream` | A live [SSE](/httpserver/sse/) tail of inserts, updates and deletes |
 | `POST /orders` | Create, answering `201` with a `Location` |
 | `PUT /orders/{id}` | Replace, with optional `If-Match` |
-| `PATCH /orders/{id}` | RFC 7396 JSON Merge Patch |
+| `PATCH /orders/{id}` | RFC 7396 JSON Merge Patch, or RFC 6902 [JSON Patch](/httpserver/json-patch/) |
 | `DELETE /orders/{id}` | Delete |
 
 `Operations` defaults to `Read | Count` — the safe half. A route that was never mapped is a routing
@@ -95,7 +95,8 @@ record exists. Return `DocumentScope.DenyAll<T>()` for "no access"; the endpoint
 scope" as "everything", and a callback returning null is an error rather than an open door.
 
 A scope on a write is checked on **both sides**: the incoming document must fall inside it, and so must
-the stored one. A `PATCH` that would move a document out of scope is refused after the merge.
+the stored one. A `PATCH` that would move a document out of scope is refused after the patch is
+applied, whichever patch format it used.
 
 <Aside type="caution" title="Read the request from the scope context, not IHttpContextAccessor">
 On this server the ambient `IHttpContextAccessor` is only populated when
@@ -131,19 +132,66 @@ A stale `If-Match` is `412`. With `RequireIfMatch`, a write or delete that sends
 Precondition Required`. Without it, a client that does not speak ETags gets documented
 last-writer-wins rather than a 412 it cannot act on.
 
-## PATCH means RFC 7396
+## PATCH: merge patch or JSON Patch
 
-An explicit `null` in a `PATCH` body **removes** the member:
+`PATCH` accepts two formats, chosen by the `Content-Type` header:
+
+| `Content-Type` | Format |
+| --- | --- |
+| `application/json-patch+json` | RFC 6902 [JSON Patch](/httpserver/json-patch/): a list of operations |
+| anything else (`application/merge-patch+json`, `application/json`, or none) | RFC 7396 JSON Merge Patch, as before |
+
+`GET /{id}` includes `Accept-Patch: application/merge-patch+json, application/json-patch+json`
+when writes are mapped, so a client can see from a normal read that both formats are accepted.
+
+### Merge patch
+
+An explicit `null` in a merge-patch body **removes** the member:
 
 ```http
 PATCH /orders/a
 {"notes": null}
 ```
 
-The store's own merge cannot assume that — a serialized document carries a null for every unset
-member, and treating those as deletions would wipe fields nobody touched. An HTTP patch body is not a
-serialized document: every member in it was written by the caller. The endpoints apply the merge
-themselves so that promise holds on every provider.
+The store's own merge cannot work this way. A serialized document has a null for every unset member,
+and treating those as deletions would erase fields nobody touched. A merge-patch body is different:
+every member in it was written by the caller. The endpoints apply the merge themselves so that a
+`null` means "remove" on every provider.
+
+### JSON Patch
+
+JSON Patch can do things merge patch cannot: append to or remove from an array, move or copy a
+value, set a member to `null` without deleting it, and `test` a value before changing anything:
+
+```http
+PATCH /orders/a
+Content-Type: application/json-patch+json
+If-Match: "3"
+
+[
+  { "op": "test",    "path": "/status", "value": "open" },
+  { "op": "replace", "path": "/status", "value": "closed" },
+  { "op": "remove",  "path": "/notes" }
+]
+```
+
+Paths use the names from the JSON response (`/status`, not `/Status`). The patch is applied to the
+stored document all at once or not at all. Both formats go through the same write path, so the
+same checks run whichever you send: the `If-Match` / `RequireIfMatch` check before the write, the
+full-replace write, and the scope check after it.
+
+| | |
+| --- | --- |
+| Malformed patch | `400` |
+| A `test` that fails, or a path that does not exist | `409`, and nothing is written |
+| A patch that turns the document into something other than an object | `422` |
+| Stale `If-Match` / missing when required | `412` / `428`, the same as for merge patch |
+| Document outside the scope, or moved out of it by the patch | `404` / `400`, the same as for merge patch |
+
+The schema-free [`MapDocumentCollection`](#schema-free-collections) lane accepts JSON Patch too. A
+merge patch there is sent to the store as a partial update. A JSON Patch is applied to the stored
+document, and the result is written back as a full replace. This is because array positions, `move`
+and `test` only make sense against the current document.
 
 ## The live tail
 
@@ -221,6 +269,7 @@ message naming the property to set.
 | Missing `TypeInfo` | Falls back to reflection | Clear error — no reflection fallback |
 | Output caching | `CacheOutput` on the group | Not available; this server has none |
 | Request scope service | `IHttpContextAccessor` works anywhere | Use `ctx.Http` unless `UseSessions()` is mapped |
+| `PATCH` formats | Merge patch | Merge patch, and [JSON Patch](#json-patch) for `application/json-patch+json` |
 
 Everything else — the filter grammar, cursors, scopes, ETags, merge-patch semantics, the SSE frame
 shape — is the same, because the engine underneath is the same.

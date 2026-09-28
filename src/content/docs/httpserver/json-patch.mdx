@@ -1,0 +1,201 @@
+---
+title: JSON Patch
+description: RFC 6902 JSON Patch over RFC 6901 JSON Pointer — add, remove, replace, move, copy and test, applied all-or-nothing, bound as an endpoint parameter, described in OpenAPI, and trim/AOT clean
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`PATCH` with a merge-patch body (RFC 7396) can only say "this is what the object should look like
+now". JSON Patch (RFC 6902) is a list of operations, and it can say several things merge patch cannot:
+
+- append to an array (`/tags/-`) or remove one element from it (`/tags/2`)
+- move or copy a value from one place to another
+- set a member to JSON `null` instead of deleting it
+- `test` a value first and abort the whole patch if it is not what the client last saw
+
+```http
+PATCH /api/notes/7
+Content-Type: application/json-patch+json
+
+[
+  { "op": "test",    "path": "/version", "value": 3 },
+  { "op": "replace", "path": "/title",   "value": "Groceries" },
+  { "op": "add",     "path": "/tags/-",  "value": "home" },
+  { "op": "remove",  "path": "/draft" }
+]
+```
+
+It is in the core package, in the `Shiny.Net.HttpServer.JsonPatch` namespace. It is built on
+`System.Text.Json.Nodes` and uses no reflection, so it is trim and Native AOT clean.
+
+## In an endpoint
+
+A `JsonPatchDocument` parameter binds from the body, like any other body parameter. Apply it to the
+current value with that type's source-generated metadata:
+
+```csharp
+[Route("/api/notes")]
+public class NoteEndpoints(INoteStore notes)
+{
+    [Patch("/{id:int}")]
+    public IResult Patch(int id, JsonPatchDocument patch)
+    {
+        if (notes.Find(id) is not { } note)
+            return Results.NotFound();
+
+        try
+        {
+            var patched = patch.ApplyTo(note, AppJson.Default.Note);
+            notes.Save(patched);
+            return Results.Ok(patched, AppJson.Default.Note);
+        }
+        catch (JsonPatchException ex)
+        {
+            return ex.ToResult();     // 409 / 422 problem naming the operation that failed
+        }
+    }
+}
+```
+
+The generator treats this parameter differently from other body parameters:
+
+- The body must be `application/json-patch+json`. Anything else gets **415** with an
+  `Accept-Patch: application/json-patch+json` header, as RFC 5789 asks. A JSON array sent as plain
+  `application/json` is not assumed to be a patch, because on a resource that also accepts merge
+  patch the two readings of the same body write different things.
+- A malformed patch is a **400** problem naming the operation at fault. The handler is not called.
+- It needs no `[JsonSerializable]` entry. The patch is parsed by hand, so the missing-metadata
+  diagnostic does not fire for it.
+- OpenAPI describes the request body as `application/json-patch+json` with the RFC 6902 schema: an
+  array of `op` / `path` / `from` / `value` objects, with `op` as an enum.
+
+## In a raw handler
+
+```csharp
+app.MapPatch("/notes/{id}", async ctx =>
+{
+    try
+    {
+        var patch = await ctx.Request.ReadJsonPatchAsync(ctx.RequestAborted);
+        var note = notes.Find(int.Parse(ctx.Request.RouteValues["id"]!.ToString()!));
+        notes.Save(patch.ApplyTo(note, AppJson.Default.Note));
+        return Results.NoContent();
+    }
+    catch (JsonPatchException ex)
+    {
+        return ex.ToResult();
+    }
+});
+```
+
+`ReadJsonPatchAsync` is strict about the `Content-Type` in the same way (415), and throws for an
+empty or malformed body (400). `ctx.Request.IsJsonPatch()` checks the header without reading the
+body, which is useful when one `PATCH` route accepts more than one format.
+
+If you let a `JsonPatchException` escape, [`UseProblemDetails()`](/httpserver/errors/#the-default-exception-mapping) maps it to
+its own status code instead of a 500. Catching it and returning `ToResult()` gives the same status,
+and adds the operation index and the `Accept-Patch` header on a 415.
+
+## Applying
+
+```csharp
+JsonNode? result = patch.ApplyTo(document);                 // any JSON
+Note patched     = patch.ApplyTo(note, AppJson.Default.Note);  // a typed value, via its JsonTypeInfo
+```
+
+- **All or nothing.** `ApplyTo` never modifies what you pass in. It works on a copy and returns the
+  copy only when every operation succeeded, so a patch that fails at operation 5 has not applied
+  operations 0 to 4 to anything. This is the atomicity RFC 6902 §5 requires.
+- **Typed values** round-trip through JSON with the metadata you pass. Member names are the ones the
+  client sees, so a camel-case naming policy means `/title`, not `/Title`. The input instance is not
+  changed. If the result no longer deserializes as the type (a string where a number belongs, or the
+  object replaced with an array), you get a 422.
+- **The root.** `"path": ""` is the whole document. `add` or `replace` at the root swaps the document
+  out, so `ApplyTo(JsonNode?)` can return a different kind of node than it was given. `remove` at the
+  root is refused as malformed, because RFC 6902 does not define it and implementations disagree.
+- **`test` equality** follows RFC 6902 §4.6. Numbers compare by value (`1`, `1.0` and `1e0` are
+  equal), object members compare in any order, strings compare exactly after unescaping, and `"10"`
+  is never equal to `10`.
+
+### Building one in code
+
+The method names and argument order match ASP.NET Core's `JsonPatchDocument`. The difference is
+that paths here are JSON Pointers, not expression trees, because turning an expression into a
+property name needs reflection.
+
+```csharp
+var patch = new JsonPatchDocument()
+    .Test("/version", 3)
+    .Replace("/title", "Groceries")
+    .Add("/tags/-", "home")
+    .Move("/draft", "/archived")
+    .Remove("/scratch");
+
+await http.PatchAsync(url, new StringContent(patch.ToJsonString(), Encoding.UTF8, JsonPatchDocument.MediaType));
+```
+
+`JsonPatchDocument` has a `JsonConverter`, so it can also be a property of a larger request type in
+your own `JsonSerializerContext`.
+
+## Errors
+
+Each failure has the status RFC 5789 §2.2 gives it. The status tells the client what to do next:
+fix the patch, re-read the resource, or fix the result.
+
+| `JsonPatchErrorKind` | Status | When |
+| --- | --- | --- |
+| `Malformed` | **400** | Not a JSON array, an unknown or wrongly-cased `op`, a missing `path`/`from`/`value`, an invalid pointer, a duplicate member, a `move` into its own child |
+| `PathNotFound` | **409** | A location the operation needs does not exist: a missing member, an index past the end, a leading-zero index like `01`, `-` anywhere except as the target of an `add`, or a pointer that goes through a string |
+| `TestFailed` | **409** | A `test` compared unequal |
+| `InvalidResult` | **422** | The patch applied, but the result is not a valid representation (it no longer fits the type, or a document that must be an object became something else) |
+| `UnsupportedMediaType` | **415** | The body was not `application/json-patch+json`. Sent with `Accept-Patch` |
+
+`PathNotFound` and `TestFailed` are 409 Conflict, not 422. The patch is valid, but the resource is
+not in the state it expected, which is RFC 5789's "conflicting state". The problem body names the
+operation:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.10",
+  "title": "Conflict",
+  "status": 409,
+  "detail": "Operation 0 ('test' at '/version') failed: the value is 4, not 3.",
+  "instance": "/api/notes/7",
+  "patchError": "testFailed",
+  "operationIndex": 0,
+  "op": "test",
+  "path": "/version"
+}
+```
+
+Branch on `patchError`, not on the wording of `detail`, which can change.
+
+<Aside type="tip" title="test + If-Match">
+A `test` at the start of a patch checks the fields that operation touches. `If-Match` checks the
+whole resource. With both, a patch fails if anything changed since the client read the resource,
+and also fails if the specific field it assumed has a different value. The
+[DocumentDb endpoints](/httpserver/documentdb/#patch-merge-patch-or-json-patch) support both.
+</Aside>
+
+## JSON Pointer
+
+`JsonPointer` is the RFC 6901 half, and you can use it on its own:
+
+```csharp
+var pointer = JsonPointer.Parse("/a~1b/m~0n/0");   // segments: "a/b", "m~n", "0"
+pointer.TryEvaluate(document, out var value);        // false when absent; true + null for a JSON null
+JsonPointer.Create("a/b", "~").ToString();           // "/a~1b/~0"
+```
+
+It handles the cases hand-written pointer code usually gets wrong. `~01` decodes to `~1`, not `/`.
+`""` is the whole document, and `/` is the member whose name is the empty string. `01` is not an
+array index. `TryEvaluate` distinguishes a member that holds `null` from a member that does not
+exist.
+
+## Scope
+
+JSON Patch reads the body and does not depend on the transport. It works the same over HTTP/1.1,
+HTTP/2, HTTP/3, tunnels and the in-memory test server. The tests cover HTTP/1.1, HTTP/2 and the
+in-memory server. The engine is tested against every example in RFC 6902 Appendix A, every example
+in RFC 6901 §5, and cases from the
+[json-patch-tests](https://github.com/json-patch/json-patch-tests) suite.

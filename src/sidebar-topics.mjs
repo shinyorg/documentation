@@ -520,6 +520,7 @@ export const sidebarTopics = [
           { label: 'Transfers', link: 'client/httptransfers/transfers' },
           { label: 'Azure Blob Storage', link: 'client/httptransfers/azure' },
           { label: 'AWS S3', link: 'client/httptransfers/aws-s3' },
+          { label: 'Resumable Uploads (tus)', link: 'client/httptransfers/tus' },
           { label: 'Transfer Delegate', link: 'client/httptransfers/delegate' },
           { label: 'Monitoring', link: 'client/httptransfers/monitoring' },
           { label: 'Transfer Progress', link: 'client/httptransfers/progress' },
@@ -722,16 +723,31 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Spreadsheet', link: 'controls/spreadsheet/' },
+          { label: 'Spreadsheet Formatting', link: 'controls/spreadsheet/formatting', badge: { text: 'New', variant: 'success' } },
+          { label: 'Spreadsheet Sort, Filter & Validation', link: 'controls/spreadsheet/data', badge: { text: 'New', variant: 'success' } },
+          { label: 'Spreadsheet Formulas', link: 'controls/spreadsheet/formulas', badge: { text: 'New', variant: 'success' } },
+          { label: 'Spreadsheet Charts', link: 'controls/spreadsheet/charts', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Viewer', link: 'controls/document-viewer/' },
           { label: 'Slide Viewer', link: 'controls/slide-viewer/' },
           { label: 'Presenting Mode', link: 'controls/slide-viewer/presenting', badge: { text: 'New', variant: 'success' } },
+          { label: 'Office Shell', link: 'controls/office-shell/', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Editor', link: 'controls/document-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Document Lists', link: 'controls/document-editor/lists', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document Formatting & Editing', link: 'controls/document-editor/formatting', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document Tables', link: 'controls/document-editor/tables', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document References & Links', link: 'controls/document-editor/references', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document Comments & Track Changes', link: 'controls/document-editor/review', badge: { text: 'New', variant: 'success' } },
+          { label: 'Document Page Layout & Views', link: 'controls/document-editor/page-layout', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Editor', link: 'controls/slide-editor/', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Objects, Groups & Tables', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
           { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', badge: { text: 'New', variant: 'success' } },
           { label: 'Slides, Layouts & Notes', link: 'controls/slide-editor/slides', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Shape Format & Text', link: 'controls/slide-editor/format', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Design', link: 'controls/slide-editor/design', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Transitions & Animations', link: 'controls/slide-editor/transitions-animations', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Charts, Icons & Media', link: 'controls/slide-editor/insert', badge: { text: 'New', variant: 'success' } },
+          { label: 'Slide Show & Presenter View', link: 'controls/slide-editor/presenting', badge: { text: 'New', variant: 'success' } },
           { label: 'Notebook', link: 'controls/notebook/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
           { label: 'Find', link: 'controls/office-find', badge: { text: 'New', variant: 'success' } },
         ]
@@ -1224,6 +1240,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'httpserver/' },
+          { label: 'FAQ', link: 'httpserver/faq' },
           { label: 'Hosting & Lifecycle', link: 'httpserver/hosting' },
           { label: 'Configuration', link: 'httpserver/configuration' },
           {
@@ -1234,10 +1251,14 @@ export const sidebarTopics = [
               { label: 'Typed Endpoints', link: 'httpserver/endpoints' },
               { label: 'Results & JSON', link: 'httpserver/results' },
               { label: 'Serialization & Formats', link: 'httpserver/serialization' },
+              { label: 'JSON Patch', link: 'httpserver/json-patch' },
               { label: 'Errors & Problem Details', link: 'httpserver/errors' },
               { label: 'Sessions', link: 'httpserver/sessions' },
+              { label: 'Localization', link: 'httpserver/localization' },
               { label: 'Request Timeouts', link: 'httpserver/timeouts' },
-              { label: 'OpenAPI', link: 'httpserver/openapi' }
+              { label: 'Idempotency Keys', link: 'httpserver/idempotency' },
+              { label: 'OpenAPI', link: 'httpserver/openapi' },
+              { label: 'API Versioning', link: 'httpserver/api-versioning' }
             ]
           },
           {
@@ -1248,7 +1269,10 @@ export const sidebarTopics = [
               { label: 'Uploads & Downloads', link: 'httpserver/files' },
               { label: 'File Browser', link: 'httpserver/file-browser' },
               { label: 'WebDAV', link: 'httpserver/webdav' },
+              { label: 'Resumable Uploads (tus)', link: 'httpserver/tus' },
+              { label: 'CalDAV & CardDAV', link: 'httpserver/caldav' },
               { label: 'Compression', link: 'httpserver/compression' },
+              { label: 'Content Digests', link: 'httpserver/content-digest' },
               { label: 'Caching & Conditional Requests', link: 'httpserver/caching' }
             ]
           },
@@ -1267,11 +1291,15 @@ export const sidebarTopics = [
               { label: 'Authentication', link: 'httpserver/authentication' },
               { label: 'Authorization', link: 'httpserver/authorization' },
               { label: 'JWT', link: 'httpserver/jwt' },
+              { label: 'OAuth Loopback Sign-in', link: 'httpserver/oauth-loopback' },
               { label: 'TLS & Certificates', link: 'httpserver/tls' },
+              { label: 'Automatic HTTPS (ACME)', link: 'httpserver/acme' },
               { label: 'CORS', link: 'httpserver/cors' },
               { label: 'Rate Limiting', link: 'httpserver/rate-limiting' },
               { label: 'IP Filtering', link: 'httpserver/ip-filtering' },
-              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery' }
+              { label: 'Host Filtering', link: 'httpserver/host-filtering' },
+              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery' },
+              { label: 'Webhooks', link: 'httpserver/webhooks' }
             ]
           },
           {
@@ -1282,7 +1310,8 @@ export const sidebarTopics = [
               { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents' },
               { label: 'Azure Relay', link: 'httpserver/azure-relay' },
               { label: 'Discovery (mDNS)', link: 'httpserver/discovery' },
-              { label: 'Reverse Proxy', link: 'httpserver/proxy' }
+              { label: 'Reverse Proxy', link: 'httpserver/proxy' },
+              { label: 'PROXY Protocol', link: 'httpserver/proxy-protocol' }
             ]
           },
           {

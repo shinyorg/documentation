@@ -1,0 +1,194 @@
+---
+title: OAuth Loopback Sign-in
+description: Receiving the OAuth 2.0 / OpenID Connect redirect on 127.0.0.1, so a desktop app or CLI can sign in through the system browser
+---
+
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+<PlatformSupport frameworks={["net"]} os={["macos", "windows", "linux"]} />
+
+```bash
+dotnet add package Shiny.Net.HttpServer.OAuthLoopback
+```
+
+This is how VS Code, the GitHub CLI and `az login` sign you in. The app opens the system browser at
+the provider's authorization page, the user signs in there, and the provider redirects the browser
+to `http://127.0.0.1:{port}/callback?code=…&state=…`. A server the app started a moment earlier
+receives that request, hands the code to the app, and tells the user they can close the tab.
+
+RFC 8252 (OAuth 2.0 for Native Apps) specifies this flow, and every major identity provider supports
+it. The usual .NET implementation is `HttpListener`, which goes through http.sys on Windows. This
+package is the receiver on this server instead: one small class, trim and AOT clean.
+
+<Aside type="note">
+This is **only the redirect receiver**. Building the authorization URL, PKCE and exchanging the code
+for tokens belong to the OAuth client you already use: Duende.IdentityModel.OidcClient, your
+provider's SDK, or a hand-written `HttpClient` call. The listener gives that client a redirect URI and
+gives you back the parameters.
+</Aside>
+
+## The whole flow in one call
+
+```csharp
+using Shiny.Net.HttpServer.OAuthLoopback;
+
+var pkce = CreatePkce();   // your OAuth client's job
+
+var result = await LoopbackCallbackListener.AuthorizeAsync((redirectUri, state) => new Uri(
+    "https://login.example.com/oauth/authorize" +
+    $"?client_id={clientId}" +
+    $"&redirect_uri={Uri.EscapeDataString(redirectUri.AbsoluteUri)}" +
+    $"&state={Uri.EscapeDataString(state)}" +
+    $"&code_challenge={pkce.Challenge}&code_challenge_method=S256"
+));
+
+if (result.IsError)
+    Console.WriteLine($"Sign-in failed: {result.ErrorDescription ?? result.Error}");
+else
+    await ExchangeCodeAsync(result.Code!, pkce.Verifier);
+```
+
+`AuthorizeAsync` starts the listener, passes its redirect URI and state to your builder, opens the
+URL in the system browser, waits for the callback and stops the server.
+
+## Step by step
+
+When you need the redirect URI before you build the request (for example, to hand it to an OAuth
+client's options), use the listener directly:
+
+```csharp
+await using var callback = await LoopbackCallbackListener.StartAsync(new LoopbackCallbackOptions
+{
+    Path = "/callback",
+    Timeout = TimeSpan.FromMinutes(5)
+});
+
+// callback.RedirectUri  → http://127.0.0.1:53817/callback
+// callback.State        → a random 256-bit value, base64url
+
+SystemBrowser.Open(BuildAuthorizeUrl(callback.RedirectUri, callback.State));
+
+var result = await callback.WaitAsync(cancellationToken);
+```
+
+Disposing the listener stops the server. The completion page is written before `WaitAsync` returns,
+so disposing straight away does not cut it off.
+
+## What the listener does for you
+
+- **Binds an IP literal, not `localhost`.** RFC 8252 §8.3 asks for this because `localhost` can
+  resolve to the other address family, or be intercepted. The default is `127.0.0.1`, and `[::1]` is
+  available through `Address = IPAddress.IPv6Loopback`. Any address that is not loopback is refused.
+- **Uses an ephemeral port** (RFC 8252 §7.3). Providers that follow the RFC accept any port on a
+  loopback redirect URI. Set `Port` only for a provider that insists on an exact match.
+- **Validates `state`** in constant time. A callback whose `state` is missing or does not match
+  gets a 400 and is **ignored**. It does not end the sign-in, so a forged request cannot beat the
+  real redirect to the finish line.
+- **Serves only the redirect path.** `/favicon.ico` and anything else get a 404.
+- **Accepts `response_mode=form_post`** as well as a query-string redirect. The mode used is in
+  `result.ResponseMode`.
+- **Completes once.** A refresh of the completion page is answered but does not replace the first
+  result.
+- **Times out.** Nothing can tell a user who closed the tab from one still typing a password, so
+  `WaitAsync` throws `TimeoutException` after `Timeout` (five minutes by default). Cancelling the
+  token throws `OperationCanceledException`, not a timeout.
+- **Treats provider errors as results.** `error=access_denied` comes back as a result with
+  `IsError` set rather than as an exception, because it is an answer and the app decides what to
+  tell the user.
+
+## The result
+
+| Member | |
+| --- | --- |
+| `Code`, `State` | The authorization code and the echoed state |
+| `Error`, `ErrorDescription`, `ErrorUri`, `IsError` | The provider's refusal, if it refused |
+| `Parameters`, `Get(name)` | Every parameter received, for anything provider-specific (`iss`, `id_token` in a hybrid flow, …) |
+| `ResponseMode` | `query` or `form_post` |
+| `CallbackUri` | The URI the browser hit, query included. For form_post, the form fields are appended as a query string, so it is still one URI a client library can parse |
+
+## The page the user sees
+
+The built-in page says "Signed in, you can close this window and return to the app", or shows the
+provider's error (HTML-encoded). It follows the system light or dark theme. To change it, supply your
+own HTML:
+
+```csharp
+new LoopbackCallbackOptions
+{
+    RenderPage = r => r.IsError
+        ? $"<h1>Couldn't sign in</h1><p>{WebUtility.HtmlEncode(r.ErrorDescription)}</p>"
+        : "<h1>You're in</h1><p>Head back to MyApp.</p>"
+}
+```
+
+…or send the browser to a hosted page, as VS Code does:
+
+```csharp
+new LoopbackCallbackOptions
+{
+    RedirectTo = r => new Uri(r.IsError ? "https://myapp.dev/signin-failed" : "https://myapp.dev/signed-in")
+}
+```
+
+## With Duende.IdentityModel.OidcClient
+
+OidcClient does its own discovery, PKCE, state and token exchange, and asks for an `IBrowser` to run
+the browser part. The listener is that browser. OidcClient generates and checks `state` itself, so
+turn the listener's own check off:
+
+```csharp
+sealed class LoopbackBrowser(LoopbackCallbackListener listener) : IBrowser
+{
+    public async Task<BrowserResult> InvokeAsync(BrowserOptions options, CancellationToken ct = default)
+    {
+        SystemBrowser.Open(new Uri(options.StartUrl));
+        try
+        {
+            var result = await listener.WaitAsync(ct);
+            return new BrowserResult { ResultType = BrowserResultType.Success, Response = result.CallbackUri.AbsoluteUri };
+        }
+        catch (TimeoutException)
+        {
+            return new BrowserResult { ResultType = BrowserResultType.Timeout };
+        }
+    }
+}
+
+await using var listener = await LoopbackCallbackListener.StartAsync(new() { ValidateState = false });
+
+var client = new OidcClient(new OidcClientOptions
+{
+    Authority = "https://demo.duendesoftware.com",
+    ClientId = "interactive.public",
+    Scope = "openid profile api",
+    RedirectUri = listener.RedirectUri.AbsoluteUri,
+    Browser = new LoopbackBrowser(listener)
+});
+
+var login = await client.LoginAsync();
+```
+
+Keep OidcClient's default redirect response mode. `CallbackUri` is the URL form it parses.
+
+MSAL (`Microsoft.Identity.Client`) runs its own loopback listener for `AcquireTokenInteractive`, so
+it does not need this package.
+
+## Opening the browser
+
+`SystemBrowser.Open(uri)` launches the default browser. It uses the shell on Windows, `open` on
+macOS and Mac Catalyst, and `xdg-open` on Linux. It opens only absolute `http`/`https` URIs, and
+`SystemBrowser.IsSupported` tells you whether the current platform can. `AuthorizeAsync` takes an
+`openBrowser` delegate if you need something else, such as printing the URL for a headless session
+to copy.
+
+## Scope
+
+- **Desktop only.** On iOS and Android the OS suspends the app while the browser is in front, which
+  takes the server with it. Use `WebAuthenticator` (`ASWebAuthenticationSession` / Custom Tabs)
+  with a custom URI scheme there. `SystemBrowser.Open` throws `PlatformNotSupportedException` on
+  those platforms.
+- **Plain HTTP on loopback.** RFC 8252 specifies `http` for loopback redirects, and the traffic
+  never leaves the machine. TLS is not offered.
+- **No browser at all?** For SSH sessions and containers, the OAuth 2.0 device authorization grant
+  (RFC 8628) is the right flow, and it needs no server.

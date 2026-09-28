@@ -159,6 +159,67 @@ On HTTP/2 and HTTP/3, a response that never wrote a body sends its trailers in t
 it does send. That shape has a name in gRPC — Trailers-Only — and is how a call that failed before
 producing anything reports its status.
 
+## Early Hints and other 1xx responses
+
+A page handler that spends 200 ms on a database query leaves the browser idle for those 200 ms. A
+`103 Early Hints` response ([RFC 8297](https://www.rfc-editor.org/rfc/rfc8297)) sent first tells it
+which stylesheets, scripts and fonts the page will need, so it downloads them while the handler is
+still working:
+
+```csharp
+app.MapGet("/", async ctx =>
+{
+    await ctx.Response.SendEarlyHintsAsync(
+        "</app.css>; rel=preload; as=style",
+        "</app.js>; rel=preload; as=script",
+        "<https://fonts.example.com>; rel=preconnect"
+    );
+
+    var model = await LoadDashboardAsync(ctx.RequestAborted);   // the slow part
+
+    // Repeat the hints on the final response: a client or proxy is free to discard a 1xx.
+    ctx.Response.Headers.Append(HeaderNames.Link, "</app.css>; rel=preload; as=style");
+    await ctx.Response.WriteTextAsync(Render(model), "text/html; charset=utf-8");
+});
+```
+
+Each argument is one `Link` header value. Browsers act on `preload` and `preconnect` hints, and only
+for page navigations. The general form is
+`SendInformationalResponseAsync(int statusCode, HeaderDictionary? headers)`, which sends any `1xx`
+except `101` (for example a `102 Processing` during a long operation). You can send several, and they
+go out in the order you call them. Neither method touches `Response.Headers` or `StatusCode`.
+
+| | How it travels |
+| --- | --- |
+| HTTP/1.1 | An interim status line and header block (`HTTP/1.1 103 Early Hints`) before the final head |
+| HTTP/1.0 | **Not sent.** HTTP/1.0 has no 1xx responses, so a 1.0 client would read the hint as the final response. The call returns `false` |
+| HTTP/2 | A `HEADERS` frame with `:status: 103` and no `END_STREAM`, HPACK-encoded |
+| HTTP/3 | A `HEADERS` frame with `:status: 103` before the final one, QPACK-encoded |
+
+Both methods return `ValueTask<bool>`: `true` when the response was sent, and `false` when nothing
+was sent (HTTP/1.0, or a response that is not attached to a connection). Calling either after the
+response has started **throws** `InvalidOperationException`. A 1xx after the final status line
+would corrupt the response, so this is a bug in the handler's ordering and it is reported as one. A
+status outside 1xx, or `101`, throws `ArgumentOutOfRangeException`. A header value containing CR or
+LF, or a `Content-Length`/`Transfer-Encoding` header, throws `ArgumentException`.
+
+How it works with the rest of the server:
+
+- **`Expect: 100-continue`** is still answered by the server itself on HTTP/1.1, before your handler
+  runs. Early Hints go out after it.
+- **[Response compression](/httpserver/compression/)** and other body wrappers are bypassed. The
+  interim response goes directly to the connection and is never compressed.
+- **[Output caching](/httpserver/caching/)** stores only the final response. A cache hit does not run
+  the handler, so it sends no hints.
+- **[Tunnels](/httpserver/tunneling/)** (relay, SSH, Azure Relay) carry the connection's bytes
+  unchanged, so hints reach the public client the same way they do on a direct connection.
+- **[The in-memory test client](/httpserver/testing/)** and `HttpClient` in general discard every
+  1xx, so they only see the final response. To assert on hints, read the raw bytes or frames.
+- **The [reverse proxy](/httpserver/proxy/)** does not forward a `103` from a destination.
+  `SocketsHttpHandler` consumes interim responses and never returns them to the caller. If you want
+  hints on a proxied route, send them from a middleware that runs before `MapProxy`/`MapReverseProxy`. The proxy writes the final
+  response only after the destination answers, so there is still time.
+
 ## Which one you actually get
 
 On a device, almost always HTTP/1.1: a browser will not speak HTTP/2 without TLS, and a

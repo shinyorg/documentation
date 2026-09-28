@@ -1,0 +1,169 @@
+---
+title: Idempotency Keys
+description: A retried POST gets the stored original response instead of running twice — the IETF Idempotency-Key header, per endpoint
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+builder.AddIdempotency();
+
+var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+app.UseIdempotency();
+
+app.MapPost("/payments", Charge).RequireIdempotencyKey();
+```
+
+A phone on a train sends a POST. The request reaches the server and charges the card, and then the
+tunnel drops before the response gets back. The client cannot tell "never arrived" from "arrived and
+the reply was lost", so it retries — and without a key, the retry charges again.
+
+With one, the client sends the same `Idempotency-Key` on every attempt, the handler runs once, and every
+retry is answered with the stored original. This is the header from the IETF draft
+[draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/),
+the one Stripe, Adyen and most payment APIs already use.
+
+```http
+POST /payments HTTP/1.1
+Idempotency-Key: "8e03978e-40d5-43e8-bc93-6894a57f9324"
+Content-Type: application/json
+
+{"amount": 1000}
+```
+
+The key is opaque — generate a UUID per logical operation, and reuse it only for retries of that
+operation. Both the draft's quoted form and a bare value are accepted, and mean the same key.
+
+## What a request with a key gets
+
+| The key… | Response |
+| --- | --- |
+| is new | The handler runs, and its response is stored |
+| was used, and that request finished | The stored status, headers and body, plus **`Idempotent-Replayed: true`** |
+| was used, and that request is still running | **409** problem details, with `Retry-After: 1` |
+| was used with a **different body** | **422** problem details — that is a client bug, and replaying the first answer would hide it |
+| is missing on an endpoint that requires one | **400** problem details |
+| is empty or longer than `MaxKeyLength` | **400** problem details |
+
+A 409 rather than waiting for the first request: running a second copy alongside it is the double
+charge this exists to prevent, and waiting would hold a connection open for as long as the first takes.
+Once it finishes, the same retry gets its response.
+
+The request body is fingerprinted (SHA-256) to tell a retry from a reused key. Replayed headers are the
+original's minus the hop-by-hop ones and `Date`.
+
+## Opting endpoints in
+
+Nothing is intercepted unless the endpoint asked. On a route:
+
+```csharp
+app.MapPost("/payments", Charge).RequireIdempotencyKey();                    // no key → 400
+app.MapPost("/notes", Save).WithIdempotency();                               // honoured if sent
+app.MapPost("/transfers", Transfer).RequireIdempotencyKey(TimeSpan.FromHours(1));  // shorter expiry
+```
+
+On a group — every route mapped through the builder it returns, nested groups and generated endpoint
+classes included:
+
+```csharp
+app.MapGroup("/api/payments", group =>
+{
+    var payments = group.RequireIdempotencyKey();
+
+    payments.MapPost("/", Charge);
+    payments.MapPost("/{id}/refund", Refund);
+    payments.MapPost("/quote", Quote).DisableIdempotency();
+});
+```
+
+Use the builder `RequireIdempotencyKey()` returns — the one passed in is left as it was.
+
+On [typed endpoints](/httpserver/endpoints/) the same thing is an attribute, read at compile time:
+
+```csharp
+[Route("/api/orders")]
+[Idempotent]                                       // Required = true by default
+public class OrderEndpoints
+{
+    [Post("/")] public Task<IActionResult> Place([FromBody] Order order) => …;
+
+    [Post("/draft")] [Idempotent(Required = false, ExpirationSeconds = 600)]
+    public Task<IActionResult> Draft([FromBody] Order order) => …;
+
+    [Post("/quote")] [DisableIdempotency]
+    public Quote Quote([FromBody] Order order) => …;
+}
+```
+
+Only **POST and PATCH** are intercepted by default — GET, PUT and DELETE are idempotent already, so a
+key on them is accepted and ignored. Change `Methods` to widen it.
+
+## Scope of a key
+
+A key is scoped by **method, path and caller** — the authenticated user's `NameIdentifier` (or name)
+and authentication type, when there is one.
+
+- By **path**, because the draft makes a key unique per resource: two endpoints may see the same key.
+- By **caller**, because a key is chosen by a client, and two clients choosing the same one must never
+  be able to read each other's responses.
+
+<Aside type="caution" title="Register it after authorization">
+`UseIdempotency()` runs after routing. Put it after `UseAuthorization()` so the caller is known when the
+key is built, and so a request that is about to be refused does not claim one.
+</Aside>
+
+## What is stored
+
+- Responses with a status **below 500**. A 5xx is the server saying it failed, which is exactly the case
+  a retry should get to try again; a 4xx is a decision about the request, and replaying it keeps a
+  retry from getting a different answer. Change `ShouldStoreStatusCode` to narrow it.
+- Nothing, if the handler **throws** — the key is released and the retry runs.
+- Nothing, if the response is **streamed** (the handler called `StartAsync`) or larger than
+  `MaxResponseBodyBytes`. It is served, the key is released, a warning is logged, and a retry runs the
+  handler again. Keep idempotent endpoints to small confirmations.
+
+A request body larger than `MaxRequestBodyBytes` is refused with a **413** before any key is claimed:
+the body has to be read in full to fingerprint it, and held so the handler can read it too.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `HeaderName` | `Idempotency-Key` | |
+| `ReplayedHeaderName` | `Idempotent-Replayed` | Null adds nothing to a replay |
+| `Expiration` | 24 hours | How long a completed response is kept |
+| `InFlightTimeout` | 2 minutes | When an unfinished claim counts as abandoned — matters for a shared store |
+| `Methods` | POST, PATCH | |
+| `ShouldStoreStatusCode` | `status < 500` | |
+| `MaxRequestBodyBytes` | 1MB | Larger → 413 |
+| `MaxResponseBodyBytes` | 256KB | Larger → served, not stored |
+| `MaxKeyLength` | 255 | |
+
+## Where keys live
+
+`MemoryIdempotencyStore` keeps them in process, bounded to 4MB of response bodies and 10,000 records:
+expired records go first, then the oldest completed ones. A claim still in flight is never evicted —
+dropping one would let a concurrent duplicate through.
+
+To share keys between instances behind a load balancer, implement `IIdempotencyStore` and register it
+before `AddIdempotency()`:
+
+```csharp
+builder.Services.AddSingleton<IIdempotencyStore, RedisIdempotencyStore>();
+builder.AddIdempotency();
+```
+
+The one hard requirement is that `TryReserveAsync` is **atomic**: two concurrent requests with the same
+key must not both be told they hold it.
+
+## Protocols
+
+Everything above works the same over HTTP/1.1, HTTP/2, HTTP/3 and a
+[tunnel](/httpserver/tunneling/) — including concurrent duplicates multiplexed on one HTTP/2
+connection, which HTTP/1.1 cannot even produce.
+
+It pairs with [content digests](/httpserver/content-digest/): register `UseContentDigest()` first, and a
+body that was truncated in transit is refused before it can claim a key, so the intact retry is not
+locked out.

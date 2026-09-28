@@ -4,6 +4,9 @@ description: A .pptx editor for .NET MAUI and Blazor WebAssembly in two controls
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+{/* TODO: capture screenshots for the PowerPoint window (slide-editor with the Office shell) */}
 
 - <NugetDownloads name="Shiny.Maui.Controls.Office" />
 - <NugetDownloads name="Shiny.Blazor.Controls.Office" />
@@ -16,7 +19,7 @@ Two controls, on both hosts:
 | Control | What it is |
 |---|---|
 | `SlideEditor` | the lone editing surface — canvas, selection, caret, typing. No chrome. |
-| `SlideEditorView` | `SlideEditor` plus an editing toolbar and a status line |
+| `SlideEditorView` | `SlideEditor` dressed as PowerPoint — the [Office shell](/controls/office-shell/)'s title bar, ribbon, slide rail, status bar and File backstage, all wired to the editor |
 
 Same packages as the viewers (`Shiny.Maui.Controls.Office` / `Shiny.Blazor.Controls.Office`), same
 constraints: **MAUI needs `UseShinyOffice()`** (it registers SkiaSharp, plus the Skia canvas SkiaSharp does not ship for the macOS AppKit head), **Blazor is WASM-only**, and on Blazor the container
@@ -45,6 +48,78 @@ document editor.
 <office:SlideEditorView Deck="{Binding Deck}" SlideIndex="{Binding Index}" />
 ```
 
+## The PowerPoint window
+
+`SlideEditorView` wears the [Office shell](/controls/office-shell/) dressed as PowerPoint (accent
+`#C43E1C`): the title bar with AutoSave, Save / Undo / Redo, the presentation name ("Presentation1") and
+the command search; the ribbon, whose **File** button opens the backstage (New, Open, Info, Save, Save
+As, Print, Export); the slide rail; and a status bar reading **"Slide 3 of 12"** with the notes toggle,
+the Normal / Slide Sorter / Reading View buttons, and zoom with **fit**.
+
+<Aside type="caution" title="Behaviour change">
+The ribbon's tab strip and the shell are **on by default**. An existing `SlideEditorView` grows
+PowerPoint's full tab set and window chrome. On Blazor `ShowRibbonTabs="false"` returns to a single-row
+bar. Files work as in the other editors — the shell raises events and the host reads and writes.
+</Aside>
+
+## The ribbon
+
+| Tab | What is on it | Details |
+|---|---|---|
+| **Home** | Clipboard, Slides (New, Duplicate, Delete, Earlier, Later, Layout), Font, Paragraph, Drawing, Editing (Find, Replace) | [Slides, Layouts & Notes](/controls/slide-editor/slides/) |
+| **Insert** | Slides, Tables, Images, Illustrations (shapes, icons, charts), Links, Text (text box, header & footer, date & time, slide number), Media | [Charts, Icons & Media](/controls/slide-editor/insert/) |
+| **Design** | Themes, variants, slide size, format background | [Design](/controls/slide-editor/design/) |
+| **Transitions** | Nine transitions, duration, direction, Apply to all, advance timing, Preview | [Transitions & Animations](/controls/slide-editor/transitions-animations/) |
+| **Animations** | Entrance, emphasis and exit effects, triggers, the animation pane | [Transitions & Animations](/controls/slide-editor/transitions-animations/) |
+| **Slide Show** | From beginning, from current, presenter view, Hide slide | [Presenting](/controls/slide-editor/presenting/) |
+| **View** | Normal, Outline, Slide Sorter, Notes Page, Slide Master; zoom; ruler, gridlines, guides | [Views & sections](#views-and-sections) |
+| **Shape Format** *(contextual)* | Fill, outline, effects, quick styles, size, arrange, align, rotate | [Shape Format](/controls/slide-editor/format/) |
+| **Table Design / Table Layout**, **Chart Design**, **Slide Master** *(contextual)* | Appear with the selection or the view | [Objects](/controls/slide-editor/objects/) |
+
+Speaker notes and the view/zoom controls sit in the status bar, where PowerPoint keeps them. Icons
+without a glyph in the shared set come from `OfficeIcons.PowerPoint.cs` (`SlideIcon`). Below 600px the
+bar runs in `Simplified` mode.
+
+Everything is on the shared `SlideEditorController`, so both hosts' ribbons are thin, and every command
+is **one undo step** — a drag, a rotation or a nudge run included. A deck opened and saved without an edit
+is byte-identical, and everything written follows the schema's element order.
+
+### Status for a host's status bar
+
+| Member | Blazor | MAUI |
+|---|---|---|
+| Current slide (0-based) | `CurrentSlideIndex` | `CurrentSlideIndex` (read-only bindable) |
+| Slide count | `SlideCount` | `SlideCount` (read-only bindable) |
+| Zoom requested, `null` = fit | `@bind-Zoom` (`Zoom` / `ZoomChanged`) | `Zoom` (two-way) |
+| Zoom in effect | `EffectiveZoom` | `EffectiveZoom` (read-only bindable) |
+| Notes pane | `@bind-ShowNotes` | `ShowNotes` |
+| View | `@bind-ViewMode` (`SlideEditorViewMode`) | `ViewMode` (two-way) |
+| Any of the above changed | `StatusChanged` callback, `StatusUpdated` event | `StatusChanged` event |
+| Presenting | `IsPresenting` | `IsPresenting` |
+
+## Views and sections
+
+**View tab.** Normal, **Outline** (edit titles and bullets as text), **Slide Sorter** (drag to reorder),
+**Notes Page**, and **Slide Master** (edit the master's and layouts' text styles and backgrounds; saved
+back to those parts). Zoom runs from 25% to 400% or fit, with <kbd>Ctrl</kbd>+wheel or pinch; ruler,
+gridlines and guides are toggles.
+
+```csharp
+c.ViewMode = SlideEditorViewMode.Outline;   // Normal, Outline, SlideSorter, NotesPage, SlideMaster
+c.Zoom = null;                              // fit; 0.25 to 4 otherwise
+```
+
+**Sections** in the rail: add, rename, remove (with or without their slides), move and collapse — written
+to `p14:sectionLst`.
+
+On the controller: `AddSection`, `RenameSection`, `RemoveSection(index, withSlides)` and `MoveSection`.
+
+## Export
+
+`ExportSlidePng(slide, width)`, `ExportSlidesPng(width)` and `ExportPdf()` (`SKDocument.CreatePdf`, one
+page per visible slide) on the view. The painter is `SlideExporter` in `Shiny.Controls.Office.Skia`, for a
+deck with no view.
+
 ## Two gestures, and the distinction is the whole design
 
 **Shape mode** — a single click (tap) selects a shape and draws a **dashed** frame with eight resize
@@ -60,9 +135,9 @@ A single click while in text mode moves the caret; a click outside the shape lea
 
 Only shapes the slide itself owns. Shapes painted from the **layout or master** are skipped by hit
 testing, because they belong to every slide using that layout — letting a click grab one would let a
-user drag the company logo off the whole deck at once. Shapes flattened out of a **group** are
-likewise not editable: their position is the group's coordinate space collapsed into the slide's, so
-writing a new one back would put them somewhere else entirely.
+user drag the company logo off the whole deck at once. A **group** is selected whole; a double-click
+goes into it — see [Objects, Groups & Tables](/controls/slide-editor/objects/). Several shapes can be
+selected at once; see [Shape Format](/controls/slide-editor/format/#multi-select-groups-and-guides).
 
 ## Editing
 
@@ -128,7 +203,13 @@ Editor.HandleKey(EditorKey.Left, shift: true);
 Editor.HandleKey(EditorKey.Undo, control: true);
 ```
 
-Tapping, dragging, typing and every toolbar command work without it.
+Tapping, dragging, typing and every toolbar command work without it. Ribbon shortcuts arrive as
+`SlideShortcut` values through `SlideEditor.HandleShortcut`.
+
+Shortcuts on Blazor: <kbd>Ctrl</kbd>+<kbd>B</kbd>/<kbd>I</kbd>/<kbd>U</kbd>, <kbd>Ctrl</kbd>+<kbd>E</kbd>/<kbd>L</kbd>/<kbd>R</kbd>/<kbd>J</kbd>,
+<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>&gt;</kbd>/<kbd>&lt;</kbd>, <kbd>Ctrl</kbd>+<kbd>D</kbd>, <kbd>Ctrl</kbd>+<kbd>M</kbd>,
+<kbd>Ctrl</kbd>+<kbd>G</kbd> / <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>G</kbd> (group / ungroup), <kbd>Shift</kbd>+<kbd>Enter</kbd>
+(soft break), <kbd>F5</kbd> and <kbd>Shift</kbd>+<kbd>F5</kbd>.
 
 ## Find
 
@@ -139,10 +220,13 @@ those can be selected. See [Find in Office Documents](/controls/office-find/).
 
 ## Not implemented
 
-- **Soft line breaks** (`a:br`). They are read and rendered, but the caret cannot be placed on one and
-  Shift+Enter does not insert one — a break contributes no characters to the offset space.
-- **Rotation** handles. A rotated shape renders rotated and can still be moved and resized, but the
-  drag works in unrotated slide coordinates.
+- **Character spacing** is saved but not yet drawn.
+- **Multi-select on MAUI touch.** Touch carries no modifier state, so multi-select there goes through
+  `SlideEditor.ShiftHeld` / `ControlHeld` (set by a host's keyboard hook) or the marquee.
+- **Audio and video** play through the host (a browser element, or the platform launcher) rather than
+  inline on the slide.
+- **Charts** carry no embedded workbook.
+- The Blazor show has no separate audience window — presenter view is a side panel.
 - Everything the viewer does not render is still not rendered — see [Slide Viewer](/controls/slide-viewer/).
 
 ## Screenshots

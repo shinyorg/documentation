@@ -1,0 +1,274 @@
+---
+title: Webhooks
+description: Receive GitHub, Stripe, Slack and Standard Webhooks deliveries with signature verification, replay protection and duplicate suppression, and sign the webhooks you send
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+using Shiny.Net.HttpServer.Webhooks;
+
+app.MapWebhook("/hooks/github", WebhookSignature.GitHub(secret), async (WebhookContext ctx) =>
+{
+    if (ctx.EventType == "push")
+        await builds.QueueAsync(ctx.ReadFromJson(AppJson.Default.PushEvent)!);
+});
+```
+
+That maps a `POST` route that runs the handler only for deliveries GitHub actually signed. Before the
+handler runs, the route:
+
+1. **Buffers the raw body**, up to `MaxBodySize` (5 MiB by default). A larger body gets a `413`.
+2. **Verifies the signature over those exact bytes**, comparing in constant time
+   (`CryptographicOperations.FixedTimeEquals`).
+3. **Checks the timestamp** for senders that sign one. Five minutes either way by default.
+4. **Suppresses a redelivery** of an id it has already handled, if you turned that on.
+
+A delivery that fails gets a `401` with a [problem details](/httpserver/errors/) body that says only
+"The webhook signature could not be verified." The log records the actual reason (missing header,
+wrong signature, stale timestamp) as a warning. The response does not say which check failed, so a
+forger learns nothing about what to fix.
+
+If the handler writes nothing, the response is `200`, and that is all a sender looks at. To return a
+status yourself, use the overload that returns an `IResult`:
+
+```csharp
+app.MapWebhook("/hooks/stripe", WebhookSignature.Stripe(stripeSecret), async (WebhookContext ctx) =>
+{
+    if (ctx.EventType != "checkout.session.completed")
+        return Results.Ok();                           // acknowledge what you ignore
+
+    await orders.FulfilAsync(ctx.ReadFromJson(AppJson.Default.StripeEvent)!);
+    return Results.Ok();
+});
+```
+
+Nothing has to be registered, and there is no middleware to install. Verification is part of the
+route itself.
+
+## The built-in verifiers
+
+| Factory | Sender | What it checks | Delivery id | Event type |
+| --- | --- | --- | --- | --- |
+| `WebhookSignature.GitHub(secret)` | GitHub | `X-Hub-Signature-256: sha256=<hex>` over the body | `X-GitHub-Delivery` | `X-GitHub-Event` |
+| `WebhookSignature.Stripe(secret)` | Stripe | `Stripe-Signature: t=…,v1=…` over `{t}.{body}`, any of several `v1` values, timestamp tolerance | the event `id` in the body | the event `type` in the body |
+| `WebhookSignature.StandardWebhooks(secret)` | [Standard Webhooks](https://www.standardwebhooks.com/): Svix, Clerk, Resend, Supabase, OpenAI… | `webhook-id`, `webhook-timestamp`, `webhook-signature: v1,<base64>` over `{id}.{timestamp}.{body}`, several signatures, timestamp tolerance | `webhook-id` | `type` in the body |
+| `WebhookSignature.Slack(signingSecret)` | Slack | `X-Slack-Signature: v0=<hex>` over `v0:{timestamp}:{body}`, with `X-Slack-Request-Timestamp` | none | none |
+| `WebhookSignature.Hmac(o => …)` | anyone else | an HMAC of the body in one header | optional header | optional header |
+
+Standard Webhooks secrets are the `whsec_…` base64 strings senders hand out. The prefix is optional,
+and a secret that does not decode throws when the verifier is built rather than failing every
+delivery. The older `svix-id` / `svix-timestamp` / `svix-signature` header names are accepted too.
+Stripe's secret is also `whsec_…`, but Stripe uses it as plain text, which the Stripe verifier does.
+
+### Anything else: the generic HMAC verifier
+
+Most senders that are not on that list put an HMAC of the body in a single header.
+
+```csharp
+// Shopify: base64 HMAC-SHA256 of the body
+var shopify = WebhookSignature.Hmac(o =>
+{
+    o.Name = "shopify";
+    o.HeaderName = "X-Shopify-Hmac-Sha256";
+    o.Algorithm = WebhookHmacAlgorithm.Sha256;     // Sha1, Sha256, Sha512
+    o.Encoding = WebhookSignatureEncoding.Base64;  // Hex, Base64
+    o.Secrets.Add(shopifySecret);
+    o.DeliveryIdHeader = "X-Shopify-Webhook-Id";
+    o.EventTypeHeader = "X-Shopify-Topic";
+});
+```
+
+Set `Prefix` for a signature written as `sha1=…`. A header without the prefix is refused, because
+the prefix is part of the format. This shape signs no timestamp, so it has no replay window. Use
+[duplicate suppression](#duplicate-deliveries) in its place.
+
+A sender whose scheme is not a single HMAC of the body needs its own `IWebhookVerifier`: one method
+that gets the headers, the raw body and the current time. Compare with `FixedTimeEquals`, not `==`.
+
+## Rotating secrets
+
+Every factory takes several secrets. A delivery is accepted when **any** of them verifies it:
+
+```csharp
+WebhookSignature.GitHub(newSecret, oldSecret);
+```
+
+Add the new secret, move the sender over, then remove the old one. No delivery is refused in between.
+Stripe and Standard Webhooks senders also send one signature per active key while they rotate, and
+any one that matches is enough.
+
+## Replay protection
+
+Stripe, Slack and Standard Webhooks sign a timestamp. A delivery whose timestamp is more than five
+minutes away from the server's clock, in either direction, is refused. Otherwise anyone who captured
+one delivery could send it again forever. To change the window:
+
+```csharp
+WebhookSignature.Stripe(TimeSpan.FromMinutes(10), stripeSecret);
+WebhookSignature.StandardWebhooks(tolerance: null, secret);   // off. Only if the sender's clock cannot be trusted at all.
+```
+
+The clock is `WebhookOptions.TimeProvider`, so a test can move it.
+
+<Aside type="caution" title="A phone's clock is part of this">
+The check compares the sender's clock with this device's. A phone whose clock the user has set by
+hand, or that has been offline long enough to drift, refuses every delivery as stale. The log names
+the reason (`the timestamp … is outside the 300s tolerance`), so this is easy to spot.
+</Aside>
+
+## Duplicate deliveries
+
+Senders deliver *at least* once. They retry on a timeout, on a 5xx, and sometimes for no visible
+reason. A handler that charges a card or sends a push should not run twice for one event:
+
+```csharp
+app.MapWebhook("/hooks/github", WebhookSignature.GitHub(secret), Handle, o => o.SuppressDuplicates());
+```
+
+A verified delivery whose id was already handled gets a `200` (`DuplicateStatusCode`), so the sender
+stops retrying, and the handler does not run. Some details:
+
+- **Only verified deliveries are recorded.** A forged request carrying a real delivery id cannot get
+  that id marked as done.
+- **A failed attempt is forgotten.** If the handler throws or answers 5xx, the id is removed, so the
+  sender's retry is processed instead of being dropped as a duplicate.
+- **Ids are kept per sender.** They are stored as `github:<id>`, so two senders' ids never collide.
+- **The built-in store is bounded.** `SuppressDuplicates(capacity: 10_000, retention: 24h)` keeps
+  keys in memory and drops the oldest first. The ids come from the sender, and an unbounded set of
+  them is a memory leak, which on a phone gets the app killed.
+
+It needs an id. GitHub, Stripe, Standard Webhooks and a generic verifier with `DeliveryIdHeader` all
+have one; Slack does not. To catch duplicates across restarts, implement `IWebhookDeliveryStore` over
+your database and set `o.DeliveryStore`.
+
+## Reading the body
+
+The body had to be buffered to verify it, so it is on the context as the exact bytes that were
+verified:
+
+| Member | |
+| --- | --- |
+| `Body` | `ReadOnlyMemory<byte>`, as verified |
+| `ReadAsString()` | UTF-8 |
+| `ReadFromJson(JsonTypeInfo<T>)` | source-generated, trim-safe |
+| `ParseJson()` | a `JsonDocument` |
+| `DeliveryId`, `EventType`, `Timestamp` | what the verifier found |
+| `Verifier` | the verifier's name, e.g. `github` |
+| `HttpContext`, `Request`, `Response` | the usual |
+
+`ctx.Request.Body` is replaced with a stream over the same bytes, so code that reads the request the
+ordinary way still works, for example a form reader for Slack's form-encoded slash commands or a
+generated endpoint's `[FromBody]`.
+
+<Aside type="caution" title="Verify before you parse">
+Every sender signs the bytes it sent. A body that has been through a JSON parser and back, with
+reordered keys, different whitespace or a normalised number, no longer matches its own signature.
+This is why verification sees the raw buffer before anything else can touch it. If
+[`UseRequestDecompression`](/httpserver/compression/) runs first, the signature is checked over the
+decompressed bytes. That is what senders that compress sign, but it is worth knowing.
+</Aside>
+
+## Named verifiers, shared settings
+
+Register verifiers by name when a secret comes from configuration, or when several routes share
+settings:
+
+```csharp
+builder.AddWebhooks(o =>
+{
+    o.AddVerifier("github", WebhookSignature.GitHub(config["GitHub:WebhookSecret"]!));
+    o.AddVerifier("stripe", WebhookSignature.Stripe(config["Stripe:WebhookSecret"]!));
+    o.SuppressDuplicates();
+    o.MaxBodySize = 1024 * 1024;
+});
+
+app.MapWebhook("/hooks/github", "github", HandleGitHub);
+```
+
+A name that was never registered throws when the route is mapped, not on the first delivery.
+
+| Option | Default | |
+| --- | --- | --- |
+| `MaxBodySize` | 5 MiB | Largest body buffered for verification. More gets a `413`. |
+| `DeliveryStore` | `null` | Set by `SuppressDuplicates()`, or your own store. |
+| `DuplicateStatusCode` | 200 | What a recognised redelivery gets. |
+| `TimeProvider` | system clock | What timestamps are checked against. |
+| `OnRejected` | `null` | Replaces the 401. It gets the `WebhookVerificationResult`, including the reason. |
+
+The last argument of `MapWebhook` adjusts those settings for one route only:
+
+```csharp
+app.MapWebhook("/hooks/big", "github", Handle, o => o.MaxBodySize = 25 * 1024 * 1024);
+```
+
+## On existing routes and typed endpoints
+
+When a route is already mapped, or it is a [typed endpoint](/httpserver/endpoints/), put the
+requirement on it as metadata and install the middleware that enforces it:
+
+```csharp
+builder.AddWebhooks(o => o.AddVerifier("github", WebhookSignature.GitHub(secret)));
+
+app.UseWebhookVerification();
+
+app.MapPost("/hooks/plain", async ctx =>
+{
+    var webhook = ctx.GetWebhook();
+    ...
+}).RequireWebhookSignature("github");
+```
+
+```csharp
+[Route("/hooks")]
+public class HookEndpoints
+{
+    [Post("/github")]
+    [RequireWebhookSignature("github")]
+    public IResult GitHub(WebhookContext webhook) => ...;
+}
+```
+
+A `WebhookContext` parameter on a typed endpoint is bound from the verified delivery. On a class, the
+attribute covers every method, and a method's own attribute replaces it.
+
+<Aside type="danger" title="Metadata needs the middleware">
+`[RequireWebhookSignature]` and `.RequireWebhookSignature(...)` are enforced by
+`UseWebhookVerification()`, the same way `[Authorize]` is enforced by `UseAuthorization()`. Forget
+the middleware and nothing checks the signature. Two things limit the damage.
+`ctx.GetWebhook()` and a bound `WebhookContext` parameter **throw** when the request was not
+verified, so a handler that uses the delivery fails with a 500 and never runs on unverified data.
+And `MapWebhook` needs no middleware at all, so use it for new routes.
+</Aside>
+
+The middleware runs after routing and only acts on endpoints that carry the requirement, so every
+other endpoint is unaffected. If it and `MapWebhook` both apply to one route, the delivery is still
+verified and recorded only once.
+
+## Signing the webhooks you send
+
+A MAUI app can also be the sender: it can notify a backend when something happens on the device, or
+call another embedded server. `WebhookSigner` produces Standard Webhooks signatures that any Standard
+Webhooks library can verify, including this server's own verifier and Svix's:
+
+```csharp
+var secret = WebhookSigner.GenerateSecret();          // "whsec_…", 32 random bytes; share it once
+var signer = WebhookSigner.StandardWebhooks(secret);
+
+var body = JsonSerializer.SerializeToUtf8Bytes(evt, AppJson.Default.DeviceEvent);
+using var request = new HttpRequestMessage(HttpMethod.Post, url) { Content = new ByteArrayContent(body) };
+
+signer.Apply(request, messageId: evt.Id, body);       // webhook-id, webhook-timestamp, webhook-signature
+await http.SendAsync(request);
+```
+
+Keep `messageId` the same when you retry an event, because receivers deduplicate on it.
+`signer.Sign(id, timestamp, body)` returns only the `v1,…` value, for a client that is not
+`HttpClient`.
+
+## Transports
+
+Verification runs in the request pipeline, so it works the same over HTTP/1.1, HTTP/2 (including
+bodies split across many DATA frames), HTTP/3 and every [tunnel](/httpserver/tunneling/). For a
+receiver on a phone, a tunnel is usually how the sender reaches it at all. Nothing about it depends
+on the connection.

@@ -1,0 +1,156 @@
+---
+title: Request Localization
+description: Run each request under the culture it asks for, from the query string, a cookie or Accept-Language
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+app.UseRequestLocalization("en", "fr", "de");   // the first is the default
+```
+
+Every request now runs with `CultureInfo.CurrentCulture` and `CultureInfo.CurrentUICulture` set to
+the language it asked for. `ToString("C")`, `DateTime.ToString()` and a `ResourceManager` return the
+right thing without the handler knowing localization is on.
+
+With a container, the shape matches ASP.NET Core:
+
+```csharp
+builder.AddRequestLocalization(o => o
+    .SetDefaultCulture("en")
+    .AddSupportedCultures("en", "en-GB", "fr", "fr-CA", "de")
+    .AddSupportedUICultures("en", "fr", "de"));
+
+var app = builder.Build();
+app.UseRequestLocalization();
+```
+
+`Culture` controls **formatting**: dates, numbers, currency and sort order. `UICulture` controls
+**text**, meaning which `.resx` is read. They are separate because it is normal for someone to read
+English while using French-Canadian number formats.
+
+## How a request picks
+
+The providers are asked in order, and the first one that names a supported culture wins:
+
+| Provider | Reads | Notes |
+| --- | --- | --- |
+| `QueryStringRequestCultureProvider` | `?culture=fr-CA&ui-culture=fr` | Either key alone sets both. Keys are configurable |
+| `CookieRequestCultureProvider` | `.Shiny.Culture` = `c=fr-CA\|uic=fr` | Uses ASP.NET Core's value format |
+| `AcceptLanguageHeaderRequestCultureProvider` | `Accept-Language: fr-CA, fr;q=0.9, en;q=0.5` | Sorted by `q`, `*` and `q=0` dropped, top 3 tried |
+
+The order goes from the most deliberate choice to the least. A culture in the URL was chosen on
+purpose. A cookie is a choice the visitor made earlier. `Accept-Language` is just the operating
+system's setting.
+
+If no provider matches, the request gets `DefaultRequestCulture`.
+
+### Parent fallback
+
+With `FallBackToParentCultures` (on by default), `fr-CA` falls back to `fr` when only `fr` is
+supported, and `zh-Hant-TW` falls back to `zh-Hant` and then `zh`. Each candidate's parents are tried
+before the next candidate, so `Accept-Language: fr-CA, en` against `en, fr` gives `fr`, the caller's
+first language in a less specific form. A parent never matches a more specific supported culture:
+`de` does not select `de-DE`.
+
+Culture and UI culture are matched separately. With the configuration above, `fr-CA` formats as
+`fr-CA` and reads text as `fr`.
+
+### Remembering a choice
+
+The cookie provider only reads the cookie. Your language picker writes it:
+
+```csharp
+app.MapPost("/language/{culture}", ctx =>
+{
+    var culture = ctx.Request.RouteValues["culture"]!.ToString()!;
+
+    ctx.Response.Cookies.Append(
+        CookieRequestCultureProvider.DefaultCookieName,
+        CookieRequestCultureProvider.MakeCookieValue(new RequestCulture(culture)),
+        new CookieOptions { MaxAge = TimeSpan.FromDays(365), SameSite = SameSiteMode.Lax });
+
+    return ctx.Response.WriteAsync("ok");
+});
+```
+
+The value format is the same as ASP.NET Core's, so a cookie written by either server can be read by
+the other.
+
+### Your own provider
+
+```csharp
+o.AddInitialRequestCultureProvider(new CustomRequestCultureProvider(ctx =>
+    ValueTask.FromResult<ProviderCultureResult?>(
+        ctx.User.FindFirst("locale")?.Value is { } locale ? new ProviderCultureResult(locale) : null)));
+```
+
+`AddInitialRequestCultureProvider` puts it ahead of the built-in providers. You can also replace
+`RequestCultureProviders` entirely.
+
+## Reading the result
+
+```csharp
+app.MapGet("/whoami", ctx =>
+{
+    var feature = ctx.GetRequestCultureFeature();   // null without the middleware
+    return ctx.Response.WriteAsync(
+        $"{feature?.RequestCulture.UICulture.Name} via {feature?.Provider?.GetType().Name ?? "default"}");
+});
+```
+
+`ctx.GetRequestCulture()` is a shortcut for `GetRequestCultureFeature()?.RequestCulture`.
+
+## Options
+
+| Option | Default |
+| --- | --- |
+| `DefaultRequestCulture` | The process's current culture when the options were created |
+| `SupportedCultures` / `SupportedUICultures` | Just the current culture. `null` accepts any culture the runtime can create |
+| `FallBackToParentCultures` / `FallBackToParentUICultures` | `true` |
+| `ApplyCurrentCultureToResponseHeaders` | `false`. When `true`, sends `Content-Language` with the chosen UI culture |
+| `RequestCultureProviders` | Query string, cookie, `Accept-Language` |
+
+`AddSupportedCultures` and `AddSupportedUICultures` **replace** the list rather than adding to it, as
+in ASP.NET Core. If you call them in two `AddRequestLocalization` calls, the last one wins.
+
+<Aside>
+If an [output cache](/httpserver/caching/) or a shared proxy sits in front of localized responses,
+vary the cache on `Accept-Language` (and on the cookie or query key you use). `Content-Language` says
+which language a response is in. It does not tell a cache that the response depends on the request's
+language.
+</Aside>
+
+## Protocols and concurrency
+
+The current cultures are async-local. They flow through every `await` in the request's handler and
+nowhere else, so two HTTP/2 or HTTP/3 streams on one connection each run in their own culture. The
+previous values are restored when the pipeline returns, so a kept-alive connection does not carry one
+request's culture into the next. The middleware reads only request headers, the query string and
+cookies, so it behaves the same on HTTP/1.1, HTTP/2, HTTP/3 and tunneled connections.
+
+## InvariantGlobalization and AOT
+
+Native AOT and trimmed mobile builds often set `<InvariantGlobalization>true</InvariantGlobalization>`.
+In that mode the runtime has no culture data, and by default it refuses to create any culture except
+the invariant one. Localization handles this without throwing:
+
+- **`InvariantGlobalization` alone.** The `string` overloads (`AddSupportedCultures("fr")`,
+  `SetDefaultCulture("en")`) skip names the runtime won't create. The middleware logs one warning
+  listing them, and every request runs with the invariant culture. `GetRequestCulture()` reports
+  that.
+- **Plus `<PredefinedCulturesOnly>false</PredefinedCulturesOnly>`.** Negotiation works by name again.
+  `CurrentUICulture` is `fr`, so a `ResourceManager` finds the French satellite assembly. Dates and
+  numbers still format invariantly, because the data to do otherwise isn't there. For most apps that
+  localize text, this is the right setting.
+- **Neither.** Full culture data, so formatting follows the culture too.
+
+`RequestLocalizationOptions.IsGlobalizationInvariant` tells you which mode the process is in.
+Parent fallback works on the culture names themselves, so `fr-CA` still falls back to `fr` in
+invariant mode.
+
+## Where it goes
+
+Put it after anything that identifies the caller (a custom provider might read a claim) and before
+anything that renders text, including the [exception handler](/httpserver/errors/) if your error
+messages are localized.

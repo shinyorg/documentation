@@ -1,0 +1,151 @@
+---
+title: Host Filtering
+description: Refuse requests addressed to names the server does not answer to, which stops DNS rebinding against a server on the LAN
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+builder.AddHostFiltering();
+
+var app = builder.Build();
+app.UseHostFiltering();   // first, ahead of everything else
+```
+
+With no configuration, that call admits loopback names, IP addresses and tunneled requests, and
+refuses every other name with a `400`. That is what a server bound to `0.0.0.0` on a phone or a LAN
+box needs.
+
+## What it stops
+
+The attack is **DNS rebinding**. A page on `evil.example` loads from the attacker's server, then
+points its own DNS name at `192.168.1.20`, the phone on your desk. The browser still thinks it is
+talking to `evil.example`. The same-origin policy lets the page read every response, and a server on
+`0.0.0.0` answers because nothing told it not to. CORS does not help here, because the browser does
+not see the request as cross-origin.
+
+The attacker cannot change the `Host` header. It still says `evil.example`, so a server that knows
+its own names can turn the request away.
+
+## Allowed hosts
+
+```csharp
+builder.AddHostFiltering(o =>
+{
+    o.AllowedHosts.Add("printer.example.com");
+    o.AllowedHosts.Add("*.devices.example.com");
+    o.AllowedHosts.Add("*.local");               // mDNS names, see below
+});
+```
+
+| Entry | Matches |
+| --- | --- |
+| `device.example.com` | That name, in any case, with or without a trailing dot |
+| `*.example.com` | Any subdomain of it at any depth, but **not** `example.com` itself |
+| `192.168.1.20`, `[fe80::1]`, `fe80::1` | That address |
+| `*` | Anything. The filter is off |
+
+Ports are ignored on both sides. A malformed entry throws when the middleware is built, so you find
+out at startup and not at the first request.
+
+<Aside type="caution">
+This differs from ASP.NET Core in one way: an **empty** `AllowedHosts` does not mean "allow
+everything". The defaults below already admit every name a rebinding attack cannot produce, so an
+empty list is the setting you want. Add `"*"` if you really want the check off.
+</Aside>
+
+## The defaults
+
+| Option | Default | Why |
+| --- | --- | --- |
+| `AllowLoopbackHosts` | `true` | `localhost`, `*.localhost`, `127.0.0.0/8` and `::1`. Browsers resolve these to loopback without asking DNS, so they cannot be rebound. Tunnel agents like `cloudflared` also use them on the hop to the server |
+| `AllowIpAddressHosts` | `true` | A rebinding attack needs a DNS name. A browser sends an IP address as the `Host` only when the page was loaded from that address, and then no DNS was involved. This keeps the server reachable at whatever address the phone has on the current network, and at the addresses [Discovery](/httpserver/discovery/) resolves to |
+| `AllowTunneledConnections` | `true` | See [tunnels](#tunnels) |
+| `AllowEmptyHosts` | `true` | An HTTP/1.0 request, or HTTP/2 without `:authority`. No browser sends one. (An HTTP/1.1 request without `Host` is already rejected by the parser.) |
+| `IncludeFailureMessage` | `true` | The problem details `detail` names the refused host. It is only sent back to the client that sent it |
+
+Turn `AllowIpAddressHosts` off, and list the addresses in `AllowedHosts`, only if the `Host` header is
+also trusted for something else, such as building absolute URLs.
+
+### mDNS `.local` names
+
+[Discovery](/httpserver/discovery/) gives clients an IP address, which is already allowed. A browser
+that visits `http://myphone.local:8080/` sends `myphone.local` as the host, and that is **not**
+allowed by default. Add `*.local` (or the exact name) to `AllowedHosts`. `.local` names are resolved
+with multicast DNS on the local link, not by public DNS, so an attacker off the network cannot rebind
+them.
+
+## Tunnels
+
+A tunnel's public entry point is already on the internet. A browser tricked into visiting it gives
+the attacker nothing they could not get by visiting it themselves. Rebinding matters on the private
+side, and a tunneled connection did not come from there. So by default, requests that arrived
+through an `ITunnelProvider` ([relay](/httpserver/tunneling/), [SSH](/httpserver/ssh/),
+[Azure Relay](/httpserver/azure-relay/)) are let through without checking the host.
+
+[Tunnel agents](/httpserver/tunnel-agents/) (cloudflared, ngrok, Tailscale Funnel) work differently.
+They forward to the server's local port, so their requests arrive as ordinary loopback connections
+with the **public** hostname as the `Host`. Allow that name with a delegate, which is checked on each
+request, so a quick tunnel that gets a new address on restart keeps working:
+
+```csharp
+builder.AddHostFiltering(o => o.AllowPublicUrl(() => cloudflared.PublicUrl));
+```
+
+To check tunneled requests against the same rules as everything else, turn the exemption off and
+allow the tunnel's own name:
+
+```csharp
+builder.AddHostFiltering(o =>
+{
+    o.AllowTunneledConnections = false;
+    o.AllowTunnel(sshTunnelProvider);   // reads provider.PublicUrl on every request
+});
+```
+
+## Protocols
+
+The check is the same for every protocol. On HTTP/1.1 it reads the `Host` header. On HTTP/2 and
+HTTP/3 it reads `:authority`, which the server exposes as `Request.Host`. WebSocket upgrades go
+through it like any other request.
+
+When there are two host values, both have to pass:
+
+- a `Host` header alongside `:authority`
+- `X-Forwarded-Host` rewriting `Request.Host` under [`UseForwardedHeaders`](/httpserver/configuration/)
+
+The forwarded case matters. A rebinding page counts as same-origin in its own browser, so it can set
+`X-Forwarded-Host` to anything. If the filter checked only the rewritten value, the page could name an
+allowed host and get in.
+
+## Rejections
+
+A refused request gets `400 Bad Request` with an RFC 9457 problem details body:
+
+```json
+{
+  "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "This server does not answer to the host 'evil.example'.",
+  "instance": "/api/files"
+}
+```
+
+Each rejection is also logged at `Warning`.
+
+## Without a container
+
+```csharp
+app.UseHostFiltering(o => o.AllowedHosts.Add("printer.local"));
+```
+
+`UseHostFiltering` uses the registered options if there are any, and otherwise starts from fresh
+defaults. The callback changes them in either case.
+
+## Where it goes
+
+Register it first, ahead of [IP filtering](/httpserver/ip-filtering/), authentication and routing, so
+that a request to the wrong name can't discover which routes exist. It checks a different thing from
+the IP filter. The IP filter looks at *who* connected. Host filtering looks at *which name they
+thought they were connecting to*. A LAN server usually wants both.

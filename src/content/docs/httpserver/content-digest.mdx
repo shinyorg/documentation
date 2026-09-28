@@ -1,0 +1,165 @@
+---
+title: Content Digests
+description: RFC 9530 Content-Digest and Repr-Digest — verify uploads end to end, and send digests as headers or trailers
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+builder.AddContentDigest();
+
+var app = builder.Build();
+app.UseContentDigest();          // before UseRequestDecompression / UseResponseCompression
+```
+
+TLS already protects the bytes in transit, so what is this for? The hops TLS does not cover. An
+embedded server is usually reached *through* something — a relay, a
+[tunnel agent](/httpserver/tunnel-agents/), a reverse proxy — and each of those terminates TLS and
+re-frames the message. A digest is end to end: the sender computes it and the recipient checks it,
+whatever sat in the middle. On a device it also catches the upload a flaky connection truncated and a
+buggy client never noticed.
+
+This is [RFC 9530](https://www.rfc-editor.org/rfc/rfc9530): `Content-Digest`, `Repr-Digest`, and the
+`Want-` fields that ask for them. `sha-256` and `sha-512` are supported — the two the RFC registers as
+active.
+
+```http
+POST /upload HTTP/1.1
+Content-Digest: sha-256=:X48E9qOokqqrvdts8nOJRJN3OWDUoyWxBf7kbu9DBPE=:
+
+{"hello": "world"}
+```
+
+## Verifying requests
+
+On by default once `UseContentDigest()` is in the pipeline. A request carrying `Content-Digest` is
+hashed **as it is read** — an upload headed for disk is never held in memory just to be checked — and
+held to every supported algorithm the header names.
+
+| The request… | Response |
+| --- | --- |
+| matches | Passes through untouched |
+| does not match | **400** problem details, with `Want-Content-Digest` saying what the server checks |
+| names only algorithms the server does not know | **400** — or passes unverified with `RejectUnsupportedAlgorithms = false` |
+| has a malformed header | **400** |
+| has a body but no header, on an endpoint that requires one | **400** |
+
+The verdict exists only once the body has been read to the end, so the read that finishes it throws
+instead of returning the last bytes. A handler that deserializes the body therefore fails before it
+acts. One that streams to disk sees the failure in place of a clean end, and should discard what it
+wrote. A handler that catches the failure and answers anyway is overruled: while a request is being
+verified its response is held (up to `MaxBufferedResponseBytes`), and the 400 replaces it.
+
+Require a digest on an endpoint that must not accept a truncated upload:
+
+```csharp
+app.MapPost("/firmware", Upload).RequireContentDigest();
+```
+
+<Aside type="caution" title="Register it ahead of decompression and compression">
+`Content-Digest` is over the bytes **on the wire**, content coding included. `UseContentDigest()` must
+come before `UseRequestDecompression()` so it sees the compressed upload, and before
+`UseResponseCompression()` so it hashes the compressed response. Registered after compression it
+notices, and sends no digest rather than a wrong one.
+</Aside>
+
+## Digests on responses
+
+A client asks with `Want-Content-Digest` (or `Want-Repr-Digest`), giving each algorithm a preference
+from 0 to 10; the most preferred supported one is used.
+
+```http
+GET /report HTTP/1.1
+Want-Content-Digest: sha-512=10, sha-256=3
+```
+
+| Setting | Behaviour |
+| --- | --- |
+| `DigestEmission.WhenRequested` | Only when the client asked. The default |
+| `DigestEmission.Always` | Every response, in `DefaultAlgorithm` unless the client prefers another |
+| `DigestEmission.Never` | Never, even when asked |
+
+```csharp
+builder.AddContentDigest(o => o.ResponseDigest = DigestEmission.Always);
+
+app.MapGet("/snapshot", Handler).WithContentDigest();     // this route always
+app.MapGet("/live", Handler).DisableContentDigest();       // this route never
+```
+
+### Header or trailer
+
+A digest cannot be known until after the last byte, and a header goes out before the first. So:
+
+- **Small responses** — up to `MaxBufferedResponseBytes` (64KB) — are held until complete, hashed, and
+  sent with the digest as an ordinary **header**, and a `Content-Length` as a side effect.
+- **Larger or streamed responses** — past the limit, or once the handler calls `StartAsync` — stream
+  as they are written, hashed on the way past, and the digest follows as a **trailer**, announced in
+  the `Trailer` header.
+
+| Protocol | Streamed response digest |
+| --- | --- |
+| HTTP/2, HTTP/3 | Always, as a trailer |
+| HTTP/1.1, chunked (no `Content-Length`) | As a trailer after the last chunk |
+| HTTP/1.1 with a declared `Content-Length` | **None** — there is no chunk for a trailer to hang off |
+| HTTP/1.0 | None |
+
+A digest the handler set itself is left alone. No digest is sent on HEAD, 1xx, 204 or 304 responses,
+or on an upgrade.
+
+### Repr-Digest
+
+`Repr-Digest` covers the whole representation rather than this message's content. For a full 200 they
+are the same bytes, and a `Want-Repr-Digest` is answered with it. For a **206** range they are not —
+the server only has the part — so no `Repr-Digest` is computed; set one yourself for a file whose
+digest you already know:
+
+```csharp
+ctx.Response.Headers.Set(DigestFields.ReprDigest, await DigestFields.ComputeAsync(file, DigestFields.Sha256));
+```
+
+## Typed endpoints
+
+```csharp
+[Route("/api/sync")]
+public class SyncEndpoints
+{
+    [Post("/batch")] [ContentDigest(RequireRequestDigest = true, AlwaysEmitResponseDigest = false)]
+    public Task<IActionResult> Batch([FromBody] Batch batch) => …;
+
+    [Get("/snapshot")] [ContentDigest]          // always digest the response
+    public Snapshot Get() => …;
+
+    [Get("/live")] [DisableContentDigest]
+    public Live Live() => …;
+}
+```
+
+On a group, `group.RequireContentDigest()` and `group.WithContentDigest()` return a builder that applies
+it to every route mapped through it.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `VerifyRequests` | `true` | Check `Content-Digest` on request bodies |
+| `RequireRequestDigest` | `false` | Server-wide; usually set per route with `RequireContentDigest()` |
+| `RejectUnsupportedAlgorithms` | `true` | A digest the client thinks was checked and was not is worse than none |
+| `ResponseDigest` | `WhenRequested` | |
+| `DefaultAlgorithm` | `sha-256` | Or `sha-512` |
+| `MaxBufferedResponseBytes` | 64KB | Header below, trailer above |
+
+## Computing one yourself
+
+`DigestFields` has the pieces: `Compute`, `ComputeAsync`, `Format`, `TryParse`, `SelectPreferred`, and
+the header names.
+
+```csharp
+var value = DigestFields.Compute(body);            // "sha-256=:…:"
+```
+
+## Protocols
+
+Request verification and response digests work over HTTP/1.1, HTTP/2, HTTP/3 and a
+[tunnel](/httpserver/tunneling/); the trailer form follows the table above. The middleware runs before
+routing, so static files and fallbacks are covered by the server-wide options — as long as
+`UseContentDigest()` is registered ahead of `UseStaticFiles()`.

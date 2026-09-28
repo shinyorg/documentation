@@ -1,0 +1,285 @@
+---
+title: CalDAV & CardDAV
+description: Serve an app's calendars and contacts over CalDAV (RFC 4791) and CardDAV (RFC 6352) — subscribed to and synced by iOS and macOS Calendar and Contacts, Thunderbird and DAVx⁵
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+An app that has calendars or contacts of its own — a booking app, a CRM, a club's fixture list, the
+device's own calendar — can hand them to the calendar and contacts apps people already use, with no
+client to write. iOS and macOS Calendar and Contacts, Thunderbird, Evolution, GNOME Calendar and
+DAVx⁵ on Android all speak CalDAV and CardDAV; point one at the device and it subscribes, syncs, and
+writes changes back.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.CalDav
+```
+
+```csharp
+app.MapCalDav("/dav", o =>
+{
+    o.CalendarStore = new FileCalendarStore(Path.Combine(FileSystem.AppDataDirectory, "calendars"));
+    o.AddressBookStore = new FileAddressBookStore(Path.Combine(FileSystem.AppDataDirectory, "contacts"));
+})
+.RequireAuthorization();
+```
+
+With [Basic authentication](/httpserver/authentication/) in front of it, that is a working server.
+On iOS: **Settings → Calendar → Accounts → Add Account → Other → Add CalDAV Account**, the device's
+address as the server, and the Basic user name and password. The same again under **Contacts** for
+CardDAV. DAVx⁵ and Thunderbird take the same three things.
+
+One mount serves both protocols, because they share nearly everything — the principal, discovery,
+sync tokens, multiget, the ETag rules — and a client given one account URL expects to find both homes
+on the same principal. Leave either store `null` to serve only the other. It is built on the
+[WebDAV](/httpserver/webdav/) package and shares its property names, dead-property store and
+`WebDavException`.
+
+## How a client finds it
+
+Clients discover every URL from the one before it, so the layout is fixed and there is nothing to
+configure:
+
+```
+/.well-known/caldav                  301 → /dav/     (RFC 6764)
+/.well-known/carddav                 301 → /dav/
+/dav/                                current-user-principal
+/dav/principals/{user}/              calendar-home-set, addressbook-home-set
+/dav/calendars/{user}/               the calendars
+/dav/calendars/{user}/{calendar}/    one calendar, with its events and tasks as .ics objects
+/dav/addressbooks/{user}/{book}/     one address book, with its contacts as .vcf objects
+```
+
+The flow iOS follows, and the one the tests replay over HTTP/1.1 and HTTP/2:
+
+1. `PROPFIND /.well-known/caldav` — redirected to the mount.
+2. `PROPFIND /dav/` for `current-user-principal` — `/dav/principals/ada/`.
+3. `PROPFIND` the principal for `calendar-home-set` — `/dav/calendars/ada/`.
+4. `PROPFIND` the home with `Depth: 1` for each calendar's name, colour, components, `getctag`,
+   `sync-token` and `current-user-privilege-set`.
+5. `REPORT sync-collection` (or `PROPFIND` for ETags and `calendar-multiget`) to fetch the events.
+6. `PUT` with `If-None-Match: *` to create, `If-Match` to change, `DELETE` to remove.
+
+The well-known redirects are only mapped by the `HttpServer` overload of `MapCalDav`, because they sit
+at the root of the server rather than under the prefix. A mount placed with the route-group overload
+(or behind a reverse proxy that moves it) maps them with `app.MapCalDavWellKnown("/dav")`. They are
+not covered by the mount's `RequireAuthorization()` — they reveal only where the mount is, and a
+client usually asks them before it has sent credentials.
+
+## Who the principal is
+
+The principal is the authenticated user's name (`HttpContext.User.Identity.Name`), so the Basic,
+cookie or [JWT](/httpserver/jwt/) user a request arrives as is whose calendars it sees. It is a path
+segment in every URL the mount hands out, and a request for another principal's URL is refused with
+403 before any store is asked — which is where one user is kept out of another's data.
+
+| Option | Notes |
+| --- | --- |
+| `PrincipalResolver` | `Func<HttpContext, string?>` to choose the principal some other way — a claim, a tenant |
+| `DefaultPrincipal` | Who an unauthenticated request is served as. `null` (the default) answers 401 |
+
+`DefaultPrincipal` exists for a single-user app with no authentication in front of the mount — and
+then anyone who can reach the port has that user's calendars. Every CalDAV client expects Basic
+credentials; use them.
+
+## What it implements
+
+| Method | Notes |
+| --- | --- |
+| `OPTIONS` | `DAV: 1, 3, extended-mkcol, calendar-access, addressbook` — the tokens a client checks before treating the server as CalDAV or CardDAV |
+| `PROPFIND` | `Depth: 0`, `1` and `infinity` (the layout is four levels deep, so it is bounded), `allprop`, `propname`, named `prop` |
+| `PROPPATCH` | Name, colour, description and timezone go to the store; anything else is a dead property. Atomic |
+| `MKCALENDAR` | With the initial name, description, colour and `supported-calendar-component-set` |
+| `MKCOL` | Extended MKCOL (RFC 5689) with a `resourcetype`, or a plain one in a home |
+| `GET` / `HEAD` | An object's text with its ETag and `If-None-Match`. On a collection, the whole calendar as one `VCALENDAR` (or every contact as one `.vcf`) — a `webcal://` subscription for a client that does not speak CalDAV |
+| `PUT` | Validated, with `If-Match` / `If-None-Match: *` — see below |
+| `DELETE` | An object (with `If-Match`) or a whole collection |
+| `REPORT` | `calendar-query`, `calendar-multiget`, `free-busy-query`, `addressbook-query`, `addressbook-multiget`, `sync-collection` |
+
+Properties, besides the WebDAV ones: `current-user-principal` (RFC 5397), `principal-URL`,
+`principal-collection-set`, `owner`, `supported-report-set`, `current-user-privilege-set`,
+`sync-token`, `calendar-home-set`, `calendar-user-address-set`, `supported-calendar-component-set`,
+`supported-calendar-data`, `calendar-description`, `calendar-timezone`, `max-resource-size`,
+`addressbook-home-set`, `addressbook-description`, `supported-address-data`, CalendarServer's
+`getctag`, and Apple's `calendar-color`. Anything a client asks for that the server does not have —
+iOS asks every principal for a dozen Apple properties — comes back as a 404 `propstat`, not a failure.
+
+A `REPORT` the resource does not support is 403 `supported-report`, which is how a client learns to
+fall back. `expand-property` and the principal search reports are not implemented; no client
+discovery flow needs them.
+
+## Writing objects
+
+A `PUT` is checked against RFC 4791 §5.3.2.1 and RFC 6352 §6.3.2.1 before a store sees it, and a
+failure is 403 with the precondition that failed in the body — which is what a client shows the user
+instead of "403".
+
+| Precondition | When |
+| --- | --- |
+| `supported-calendar-data` / `supported-address-data` | Content type is not `text/calendar` / `text/vcard` |
+| `valid-calendar-data` / `valid-address-data` | It does not parse — or a vCard has no `UID` |
+| `valid-calendar-object-resource` | More than one component type, more than one `UID`, a missing `UID`, or a `METHOD` (an iTIP message, not a calendar object) |
+| `supported-calendar-component` | A `VTODO` into a calendar that only holds events, say |
+| `no-uid-conflict` | Another object in the collection has the same `UID` — the body names it |
+| `max-resource-size` | Larger than `MaxResourceSize` |
+
+`If-None-Match: *` creates and never replaces, so two devices adding the same new event at once
+cannot both succeed. `If-Match` replaces only the version the client last saw. Either failing is 412,
+and the client fetches and merges. Writes to one collection are serialised, so the precondition
+checks and the write they guard are one step — a store does not have to be careful about that itself.
+
+## Queries and time ranges
+
+`calendar-query` evaluates `comp-filter`, `prop-filter`, `param-filter`, `is-not-defined` and
+`text-match` (with `negate-condition`, and the `i;ascii-casemap`, `i;octet` and `i;unicode-casemap`
+collations — anything else is 403 `supported-collation`). `time-range` follows RFC 4791 §9.9's rules
+for `VEVENT`, `VTODO`, `VJOURNAL` and `VFREEBUSY`, including an event's `DTEND` or `DURATION`, an
+all-day event's day, and a todo's `DUE`, `COMPLETED` and `CREATED`.
+
+Recurring events are **expanded**: a weekly meeting from January matches a range in March. Expanded
+are `FREQ` of `DAILY`, `WEEKLY`, `MONTHLY` and `YEARLY`, with `INTERVAL`, `COUNT`, `UNTIL`, `WKST`,
+`BYDAY` (including ordinals like `2TU` and `-1FR`), `BYMONTHDAY` (including negative days) and
+`BYMONTH`, plus `RDATE`, `EXDATE`, and overridden instances — an instance moved with a
+`RECURRENCE-ID` is matched where it moved to, not where it was. Expansion is in the event's own time
+zone, so a 09:00 New York meeting is at 14:00Z in January and 13:00Z after the clocks change.
+
+`addressbook-query` evaluates `prop-filter`s combined by the filter's `test` (`anyof` or `allof`),
+each with `text-match` (`equals`, `contains`, `starts-with`, `ends-with`) and `param-filter`, and
+honours `limit`/`nresults` with the 507 RFC 6352 asks for.
+
+`free-busy-query` answers a `VFREEBUSY` for the range: transparent and cancelled events do not count,
+and tentative ones are `BUSY-TENTATIVE`.
+
+<Aside type="caution" title="Limits, stated plainly">
+- **Recurrence** — `BYSETPOS`, `BYWEEKNO`, `BYYEARDAY`, `BYHOUR`/`BYMINUTE`/`BYSECOND` and the
+  sub-daily frequencies are not expanded. A series using them is treated as possibly occurring
+  anywhere between its start and its `UNTIL`, so it is **included** in a range query rather than
+  missed: returning an event the client did not need is harmless, since it filters again; leaving out
+  one it did is a missing meeting. The same applies past `MaxRecurrenceInstances` (10 000).
+- **Time zones** — a `TZID` is looked up as a system zone, which covers the IANA ids Apple, Google
+  and Thunderbird write and the Windows ids Outlook writes. A custom `VTIMEZONE` the platform does not
+  know, a floating time and an all-day date are read as UTC.
+- **`VALARM`** time ranges are not evaluated; an alarm filter with a `time-range` does not match.
+- **`calendar-data` subsets** — `comp`, `prop`, `expand` and `limit-recurrence-set` inside a
+  requested `calendar-data` (and `prop` inside `address-data`) are accepted and the whole object is
+  returned, which RFC 4791 §9.6 allows.
+- **Cost** — a query reads and parses every object in the collection. That is the honest cost of a
+  store that is a list of text objects, and is fine for thousands of events. A store whose own
+  database can answer a date range faster is the one to write if it is not.
+</Aside>
+
+## Sync tokens
+
+`sync-collection` (RFC 6578) works over any store, including one that knows nothing about sync. A
+token is a hash of the collection's listing — every object's name and ETag — so it changes whenever
+anything does, **whoever changed it**: a client of the mount, or the app writing to its own storage
+directly. Each token keeps the listing it was made from, and a sync compares that with the listing
+now: new or different ETag is changed, missing is removed (a bare 404 response).
+
+Snapshots are held in memory, `MaxSyncTokensPerCollection` (32) per collection. A token that has aged
+out, or one from before a restart for a collection that has changed since, is answered 403
+`valid-sync-token`, and the client does a full resync — RFC 6578 requires every client to handle
+that, because every server does it. A token for a collection that has **not** changed needs no
+snapshot, so the common case after a restart — a client checking an unchanged calendar — is still
+free. `getctag` is the same hash, unless the store supplies its own `CTag`.
+
+## Serving your own data
+
+`FileCalendarStore` and `FileAddressBookStore` keep one directory per principal, one per collection,
+and one file per object, byte for byte as the client sent it, with a content-hash ETag. A principal
+with no collections is given one (`Calendar` / `Contacts`) the first time its home is touched —
+because a client that finds an empty home has nothing to sync into. Set `DefaultCollection` to
+`null` to turn that off.
+
+When the calendars are already somewhere else — the device calendar, a table in SQLite — implement
+`ICalendarStore` or `IAddressBookStore`. Both are `IDavCollectionStore<TCollection>`: collections of
+text objects, each addressed by a name and versioned by an ETag.
+
+```csharp
+public sealed class DeviceCalendarStore(IMyCalendarApi calendars) : ICalendarStore
+{
+    public async ValueTask<IReadOnlyList<CalendarCollection>> GetCollectionsAsync(string principal, CancellationToken ct)
+        => (await calendars.GetCalendarsAsync())
+            .Select(c => new CalendarCollection(c.Id) { DisplayName = c.Name, Color = c.Color, IsReadOnly = !c.CanEdit })
+            .ToList();
+
+    public async ValueTask<IReadOnlyList<DavObjectInfo>> GetObjectsAsync(string principal, string calendar, CancellationToken ct)
+        => (await calendars.GetEventsAsync(calendar))
+            .Select(e => new DavObjectInfo($"{e.Id}.ics", $"\"{e.LastModified.Ticks:x}\"", e.LastModified) { Uid = e.Id })
+            .ToList();
+
+    public async ValueTask<DavObject?> GetObjectAsync(string principal, string calendar, string name, CancellationToken ct)
+    {
+        var e = await calendars.GetEventAsync(calendar, Path.GetFileNameWithoutExtension(name));
+        return e is null ? null : new DavObject(name, $"\"{e.LastModified.Ticks:x}\"", ToICalendar(e), e.LastModified);
+    }
+
+    public async ValueTask<string?> PutObjectAsync(string principal, string calendar, DavObjectWrite write, CancellationToken ct)
+    {
+        // Already parsed and validated: read the fields you keep off write.Component.
+        var evt = write.Component.GetComponents("VEVENT").First();
+        await calendars.SaveAsync(calendar, write.Uid, evt.GetProperty("SUMMARY")?.GetText(), /* … */);
+
+        // The device keeps its own representation, not these bytes — so no ETag (RFC 4791 §5.3.4).
+        return null;
+    }
+
+    // CreateCollectionAsync, UpdateCollectionAsync, DeleteCollectionAsync, DeleteObjectAsync …
+}
+```
+
+What the contract asks:
+
+- **ETags** are quoted, strong, and change whenever the object's text does. They are what every
+  client syncs by and what `sync-collection` compares.
+- **`GetObjectsAsync`** is asked on every sync, so it should not read every object to answer. Fill in
+  `Uid` when you know it cheaply; otherwise the mount reads the object once and remembers the UID
+  against its ETag.
+- **`PutObjectAsync`** returns the new ETag, or `null` when the store did not keep the text byte for
+  byte — then the client is not sent one, and fetches what was stored.
+- **`DavCollection.IsReadOnly`** is advertised through `current-user-privilege-set`, which is what
+  makes iOS show the calendar as read-only instead of letting someone edit an event that cannot save.
+- **Refuse** with `WebDavException(403)` — a calendar the platform will not let the app create — or
+  any status; `UnauthorizedAccessException` and the `System.IO` exceptions map as they do on a WebDAV
+  mount.
+
+`ContentComponent` is the iCalendar/vCard model the mount parses with, and it is public: `Parse`,
+`GetProperty`, `GetComponents`, `GetText` (which undoes `TEXT` escaping), `GetParameter`, and
+`ToString()`, which folds lines at 75 octets. It is deliberately small — enough to read what a client
+sent and to build what you send back — and it is not a calendar library.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `CalendarStore` | `null` | CalDAV. Null leaves it off — no home set, no well-known URL, no `calendar-access` |
+| `AddressBookStore` | `null` | CardDAV, likewise. At least one is required |
+| `PrincipalResolver` | user name | See [above](#who-the-principal-is) |
+| `DefaultPrincipal` | `null` | For an unauthenticated mount |
+| `MapWellKnown` | `true` | The RFC 6764 redirects |
+| `ReadOnly` | `false` | Refuses every change, and says so in `current-user-privilege-set` |
+| `MaxResourceSize` | 10 MB | Largest object a `PUT` may carry — a contact photo is not small |
+| `MaxXmlBodyBytes` | 1 MB | `PROPFIND`, `PROPPATCH`, `REPORT`, `MKCALENDAR`, `MKCOL` bodies |
+| `MaxSyncTokensPerCollection` | 32 | Snapshots remembered per collection |
+| `MaxRecurrenceInstances` | 10 000 | Past this a series is treated as possibly anywhere |
+| `PropertyStore` | in memory | Dead properties, such as Apple's `calendar-order` |
+| `CalendarUserAddresses` | `null` | `mailto:` URIs per principal, for `calendar-user-address-set` |
+
+## Authorization
+
+`MapCalDav` returns a `CalDavMountBuilder` that fans a policy across every route under the prefix —
+`RequireAuthorization`, `AllowAnonymous`, `RequireCors`, `RequireRateLimiting`, `RequireIpFilter`,
+`WithMetadata` and `ForEach` — and `WellKnownRoutes` for the redirects. There is no "reads only"
+variant, because a calendar's reads are exactly as private as its writes. The mount is excluded from
+the [OpenAPI](/httpserver/openapi/) document.
+
+It is transport-agnostic like every endpoint: HTTP/1.1, HTTP/2 and HTTP/3 alike, and through a
+[tunnel](/httpserver/tunneling/) — which is how a phone's calendars reach a laptop that is not on
+the same network.
+
+<Aside type="danger">
+These are someone's calendar and address book, and every client sends the password on **every**
+request. Serve it over [TLS](/httpserver/tls/) — iOS warns before it saves a CalDAV account over plain
+HTTP — put [authentication](/httpserver/authentication/) in front
+of it, and consider an [IP filter](/httpserver/ip-filtering/) that keeps it on the local network.
+</Aside>

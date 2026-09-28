@@ -1,0 +1,192 @@
+---
+title: PROXY Protocol
+description: Get the real client address from HAProxy, AWS NLB, nginx stream, Traefik or fly.io — the PROXY protocol v1 and v2, read below TLS on the listener
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+```csharp
+builder.Options.Listen(IPAddress.Any, 8080)
+    .UseProxyProtocol(p => p.Trust("10.0.0.0/8"));   // the balancer's addresses
+```
+
+That endpoint now expects every connection to open with a PROXY protocol header, and
+`ctx.Connection.RemoteIpAddress` / `RemotePort` are the **client's**, not the balancer's.
+
+## Why
+
+A TCP load balancer such as HAProxy, an AWS Network Load Balancer, nginx's `stream` module, Traefik or
+fly.io's proxy opens its own connection to your server and copies bytes across. Without help, every
+request appears to come from the balancer. The IP filter allows or blocks the balancer, the rate
+limiter puts every client in one bucket, and the access log shows the same address on every line.
+
+The [PROXY protocol](https://www.haproxy.org/download/3.0/doc/proxy-protocol.txt) fixes this below
+HTTP. The balancer writes one short header naming the real client before it relays anything else,
+and the server reads it, swaps the client into `ConnectionInfo`, and carries on. Everything that reads
+`RemoteIpAddress` then sees the real client and needs no configuration of its own:
+[IP filtering](/httpserver/ip-filtering/), [rate limiting](/httpserver/rate-limiting/)'s per-IP
+partitions, [W3C logs](/httpserver/logging/), and the `client.address` tag in
+[telemetry](/httpserver/diagnostics/).
+
+Both versions are accepted on the same port: v1 (`PROXY TCP4 192.0.2.10 10.0.0.1 51234 443\r\n`) and
+v2 (binary, with TLVs). You do not choose one.
+
+## Configuring it
+
+The setting is per endpoint, like [TLS](/httpserver/tls/), because usually only the port the balancer
+forwards to should accept a header. A loopback or admin port on the same server should not.
+
+```csharp
+// The shorthand, when the server has one endpoint
+builder.Options.Port = 8080;
+builder.Options.ProxyProtocol = new ProxyProtocolOptions { Mode = ProxyProtocolMode.Required }
+    .Trust("10.0.0.0/8");
+
+// Several endpoints: only the public one is behind the balancer
+builder.Options.Listen(IPAddress.Loopback, 5000);
+builder.Options.ListenHttps(IPAddress.Any, 8443, certificate)
+    .UseProxyProtocol(p => p.Trust("172.16.0.0/12"));
+```
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `Mode` | `Off` | `Off`, `Optional` or `Required`. `UseProxyProtocol(...)` sets `Required` unless you pass another mode |
+| `TrustedProxies` | empty | `IpAddressRange`s the header is accepted from. **Must not be empty** when the mode is on |
+| `HeaderTimeout` | 5 s | How long a peer has to send the complete header |
+| `MaxHeaderSize` | 4096 | Cap on a v2 header, including TLVs. v1 is always capped at 107 bytes by the spec |
+
+### Modes
+
+| Mode | Header from a trusted peer | No header | Header from an untrusted peer |
+| --- | --- | --- | --- |
+| `Required` | Applied | Connection closed | Connection closed, header never read |
+| `Optional` | Applied | Served normally | Not parsed; it reaches HTTP as a malformed request |
+| `Off` | Not read | Served normally | Not read |
+
+`Required` is the mode to run in once the balancer is the only way in. `Optional` is for switching a
+balancer over while some traffic still arrives directly. Once the switch is done, change to
+`Required`.
+
+A malformed header (for example a doubled space in v1, an undefined v2 command or family, a TLV that
+runs past the end, or a CRC32C that does not match), an oversized one, or one that is not complete
+within `HeaderTimeout` closes the connection in either mode. Nothing is written back, since there
+is no HTTP yet to answer in. These rejections are logged at `Debug`.
+
+### Trusted proxies
+
+<Aside type="danger">
+The header is an unauthenticated claim about who the client is. If you accept it from anyone, any
+client can choose its own address and get straight past an IP filter. That is why the server refuses
+to start when the mode is on and `TrustedProxies` is empty.
+</Aside>
+
+List the balancer's own addresses, not the clients':
+
+```csharp
+p.Trust("10.0.0.0/8")                       // an AWS VPC
+ .Trust(IpAddressRange.PrivateClassB)       // the ranges IpAddressRange ships
+ .Trust("fdaa::/16");                       // fly.io's private network
+```
+
+If the port is firewalled so that only the balancer can reach it, you can trust everyone
+explicitly with `Trust("0.0.0.0/0").Trust("::/0")`. That is a deliberate choice, so the server does
+not make it for you.
+
+## TLS passthrough
+
+The header is read **before** the TLS handshake and before HTTP/1.1 vs HTTP/2 detection. A balancer
+that passes TLS through untouched (HAProxy `mode tcp`, an NLB TCP listener) writes the header in
+cleartext ahead of the client's ClientHello, and that works on an `https` endpoint unchanged. ALPN
+still picks `h2` or `http/1.1`, and cleartext HTTP/2 with prior knowledge is still detected from the
+preface that follows the header.
+
+This is the main reason to prefer the PROXY protocol over `X-Forwarded-For`. A balancer passing TLS
+through never sees the HTTP headers it would have to add to.
+
+## What else the header tells you
+
+`ctx.Connection.ProxyProtocol` holds everything the header said. It is null when no header was read.
+
+```csharp
+app.MapGet("/whoami", ctx =>
+{
+    var proxy = ctx.Connection.ProxyProtocol;
+    return ctx.Response.WriteAsync(
+        $"client {ctx.Connection.RemoteIpAddress} via {proxy?.ProxyEndPoint}, dialled {proxy?.DestinationEndPoint}"
+    );
+});
+```
+
+| Property | |
+| --- | --- |
+| `Version` | `1` or `2` |
+| `Command` | `Proxy`, or `Local` for a connection the balancer opened for itself (a health check) |
+| `SourceEndPoint` | The client. Already applied to `RemoteIpAddress`/`RemotePort` |
+| `DestinationEndPoint` | The address and port the client dialled, on the balancer |
+| `ProxyEndPoint` | The balancer itself, which is what `RemoteIpAddress` would otherwise have been |
+| `AddressFamily`, `SocketType` | As declared: IPv4, IPv6, Unix or unspecified; stream or datagram |
+| `SourceUnixPath`, `DestinationUnixPath` | For a relayed unix-socket connection |
+| `Alpn` | v2 `PP2_TYPE_ALPN`: the protocol the client negotiated with a TLS-terminating balancer |
+| `Authority` | v2 `PP2_TYPE_AUTHORITY`: usually the client's SNI |
+| `UniqueId` | v2 `PP2_TYPE_UNIQUE_ID`: the balancer's id for the connection, which is useful in logs |
+| `Ssl` | v2 `PP2_TYPE_SSL`: `IsSsl`, client certificate presence and verification, TLS version, cipher, CN, algorithms |
+| `Tlvs` / `GetTlv(type)` | Every TLV as received, including vendor ones: AWS's VPC endpoint id is `0xEA`, Azure's link id `0xEE`, GCP's PSC id `0xE0` |
+
+The local address (`LocalIpAddress`/`LocalPort`) is left as the real socket's. Use
+`DestinationEndPoint` for the address the client dialled.
+
+A `LOCAL` command, v1 `UNKNOWN`, v2 `AF_UNSPEC` and unix-socket clients carry no IP address. The
+connection keeps its real remote endpoint, as the spec instructs, and `ProxyProtocol` is still set
+so you can see a balancer was involved.
+
+`Ssl` describes the client's TLS session **with the balancer**. It does not make
+`ConnectionInfo.IsEncrypted` true or change `Request.Scheme`, because those describe this connection,
+and this connection is cleartext when the balancer terminated TLS. If you need the scheme, have the
+balancer send `X-Forwarded-Proto` as well (see below).
+
+## PROXY protocol vs. forwarded headers
+
+[`UseForwardedHeaders`](/httpserver/configuration/#forwarded-headers) reads `X-Forwarded-For` and
+`X-Forwarded-Proto`. The two solve the same problem at different layers:
+
+| | PROXY protocol | `X-Forwarded-For` |
+| --- | --- | --- |
+| Layer | TCP, once per connection | HTTP, once per request |
+| Works with TLS passthrough | Yes | No, the balancer cannot see inside |
+| Works with HTTP/1.1 and HTTP/2 | Both | HTTP/1.1 only in this server |
+| Who may send it | Only `TrustedProxies`; everyone else is refused | Anyone who can reach the port |
+| Carries the scheme | No (`Ssl.IsSsl` is informational) | Yes, `X-Forwarded-Proto` |
+
+Prefer the PROXY protocol when your balancer supports it. If you enable both, the PROXY header sets
+the address first, and then on HTTP/1.1 an `X-Forwarded-For` header, if present, **overrides** it,
+because `UseForwardedHeaders` has no trusted-proxy list of its own. Only enable both when the balancer
+sets (and overwrites) `X-Forwarded-For` itself.
+
+## Balancer configuration
+
+```text
+# HAProxy
+backend app
+    server app1 10.0.1.5:8080 send-proxy-v2
+
+# nginx (stream module)
+stream {
+    server { listen 443; proxy_pass 10.0.1.5:8443; proxy_protocol on; }
+}
+```
+
+- **AWS NLB**: enable *Proxy protocol v2* on the target group's attributes.
+- **Traefik**: `proxyProtocol: { version: 2 }` on the TCP service's server.
+- **fly.io**: `[services.ports] handlers = ["proxy_proto"]`. Trust `fdaa::/16`.
+
+## Scope
+
+- **TCP listeners only.** HTTP/3 runs over QUIC (UDP) and has no PROXY protocol, so an HTTP/3
+  endpoint ignores the setting.
+- **Tunnels do not carry it.** The [relay](/httpserver/tunneling/), [SSH](/httpserver/ssh/) and
+  [Azure Relay](/httpserver/azure-relay/) tunnels hand the server connections that arrive already
+  connected and have no socket peer to trust. The option applies to endpoints in
+  `HttpServerOptions`, not to tunnel providers.
+- **The server reads it; the [reverse proxy](/httpserver/proxy/) does not send it.** Destinations
+  are reached through a pooled `HttpClient`, which shares one TCP connection across many callers, so
+  a once-per-connection header would attribute every request on it to whoever opened it first.

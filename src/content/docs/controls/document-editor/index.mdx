@@ -4,6 +4,9 @@ description: A .docx editor for .NET MAUI and Blazor WebAssembly in two controls
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+{/* TODO: capture screenshots for the Word window (document-editor with the Office shell) */}
 
 - <NugetDownloads name="Shiny.Maui.Controls.Office" />
 - <NugetDownloads name="Shiny.Blazor.Controls.Office" />
@@ -16,7 +19,7 @@ Two controls, on both hosts:
 | Control | What it is |
 |---|---|
 | `DocumentEditor` | the lone editing surface — canvas, caret, selection, typing. No chrome. |
-| `DocumentEditorView` | `DocumentEditor` plus a formatting toolbar |
+| `DocumentEditorView` | `DocumentEditor` dressed as Word — the [Office shell](/controls/office-shell/)'s title bar, ribbon, ruler, panes, status bar and File backstage, all wired to the editor |
 
 Same packages as the viewers (`Shiny.Maui.Controls.Office` / `Shiny.Blazor.Controls.Office`), same two
 constraints: **MAUI needs `UseShinyOffice()`** (it registers SkiaSharp, plus the Skia canvas SkiaSharp does not ship for the macOS AppKit head), **Blazor is WASM-only**, and on Blazor the container needs
@@ -49,6 +52,134 @@ using var document = await WordDocument.OpenAsync("report.docx", editable: true)
 <office:DocumentEditorView x:Name="Editor" Document="{Binding Document}" />
 <office:DocumentEditor x:Name="BareEditor" Document="{Binding Document}" />
 ```
+
+## The Word window
+
+<Aside type="caution" title="Behaviour change">
+`DocumentEditorView` now wears the [Office shell](/controls/office-shell/) **by default**, modelled on
+Word for the web: an accent title bar, the ribbon, a ruler above the page, a navigation pane on the left,
+a comments pane on the right, a status bar along the bottom and the File backstage. Give the Blazor host
+more height (≈700px) than the bare ribbon needed. `ShowShell="false"` puts back exactly the previous
+layout — the ribbon over the page with its own Undo/Redo and navigation pane.
+</Aside>
+
+Every part is wired to the editor already, and each has its own switch:
+
+| Part | Switch | What it does |
+|---|---|---|
+| **Title bar** | `ShowTitleBar` | AutoSave (`AutoSave`), Save / Undo / Redo, the document name (`DocumentName`, default "Document1", renamed in place), the save status (`SaveState`; left null it reads "Unsaved changes" once the document is edited), the command search, and the account (`UserName`, which also signs comments and tracked changes) |
+| **Ribbon** | `ShowToolbar` | Word's tabs (below). **File** opens the backstage. The right end carries **Comments**, **Editing / Reviewing / Viewing** (`EditMode`: Reviewing switches Track Changes on, Viewing makes the document read-only) and **Share** (`ShareRequested`). Home ▸ Styles is the "AaBbCcDd" gallery. Keyboard shortcuts live in each item's `Shortcut`, where the command search shows them too |
+| **Ruler** | `ShowRuler` | Print Layout only. Shows the caret paragraph's indents and tab stops and the section's margins; dragging a marker indents the selected paragraphs, a click adds a tab stop, dragging a margin edge moves it — each one undo step. Tab stops are saved as `w:tabs` |
+| **Navigation pane** | `ShowNavigationPane` | The headings (click to jump; the one the caret is under is marked) and a search box whose Results tab lists every hit with its context. View ▸ Navigation Pane, <kbd>Ctrl</kbd>+<kbd>F</kbd> and the status bar's page count open it |
+| **Comments pane** | `ShowCommentsPane` | Every comment with its author, date and the text it is anchored to. Click a card to select that text; delete one with its button; **New** comments on the selection |
+| **Status bar** | `ShowStatusBar` | "Page 2 of 5", "197 words" ("12 of 197 words" with a selection — click for Word Count), the proofing language; Focus; Read / Print / Web view buttons; the zoom slider, − / + and the percentage (which opens the Zoom dialog with page-width / text-width / whole-page presets) |
+| **Backstage** | File | Home and New offer `Templates` (null = the built-in **Blank**, **Report** and **Letter**, generated in code), `RecentFiles` (your list), Info with the document's statistics, Save, Save As, Print with a preview of the first page, and Export |
+
+The command search (`CommandIndex`) holds the ribbon's commands plus the ones people look for on tabs
+not yet opened (Table, Page Break, Link, Comment, Header, Table of Contents, Track Changes, Landscape…).
+A query that matches no command searches the document instead.
+
+### Files are the host's
+
+The shell reads and writes nothing on its own; these are events. What happens when you leave one
+unhandled:
+
+| Event | Unhandled on Blazor | Unhandled on MAUI |
+|---|---|---|
+| `SaveRequested` | downloads the `.docx` | nothing |
+| `SaveAsRequested(OfficeFileFormat)` / `ExportRequested(…)` | downloads `.docx`, `.pdf`, `.txt` or `.html` | nothing |
+| `PrintRequested` | opens the browser's print dialog over a PDF of the document | nothing |
+| `NewDocumentRequested(OfficeTemplate)` | opens the template in place, raises `DocumentOpened(WordDocument)` | same |
+| `OpenRequested`, `RecentFileSelected(OfficeRecentFile)`, `ShareRequested`, `DocumentRenamed(string)` | — | — |
+
+```razor
+<div style="height:760px">
+    <DocumentEditorView Document="document"
+                        @bind-DocumentName="name"
+                        SaveState="saveState"
+                        UserName="Allan Ritchie"
+                        RecentFiles="recent"
+                        SaveRequested="SaveAsync"
+                        RecentFileSelected="OpenAsync" />
+</div>
+```
+
+```csharp
+editor.SaveRequested += async (_, _) => await File.WriteAllBytesAsync(path, editor.Document!.ToArray());
+editor.ExportRequested += (_, format) =>
+{
+    if (format.Id == OfficeFileFormats.Pdf.Id)
+    {
+        using var file = File.Create(Path.ChangeExtension(path, ".pdf"));
+        editor.ExportPdf(file);
+    }
+};
+```
+
+### PDF
+
+`ExportPdf(Stream)` on both views — or `DocumentPdfExporter.Export(document, stream, options)` in
+`Shiny.Controls.Office.Skia` for a document with no view — writes one PDF page per printed page. The
+document is laid out afresh in print layout at 100%, whatever the view is showing, and drawn by the same
+`DocumentPainter` as the screen, so headers, footers, footnotes, page colour and the text watermark come
+along and the editing overlays (caret, selection, squiggles, comment balloons) do not. Text stays text,
+with the fonts embedded. It works on WebAssembly. `DocumentPdfExporter.RenderPagePng(document, page,
+scale)` renders one page as a PNG — the backstage's print preview.
+
+### Building your own chrome
+
+Everything the view wires up is public: `Shiny.Controls.Office.Shell.WordShell` turns the controller
+into what the shell parts take (headings, search results, styles, ruler indents and tab stops in points,
+view-mode ids, document info, an HTML rendering), and the controller has `CurrentTabStops` /
+`SetTabStops`, `GoToComment(id)` and `CommentedText(comment)`. `WordTemplates` builds the three
+templates.
+
+On MAUI the shell is built once and parts are shown and hidden rather than added later, so the AppKit
+head renders it; lists that change after layout (headings, comments, status text) may not repaint there
+until the window is resized.
+
+## Word's ribbon
+
+Every command below is a method on `DocumentEditorController` first — the ribbon on each host is a thin
+layer over it — so a host with its own chrome gets all of it without the ribbon.
+
+<Aside type="caution" title="Behaviour change">
+The ribbon is organised into Word's tabs and the tab strip is **on by default** on both hosts
+(`ShowRibbonTabs`). Proofing moved from Home to **Review**, and zoom moved from Layout to **View**. A
+host that turned the strip off to show a single row of Home commands should set
+`ShowRibbonTabs="False"` explicitly.
+</Aside>
+
+| Tab | Groups | Details |
+|---|---|---|
+| **Home** | Clipboard (Paste ▸ Keep Text Only, Cut, Copy, Format Painter) · Font (font, size, Grow/Shrink, Change Case, Clear Formatting, B I U S, subscript, superscript, colour, highlight) · Paragraph (bullets, numbering, multilevel, indent −/+, Show/Hide ¶, alignment, line spacing, shading, borders) · Styles · Editing (Find, Replace, Select All) | [Formatting & Editing](/controls/document-editor/formatting/) |
+| **Insert** | Pages (Blank Page, Page Break, Section Break) · Tables · Illustrations · Links (Link, Bookmark, Remove Link) · Comments · Header & Footer (Header, Footer, Page Number) · Text (Date & Time) · Symbols (Symbol, Horizontal Line) | [References & Links](/controls/document-editor/references/), [Objects](/controls/document-editor/objects/) |
+| **Design** | Page Background (Watermark, Page Color) | [Page Layout & Views](/controls/document-editor/page-layout/) |
+| **Layout** | Page Setup (Margins, Orientation, Size, Columns, Breaks) · Paragraph (indent, spacing before/after) | [Page Layout & Views](/controls/document-editor/page-layout/) |
+| **References** | Table of Contents (Insert, Update Table) · Footnotes (Insert Footnote, Next Footnote) | [References & Links](/controls/document-editor/references/) |
+| **Review** | Proofing (Spelling, previous/next misspelling, Word Count) · Comments (New, Delete, Previous, Next, Show) · Tracking (Track Changes) · Changes (Accept, Reject, Previous, Next) | [Comments & Track Changes](/controls/document-editor/review/) |
+| **View** | Views (Read Mode, Print Layout, Web Layout) · Show (Navigation Pane, Formatting Marks) · Zoom | [Page Layout & Views](/controls/document-editor/page-layout/) |
+| **Table** *(contextual)* | Rows & Columns (Insert Above/Below/Left/Right, Delete Rows/Columns/Table) · Merge (Merge Cells, Split Cells) | [Tables](/controls/document-editor/tables/) |
+
+The **File** button opens the backstage. It still raises `FileRequested` on MAUI and `FileClicked` on
+Blazor; with the shell off it is shown only when one of those is wired (`ShowFileButton` on MAUI), as
+before. Below 600px wide the ribbon runs in `Simplified` mode — one dense row. Undo and redo sit in the
+title bar (or the ribbon's quick access row with the shell off).
+
+## Positions index the story
+
+<Aside type="caution" title="Breaking change">
+`DocumentPosition.Block` now indexes **`WordDocument.Paragraphs`** — every paragraph in reading order,
+table cells included — not `WordDocument.Blocks`. That is what lets the caret go into a table cell.
+`Blocks` is still the top-level list the layout walks. Code that stored a block index, or used one to
+index `Blocks`, must map between the two:
+
+```csharp
+var top  = document.TopBlockOf(position.Block);   // story paragraph → top-level block
+var para = document.FirstParagraphOf(top);        // top-level block → its first story paragraph
+var cell = document.CellOf(position.Block);       // the table cell a paragraph is in, or null
+```
+</Aside>
 
 ## The toolbar is composed from what each host has
 
@@ -195,9 +326,34 @@ Tapping, selection, typing and every toolbar command work without it.
 ## Find
 
 **Home ▸ Find** carries a box, a `3/12` readout and a pair of arrows. Typing searches as you type and
-selects the first hit at or after the caret; the arrows walk the rest and wrap at either end. Paragraphs
-only — a caret position is a block and an offset, and a table cell has neither. See
+selects the first hit at or after the caret; the arrows walk the rest and wrap at either end. Every
+paragraph the caret can reach is searched — **table cells included**, now that positions index the
+story. <kbd>Ctrl</kbd>+<kbd>H</kbd> opens Replace; see
+[Formatting & Editing](/controls/document-editor/formatting/#find-and-replace) and
 [Find in Office Documents](/controls/office-find/).
+
+## Keyboard shortcuts
+
+Both hosts resolve keys through the shared `WordShortcuts.Resolve(key, ctrl, shift, alt)` table, so they
+cannot disagree. On MAUI a desktop host routes keys in with `DocumentEditorView.HandleShortcut(key,
+ctrl, shift, alt)` (MAUI has no portable key-down event); Blazor handles them itself.
+
+| Keys | | Keys | |
+|---|---|---|---|
+| Ctrl+B / I / U | Bold / italic / underline | Ctrl+E / L / R / J | Centre / left / right / justify |
+| Ctrl+C / X / V | Copy / cut / paste | Ctrl+Shift+&gt; / &lt; | Grow / shrink font |
+| Ctrl+Z / Y | Undo / redo | Ctrl+= / Ctrl+Shift+= | Subscript / superscript |
+| Ctrl+F / H | Find / replace | Ctrl+Enter | Page break |
+| Ctrl+K | Hyperlink | Ctrl+1 / 5 / 2 | Line spacing 1 / 1.5 / 2 |
+| Ctrl+Alt+1..3 | Heading 1-3 | Ctrl+Shift+N | Normal style |
+| Ctrl+Space | Clear formatting | Ctrl+M / Ctrl+Shift+M | Indent / outdent |
+| Ctrl+Shift+C / V | Copy / paste formatting | Shift+F3 | Change case |
+| Ctrl+Alt+M | New comment | Ctrl+Shift+E | Track changes |
+| Ctrl+Shift+G | Word count | Ctrl+Shift+8 | Show/hide ¶ |
+
+`DocumentEditorController.Execute(WordCommand)` runs the engine's commands; the ones that need the
+host's UI or clipboard — Find, Replace, Hyperlink, New Comment, Word Count, Copy, Cut, Paste — return
+false (see `WordShortcuts.IsHostCommand`) and surface as `ShortcutRequested` on the surfaces.
 
 ## Spell check
 
@@ -271,17 +427,17 @@ addresses and paths — the things every dictionary flags and no reader wants un
 
 ## Not implemented
 
-- **Formatting with an empty selection changes only `CaretFormat`, not the document.** Word applies it
-  to whatever is typed next; that needs a pending-format concept the editor does not have yet.
-- Editing tables, images, lists (their *text* edits fine; structure does not).
-- Cut/copy/paste through the clipboard, find and replace.
+- **Columns** are written and saved (`w:cols`) but the page view still lays text out in a single column.
+- **Sections** — breaks paginate and each section's own page setup is written, but every page is drawn
+  on the last section's paper size and margins.
+- **Headers and footers** are set as a line of text rather than edited in place on the page.
+- **Tracked formatting changes** (`w:rPrChange`) and tracked paragraph joins are not recorded; existing
+  ones are preserved.
+- **Endnotes** are read and numbered but not drawn.
 - **Grammar** checking. Android reports grammar errors and they are deliberately ignored, so all four
   platforms behave the same.
-- Inserting new paragraph styles, images or tables.
-- Setting the **paper size or orientation** — the margins can be set, the sheet they sit on cannot.
-- **Per-section** page setup. One geometry is read for the document and one is written back, so the
-  margins are the last section's.
-- Everything the viewer does not render is still not rendered — see `document-viewer.md`.
+- Floating (anchored) objects — everything inserts inline; see [Objects](/controls/document-editor/objects/).
+- Everything the viewer does not render is still not rendered — see [Document Viewer](/controls/document-viewer/).
 
 ## Screenshots
 
