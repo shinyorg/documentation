@@ -50,7 +50,7 @@ const announcementConfig = {
     {
       id: 'controls-15',
       title: 'Shiny Controls 1.5',
-      description: 'Diagrams, Floor Plans, Kanban, & GamePads!',
+      description: 'Diagrams, Floor Plans, Kanban, GamePads, & FULL Office!',
       href: '/controls/',
       cta: 'What!?!',
     },
@@ -62,9 +62,16 @@ const announcementConfig = {
       cta: 'Join Me Too!',
     },
     {
+      id: 'httpserver-v20',
+      title: 'HTTP Server v2',
+      description: 'Resumable Uploads, OAuth Loopingback, NEW Switchboard SignalR-like Framework, Webhooks, CalDAV, & Scalar Support',
+      href: '/httpserver/',
+      cta: 'Lets GO!',
+    },    
+    {
       id: 'client-v580',
       title: 'Shiny Client 5.8',
-      description: 'GamePads & Watch Libraries!',
+      description: 'GamePads, Location Updates, Resumable Uploads, & Watch Libraries!',
       href: '/client/ble',
       cta: 'Live It Up!',
     },

@@ -142,17 +142,59 @@ arrives. Requests are routed to a tunnel by their `Host` header.
 | `PublicScheme` / `IncludePortInPublicUrl` | `http` / `true` |
 | `ControlHttps` / `PublicHttps` | `null` |
 | `Authorize` | Default: accepts any token matching `Token`, grants the requested subdomain when free |
+| `AuthorizeTimeout` | 15s — `Authorize` running longer refuses the registration |
 | `Token` | `null` — accepts anything |
 | `MaxTunnels` | 100 |
 | `MaxRequestHeadSize` | 32 KB |
 | `AddForwardedHeaders` | `true` |
 | `RequestHeadTimeout` / `KeepAliveTimeout` | 15s / 130s |
 
-`Authorize` is the hook for a real registry — return the subdomain to grant, or `null` to refuse:
+`Authorize` is the hook for a real registry — return the subdomain to grant, or `null` to refuse.
+It is asynchronous, so it can look the token up in a database or ask an identity service:
 
 ```csharp
-o.Authorize = request => devices.Lookup(request.Token)?.Subdomain;
+o.Authorize = async (request, ct) =>
+    (await devices.FindByTokenAsync(request.Token, ct))?.Subdomain;
 ```
+
+The token it receives is cancelled after `AuthorizeTimeout` or when the relay stops. An exception
+refuses the registration with the same message as any other refusal, and is logged; the client is
+never told why. When the relay itself grants a subdomain it checks it is free, but a subdomain
+returned by `Authorize` is taken as given: a clash with a live tunnel is refused.
+
+### Watching and closing tunnels
+
+`Authorize` can tag the tunnel it grants by setting `request.State` — a key id, an account — and the
+tag travels with the tunnel as `RelayTunnel.State`. The raw token never has to leave the hook.
+
+```csharp
+o.Authorize = async (request, ct) =>
+{
+    var key = await keys.FindAsync(request.Token, ct);
+    if (key is null || key.Revoked)
+        return null;
+
+    request.State = key.Id;
+    return request.RequestedSubdomain ?? key.DefaultSubdomain;
+};
+
+relay.TunnelConnected += (_, e) => log.Opened(e.Tunnel.Host, e.Tunnel.State, e.Tunnel.RemoteEndPoint);
+relay.TunnelDisconnected += (_, e) => log.Closed(e.Tunnel.Host, e.Reason);   // ConnectionClosed | Disconnected | RelayStopped
+
+// Revoking a key: refuse it first, then close what it holds
+await keys.RevokeAsync(keyId);
+await relay.DisconnectAsync(t => Equals(t.State, keyId));
+```
+
+- `Tunnels` is a snapshot of what is registered: host, public URL, client address, connection time
+  and state. `DisconnectAsync(host)` closes one tunnel and every public request in flight on it.
+- `TunnelDisconnected` is raised **exactly once** for every tunnel `TunnelConnected` reported,
+  however it ended, and `StopAsync` raises it for every open tunnel before returning. Both events
+  run on the tunnel's own task — keep handlers short. An exception from a handler is logged and
+  does not affect the tunnel.
+- A client with a `ReconnectDelay` dials back after being disconnected and goes through `Authorize`
+  again. Make `Authorize` refuse it **before** calling `DisconnectAsync`, or it is simply back a
+  moment later.
 
 ### What makes keep-alive safe
 
