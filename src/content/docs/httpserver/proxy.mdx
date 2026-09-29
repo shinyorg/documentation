@@ -265,6 +265,38 @@ configuration change is applied to the *running* server rather than needing a re
 
 Subscribe to `ReverseProxyRuntime.Reloaded` to be told when a new configuration has taken effect.
 
+## gRPC and trailers
+
+Response trailers from the upstream (`HttpResponseMessage.TrailingHeaders`) are relayed to the caller.
+On HTTP/2 and HTTP/3 they go out as a trailing HEADERS frame, and on HTTP/1.1 as the chunked trailer
+section, with the upstream's `Trailer` announcement kept. gRPC's status (`grpc-status`, `grpc-message`)
+travels there, so a gRPC service can sit behind a proxy route. `TE: trailers` is forwarded; every other
+`TE` value is dropped as hop-by-hop. gRPC needs HTTP/2 to the upstream:
+
+```csharp
+app.MapProxy("/{*path}", "http://127.0.0.1:5001", o =>
+{
+    o.RequestVersion = HttpVersion.Version20;                 // h2c prior knowledge on http://
+    o.VersionPolicy = HttpVersionPolicy.RequestVersionExact;
+});
+```
+
+The caller has to reach the proxy over HTTP/2 or HTTP/3 as well. gRPC-Web is the option for HTTP/1.1
+clients.
+
+## Metrics
+
+On the server's meter (`HttpServerTelemetry.MeterName`), next to the
+[server's own instruments](/httpserver/diagnostics/#telemetry):
+
+| Instrument | Kind | Attributes |
+| --- | --- | --- |
+| `shiny.proxy.upstream.request.duration` | histogram (s) | `server.address` (destination host:port), `http.request.method`, `http.response.status_code`, or `error.type` when there was no response |
+| `shiny.proxy.upstream.errors` | counter | `error.type` (the `ProxyError`: `Request`, `RequestTimeout`, `RequestCanceled`, `ResponseBody`, `Upgrade`, `NoAvailableDestination`), `server.address` |
+
+The duration runs from sending the request upstream to its response headers, so a slow download to a
+slow client does not count against the upstream.
+
 ## WebSockets
 
 An `Upgrade` request is completed against the upstream and, on a `101`, the connection is handed over

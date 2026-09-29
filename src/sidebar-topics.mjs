@@ -1282,6 +1282,7 @@ export const sidebarTopics = [
               { label: 'Protocols', link: 'httpserver/protocols' },
               { label: 'WebSockets', link: 'httpserver/websockets' },
               { label: 'Server-Sent Events', link: 'httpserver/sse' },
+              { label: 'Switchboard', link: 'httpserver/switchboard' },
               { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc' }
             ]
           },

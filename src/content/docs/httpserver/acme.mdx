@@ -222,6 +222,80 @@ For a database, a secret manager or storage shared between instances, implement 
 It has four methods: load and save the account, and load and save a PKCS#12 blob. Set it as `o.Store`.
 Everything it holds contains private keys.
 
+## Many certificates: the registry
+
+`AcmeCertificateManager` holds one certificate for a fixed list of names. A server that fronts many
+hosts, added and removed while it runs, each with its own certificate (an edge server replacing
+Nginx Proxy Manager, say), uses `AcmeCertificateRegistry` instead:
+
+```csharp
+var acme = new AcmeCertificateRegistry(new AcmeRegistryOptions
+{
+    Email = "ops@example.com",
+    AcceptTermsOfService = true,
+    DirectoryUrl = AcmeDirectories.LetsEncryptStaging,
+    Store = myStore,                                  // optional; a directory by default
+    FallbackCertificate = ServerCertificate.Create()  // optional; for SNI names no entry covers
+});
+
+server.UseAcme(acme);        // one HTTP-01 middleware for every entry, now and later
+http3.UseAcme(acme);         // the same SNI selection on QUIC
+
+acme.Set("grafana", ["grafana.example.com"]);            // add, or change the names
+await acme.IssueAsync("grafana", ct);                    // explicit; throws AcmeException on failure
+await acme.RemoveAsync("grafana");
+
+acme.CertificateChanged += (_, e) => Log(e.Name, e.Certificate);
+acme.IssuanceFailed     += (_, e) => Alert(e.Name, e.Exception, e.IsRenewal);
+```
+
+With a container, `builder.AddAcmeRegistry(o => …)` registers it and calls `UseAcme` for you;
+`server.GetAcmeCertificateRegistry()` returns it.
+
+<Aside type="caution" title="Nothing is ordered implicitly">
+`Set` **never contacts the CA**. It loads the certificate stored for exactly those names, if there is one,
+so restarts and imports are seamless, and otherwise leaves the entry without a certificate. The first
+certificate comes only from `IssueAsync` (or an import), and a failed first issuance is **not retried**:
+it stays `Failed`, with the CA's reason in `LastError`, until something calls `IssueAsync` again. That is
+the rate-limit guardrail. Let's Encrypt allows five failed validations per name per hour, and a loop
+retrying a name whose DNS does not point here yet spends them all.
+Once an entry has a certificate, **renewal is automatic**, on the same schedule, ARI and backoff as the
+single manager.
+</Aside>
+
+| Member | What it does |
+| --- | --- |
+| `Set(name, domains)` | Adds an entry or replaces its names. Changing the names keeps the current certificate serving; the next `IssueAsync` or scheduled renewal orders one for the new list. |
+| `IssueAsync(name, ct)` | Orders now, serves the result, starts renewing it. Throws `AcmeException`. |
+| `RenewAsync(name, ct)` | Forces a renewal of an entry that has a certificate. |
+| `ImportAsync(name, cert, chain?, ct)` | Adopts a certificate from elsewhere. There are also overloads for PEM (`fullchain.pem` + `privkey.pem`) and PKCS#12 bytes with a password. It is saved under the entry's storage name, so renewal and restarts treat it like one the registry issued, and nothing is ordered. |
+| `RemoveAsync(name)` | Stops serving and renewing. The stored certificate is kept, so setting the entry again reuses it. |
+| `LoadAsync(name, ct)` | Awaits the entry's initial load from the store. |
+| `Entries` / `GetEntry(name)` | Name, domains, `State` (`None`, `Issuing`, `Issued`, `Failed`), certificate, `NotAfter`, `NextRenewal`, `LastError`. |
+| `SelectCertificate(sni)` | Exact name (case-insensitive), then a `*.` wildcard on a served certificate, then `FallbackCertificate`, otherwise `null`, which refuses the handshake. |
+
+Every entry shares one ACME account, one store, one `HttpClient` to the CA and one challenge responder,
+so TLS-ALPN-01 (`Challenges = AcmeChallengeTypes.TlsAlpn01`) is also answered for every entry through a
+single ClientHello hook. When a renewal replaces an imported certificate that the CA did not issue to
+this account, the order is retried without naming the old certificate (`replaces`), since some CAs
+refuse that.
+
+## Metrics
+
+Both the manager and the registry report on the server's meter (`HttpServerTelemetry.MeterName`), so an
+exporter already set up for [telemetry](/httpserver/diagnostics/#telemetry) picks them up:
+
+| Instrument | Kind | Attributes |
+| --- | --- | --- |
+| `shiny.acme.certificate.issuances` | counter | `acme.certificate.name`, `acme.issuance.result` (`success` / `failure`), `error.type` on failure (the CA's problem type) |
+| `shiny.acme.certificate.expiry` | observable gauge (days) | `acme.certificate.name`: the registry entry, or the manager's first domain |
+
+Alert on `shiny.acme.certificate.expiry < 14`. A renewal that keeps failing still leaves a few weeks
+before that fires.
+
+`AcmeCertificateManager` also raises `IssuanceFailed` (with the exception) whenever an order fails,
+whether from the background loop or an explicit call.
+
 ## Without a container
 
 ```csharp
@@ -255,4 +329,5 @@ package:
   certificate. Both follow renewals.
 - Tunnels (`ITunnelProvider`, the relay, SSH and Azure Relay) terminate TLS at the far end, so they
   never see this certificate. A tunnel's public name already has one.
-- No DNS-01 challenge, no wildcards, and no revocation or account key rollover API.
+- No DNS-01 challenge, so no wildcards are ordered (an imported wildcard certificate is served and
+  matched by SNI), and no revocation or account key rollover API.

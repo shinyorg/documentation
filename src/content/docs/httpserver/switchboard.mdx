@@ -1,0 +1,617 @@
+---
+title: Switchboard
+description: SignalR-shaped real-time calls over Server-Sent Events and plain HTTP — switchboards, groups, an operator, client results, resumable lines, and typed clients, all source-generated and AOT-clean
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+Switchboard is real-time, two-way calling between a server and its clients: clients call methods on
+the server, and the server calls methods on one client, a group, a user's devices, or everyone. If
+you know SignalR the ideas carry straight over — a **switchboard** is a hub, a **line** is a
+connection, the **operator** is `IHubContext`.
+
+It is not built on WebSockets. Each client holds one `text/event-stream` open for everything the
+server sends, and every call the client makes is an ordinary HTTP `POST`. That buys three things:
+
+- It survives what WebSockets often do not: proxies, corporate middleboxes, and every
+  [tunnel](/httpserver/tunneling/) that can stream a response.
+- On HTTP/2 and HTTP/3 the stream and every call share one connection.
+- Every call is a normal request, so [authentication](/httpserver/authentication/),
+  [authorization](/httpserver/authorization/), [rate limiting](/httpserver/rate-limiting/),
+  [CORS](/httpserver/cors/), access logs and [telemetry](/httpserver/diagnostics/) apply to it
+  unchanged.
+
+<Aside type="caution">
+Switchboard is SignalR-*shaped*, not SignalR-compatible. The wire protocol is its own, so a SignalR
+client cannot connect to a switchboard, and the Switchboard client cannot connect to an ASP.NET Core
+hub.
+</Aside>
+
+| Package | |
+| --- | --- |
+| <NugetBadge name="Shiny.Net.HttpServer.Switchboard" showLabel={true} /> | The server: switchboards, the operator, hang-ups, resume. The source generator ships inside it |
+| <NugetBadge name="Shiny.Net.HttpServer.Switchboard.Client" showLabel={true} /> | The .NET client. No dependency on the server package. Its generator for typed clients ships inside it |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+Both packages are trim and Native AOT clean. Method dispatch, the typed client proxies and the typed
+client are all generated at compile time — nothing is found by reflection or emitted at run time.
+
+## Getting started
+
+### The server
+
+```csharp
+using Shiny.Net.HttpServer.Switchboard;
+
+public class ChatBoard(IRoomStore rooms) : Switchboard
+{
+    public override Task OnConnectedAsync()
+        => Clients.Caller.SendAsync("Notice", $"Welcome, {Context.UserIdentifier}");
+
+    public async Task JoinRoom(string room)
+        => await Groups.AddToGroupAsync(Context.LineId, room);
+
+    public async Task SendMessage(string room, string text)
+        => await Clients.Group(room).SendAsync("MessageReceived", Context.UserIdentifier, text);
+
+    public IReadOnlyList<string> ListRooms() => rooms.Names;
+}
+```
+
+```csharp
+var builder = HttpServer.CreateBuilder();
+builder.AddSwitchboard();
+builder.Services.AddSingleton<IRoomStore, RoomStore>();
+
+var app = builder.Build();
+app.MapSwitchboard<ChatBoard>("/chat");
+await app.RunAsync();
+```
+
+`MapSwitchboard` mounts four routes under the path: `GET /chat/connect` (the event stream),
+`POST /chat/invoke` (calls), `DELETE /chat/connect` (the client hanging up) and
+`POST /chat/completion` (a client answering the server's question).
+
+### The client
+
+```csharp
+using Shiny.Net.HttpServer.Switchboard.Client;
+
+var line = new SwitchboardLineBuilder()
+    .WithUrl("https://device.local:5001/chat", o => o.AccessTokenProvider = () => auth.GetTokenAsync())
+    .WithJson(ChatJson.Default)
+    .WithAutomaticReconnect()
+    .Build();
+
+line.On<string, string>("MessageReceived", (user, text) => Console.WriteLine($"{user}: {text}"));
+line.On<string>("Notice", text => Console.WriteLine($"! {text}"));
+
+await line.StartAsync();
+await line.InvokeAsync("JoinRoom", "general");
+await line.SendAsync("SendMessage", "general", "hello");
+var rooms = await line.InvokeAsync<IReadOnlyList<string>>("ListRooms");
+```
+
+`WithJson` takes the same `JsonSerializerContext` the server uses, so both ends agree on the shape of
+every message. Common primitives (`string`, `int`, `Guid`, `DateTimeOffset`…) are covered without it.
+
+For a typed client — calls as methods, server calls as events — see [strongly typed](#strongly-typed).
+
+## Switchboards
+
+A switchboard is any non-abstract, non-generic class deriving from `Switchboard` (or
+[`Switchboard<TClient>`](#strongly-typed)). One instance is created **per call** and per lifecycle
+callback, in that request's DI scope, and disposed afterwards — so nothing survives on the instance.
+Per-line state goes in `Context.Items`.
+
+### Methods
+
+Every public instance method is callable by clients, under its C# name. Overloads are not possible
+(clients call by name), and the build fails if two methods share one.
+
+| Return type | The client gets |
+| --- | --- |
+| `void`, `Task`, `ValueTask` | Completion (a `204`) |
+| `T`, `Task<T>`, `ValueTask<T>` | The value |
+| `IAsyncEnumerable<T>` | Each item as the server yields it — the call's response is itself an event stream |
+
+Parameters bind by position from the call's JSON arguments, with the JSON metadata registered for
+their types. A parameter with a default value is optional. Three kinds of parameter are filled by
+the server instead:
+
+| Parameter | Filled with |
+| --- | --- |
+| `CancellationToken` | Cancelled when the client abandons the call or the line closes |
+| `CallerContext` | The same as `Context` |
+| `[FromServices] T` | Resolved from the request scope |
+
+```csharp
+[LineMethod("greet")]                   // published as "greet"
+public string Greeting(string name = "world") => $"hello {name}";
+
+[NotALineMethod]                        // public, but not callable by clients
+public void Helper() { }
+
+public async IAsyncEnumerable<ChatMessage> History(
+    string room, int take = 20, [EnumeratorCancellation] CancellationToken ct = default)
+{
+    await foreach (var m in store.ReadAsync(room, take, ct))
+        yield return m;
+}
+```
+
+A streaming method hands the line back once its first bytes are out, so other calls from the same
+client are not held up for as long as the stream runs.
+
+### Errors
+
+Throw `SwitchboardException` for an error meant for the client: its message always reaches the
+caller (as a `400`). Any other exception is reported as a generic failure (a `500`) unless
+`EnableDetailedErrors` is on — an exception message is written for a developer, not for whoever is on
+the other end of the line.
+
+### Context
+
+| `Context.` | |
+| --- | --- |
+| `LineId` | The line's public id. Stable for its whole life, resumes included |
+| `User` | The principal of the current request |
+| `UserIdentifier` | Who the line belongs to, from `IUserIdProvider` (default: the principal's name) |
+| `Items` | State that lives as long as the line, resumes included |
+| `LineClosed` | Fires when the line closes for good — not on a drop the client is expected back from |
+| `HttpContext` | The request running now; null in `OnDisconnectedAsync` |
+| `HangUp(reason, allowReconnect)` | Hangs up on this line |
+
+Calls from one line run **one at a time, in the order the client made them** (by default). They are
+separate HTTP requests and can overtake each other on the way — especially on HTTP/2 — so the client
+numbers them and the server puts them back in order. That is also why `Items` needs no locking.
+Raise `MaximumParallelInvocationsPerLine` to run them concurrently, and then `Items` is shared.
+
+## Calling clients
+
+`Clients` addresses lines on this switchboard. Every send is serialized once, however many lines
+receive it, and returns as soon as it is queued. A line that has gone away is skipped rather than
+failing the send.
+
+| `Clients.` | |
+| --- | --- |
+| `All` / `AllExcept(ids)` | Every line |
+| `Caller` | The line making the current call |
+| `Others` | Every line except the caller |
+| `Line(id)` / `Lines(ids)` | Specific lines |
+| `Group(name)` / `Groups(names)` / `GroupExcept(name, ids)` | Lines in a group |
+| `OthersInGroup(name)` | A group minus the caller |
+| `User(id)` / `Users(ids)` | Every line a user has open — their phone and their tablet |
+
+```csharp
+await Clients.Group("kitchen").SendAsync("DoorUnlocked", doorId, DateTimeOffset.UtcNow);
+```
+
+### Groups
+
+```csharp
+await Groups.AddToGroupAsync(Context.LineId, "kitchen");
+await Groups.RemoveFromGroupAsync(Context.LineId, "kitchen");
+await Groups.RemoveGroupAsync("kitchen");   // everyone out; nobody hung up on
+```
+
+Groups exist by being joined and are kept across a resume.
+
+### From outside a switchboard — the operator
+
+`IOperator<TBoard>` is everything a switchboard can do to its lines, from anywhere: an endpoint, a
+background service, a view model when the server runs on the device. `AddSwitchboard()` registers it
+for every switchboard type.
+
+```csharp
+public class OrderShipped(IOperator<ChatBoard> board)
+{
+    public Task Handle(Order order)
+        => board.Clients.User(order.CustomerId).SendAsync("OrderShipped", order.Id);
+}
+```
+
+`Caller`, `Others` and `OthersInGroup` throw there: outside a call, there is no caller.
+
+## Client results
+
+The server can call **one** client and wait for what its handler returns:
+
+```csharp
+public async Task DeleteRoom(string room)
+{
+    if (!await Clients.Caller.InvokeAsync<bool>("ConfirmDelete", [room]))
+        throw new SwitchboardException("Delete cancelled");
+
+    await rooms.DeleteAsync(room);
+}
+```
+
+```csharp
+line.On<string, bool>("ConfirmDelete", room => AskUserAsync($"Delete {room}?"));
+```
+
+- Only `Caller` and `Line(id)` can be asked. A group or a user may be several lines, and there is no
+  single answer to wait for.
+- The answer comes back on its own route, never queued behind the call that is waiting for it — so,
+  unlike SignalR, asking from inside a switchboard method works with one call at a time per line.
+- It fails with the client's message as a `SwitchboardException` when the handler throws or there is
+  none, with `TimeoutException` after `ClientResultTimeout` (30 seconds), and with
+  `LineClosedException` when the line closes for good first.
+- A drop inside the resume window is not a failure: the question is replayed when the line comes
+  back, and the client answers it once.
+- On the client, a handler that returns a value runs off the message queue — so one waiting on a
+  person does not hold up every message behind it.
+
+## Hanging up
+
+```csharp
+await board.Lines.HangUpAsync(lineId, "Removed by a moderator");
+await board.Lines.HangUpUserAsync("mallory", "You have been banned");
+await board.Lines.HangUpGroupAsync("kitchen");
+await board.Lines.HangUpAllAsync("Restarting", allowReconnect: true);
+
+Context.HangUp("bye");                  // from inside a switchboard
+```
+
+The client is sent the reason and its line token stops working at once, so it cannot resume past a
+hang-up. Unless `allowReconnect` is set, it does not reconnect at all (`LineCloseReason.HungUp`).
+
+`Lines` also lists what is connected: `Count`, `Lines` and `Find(id)` return a `LineInfo` with the
+line's id, user, groups, when it connected, whether it is attached or waiting to resume, how many
+times it has resumed, its HTTP version and its remote address.
+
+## Line lifecycle
+
+```csharp
+public override Task OnConnectedAsync() { … }        // a new line — Clients.Caller works in here
+public override Task OnReconnectedAsync() { … }      // a dropped line came back: same id, groups, Items
+public override Task OnDisconnectedAsync(DisconnectContext disconnect) { … }
+```
+
+`DisconnectContext.Reason` tells apart what SignalR folds into one exception:
+
+| `DisconnectReason` | |
+| --- | --- |
+| `ClientClosed` | The client closed it on purpose (`StopAsync`) |
+| `Dropped` | The stream broke and the line did not come back within the resume window |
+| `HungUp` | The server hung up |
+| `ServerShutdown` | The server was disposed |
+| `Faulted` | `OnConnectedAsync` threw; `Exception` says why |
+
+`OnDisconnectedAsync` runs once, never overlapping a call on the same line.
+
+## Dropping and resuming
+
+A line outlives any one stream. When the stream drops — a phone in a tunnel, Wi-Fi to cellular, the
+server stopping while a MAUI app is in the background — the line is **held for the resume window**
+(30 seconds by default). Everything sent to it meanwhile is kept (up to `ReplayBufferSize`). A client
+that comes back in time gets the same line id, its groups and its `Items`, and is replayed what it
+missed. If more was sent than the buffer held, it is told so (`MissedMessages`) rather than silently
+handed a gap.
+
+A client that comes back too late opens a new line (`NewLine = true`): a new id and no groups, so it
+should rejoin whatever it had joined.
+
+```csharp
+line.Reconnected += async (_, e) =>
+{
+    if (e.NewLine)
+        await line.InvokeAsync("JoinRoom", currentRoom);
+    else if (e.MissedMessages)
+        await ReloadAsync();
+};
+```
+
+Idle streams get a heartbeat comment (`HeartbeatInterval`, 15 seconds). It keeps proxies from closing
+a quiet connection, and the client treats a stream silent for twice that as dead — a mobile client
+relying on TCP to notice can sit "connected" to a dead link for minutes.
+
+<Aside>
+On HTTP/1.1 the server learns a client has gone when a write to it fails, so a drop is noticed
+within about two heartbeats, and the resume window starts then.
+</Aside>
+
+Stopping the server ends every stream but keeps the lines, so a MAUI app that stops the server in
+the background and starts it again on resume keeps its clients' lines — provided they come back
+inside the window.
+
+A client that falls more than `MaxBufferedMessagesPerLine` messages behind has its stream cut rather
+than letting memory grow without bound. It resumes and is replayed what the buffer still holds.
+
+## Strongly typed
+
+### On the server — `Switchboard<TClient>`
+
+Describe what the server calls on its clients as an interface, and call it through `Clients`:
+
+```csharp
+public interface IChatClient
+{
+    Task MessageReceived(ChatMessage message);
+    Task Notice(string text);
+    Task<bool> ConfirmDelete(string room);      // a client result
+}
+
+public class ChatBoard : Switchboard<IChatClient>
+{
+    public Task SendMessage(string room, string text)
+        => Clients.Group(room).MessageReceived(new(room, Context.UserIdentifier!, text, DateTimeOffset.UtcNow));
+
+    public async Task DeleteRoom(string room)
+    {
+        if (!await Clients.Caller.ConfirmDelete(room))
+            throw new SwitchboardException("Delete cancelled");
+    }
+}
+```
+
+The implementation of `IChatClient` is generated. A `Task<T>` method is a client result: on `Caller`
+or `Line(id)` it waits for the answer, and anywhere else it throws `NotSupportedException`. A
+`CancellationToken` parameter cancels the call rather than being sent. The typed operator is
+`IOperator<ChatBoard, IChatClient>`.
+
+If the switchboard also implements an interface describing its own methods (`ChatBoard : IChatBoard`),
+the compiler checks the signatures, and the generator warns (SWB009) when an implementation cannot be
+called under the interface's name — implemented explicitly, `[NotALineMethod]`, or renamed.
+
+### On the client — `[SwitchboardClient<TBoard, TClient>]`
+
+With the two interfaces in a project both sides reference:
+
+```csharp
+[SwitchboardClient<IChatBoard, IChatClient>]
+public partial class ChatBoardClient;
+```
+
+```csharp
+await using var chat = new ChatBoardClient(line);
+
+chat.MessageReceived += m => { Show(m); return Task.CompletedTask; };  // server calls become events…
+chat.ConfirmDelete = room => AskAsync(room);                           // …or a handler, where it waits for an answer
+
+await chat.Line.StartAsync();
+await chat.SendMessage("general", "hi");                                // board methods become calls
+await foreach (var m in chat.History("general", 20)) { … }
+```
+
+A method returning `Task<T>` becomes a single handler property rather than an event, because a result
+has exactly one producer. `chat.Register(receiver)` binds an implementation of the whole client
+interface instead — convenient for a service; the events suit a view model that cares about two
+messages of twelve. `DisposeAsync` removes the handlers and closes the line.
+
+### Contract export
+
+When the client cannot reference a shared contracts project — another repo, another team — the server
+can publish the contract as one C# file:
+
+```csharp
+[ExportContract(Namespace = "Chat.Contracts")]
+public class ChatBoard : Switchboard<IChatClient> { … }
+```
+
+```xml
+<PropertyGroup>
+  <SwitchboardContractsOutputPath>$(MSBuildProjectDirectory)/../ChatClient/Contracts</SwitchboardContractsOutputPath>
+</PropertyGroup>
+```
+
+Each build writes `ChatBoard.Contract.g.cs` there — only when it changed, so it does not churn the
+client's git status. It contains:
+
+- `IChatBoard` (or `BoardInterface = "…"`), derived from the switchboard's methods under their
+  published names, each with a `CancellationToken` added. Server-filled parameters are left out.
+- The `TClient` interface.
+- Every data type either interface mentions, rendered as plain records, classes and enums with their
+  `System.Text.Json` attributes, so a renamed property or a string enum means the same thing on both
+  sides.
+- A `JsonSerializerContext` for all of them, with the naming options of the server context that
+  already covered them.
+
+The file depends on nothing but the BCL. A type it cannot export — one with a base class, a generic,
+a type from another assembly — gets a warning (SWB010) and is referred to by name, so the client has
+to reference it some other way.
+
+## Authorization
+
+`[Authorize]` and `[AllowAnonymous]` work on the switchboard class and on individual methods, and
+`.RequireAuthorization()` on the mapping applies to every route:
+
+```csharp
+[Authorize]
+public class AdminBoard : Switchboard
+{
+    [Authorize(Roles = "admin")]
+    public Task Purge() => …;
+}
+
+app.MapSwitchboard<ChatBoard>("/chat").RequireAuthorization("members");
+```
+
+Every method shares one `/invoke` route, so a method's requirement is checked by the switchboard
+itself once it knows which method was called, together with the route's. A switchboard marked
+`[Authorize]` is protected even if the app never calls `UseAuthorization()`. `[AllowAnonymous]` on a
+method cannot lift a class-level requirement (the generator warns: SWB007).
+
+The line token that ties calls to a line is a credential. Every call must also come from the same
+principal that opened the line, so a leaked token alone is not enough to speak as someone else.
+
+## Filters
+
+A filter wraps every call and lifecycle callback — the switchboard counterpart of middleware:
+
+```csharp
+public sealed class AuditFilter(ILogger<AuditFilter> logger) : ISwitchboardFilter
+{
+    public async ValueTask InvokeMethodAsync(SwitchboardInvocationContext context, Func<SwitchboardInvocationContext, ValueTask> next)
+    {
+        logger.LogInformation("{User} called {Method}", context.Caller.UserIdentifier, context.MethodName);
+        await next(context);
+    }
+}
+
+builder.AddSwitchboardFilter<AuditFilter>();
+```
+
+Implement only what you need: `InvokeMethodAsync`, `OnConnectedAsync`, `OnReconnectedAsync`,
+`OnDisconnectedAsync`. To refuse a call, throw `SwitchboardException` instead of calling `next`.
+Filters are singletons and run in registration order, the first outermost. `context.Services` is the
+request scope.
+
+## The client
+
+| `SwitchboardLine` | |
+| --- | --- |
+| `StartAsync()` / `StopAsync()` | Open the line; close it on purpose (the server sees `ClientClosed`). A stopped line can be started again, as a new line |
+| `InvokeAsync(method, args…)`, `InvokeAsync<T>(…)` | Call and wait for completion or the result |
+| `SendAsync(method, args…)` | The same as `InvokeAsync`, for calls with nothing to return |
+| `StreamAsync<T>(method, args…)` | Receive an `IAsyncEnumerable<T>` item by item |
+| `InvokeCoreAsync` / `StreamCoreAsync` | The same, taking a `CancellationToken` |
+| `On(method, handler)` | Handle a call from the server, with up to three arguments |
+| `On<…, TResult>(method, handler)` | Answer a call the server waits on |
+| `Handle(method, args => …)` | Read the arguments yourself, any number |
+| `State`, `LineId` | `Disconnected`, `Connecting`, `Connected`, `Reconnecting` |
+
+Calls throw `InvalidOperationException` unless the line is `Connected`, and `SwitchboardException`
+(with the HTTP `StatusCode`) when the server refuses or fails them. Handlers for server calls run one
+at a time in the order they were sent; one that returns a value runs off that queue.
+
+| Event | |
+| --- | --- |
+| `StateChanged` | Every transition |
+| `Reconnecting` | Before each reconnect attempt, with the error and the attempt number |
+| `Reconnected` | `LineId`, `NewLine`, `MissedMessages` |
+| `Closed` | Once, when the line is closed for good, with `Reason`, the server's `Message` and any `Exception` |
+
+| `LineCloseReason` | Reconnects? |
+| --- | --- |
+| `ClientClosed` | No |
+| `HungUp` | Never |
+| `ServerClosed` | The server closed the line allowing a reconnect, and none succeeded |
+| `Dropped` | The stream broke and automatic reconnect is off |
+| `RetriesExhausted` | The retry policy gave up |
+| `Faulted` | Refused credentials or a protocol error — retrying will not help |
+
+`WithAutomaticReconnect()` retries after 0, 2, 10 and 30 seconds (with jitter), then gives up. Pass
+your own delays, or an `IRetryPolicy`. A reconnect first tries to resume the line; if the server no
+longer has it, it opens a new one.
+
+| `SwitchboardLineOptions` | |
+| --- | --- |
+| `AccessTokenProvider` | Called before each request; sent as a bearer token |
+| `Headers` | Added to every request |
+| `HttpMessageHandlerFactory` | Wrap the handler — certificate pinning, a self-signed dev certificate |
+| `HttpClient` | Use your own; the line does not dispose it |
+| `HttpVersion`, `HttpVersionPolicy` | HTTP/2, falling back to HTTP/1.1, by default |
+| `ServerTimeout` | How long a silent stream counts as alive. Default: twice the server's heartbeat |
+
+In Blazor WebAssembly the client asks the browser to stream responses, which an event stream needs.
+
+## Options
+
+```csharp
+builder.AddSwitchboard(o =>
+{
+    o.ResumeWindow = TimeSpan.FromSeconds(60);
+});
+```
+
+| `SwitchboardOptions` | Default | |
+| --- | --- | --- |
+| `HeartbeatInterval` | 15 s | Comment lines on an idle stream. Zero turns them off |
+| `ResumeWindow` | 30 s | How long a dropped line is held. Zero closes it the moment its stream ends |
+| `ReplayBufferSize` | 256 | Messages kept per line for replay |
+| `MaxBufferedMessagesPerLine` | 1024 | Queued messages before a slow line's stream is cut |
+| `MaximumParallelInvocationsPerLine` | 1 | Concurrent calls per line. One keeps them in order |
+| `InvocationOrderingTimeout` | 2 s | How long a call waits for an earlier-numbered one that has not arrived |
+| `ClientResultTimeout` | 30 s | How long the server waits for a client's answer |
+| `MaxPendingClientResults` | 16 | Unanswered questions per line |
+| `MaxLines` | 10,000 | Per switchboard. New connects past it get a `503` |
+| `EnableDetailedErrors` | false | Send unhandled exception messages to clients |
+
+## Telemetry
+
+On the server's meter ([Health & Telemetry](/httpserver/diagnostics/)), every instrument tagged
+`switchboard` with the switchboard type's name:
+
+| Instrument | |
+| --- | --- |
+| `shiny.switchboard.lines.active` | Open lines, attached or held for resume |
+| `shiny.switchboard.lines.opened` / `.closed` | Closed is tagged `reason` |
+| `shiny.switchboard.lines.resumed` | Tagged `missed` |
+| `shiny.switchboard.lines.overflowed` | Streams cut for falling behind |
+| `shiny.switchboard.invocation.duration` | Seconds per call, tagged `method` and `outcome` (`ok`, `error`, `fault`, `cancelled`) |
+| `shiny.switchboard.client_results` | Server-to-client questions, tagged `outcome` (`ok`, `error`, `timeout`, `closed`) |
+
+Each call is also a span, `switchboard {Board}.{Method}`, on the server's activity source.
+
+## Transports
+
+Tested end to end over HTTP/1.1, HTTP/2 (cleartext and in memory), and the [relay tunnel](/httpserver/tunneling/).
+HTTP/3 and the other tunnel providers carry it the same way but have no end-to-end test yet.
+[Response compression](/httpserver/compression/) already leaves `text/event-stream` alone, and
+`MapSwitchboard` exempts its routes from [request timeouts](/httpserver/timeouts/): a stream is open
+as long as the line, and a call may wait on a client's answer.
+
+On HTTP/1.1 a browser allows six connections per origin, and the event stream holds one of them for
+as long as the line is open. Prefer HTTP/2 where you can.
+
+## Wire protocol
+
+For anyone writing a client in another language. All bodies are JSON; `{base}` is the mapped path.
+
+| Request | |
+| --- | --- |
+| `GET {base}/connect` | Opens the stream. To resume, send `X-Switchboard-Line: <token>` and `Last-Event-ID` (`?token=` and `?lastEventId=` also work, but query strings are logged) |
+| `POST {base}/invoke` | `{"target": "Method", "args": [ … ], "seq": 1}` with `X-Switchboard-Line`. Answers `200 {"result": …}`, `204`, an event stream for a streaming method, or `{"error": "…"}` with `400`/`401`/`403`/`404`/`410`/`500` |
+| `POST {base}/completion` | `{"invocationId": "…", "result": …}` or `{"invocationId": "…", "error": "…"}` |
+| `DELETE {base}/connect` | Hangs up, with `X-Switchboard-Line` |
+
+Events on the stream, each with an `id:` to resume from except where noted:
+
+| `event:` | `data:` |
+| --- | --- |
+| `connected` (no id) | `{"protocol": 1, "lineId", "lineToken", "heartbeatMs", "resumeWindowMs"}` |
+| `resumed` (no id) | `{"lineId", "missed"}`, followed by the replay |
+| `invoke` | `{"target", "args", "invocationId"?}` — an `invocationId` means the server waits for a completion |
+| `close` (no id) | `{"reason", "allowReconnect"}` |
+
+A streaming call's response carries `item` events, then `complete` or `error`. `seq` numbers a line's
+calls from 1 so the server can run them in order; a new line starts again at 1.
+
+## Build diagnostics
+
+| Id | |
+| --- | --- |
+| SWB001 | A switchboard cannot be dispatched: generic, or not public/internal |
+| SWB002 | No public or internal constructor |
+| SWB003 | Two methods with the same published name |
+| SWB004 | A parameter cannot be bound: `ref`/`out`/`in`, a ref struct, or an `IAsyncEnumerable<T>` from the client |
+| SWB005 | A return type that cannot be sent: a `ref` return, or `Task<IAsyncEnumerable<T>>` |
+| SWB006 | A generic method |
+| SWB007 | `[AllowAnonymous]` on a method of a switchboard that requires authorization (warning) |
+| SWB008 | A `TClient` interface member that cannot be called on a client |
+| SWB009 | A contract method clients cannot call under its interface name (warning) |
+| SWB010 | A type the contract export cannot include (warning) |
+| SWBC001 | A `[SwitchboardClient]` class that is not partial, top-level and non-generic |
+| SWBC002 | A contract member the typed client cannot implement |
+| SWBC003 | Two members of the typed client with the same name |
+
+## Limits
+
+- **One process.** Lines, groups and the replay buffer live in memory. There is no backplane for
+  several server instances.
+- **.NET client only.** There is no JavaScript client yet; the [wire protocol](#wire-protocol) is
+  documented for anyone writing one. A browser's `EventSource` cannot send an `Authorization`
+  header, so a JavaScript client would read the stream with `fetch`.
+- **No streaming from the client.** A method cannot take an `IAsyncEnumerable<T>` parameter.
+- **Naming.** The class `Switchboard` lives in the namespace `Shiny.Net.HttpServer.Switchboard`. From
+  app code, `using Shiny.Net.HttpServer.Switchboard;` then `: Switchboard` works. Code that is itself
+  inside a `Shiny.Net.HttpServer…` namespace sees the namespace first (CS0118) and has to qualify it.
+
+The `samples/Sample.Switchboard` and `Sample.Switchboard.Client` projects in the repository are a
+chat server and a console client that compiles against nothing but the server's exported contract.
+Both publish with Native AOT.
