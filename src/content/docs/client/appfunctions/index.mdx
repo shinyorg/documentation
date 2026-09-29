@@ -1,0 +1,155 @@
+---
+title: App Functions
+description: Declare your app's functions once in C# and expose them to Siri, Spotlight, Shortcuts and Apple Intelligence (App Intents) and to Gemini (Android AppFunctions)
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.AppFunctions" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios"]} />
+
+`Shiny.AppFunctions` lets the assistants call into your app. You declare each function **once, in C#**, and it becomes:
+
+- an **App Intent** on iOS 16+ - available to Siri, Spotlight, the Shortcuts app and Apple Intelligence, with optional Siri phrases that work without any setup by the user;
+- an **Android AppFunction** on Android 16+ - available to Gemini and other agents the system allows.
+
+A source generator, shipped in the package, writes the DI registration, the argument binding and dispatch, the Swift App Intents and the Android AppFunctions schema. The package's build step compiles the Swift into your iOS app and adds the schema to your Android app. **You write no Swift, no Kotlin, and no Info.plist, entitlement or AndroidManifest entries.**
+
+The library is hosted on Shiny.Core and has no MAUI dependency.
+
+## Setup
+
+```csharp
+// MauiProgram.cs
+builder
+    .UseMauiApp<App>()
+    .UseShiny();
+
+builder.Services.AddAppFunctions();   // source-generated
+```
+
+`AddAppFunctions()` is generated into your app. It registers every handler, entity query and delegate the app declares, plus the runtime.
+
+:::caution[Declare functions in the app project]
+The generator only scans the project it runs in, which must be the app itself. `[AppFunction]` records, handlers, `[AppEntity]` records, entity queries and delegates declared in a class library are not picked up. The services, enums and result types they use can live anywhere.
+:::
+
+## Declaring a function
+
+A function is a record marked `[AppFunction]` that implements `IAppFunction<TResult>` (or `IAppFunction` when there is no result). Its properties are the parameters. One handler runs it.
+
+```csharp
+using Shiny.AppFunctions;
+
+public enum Priority { Low, Normal, Urgent }
+
+public record OrderResult(string Number, int Quantity, double Total);
+
+[AppFunction("create_order", Description = "Creates an order for a customer")]
+[AppShortcut("Create an order in ${applicationName}", ShortTitle = "New Order", SystemImage = "cart.badge.plus")]
+public record CreateOrder(
+    [property: AppParameter(Title = "Customer", Description = "Who the order is for")] Customer Customer,
+    int Quantity,
+    Priority Priority,
+    string? Note
+) : IAppFunction<OrderResult>;
+
+public class CreateOrderHandler(OrderStore store) : IAppFunctionHandler<CreateOrder, OrderResult>
+{
+    public Task<OrderResult> Handle(CreateOrder request, AppFunctionContext context, CancellationToken cancellationToken)
+    {
+        if (request.Quantity is < 1 or > 1000)
+            throw new AppFunctionException(AppFunctionErrorCode.InvalidArgument, "Quantity must be between 1 and 1000");
+
+        var order = store.Create(request.Customer, request.Quantity, request.Priority, request.Note);
+        context.Say($"Order {order.Number} is in.");     // what Siri says or shows
+        return Task.FromResult(new OrderResult(order.Number, order.Quantity, order.Total));
+    }
+}
+```
+
+- **The id** (`create_order`) is shared by both platforms: lowercase letters, digits and underscores, starting with a letter. Changing it breaks saved Shortcuts and agent references.
+- **The description** is what assistants use to decide when to call the function, so be specific.
+- **Handlers** are resolved from a new DI scope for every call, so they can take scoped services. Each function has exactly one.
+- **`context.Say(...)`** sets the text Siri shows or speaks. On Android it is returned with the result, under the `ShinyAppFunctionService.DialogExtraKey` response extra.
+
+### Parameters
+
+- Constructor parameters are **required unless they are nullable**.
+- Settable and `init` properties are **optional unless they are marked `required`**. A value that isn't sent keeps the property's own default.
+- Computed properties are ignored.
+
+| | Parameters | Results |
+|---|---|---|
+| `string`, `int`, `long`, `double`, `bool`, `DateTimeOffset` | ✅ (nullable = optional) | ✅ |
+| enums | ✅ | ✅ |
+| `[AppEntity]` records | ✅ (by id, resolved through `IAppEntityQuery<T>`) | as plain objects |
+| records / classes of the above | — | ✅ (nested up to 4 levels) |
+| arrays / lists | — | ✅ |
+| no result (`IAppFunction`) | | ✅ |
+
+On iOS a primitive result is returned as a typed value; an object or list result is returned as its JSON text, and the dialog is what the handler passed to `context.Say(...)`.
+
+## Entities
+
+An entity is an app object an assistant can pick as a parameter - a customer, a playlist, a project. Mark the record with `[AppEntity]`, give it a public `string Id`, and implement an `IAppEntityQuery<T>` for it:
+
+```csharp
+[AppEntity("customer", Title = "Customer")]
+public record Customer(string Id, string Name, string City);
+
+public class CustomerQuery(ICustomers customers) : IAppEntityQuery<Customer>
+{
+    public Task<IReadOnlyList<Customer>> GetByIds(IReadOnlyList<string> ids, CancellationToken ct) => customers.ByIds(ids, ct);
+    public Task<IReadOnlyList<Customer>> Search(string text, CancellationToken ct) => customers.Search(text, ct);
+    public Task<IReadOnlyList<Customer>> Suggested(CancellationToken ct) => customers.Recent(ct);   // optional
+}
+```
+
+The value shown to the user is `DisplayProperty` when set, otherwise `Name`, then `Title`, then `Id`.
+
+- **iOS** shows it as an App Entity with a picker: `Suggested` before the user types, `Search` while they type, and `GetByIds` to load the ones that were chosen.
+- **Android has no entity queries.** The id is sent on the wire, and each entity also gets a generated **`search_{id}`** function (here `search_customer`) that agents use to find ids. It returns `[{ id, title }]`.
+
+An id that the query doesn't return fails the call with `NotFound`. Entity lookups pass through the [delegates](/client/appfunctions/delegates/) like any other call.
+
+## Siri phrases (App Shortcuts)
+
+`[AppShortcut]` makes a function an **App Shortcut**: it's available to Siri and Spotlight as soon as the app is installed, with no setup by the user. It is ignored on Android.
+
+```csharp
+[AppFunction("count_open_orders", Title = "Open Orders", Description = "Counts the orders that have not shipped")]
+[AppShortcut("How many orders are open in ${applicationName}", SystemImage = "shippingbox")]
+[AppShortcut("Open orders in ${applicationName}")]
+public record CountOpenOrders : IAppFunction<int>;
+```
+
+- Every phrase must contain `${applicationName}`.
+- Repeat the attribute for more phrases. The first one's `ShortTitle` (the Shortcuts tile label) and `SystemImage` (an SF Symbol) are used.
+- iOS allows at most 10 App Shortcuts per app.
+- Siri phrase training needs a development region. If your `Info.plist` has no `CFBundleDevelopmentRegion`, `en` is added to the built app (see [build properties](/client/appfunctions/platform/#build-properties)).
+
+## Errors
+
+Throw `AppFunctionException` to fail a call with a specific code. The message is shown or spoken to the user, so write it for them. Any other exception becomes `AppError`.
+
+| `AppFunctionErrorCode` | Android `AppFunctionError` | |
+|---|---|---|
+| `InvalidArgument` | `InvalidArgument` | a missing or bad parameter - binding throws this itself for missing required values |
+| `NotFound` | `InvalidArgument` for an unknown entity, `FunctionNotFound` for an unknown function | |
+| `Denied` | `Denied` | a delegate refused, or the user may not do this |
+| `Cancelled` | `Cancelled` | the caller cancelled, or the OS time budget ran out |
+| `AppError` | `AppUnknownError` | anything else |
+
+On iOS the message becomes Siri's error dialog.
+
+## Sample
+
+The [Shiny client sample](https://github.com/shinyorg/shiny/tree/v5/samples/Sample.Maui/AppFunctions) has a small orders app: create, count, look up and cancel orders, a customer entity, two App Shortcuts, and a sign-in delegate. Its **App Functions** page shows the orders and every call Siri or Gemini made.

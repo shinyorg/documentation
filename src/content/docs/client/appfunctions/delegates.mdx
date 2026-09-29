@@ -1,0 +1,85 @@
+---
+title: Delegates & In-App Calls
+description: Gate and observe every App Function call with delegates, and call functions in-process through the dispatcher
+---
+
+## Delegates
+
+`IAppFunctionDelegate` handles what cuts across every function: sign-in checks, feature flags, telemetry. Declare as many as you like in the app project - `AddAppFunctions()` finds and registers them, so don't register them yourself.
+
+```csharp
+public class SignInDelegate(SignInState signIn) : IAppFunctionDelegate
+{
+    public Task<AppFunctionGate> OnInvoking(AppFunctionContext context, CancellationToken cancellationToken)
+        => Task.FromResult(context.FunctionId == "cancel_order" && !signIn.IsSignedIn
+            ? AppFunctionGate.OpenApp("Sign in to cancel orders.")
+            : AppFunctionGate.Allow);
+}
+
+public class TelemetryDelegate(ILogger<TelemetryDelegate> logger) : IAppFunctionDelegate
+{
+    public Task OnInvoked(AppFunctionContext context, object? result, Exception? exception)
+    {
+        logger.LogInformation("{Function} from {Platform}: {Outcome}", context.FunctionId, context.Platform, exception?.Message ?? "ok");
+        return Task.CompletedTask;
+    }
+}
+```
+
+Both methods have default implementations, so implement only what you need.
+
+- **`OnInvoking`** runs after the arguments are bound and before the handler. The first delegate that doesn't return `AppFunctionGate.Allow` decides the call.
+  - `AppFunctionGate.Deny(message)` refuses it with `Denied`.
+  - `AppFunctionGate.OpenApp(message)` asks for the app. **On iOS**, the user is asked to continue in the app, and the function then runs again in the foreground with `context.IsForeground` set - which passes the gate, so the user can sign in first. **On Android** there is no equivalent, and the call is refused with the message.
+- **`OnInvoked`** runs after the handler with its result or exception. A refusal arrives as an `AppFunctionException` with `Denied`. Exceptions thrown here are logged and ignored.
+
+Delegates are resolved from the call's scope and run in the order `AddAppFunctions()` registers them. Entity lookups go through them as well, because they expose app data.
+
+### The context
+
+| | |
+|---|---|
+| `FunctionId`, `Function` | the function's id and its descriptor |
+| `Platform` | `Apple`, `Android` or `Other` (an in-process call) |
+| `IsForeground` | iOS: the app is in the foreground for this run |
+| `CallerPackage` | Android: the calling agent's package name (empty from the shell) |
+| `Request` | the bound request record (null for entity lookups) |
+| `Services` | the call's DI scope |
+| `Items` | state shared between delegates and the handler for this call |
+| `Say(text)` / `Dialog` | the text for Siri, or returned with the Android result |
+
+`[AppFunction(OpensApp = true)]` brings the app to the foreground before the handler runs on iOS. Android runs it in the background.
+
+## Calling functions in the app
+
+Every call - from Siri, from Gemini or from your own code - goes through `AppFunctionDispatcher`: a new DI scope, binding, delegates, the handler and the JSON result. You can call it directly, for example from a test, a debug page or your own in-app assistant:
+
+```csharp
+public class OrdersViewModel(AppFunctionDispatcher dispatcher)
+{
+    async Task CreateTestOrder()
+    {
+        var outcome = await dispatcher.Execute(
+            new AppFunctionInvocation("create_order"),
+            """{"customer":"acme","quantity":2,"priority":"Normal"}""",
+            CancellationToken.None
+        );
+
+        if (outcome.Status == AppFunctionStatus.Success)
+            Console.WriteLine(outcome.Dialog ?? outcome.ResultJson);
+        else
+            Console.WriteLine($"{outcome.ErrorCode}: {outcome.Message}");
+    }
+}
+```
+
+`Execute` never throws: every failure comes back as an `AppFunctionOutcome`. Arguments are a JSON object keyed by the parameter names in camelCase; enums are their member names, entities their ids, and `DateTimeOffset` values ISO 8601 strings. `AppFunctionInvocation` defaults to `AppFunctionPlatform.Other` and not in the foreground, so an `OpenApp` gate refuses the call the way Android does.
+
+### Descriptors and JSON schemas
+
+`dispatcher.Registry.Functions` describes every function - the declared ones, followed by the generated `search_{entity}` functions - with its title, description, parameters and result type. `GetParametersJsonSchema()` returns a JSON schema (draft 2020-12) for the parameters, which is what an AI tool or MCP adapter needs to offer the same functions to a model.
+
+```csharp
+foreach (var function in dispatcher.Registry.Functions)
+    Console.WriteLine($"{function.Id}: {function.Description}\n{function.GetParametersJsonSchema()}");
+```

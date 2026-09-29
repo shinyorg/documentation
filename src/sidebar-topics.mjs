@@ -512,6 +512,17 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'App Functions',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'client/appfunctions/' },
+          { label: 'Delegates & In-App Calls', link: 'client/appfunctions/delegates' },
+          { label: 'Platform & Testing', link: 'client/appfunctions/platform' },
+          { label: 'Release Notes', link: 'client/release-notes' }
+        ]
+      },
+      {
         label: 'HTTP Transfers',
         jumpTo: true,
         items: [

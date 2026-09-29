@@ -1,0 +1,98 @@
+---
+title: Platform & Testing
+description: How Shiny App Functions builds the App Intents and the Android AppFunctions schema, the build properties, and how to test from a simulator or emulator
+---
+
+## What happens at build time
+
+```
+[AppFunction] records, handlers, [AppEntity] + queries, delegates
+        │  Roslyn source generator
+        ├─ AddAppFunctions()               DI registration
+        ├─ GeneratedAppFunctionRegistry    descriptors + reflection-free binding, dispatch and result writing
+        └─ the Swift and Android XML, as string constants
+        │  MSBuild task, after compile: reads the constants from the compiled assembly and writes the files
+        ├─ iOS      swiftc → a static library linked into the app
+        │           appintentsmetadataprocessor + appintentsnltrainingprocessor → Metadata.appintents in the .app, before signing
+        └─ Android  app_functions.xml, app_functions_v2.xml and the schema XSD as assets
+```
+
+Nothing is done with reflection, so it is trim- and AOT-safe. The generator, the MSBuild task and the build targets all ship inside the `Shiny.AppFunctions` package; only the app project (not class libraries that reference the package) runs the build step.
+
+| | iOS | Android |
+|---|---|---|
+| Code to write | none - a Shiny startup task connects the Swift bridge | none |
+| Manifest / plist | none. `CFBundleDevelopmentRegion` is added when missing | none - the service comes from the library's manifest through the manifest merger |
+| Entitlements | none - App Intents don't need one | - |
+| Minimum OS | iOS 16 | Android 16 (API 36); a no-op below |
+
+The iOS build needs Xcode, since it runs `swiftc` and Apple's App Intents processors.
+
+### When a call arrives
+
+The OS can call in before your app has built its DI container - a cold start from Siri, or the Android service being bound early. The Swift bridge and the Android service wait up to 10 seconds (`AppFunctionsHost.ReadyTimeout`) for the host, then fail the call. Handlers run in the background with no UI, often with the app launched just for them, so persist any state they change and let pages refresh when they appear.
+
+## Build properties
+
+All optional; set them in the app's project file.
+
+| Property | Default | |
+|---|---|---|
+| `ShinyAppFunctionsEnabled` | `true` | `false` skips generating and building the App Intents and the Android assets |
+| `ShinyAppFunctionsMinimumOSVersion` | the app's `SupportedOSPlatformVersion`, at least `16.0` | the iOS deployment target of the Swift intents |
+| `ShinyAppFunctionsDevelopmentRegion` | `en` | added to the built Info.plist only when it has no `CFBundleDevelopmentRegion` |
+| `ShinyAppFunctionsConstProtocolsFile` | the list shipped for Xcode 27 | swiftc's const-extraction protocol list. Xcode builds this internally, so a later Xcode may need an updated one |
+
+## Generator diagnostics
+
+| Id | |
+|---|---|
+| SHAF001 | Invalid function or entity id |
+| SHAF002 | An `[AppFunction]` type must implement exactly one of `IAppFunction` / `IAppFunction<TResult>` |
+| SHAF003 | Unsupported parameter or result type |
+| SHAF004 | The request can't be constructed from its parameters |
+| SHAF005 | No handler for a function |
+| SHAF006 | More than one handler for a function |
+| SHAF007 | An `[AppEntity]` needs a public `string Id` |
+| SHAF008 | The entity's display property doesn't exist |
+| SHAF009 | No `IAppEntityQuery<T>` for an entity |
+| SHAF010 | Duplicate id |
+| SHAF011 | An App Shortcut phrase must contain `${applicationName}` |
+| SHAF012 | More than 10 App Shortcuts |
+| SHAF013 | A handler, query or delegate has no public constructor |
+
+## Testing
+
+### Android
+
+On an Android 16+ emulator or device, the shell can list and call your functions - every call can be a cold start:
+
+```bash
+adb shell cmd app_function list-app-functions --package com.mycompany.myapp
+
+adb shell "cmd app_function execute-app-function --package com.mycompany.myapp \
+  --function create_order --parameters '{\"customer\":\"acme\",\"quantity\":2,\"priority\":\"Normal\"}'"
+
+adb shell "cmd app_function execute-app-function --package com.mycompany.myapp \
+  --function search_customer --parameters '{\"query\":\"acme\"}'"
+```
+
+:::note[Debug installs]
+The system starts your process for these calls without Fast Deployment's files. `dotnet build -t:Run` or `-t:Install` is fine, but a Debug APK installed with plain `adb install` must embed its assemblies: `<EmbedAssembliesIntoApk>true</EmbedAssembliesIntoApk>`.
+:::
+
+### iOS
+
+Install the app on a simulator or device, then search a shortcut's title or phrase in Spotlight ("New Order", "Open Orders"), or find the app's actions in the Shortcuts app. Running an App Shortcut from Spotlight starts the app in the background and shows the handler's `context.Say(...)` text as the Siri dialog.
+
+### In-process
+
+Handlers are plain classes, and [`AppFunctionDispatcher`](/client/appfunctions/delegates/#calling-functions-in-the-app) runs the whole pipeline - binding, delegates, handler and result - without an OS in the loop.
+
+## Known limits
+
+- Only the app project is scanned; functions declared in a class library are ignored without a diagnostic.
+- Titles and descriptions are not localized.
+- An iOS build with more than one runtime identifier at once (for example arm64 and x64 simulator together) is not supported by the metadata step.
+- Answering iOS parameter prompts from the OS, Siri by voice, Gemini itself and physical devices have not been verified end to end. Calls to AppFunctions from agents are allowlisted by the system.
+- `AppFunctionGate.OpenApp` on iOS continues in the foreground with `continueInForeground` on iOS 26+, `ForegroundContinuableIntent` on iOS 17-25, and fails with the message on iOS 16.
