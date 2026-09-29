@@ -268,10 +268,12 @@ The BLE transport:
 
 1. **Scans** for a peripheral matching the optional device name filter (or uses a pre-provided peripheral / discovered device). The scan itself is deliberately unfiltered — see [Why the scan isn't filtered by service UUID](#why-the-scan-isnt-filtered-by-service-uuid)
 2. **Connects** using Shiny's task-based `ConnectAsync`
-3. **Subscribes** to notifications on the read characteristic via `NotifyCharacteristic`
+3. **Subscribes** to notifications on the read characteristic via `NotifyCharacteristic`, and **waits for the peripheral to confirm** they are on (`WhenCharacteristicSubscriptionChanged`) before `Connect` returns — see below
 4. **Sends commands** by writing bytes to the write characteristic via `WriteCharacteristicAsync`
 5. **Collects response** bytes from notifications into a buffer until the ELM327 `>` prompt is received
 6. **Returns** the complete response string
+
+`Connect` does not return until notifications are confirmed live. Subscribing only *requests* them — the CCCD write that turns them on completes whenever the peripheral acknowledges it — and a first command written as write-without-response is not queued behind that request, so it can overtake it. The adapter then answers before anything is listening, the reply is lost, and the caller waits out the full `CommandTimeout` on its very first command (`ATI`). If the confirmation does not arrive within `CommandTimeout`, `Connect` throws `ObdException` naming the characteristic.
 
 Commands are serialized with a semaphore — only one command executes at a time, which matches the ELM327's single-threaded request-response protocol.
 
