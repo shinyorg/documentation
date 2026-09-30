@@ -13,6 +13,7 @@ description: Every Shiny.AppDeviceBridge bridge — routes, events, platforms an
 | GPS | `GET gps/status`, `POST gps/access`, `GET gps/last`, `GET gps/current`, `GET/POST/DELETE gps/listener` | `gps.reading` |
 | Geofences | `GET geofences/status`, `POST geofences/access`, `GET/POST/DELETE geofences/regions`, `DELETE geofences/regions/{id}`, `GET geofences/regions/{id}/state` | `geofence.status` |
 | Motion activity | `GET motion/status`, `POST motion/access`, `GET motion/current`, `GET/POST/DELETE motion/listener` | `motion.activity` |
+| Beacons | `GET beacons/status`, `POST beacons/access`, `GET/POST/DELETE beacons/ranging`, `DELETE beacons/ranging/{id}`, `GET/POST/DELETE beacons/regions`, `DELETE beacons/regions/{id}`, `GET beacons/regions/{id}/state`, `POST/DELETE beacons/eddystone`, `GET/DELETE beacons/broadcast`, `POST beacons/broadcast/{ibeacon,eddystone-uid,eddystone-url}` | `beacons.ranged`, `beacons.region`, `beacons.eddystone` |
 | Bluetooth LE | `GET ble/status`, `POST ble/access`, `POST/DELETE ble/scan`, `GET ble/peripherals[/{uuid}]`, `POST/DELETE …/connection`, `GET …/rssi`, `GET …/services`, `GET …/characteristics`, `GET/PUT …/characteristics/{c}`, `POST/DELETE …/notifications` | `ble.scan`, `ble.status`, `ble.notification`, `ble.error` |
 | OBD-II | `GET obd/status`, `GET obd/commands`, `POST obd/scan`, `GET obd/adapters`, `POST/DELETE obd/connection`, `POST obd/command`, `POST obd/raw`, `GET obd/vin`, `GET/DELETE obd/dtc`, `POST/DELETE obd/monitor` | `obd.reading`, `obd.disconnected` |
 | Wi-Fi | `GET wifi`, `POST wifi/access`, `GET wifi/networks`, `GET wifi/current`, `POST/DELETE wifi/connection`, `GET wifi/known`, `DELETE wifi/known?id=`, `GET/PUT wifi/radio`, `GET/POST/DELETE wifi/hotspot`, `GET wifi/hotspot/clients` | `wifi.changed`, `wifi.hotspot` |
@@ -132,9 +133,32 @@ vibration needs `VIBRATE`, and battery needs `BATTERY_STATS` in the manifest (wi
 returns `403`). `vibrate` is capped at 5 seconds.
 
 **Motion activity:** walking, running, cycling, driving or stationary, from the OS's activity recognition.
-There's no history, only the latest reading and live ones. `AddLocationBridges()` doesn't include it,
+There's no history, only the latest reading and live ones. It ships in `Shiny.AppDeviceBridge.Gps`, but `AddGpsBridge()` doesn't include it,
 because it needs its own setup: `NSMotionUsageDescription` on iOS (the permission request crashes without it),
 and `ACTIVITY_RECOGNITION` with Google Play Services on Android. Other platforms return `501`.
+
+**Beacons:** `AddBeaconsBridge()` registers all four features. To leave some out, pass `BeaconFeatures` flags: for
+example `AddBeaconsBridge(BeaconFeatures.Ranging | BeaconFeatures.Eddystone)` skips monitoring's background location and
+broadcasting's advertise permission. A feature left out answers `501`. So does one the platform reports as `NotSupported`,
+such as iBeacon ranging and monitoring on macOS, where CoreLocation has neither. `GET beacons/status` shows each
+feature's access.
+- **Ranging:** `POST beacons/ranging` takes a region: `identifier`, `uuid`, and optionally `major`, then `minor`. Each
+  beacon seen arrives as `beacons.ranged`, tagged with the region, with RSSI, an estimated distance and a proximity
+  bucket. Listen first: without a listener it answers `409`. Several regions can range at once, and all of them stop
+  once nothing listens. Ranging is a foreground activity.
+- **Monitoring:** `POST beacons/regions` watches a region for enter and exit, in the background and across restarts.
+  Transitions arrive as `beacons.region` while a page is open, and at the `beacon` handler otherwise. Without
+  permission it answers `409`.
+- **Eddystone:** `POST beacons/eddystone` sends UID, URL, TLM and EID frames as `beacons.eddystone`, one flat shape
+  with `frameType` saying which fields are set. It needs a listener too.
+- **Broadcasting:** `POST beacons/broadcast/ibeacon`, `…/eddystone-uid` or `…/eddystone-url` starts advertising and
+  replaces any advertisement already running. A URL too long for an Eddystone-URL frame answers `400`. Apple platforms
+  stop the advertisement in the background.
+- **Platform setup:** Shiny.Beacons'. On iOS and Mac Catalyst: `NSLocationWhenInUseUsageDescription` for ranging,
+  `NSLocationAlwaysAndWhenInUseUsageDescription` for monitoring, and `NSBluetoothAlwaysUsageDescription` for Eddystone
+  and broadcasting. On Android: `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` (location before Android 12),
+  `BLUETOOTH_ADVERTISE` to broadcast, and `FOREGROUND_SERVICE_CONNECTED_DEVICE` with `POST_NOTIFICATIONS` to monitor.
+  Linux answers `501`.
 
 **OBD-II:**
 - **Adapters:** ELM327 and OBDLink, one at a time. `scan` finds Bluetooth LE adapters, or with
