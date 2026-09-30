@@ -41,6 +41,13 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
+      id: 'client-v580',
+      title: 'Shiny Client 5.8',
+      description: 'SIRI & Gemini Integration, GamePads, Location Updates, Resumable Uploads, & Watch Libraries!',
+      href: '/client/ble',
+      cta: 'AWESOME!',
+    },
+    {
       id: 'appdevicebridge-10',
       title: 'App Device Bridge',
       description: 'Release updates without the AppStore on .NET!',
@@ -67,13 +74,6 @@ const announcementConfig = {
       description: 'Resumable Uploads, OAuth Loopingback, NEW Switchboard SignalR-like Framework, Webhooks, CalDAV, & Scalar Support',
       href: '/httpserver/',
       cta: 'Lets GO!',
-    },    
-    {
-      id: 'client-v580',
-      title: 'Shiny Client 5.8',
-      description: 'GamePads, Location Updates, Resumable Uploads, & Watch Libraries!',
-      href: '/client/ble',
-      cta: 'Live It Up!',
     },
     {
       id: 'mauishell-7',

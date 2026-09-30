@@ -595,6 +595,27 @@ export const sidebarTopics = [
           { label: 'iOS', link: 'permissions/ios' }
         ]
       },
+      {
+        label: 'App Device Bridge',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'appdevicebridge/' },
+          { label: 'vs. Blazor Hybrid', link: 'appdevicebridge/vs-blazor-hybrid' },
+          { label: 'Hosting', link: 'appdevicebridge/hosting' },
+          { label: 'Updates', link: 'appdevicebridge/updates' },
+          { label: 'Security', link: 'appdevicebridge/security' },
+          { label: 'Typed Clients', link: 'appdevicebridge/clients' },
+          { label: 'Bridges', link: 'appdevicebridge/bridges' },
+          { label: 'Wearables', link: 'appdevicebridge/wearables' },
+          { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder' },
+          { label: 'Maps & Directions', link: 'appdevicebridge/maps' },
+          { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
+          { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
+          { label: 'Simulator', link: 'appdevicebridge/simulator' },
+          { label: 'Release Notes', link: 'appdevicebridge/release-notes' }
+        ]
+      },
     ]
   },
   {
@@ -1346,27 +1367,6 @@ export const sidebarTopics = [
             ]
           },
           { label: 'Release Notes', link: 'httpserver/release-notes' }
-        ]
-      },
-      {
-        label: 'App Device Bridge',
-        jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
-        items:[
-          { label: 'Getting Started', link: 'appdevicebridge/' },
-          { label: 'vs. Blazor Hybrid', link: 'appdevicebridge/vs-blazor-hybrid' },
-          { label: 'Hosting', link: 'appdevicebridge/hosting' },
-          { label: 'Updates', link: 'appdevicebridge/updates' },
-          { label: 'Security', link: 'appdevicebridge/security' },
-          { label: 'Typed Clients', link: 'appdevicebridge/clients' },
-          { label: 'Bridges', link: 'appdevicebridge/bridges' },
-          { label: 'Wearables', link: 'appdevicebridge/wearables' },
-          { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder' },
-          { label: 'Maps & Directions', link: 'appdevicebridge/maps' },
-          { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
-          { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
-          { label: 'Simulator', link: 'appdevicebridge/simulator' },
-          { label: 'Release Notes', link: 'appdevicebridge/release-notes' }
         ]
       },
       {
