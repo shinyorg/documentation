@@ -30,7 +30,7 @@ Both methods have default implementations, so implement only what you need.
 
 - **`OnInvoking`** runs after the arguments are bound and before the handler. The first delegate that doesn't return `AppFunctionGate.Allow` decides the call.
   - `AppFunctionGate.Deny(message)` refuses it with `Denied`.
-  - `AppFunctionGate.OpenApp(message)` asks for the app. **On iOS**, the user is asked to continue in the app, and the function then runs again in the foreground with `context.IsForeground` set - which passes the gate, so the user can sign in first. **On Android** there is no equivalent, and the call is refused with the message.
+  - `AppFunctionGate.OpenApp(message)` asks for the app. If the user is already in it (`context.IsForeground`), the gate passes with no prompt. Otherwise, **on iOS**, the user is asked to continue in the app, and the function then runs again in the foreground - which passes the gate, so the user can sign in first. **On Android** there is no equivalent, and the call is refused with the message.
 - **`OnInvoked`** runs after the handler with its result or exception. A refusal arrives as an `AppFunctionException` with `Denied`. Exceptions thrown here are logged and ignored.
 
 Delegates are resolved from the call's scope and run in the order `AddAppFunctions()` registers them. Entity lookups go through them as well, because they expose app data.
@@ -41,7 +41,7 @@ Delegates are resolved from the call's scope and run in the order `AddAppFunctio
 |---|---|
 | `FunctionId`, `Function` | the function's id and its descriptor |
 | `Platform` | `Apple`, `Android` or `Other` (an in-process call) |
-| `IsForeground` | iOS: the app is in the foreground for this run |
+| `IsForeground` | the app is on screen for this run - the user asked Siri or Gemini from inside it, or (iOS) `OpensApp` / `OpenApp` brought it forward |
 | `CallerPackage` | Android: the calling agent's package name (empty from the shell) |
 | `Request` | the bound request record (null for entity lookups) |
 | `Services` | the call's DI scope |
@@ -49,6 +49,24 @@ Delegates are resolved from the call's scope and run in the order `AddAppFunctio
 | `Say(text)` / `Dialog` | the text for Siri, or returned with the Android result |
 
 `[AppFunction(OpensApp = true)]` brings the app to the foreground before the handler runs on iOS. Android runs it in the background.
+
+### When the user is already in the app
+
+Siri and Gemini can be invoked over your app. The function runs in the same process as the UI - the same container, the same singletons - so a handler can update what's on screen. Check `context.IsForeground` first, and move to the main thread: handlers never run on it.
+
+```csharp
+public async Task<Order> Handle(OpenOrder request, AppFunctionContext context, CancellationToken cancellationToken)
+{
+    var order = await orders.Get(request.OrderId, cancellationToken);
+    if (context.IsForeground)
+        await MainThread.InvokeOnMainThreadAsync(() => Shell.Current.GoToAsync($"order?id={order.Id}"));
+
+    return order;
+}
+```
+
+- **iOS** counts any application state but `background` - a Siri or Spotlight overlay leaves the app `inactive`.
+- **Android** counts any started activity, so an app paused under Gemini's overlay still counts.
 
 ## Calling functions in the app
 
