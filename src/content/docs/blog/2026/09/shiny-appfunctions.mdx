@@ -1,0 +1,233 @@
+---
+title: 'Introducing Shiny.AppFunctions — One C# Declaration for Siri and Gemini'
+description: "Declare what your app can do once, in C#. Shiny.AppFunctions turns it into App Intents for Siri, Spotlight, Shortcuts and Apple Intelligence on iOS, and Android AppFunctions for Gemini and other agents on Android 16 — with no Swift, no Kotlin, and no plist or manifest entries."
+date: 2026-09-29
+authors:
+  - allanritchie
+tags:
+  - AppFunctions
+  - AI
+  - MAUI
+  - Release
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+**Shiny.AppFunctions** is a new package that lets the platform assistants call into your .NET app. You declare a
+function **once, in C#**, and it becomes:
+
+- an **App Intent** on iOS 16+, available to **Siri**, Spotlight, the Shortcuts app and Apple Intelligence;
+- an **Android AppFunction** on Android 16+, available to **Gemini** and other agents the system allows.
+
+It's coming in Shiny 5.8.
+
+<NugetBadge name="Shiny.AppFunctions" showLabel={true} />
+
+## Two assistants, two very different APIs
+
+Apple and Google both want assistants to act inside apps, and both have shipped a way for apps to say what they can
+do. The two share nothing:
+
+| | iOS | Android |
+|---|---|---|
+| Framework | App Intents | AppFunctions (Android 16 / API 36) |
+| Language | Swift, with compile-time metadata extraction | Kotlin, with an XML schema and a bound service |
+| Picking an app object as a parameter | `AppEntity` + `EntityQuery` | not supported — agents send ids |
+| Voice phrases | `AppShortcutsProvider` | — |
+| Callers | Siri, Spotlight, Shortcuts, Apple Intelligence | Gemini and allowlisted agents |
+
+For a .NET developer, that's two native languages, two build pipelines and two ways to describe the same "create an
+order" operation. They drift apart the moment one of them changes.
+
+With Shiny.AppFunctions, the operation is a C# record and the handler is a C# class. The id, the parameters, their
+descriptions and the business logic are shared, and each platform gets its own native form generated from them.
+
+## Setup
+
+```csharp
+// MauiProgram.cs
+builder
+    .UseMauiApp<App>()
+    .UseShiny();
+
+builder.Services.AddAppFunctions();   // source-generated
+```
+
+That's all the registration there is. `AddAppFunctions()` is written by the package's source generator, and it
+registers every handler, entity query and delegate in your app.
+
+## Declaring a function
+
+A function is a record marked `[AppFunction]` that implements `IAppFunction<TResult>`. Its properties are the
+parameters, and one handler runs it:
+
+```csharp
+using Shiny.AppFunctions;
+
+public enum Priority { Low, Normal, Urgent }
+
+public record OrderResult(string Number, int Quantity, double Total);
+
+[AppFunction("create_order", Description = "Creates an order for a customer")]
+[AppShortcut("Create an order in ${applicationName}", ShortTitle = "New Order", SystemImage = "cart.badge.plus")]
+public record CreateOrder(
+    [property: AppParameter(Title = "Customer", Description = "Who the order is for")] Customer Customer,
+    int Quantity,
+    Priority Priority,
+    string? Note
+) : IAppFunction<OrderResult>;
+
+public class CreateOrderHandler(OrderStore store) : IAppFunctionHandler<CreateOrder, OrderResult>
+{
+    public Task<OrderResult> Handle(CreateOrder request, AppFunctionContext context, CancellationToken cancellationToken)
+    {
+        if (request.Quantity is < 1 or > 1000)
+            throw new AppFunctionException(AppFunctionErrorCode.InvalidArgument, "Quantity must be between 1 and 1000");
+
+        var order = store.Create(request.Customer, request.Quantity, request.Priority, request.Note);
+        context.Say($"Order {order.Number} is in.");
+        return Task.FromResult(new OrderResult(order.Number, order.Quantity, order.Total));
+    }
+}
+```
+
+That one declaration is everything both assistants need:
+
+- **The id** (`create_order`) is the same on both platforms. It's the name a saved Shortcut and an agent refer to.
+- **The description** is what Siri, Apple Intelligence and Gemini use to decide when to call the function.
+- **The parameters** come from the record. Constructor parameters are required unless nullable, so `Note` is optional
+  everywhere. `Priority` becomes an `AppEnum` on iOS and an enumerated value in the Android schema.
+- **`context.Say(...)`** is what Siri shows or speaks. On Android it comes back with the result, in a response extra.
+- **`AppFunctionException`** fails the call with a code that maps to each platform's own error. The message is shown
+  or spoken to the user, so it's written for them.
+
+The handler is resolved from a new DI scope for every call, so it takes your services like anything else in the app.
+
+## Entities — letting the assistant pick a customer
+
+An **entity** is an app object that can be a parameter: a customer, a playlist, a project. Mark a record with
+`[AppEntity]` and give it a query:
+
+```csharp
+[AppEntity("customer", Title = "Customer")]
+public record Customer(string Id, string Name, string City);
+
+public class CustomerQuery(ICustomers customers) : IAppEntityQuery<Customer>
+{
+    public Task<IReadOnlyList<Customer>> GetByIds(IReadOnlyList<string> ids, CancellationToken ct) => customers.ByIds(ids, ct);
+    public Task<IReadOnlyList<Customer>> Search(string text, CancellationToken ct) => customers.Search(text, ct);
+    public Task<IReadOnlyList<Customer>> Suggested(CancellationToken ct) => customers.Recent(ct);
+}
+```
+
+This is where the two platforms differ most, and where one declaration pays off:
+
+- **On iOS** it's a real App Entity. Siri and Shortcuts show a picker: `Suggested` before the user types, `Search`
+  while they type, and `GetByIds` to load the one they chose.
+- **On Android** there are no entity queries, so agents send an id. Shiny generates a companion **`search_customer`**
+  function from the same query, returning `[{ id, title }]`, so Gemini can find the customer first and then call
+  `create_order` with its id.
+
+Either way, the id is resolved back to a `Customer` through your query before the handler runs. An id the query
+doesn't know fails the call with `NotFound`.
+
+## Siri phrases with no setup
+
+`[AppShortcut]` turns a function into an **App Shortcut**. It's available to Siri and Spotlight as soon as the app is
+installed, and the user doesn't have to set anything up:
+
+```csharp
+[AppFunction("count_open_orders", Title = "Open Orders", Description = "Counts the orders that have not shipped")]
+[AppShortcut("How many orders are open in ${applicationName}", SystemImage = "shippingbox")]
+[AppShortcut("Open orders in ${applicationName}")]
+public record CountOpenOrders : IAppFunction<int>;
+```
+
+Every phrase must include `${applicationName}`, and iOS allows up to 10 App Shortcuts per app. Both are checked at
+compile time. The attribute is ignored on Android, where Gemini works from the function's description instead.
+
+## Gating every call with delegates
+
+An assistant can call your app when the user isn't signed in, or when a feature is switched off. An
+`IAppFunctionDelegate` sees every call before and after the handler:
+
+```csharp
+public class SignInDelegate(IAuth auth) : IAppFunctionDelegate
+{
+    public Task<AppFunctionGate> OnInvoking(AppFunctionContext context, CancellationToken ct)
+        => Task.FromResult(context.FunctionId == "cancel_order" && !auth.IsSignedIn
+            ? AppFunctionGate.OpenApp("Sign in to cancel orders.")
+            : AppFunctionGate.Allow);
+}
+```
+
+`AppFunctionGate.Deny(message)` refuses the call. `AppFunctionGate.OpenApp(message)` asks the user to continue in the
+app on iOS, and then runs the call again in the foreground; on Android it refuses with the message. `OnInvoked`
+receives the result or the exception, which makes it the place for logging and telemetry. `context.Platform` tells
+you whether Siri or Gemini made the call. Delegates are found and registered by the generator.
+
+## What you don't write
+
+The source generator and the build step ship inside the package:
+
+- **Generated C#:** `AddAppFunctions()`, the function descriptors, and reflection-free argument binding, dispatch and
+  result writing. It's trim- and AOT-safe.
+- **iOS:** the Swift App Intents, App Entities, entity queries and `AppShortcutsProvider`, compiled with `swiftc` into
+  the app. Apple's App Intents metadata and Siri phrase processors run before signing.
+- **Android:** the AppFunctions schema, added to the app as assets. The `AppFunctionService` arrives through the
+  manifest merger.
+
+There's no Swift, no Kotlin, no Info.plist entry, no entitlement and no AndroidManifest entry to write. The iOS build
+needs Xcode, since it runs `swiftc` and Apple's processors.
+
+The generator also checks your declarations: a missing handler, an unsupported parameter type, a duplicate id or a Siri
+phrase without `${applicationName}` is a build error (`SHAF001`–`SHAF013`), not a failure at runtime.
+
+## The same functions, in your app
+
+`AppFunctionDispatcher` runs the same pipeline Siri and Gemini use — new scope, binding, delegates, handler, JSON
+result — from inside the app:
+
+```csharp
+var outcome = await dispatcher.Execute(
+    new AppFunctionInvocation("create_order"),
+    """{"customer":"acme","quantity":2,"priority":"Normal"}""",
+    CancellationToken.None
+);
+```
+
+Every function in `dispatcher.Registry.Functions` exposes `GetParametersJsonSchema()`. That's enough to hand your app's
+functions to an in-app AI chat as tools, or to an MCP server, without declaring them a third time.
+
+## Trying it
+
+On an Android 16+ emulator, the shell can list and call your functions, the same way an agent does:
+
+```bash
+adb shell cmd app_function list-app-functions --package com.mycompany.myapp
+
+adb shell "cmd app_function execute-app-function --package com.mycompany.myapp \
+  --function create_order --parameters '{\"customer\":\"acme\",\"quantity\":2,\"priority\":\"Normal\"}'"
+```
+
+On iOS, install the app and search for a shortcut's title in Spotlight ("New Order"), or find the app's actions in the
+Shortcuts app.
+
+## Things to know
+
+- **Platforms:** iOS 16+ and Android 16 (API 36)+. Below Android 16 the package does nothing. There's no Mac Catalyst,
+  macOS or Windows bridge; `net10.0` has the contracts and the dispatcher.
+- **Declare functions in the app project.** The generator scans only the app, not class libraries. The services, enums
+  and result types they use can live anywhere.
+- **Calls can be cold starts** with no UI. Persist what a handler changes, and don't touch pages from it.
+- **Parameters** are `string`, `int`, `long`, `double`, `bool`, `DateTimeOffset`, enums and entities. Results can
+  also be records and lists.
+- Titles and descriptions are not localized yet.
+
+## Get started
+
+- [App Functions documentation](/client/appfunctions/)
+- [Delegates and in-process calls](/client/appfunctions/delegates/)
+- [Platform, build and testing](/client/appfunctions/platform/)
+- [Sample](https://github.com/shinyorg/shiny/tree/v5/samples/Sample.Maui/AppFunctions): a small orders app with
+  create, count, look up and cancel functions, a customer entity, two App Shortcuts and a sign-in delegate. Its
+  **App Functions** page shows every call Siri or Gemini made.
