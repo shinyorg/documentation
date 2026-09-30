@@ -107,6 +107,7 @@ export const sidebarTopics = [
               collapsed: true,
               items:[
                 { label: 'AI Tools', link: 'mediator/extensions/ai' },
+                { label: 'App Functions', link: 'mediator/extensions/appfunctions', badge: { text: 'New', variant: 'success' } },
                 { label: 'MAUI', link: 'mediator/extensions/maui' },
                 { label: 'Blazor', link: 'mediator/extensions/blazor' },
                 { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },
@@ -519,6 +520,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'client/appfunctions/' },
           { label: 'Delegates & In-App Calls', link: 'client/appfunctions/delegates' },
           { label: 'Platform & Testing', link: 'client/appfunctions/platform' },
+          { label: 'AI Tools', link: 'client/appfunctions/ai-tools', badge: { text: 'New', variant: 'success' } },
           { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },

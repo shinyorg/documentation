@@ -171,6 +171,22 @@ const MauiProgram = (props: Props) => {
       // OR, when a server pushes updates (the delegate is the only way to learn the tokens):
       // builder.Services.AddLiveActivities<ShinyApp.Delegates.MyLiveActivityDelegate>();`;
   }
+  if (has('appfunctions') || has('appfunctions-ai')) {
+    src += `
+
+      // Source-generated from the [AppFunction] records, handlers, entity queries and delegates in THIS
+      // project (class libraries are not scanned). Siri/Spotlight/Shortcuts call in on iOS 16+ and
+      // Gemini on Android 16+ - https://shinylib.net/client/appfunctions/
+      builder.Services.AddAppFunctions();`;
+  }
+  if (has('appfunctions-ai')) {
+    src += `
+
+      // The same app functions as Microsoft.Extensions.AI tools for your own in-app LLM - same binding
+      // and delegates as Siri and Gemini. Resolve AppFunctionAITools from DI and pass its .Tools to your
+      // IChatClient (ChatOptions.Tools) - https://shinylib.net/client/appfunctions/ai-tools/
+      builder.Services.AddAppFunctionAITools(tools => tools.AddAllFunctions());`;
+  }
   if (has('mediator')) {
     src += `
       builder.Services.AddShinyMediator(cfg => cfg.UseMaui());`;

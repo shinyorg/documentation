@@ -1,0 +1,98 @@
+---
+title: AI Tools
+description: Hand the app functions Siri and Gemini call to your own in-app LLM as Microsoft.Extensions.AI tools
+---
+import { Steps } from '@astrojs/starlight/components';
+
+The functions you declare for Siri and Gemini can also be called by **your own in-app assistant**. `Shiny.AppFunctions.Extensions.AI` turns them into [`Microsoft.Extensions.AI`](https://learn.microsoft.com/dotnet/ai/) tool functions (`AIFunction`s) for any `IChatClient`, so "create an order for Acme" works in your chat screen with the same handler Siri runs, and nothing is declared a second time.
+
+Every tool call goes through [`AppFunctionDispatcher`](/client/appfunctions/delegates/#calling-functions-in-the-app), so the in-app LLM gets the same argument binding, the same [delegates](/client/appfunctions/delegates/) and the same error mapping as Siri and Gemini.
+
+## Setup
+
+<Steps>
+1. Install the AI extensions package
+
+   ```bash
+   dotnet add package Shiny.AppFunctions.Extensions.AI
+   ```
+
+2. Register App Functions and the AI tools
+
+   ```csharp
+   builder.Services.AddAppFunctions();   // source-generated
+
+   builder.Services.AddAppFunctionAITools(tools => tools
+       .AddAllFunctions()
+       .ExcludeFunction("cancel_order")   // optional
+   );
+   ```
+
+3. Resolve `AppFunctionAITools` and hand `.Tools` to your chat client
+
+   ```csharp
+   var functions = sp.GetRequiredService<AppFunctionAITools>();
+
+   var response = await chatClient.GetResponseAsync(
+       messages,
+       new ChatOptions { Tools = [.. functions.Tools] }
+   );
+   ```
+</Steps>
+
+## Choosing functions
+
+Nothing is exposed unless you add it. `AddAppFunctionAITools` throws when the builder adds nothing, and an id that the app doesn't declare throws when `AppFunctionAITools` is first resolved.
+
+| | |
+|---|---|
+| `AddAllFunctions()` | every function, including the generated `search_{entity}` functions |
+| `AddFunction("create_order")` / `AddFunctions(ids)` | only these functions |
+| `ExcludeFunction("cancel_order")` | hides a function, even when `AddAllFunctions()` or an entity parameter would have added it |
+
+A function with an [entity](/client/appfunctions/#entities) parameter needs a way to find the entity's id, so adding it also adds its `search_{entity}` function. `AddFunction("create_order")` gives the model `create_order` and `search_customer`: it looks up Acme's id, then creates the order.
+
+## The tools
+
+Each tool is named by the function id and described by the function's `Description`. Its parameter schema is the function's [`GetParametersJsonSchema()`](/client/appfunctions/delegates/#descriptors-and-json-schemas), where entity parameters are described as ids found with `search_{entity}`.
+
+Tool results are JSON objects. The model never sees an exception:
+
+```json
+{ "success": true, "result": { "number": "ORD-1042", "quantity": 2, "total": 39.98 }, "message": "Order ORD-1042 is in." }
+```
+
+```json
+{ "error": "Quantity must be between 1 and 1000", "code": "InvalidArgument" }
+```
+
+`result` is left out for functions without a result, and `message` is the text the handler passed to `context.Say(...)`. `code` is the [`AppFunctionErrorCode`](/client/appfunctions/#errors).
+
+## Delegates apply here too
+
+Tool calls run as `AppFunctionPlatform.Other` and not in the foreground. Your delegates run exactly as they do for Siri and Gemini:
+
+- `AppFunctionGate.Deny(message)` refuses the call, and the model gets the message.
+- `AppFunctionGate.OpenApp(message)` also refuses it with the message, as on Android. The gate is **not** skipped because the app happens to be open, so a sign-in check that returns `OpenApp` still protects the function from the in-app assistant.
+- To treat AI calls differently, check `context.Platform == AppFunctionPlatform.Other` in a delegate. `OnInvoked` sees these calls too, so your telemetry covers them.
+
+## With the other AI tools
+
+The package follows the same `*AITools` bundle pattern as the other Shiny AI tool packages, so one assistant can use all of them together:
+
+```csharp
+builder.Services.AddCalendarAITools(b => b.AddCalendar(CalendarAICapabilities.Read));
+builder.Services.AddLocationAITool();
+builder.Services.AddAppFunctionAITools(b => b.AddAllFunctions());
+
+var tools = sp.GetRequiredService<AppFunctionAITools>().Tools
+    .Concat(sp.GetRequiredService<CalendarAITools>().Tools)
+    .Concat(sp.GetRequiredService<LocationAITools>().Tools)
+    .ToList();
+```
+
+See [Calendar](/client/calendarstore/ai-tools/), [Contacts](/client/contactstore/ai-tools/), [Notifications](/client/notifications/ai-tools/) and [Locations](/client/locations/ai-tools/).
+
+## AOT
+
+`Shiny.AppFunctions.Extensions.AI` is `IsAotCompatible`. Arguments are written to JSON without reflection, schemas come from the generated descriptors, and results are `JsonNode`s.

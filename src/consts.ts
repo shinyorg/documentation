@@ -311,6 +311,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
+        "id": "appfunctions",
+        "nuget": "Shiny.AppFunctions",
+        "description": "App Functions (Siri & Gemini)",
+        "category": "background",
+        "version": DEFAULT_VERSION
+    },
+    {
+        "id": "appfunctions-ai",
+        "nuget": "Shiny.AppFunctions.Extensions.AI",
+        "description": "App Functions - AI Tools",
+        "category": "background",
+        "additionalNugets": [{ "nuget": "Shiny.AppFunctions", "version": DEFAULT_VERSION }],
+        "version": DEFAULT_VERSION
+    },
+    {
         "id": "music",
         "nuget": "Shiny.Music",
         "description": "Music Library",
@@ -1649,7 +1664,7 @@ export const Data = {
     },
 
     usesHosting(compos: ShinyComponent[]): boolean {
-        const hostingIds = ['ble', 'wearables', 'gamepad', 'gamepad-controls', 'blehosting', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'spatial-geofencing', 'httptransfers', 'notifications', 'notifications-ai', 'push', 'liveactivities', 'screenrecorder', 'datasync', 'calendarstore', 'calendarstore-ai'];
+        const hostingIds = ['ble', 'wearables', 'gamepad', 'gamepad-controls', 'blehosting', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'spatial-geofencing', 'httptransfers', 'notifications', 'notifications-ai', 'push', 'liveactivities', 'appfunctions', 'appfunctions-ai', 'screenrecorder', 'datasync', 'calendarstore', 'calendarstore-ai'];
         return compos.some(x => hostingIds.includes(x.id));
     },
 
