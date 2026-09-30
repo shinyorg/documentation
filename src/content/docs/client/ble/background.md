@@ -51,6 +51,29 @@ Register your delegate during startup:
 services.AddBluetoothLE<MyBleDelegate>();
 ```
 
+## iOS system alerts for background connections
+
+On iOS and Mac Catalyst, CoreBluetooth can put its own alert in front of the user — *"Accessory would like to
+open App"* — when a peripheral connects, disconnects or sends a notification while your app is not in the
+foreground. Apple intends these for apps that do **not** declare the `bluetooth-central` background mode and so
+have no other way to tell the user something happened.
+
+Shiny asks for all three by default. If your app connects from the background on purpose — for example one kept
+running by background location updates, connecting when it detects something and disconnecting afterwards —
+the alert appears on every connect, and for a device that streams notifications, once per packet. Turn them
+off (5.8.1+):
+
+```csharp
+services.AddBluetoothLE(new AppleBleConfiguration
+{
+    NotifyOnConnection = false,
+    NotifyOnDisconnection = false,
+    NotifyOnNotification = false
+});
+```
+
+The options apply to every connect the app issues. They have no effect on other platforms.
+
 ## When to Use Delegates vs Observables
 
 | Scenario | Use |
