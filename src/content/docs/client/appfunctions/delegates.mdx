@@ -11,9 +11,11 @@ description: Gate and observe every App Function call with delegates, and call f
 public class SignInDelegate(SignInState signIn) : IAppFunctionDelegate
 {
     public Task<AppFunctionGate> OnInvoking(AppFunctionContext context, CancellationToken cancellationToken)
-        => Task.FromResult(context.FunctionId == "cancel_order" && !signIn.IsSignedIn
-            ? AppFunctionGate.OpenApp("Sign in to cancel orders.")
-            : AppFunctionGate.Allow);
+        => Task.FromResult(context.FunctionId != "cancel_order" || signIn.IsSignedIn
+            ? AppFunctionGate.Allow
+            : context.IsForeground
+                ? AppFunctionGate.Deny("Sign in to cancel orders.")
+                : AppFunctionGate.OpenApp("Sign in to cancel orders."));
 }
 
 public class TelemetryDelegate(ILogger<TelemetryDelegate> logger) : IAppFunctionDelegate
@@ -30,7 +32,9 @@ Both methods have default implementations, so implement only what you need.
 
 - **`OnInvoking`** runs after the arguments are bound and before the handler. The first delegate that doesn't return `AppFunctionGate.Allow` decides the call.
   - `AppFunctionGate.Deny(message)` refuses it with `Denied`.
-  - `AppFunctionGate.OpenApp(message)` asks for the app. If the user is already in it (`context.IsForeground`), the gate passes with no prompt. Otherwise, **on iOS**, the user is asked to continue in the app, and the function then runs again in the foreground - which passes the gate, so the user can sign in first. **On Android** there is no equivalent, and the call is refused with the message.
+  - `AppFunctionGate.OpenApp(message)` asks for the app. If the user is already in it (`context.IsForeground`), the gate passes with no prompt. Otherwise, **on iOS**, the user is asked to continue in the app, and the function then runs again in the foreground. **On Android** there is no equivalent, and the call is refused with the message.
+
+`OpenApp` means "needs the app on screen", not "needs sign-in". The run in the foreground passes the gate *before* the user has had a chance to sign in, as does a call made over the app or from the [in-app AI tools](/client/appfunctions/ai-tools/). That's why the sign-in check above asks for the app only from the background, and refuses the call with `Deny` once the app is open.
 - **`OnInvoked`** runs after the handler with its result or exception. A refusal arrives as an `AppFunctionException` with `Denied`. Exceptions thrown here are logged and ignored.
 
 Delegates are resolved from the call's scope and run in the order `AddAppFunctions()` registers them. Entity lookups go through them as well, because they expose app data.
@@ -41,14 +45,22 @@ Delegates are resolved from the call's scope and run in the order `AddAppFunctio
 |---|---|
 | `FunctionId`, `Function` | the function's id and its descriptor |
 | `Platform` | `Apple`, `Android` or `Other` (an in-process call) |
-| `IsForeground` | the app is on screen for this run - the user asked Siri or Gemini from inside it, or (iOS) `OpensApp` / `OpenApp` brought it forward |
+| `IsForeground` | the app is on screen for this run - the user asked Siri or Gemini from inside it, the call came from the in-app AI tools, or (iOS) `OpensApp` / `OpenApp` brought it forward |
 | `CallerPackage` | Android: the calling agent's package name (empty from the shell) |
 | `Request` | the bound request record (null for entity lookups) |
 | `Services` | the call's DI scope |
 | `Items` | state shared between delegates and the handler for this call |
 | `Say(text)` / `Dialog` | the text for Siri, or returned with the Android result |
 
-`[AppFunction(OpensApp = true)]` brings the app to the foreground before the handler runs on iOS. Android runs it in the background.
+### Functions that need the app
+
+Mark a function that only makes sense on screen - it navigates, shows something, or needs the user - with `[AppFunction(OpensApp = true)]`. It works like an `OpenApp` gate that the function declares itself, checked before any delegate:
+
+- **iOS** brings the app to the foreground before the handler runs.
+- **Android** can't bring an app forward from the background, so the function runs only while the app is visible (including under Gemini's overlay). Otherwise the call is refused with `Denied` and "Open the app to continue".
+- An in-process call through the dispatcher that isn't marked foreground is refused the same way. Calls from the [AI tools](/client/appfunctions/ai-tools/) are in the foreground, so they run.
+
+The handler still runs off the main thread, so dispatch UI work to it.
 
 ### When the user is already in the app
 
@@ -91,7 +103,7 @@ public class OrdersViewModel(AppFunctionDispatcher dispatcher)
 }
 ```
 
-`Execute` never throws: every failure comes back as an `AppFunctionOutcome`. Arguments are a JSON object keyed by the parameter names in camelCase; enums are their member names, entities their ids, and `DateTimeOffset` values ISO 8601 strings. `AppFunctionInvocation` defaults to `AppFunctionPlatform.Other` and not in the foreground, so an `OpenApp` gate refuses the call the way Android does.
+`Execute` never throws: every failure comes back as an `AppFunctionOutcome`. Arguments are a JSON object keyed by the parameter names in camelCase; enums are their member names, entities their ids, and `DateTimeOffset` values ISO 8601 strings. `AppFunctionInvocation` defaults to `AppFunctionPlatform.Other` and not in the foreground, so an `OpenApp` gate or an `OpensApp` function refuses the call the way Android does. Pass `IsForeground: true` when the call comes from the app's own screen.
 
 ### Descriptors and JSON schemas
 
