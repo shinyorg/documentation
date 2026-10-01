@@ -29,6 +29,9 @@ var config = new BleObdConfiguration
     // Timeout for a single command response
     CommandTimeout = TimeSpan.FromSeconds(10),
 
+    // After a command is given up on, how long the next one waits for the adapter's late '>' prompt
+    AbandonedReplyGrace = TimeSpan.FromSeconds(2),
+
     // How long to wait for the BLE link itself, before any OBD initialization
     ConnectTimeout = TimeSpan.FromSeconds(30),
 
@@ -59,6 +62,19 @@ where it is offered — the ELM327 exchange is request/response over a serial em
 notification is already the acknowledgement — but it has to be *offered*: a clone whose TX
 characteristic is write-with-response only silently drops the write, nothing ever answers, and the
 caller sits out the full `CommandTimeout` for a reply that was never coming.
+
+### Abandoned commands
+
+A command the caller stops waiting for — its `CommandTimeout` elapsed, or the caller's token was
+cancelled — has not ended as far as the adapter is concerned. An ELM327 abandons whatever it is working on
+the moment anything else arrives, answers `STOPPED`, and that reply lands on the command that interrupted
+it: the new command is lost and the caller gets the wrong answer. On cheap clones a run of those wedges the
+adapter until the link is dropped.
+
+So after an abandoned command the transport holds the next write until the adapter prints its late `>`
+prompt, for at most `AbandonedReplyGrace` (2 seconds by default). An adapter that never prints one is
+wedged, and the wait ends there rather than moving the hang to the next command. A command whose write
+never completed did not reach the adapter, and leaves nothing to wait out.
 
 ### Common Adapter UUIDs
 
