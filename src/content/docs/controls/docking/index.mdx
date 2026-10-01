@@ -176,7 +176,7 @@ A POCO tree with a source-generated `System.Text.Json` context (AOT-safe). Round
 DockRoot
 ├── int SchemaVersion + int MinReadableVersion
 ├── DockWindowState MainWindow
-└── List<DockWindowState> FloatingWindows         (order = z-order)
+└── List<DockWindowState> FloatingWindows         (stacking order is session state, not persisted)
 
 DockWindowState
 ├── DockRect? Bounds                              (screen-coord rectangle — desktop only)
@@ -186,7 +186,8 @@ DockWindowState
 ├── double? LeftRailSize + TopRailSize + RightRailSize + BottomRailSize
 ├── List<DockArea> CollapsedRails                 (legacy whole-rail collapse — converted to per-panel on load)
 ├── List<DockCollapsedPanel> CollapsedTabs        (per-panel edge-bar collapse: which panel, which edge)
-└── string? ActivePanelId                         (for focus restoration on load)
+├── string? ActivePanelId                         (for focus restoration on load)
+└── string? RestoreGroupId                        (floating windows only: the group it was torn from — docking back returns it there)
 
 DockNode = DockSplit | DockGroup | DockEmpty       (polymorphic, $kind discriminator)
 DockSplit  { Orientation, Ratio (0..1), First, Second }
@@ -219,6 +220,7 @@ public interface IDockHost
     Task HidePanelAsync(string panelInstanceId, CancellationToken ct = default);
     Task ActivatePanelAsync(string panelInstanceId, CancellationToken ct = default);
     Task ResetLayoutAsync(CancellationToken ct = default);
+    Task FloatPanelAsync(string panelInstanceId, CancellationToken ct = default);   // tear a panel off into its own floating window
     Task SetRailCollapsedAsync(DockArea area, bool collapsed, CancellationToken ct = default);
 }
 ```
@@ -336,8 +338,9 @@ public interface IDockCommandScope
 
 Everything below ships working end-to-end on both hosts:
 
-- **Tab drag** — drop on another group's center to merge, on a group edge (left/right/top/bottom) to split, within the tab strip to reorder, or outside the host to tear off a floating window. Drop zones render as a colored overlay while dragging.
-- **Floating windows** — independent dockable windows with their own bounds, persisted in `DockRoot.FloatingWindows`. Move via the header, resize via the corner grip, re-dock with the ⇤ button, close with ×.
+- **Tab drag, the Visual Studio way** — pull a tab out of its strip and it becomes a **translucent floating window** that follows the pointer (on Blazor it carries a live snapshot of the panel, so you see the window you are about to get). A **docking compass** appears over the pane under the pointer — the centre guide adds the panel as a tab, the four arms split the pane — and **four outer guides** sit on the host edges to dock against that side of the whole layout. Only a guide you are hovering is a target, and an accent **preview** shows exactly where the panel will land. Let go anywhere else and the panel **floats** right there, at the size you were dragging. Over a tab strip the drop inserts at the caret. On Blazor <kbd>Esc</kbd> cancels a drag; MAUI has no cross-platform key hook, so a MAUI drag is cancelled only by the platform.
+- **Floating windows** — real window chrome: a title bar with the panel's icon and title, **Dock** and **Close** buttons (Close is hidden while any panel inside is registered `canClose: false`), an accent title bar on the window that holds the active panel, and no redundant tab strip for a single panel. **Resize from every edge and corner**; click to bring a window to the front. **Drag a window by its title bar** and the window itself travels translucent with the same guides: drop it on a guide to dock the whole window (an edge drop keeps its internal splits, a centre or tab-strip drop merges its tabs), or anywhere else to move it. Bounds persist in `DockRoot.FloatingWindows`.
+- **Double-click** a tab to float it. Double-click a floating window's title bar, or press **Dock**, to send it **home** — back into the group it was torn from (`RestoreGroupId`), or onto the left rail if that group has gone. `IDockHost.FloatPanelAsync(instanceId)` floats a panel from code.
 - **Splitters** — drag to resize; `DockSplit.Ratio` persists and is clamped to 0.08–0.92 so neither side can vanish.
 - **Per-panel collapse** — collapse a tab to a slim edge bar (icon + rotated title); click to restore. `SetRailCollapsedAsync(area, collapsed)` collapses or restores a whole rail at once. Collapsed state persists via `CollapsedTabs`.
 - **Locked mode** — `IsLocked = true` disables drag, resize, collapse, and close; switching between existing tabs still works. Ideal for kiosk and demo scenarios.
@@ -355,7 +358,7 @@ When a panel is closed, the host disposes the content if it implements `IDisposa
 
 MAUI: `ResourceDictionary` keys (`DockTabBackgroundBrush`, `DockGroupSeparatorBrush`, …) — names locked before styling lands so consumer code stays stable.
 
-Blazor: CSS custom properties (`--shiny-dock-host-bg`, `--shiny-dock-placeholder-fg`, …) — override on a parent or on `<DockHost>` itself.
+Blazor: CSS custom properties (`--shiny-dock-host-bg`, `--shiny-dock-placeholder-fg`, …) — override on a parent or on `<DockHost>` itself. The accent used by the focused tab bar, focused-group border, active floating title bar, docking guides and drop preview is the theme's `--shiny-color-primary`; set `--shiny-dock-accent` to give docking its own. Other hooks: `--shiny-dock-group-bg`, `--shiny-dock-border`, `--shiny-dock-tabs-bg`, `--shiny-dock-focus-border`, `--shiny-dock-float-header-bg` / `-fg`, `--shiny-dock-float-active-header-bg` / `-fg`, `--shiny-dock-float-shadow`, `--shiny-dock-splitter-hover`.
 
 Animation duration is a theme token, not a constant — reduced-motion / accessibility consumers can flatten to zero without recompiling.
 
@@ -363,7 +366,7 @@ Animation duration is a theme token, not a constant — reduced-motion / accessi
 
 - **macOS tear-off** uses native AppKit (`net10.0-macos`) `NSPanel` at `NSWindowLevel.Floating`. MacCatalyst stays in-app-only in v1 (Catalyst can't do borderless click-through windows for the drag ghost).
 - **Cross-window drag** uses mouse-down implicit capture, **not** global mouse hooks. This sidesteps the macOS Accessibility entitlement entirely, so the library works under sandboxed / Mac App Store distribution.
-- **Floating window z-order** is persisted as part of the schema — the floating-windows list is ordered.
+- **Floating window z-order** is session state. Clicking a window raises it without rewriting the layout, so focusing a window never triggers a save.
 - **Document area vs tool area** is a schema-level partition rather than a per-panel flag, so document-well focus rules and tab behavior don't leak into every consumer.
 
 ## Related
