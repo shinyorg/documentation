@@ -102,6 +102,8 @@ button bound to `Score >= 80` will happily accept a password your own rules reje
 | `RequireNotCompromisedPassword` | bool | `true` | Refuse commonly breached values and their disguises |
 | `BlockedPasswords` | list | `null` | Extra values to refuse outright |
 | `UserInputs` | list | `null` | This user's email / name — refused, and discounted when scoring |
+| `MinimumTimeToCrack` | TimeSpan | `Zero` (off) | Least time the password must resist `GuessesPerSecond`; adds a checklist rule |
+| `GuessesPerSecond` | double | `1e10` | The attacker the time to crack is estimated against |
 | `Evaluator` | IPasswordStrengthEvaluator? | `null` | Per-field scorer override |
 | `DebounceMilliseconds` | int | `250` | Pause before scoring; `0` scores every keystroke |
 | `Localizer` | PasswordStrengthLocalizer? | `null` | Replaces the wording |
@@ -118,6 +120,7 @@ button bound to `Score >= 80` will happily accept a password your own rules reje
 | `ShowRules` | bool | `true` | Draw the checklist |
 | `ShowWarning` | bool | `true` | Surface the evaluator's warning as the field's hint text |
 | `ShowVisibilityToggle` | bool | `true` | The Show/Hide button |
+| `ShowTimeToCrack` | bool | `false` | A "Time to crack: 21 days" caption under the meter |
 | `ShowPasswordIcon` `HidePasswordIcon` | ImageSource? / string? | `null` | Toggle content; null uses the words "Show" / "Hide" |
 | `Score` | int | `0` | 0-100, read-only |
 | `Level` | PasswordStrengthLevel | `None` | Read-only |
@@ -156,6 +159,41 @@ characters are ignored — they match half the dictionary and would fail every p
 
 Both lists are read when the parameters change. If you mutate a list in place, call
 `EvaluateNowAsync()`.
+
+## Time to crack
+
+The built-in evaluator turns its entropy estimate into a time to crack: the average time an attacker
+making `GuessesPerSecond` guesses would need to find the password. `ShowTimeToCrack` paints it under
+the meter, and `MinimumTimeToCrack` turns it into policy. The password is not acceptable until the
+estimate reaches the floor, so a password can clear the length rule and still be refused because it
+would fall in 21 days when the floor is a century.
+
+```xml
+<shiny:PasswordStrength Password="{Binding Password}"
+                        MinimumLength="8"
+                        MinimumTimeToCrack="36525.00:00:00"
+                        ShowTimeToCrack="True"
+                        IsAcceptable="{Binding CanSubmit}" />
+```
+
+```razor
+<PasswordStrength @bind-Password="password"
+                  MinimumLength="8"
+                  MinimumTimeToCrack="TimeSpan.FromDays(36525)"
+                  ShowTimeToCrack="true" />
+```
+
+The rule is added as the last row of the checklist ("At least 1 century to crack"), so turning it on
+does not reorder the rows above it. The estimate is on the verdict as
+`PasswordStrengthResult.TimeToCrackSeconds`, a double, because a good passphrase outlasts what a
+`TimeSpan` can hold. `TimeToCrack` gives the same value as a `TimeSpan` that stops at
+`TimeSpan.MaxValue`, about 29,000 years.
+
+The default of 10 billion guesses a second models an offline attack on a fast hash. Set
+`GuessesPerSecond` to match what you store: about 10,000 for bcrypt or Argon2, about 10 for a
+rate-limited login form. `PasswordCrackTime.Describe(seconds)` returns the unit, the count and the
+English wording ("21 days") if you want to show the value yourself. A custom evaluator that wants
+the caption or the rule has to set `TimeToCrackSeconds` and add the rule itself.
 
 ## Pluggable scoring
 
@@ -239,6 +277,17 @@ Every string the control paints has a key. Returning `null` keeps the default, s
 has to know about the strings it actually translates.
 
 That includes the built-in evaluator's **warning**. It tags each one with `PasswordStrengthResult.WarningKey` — `WarningCompromised`, `WarningBlocked`, `WarningUserInput` or `WarningCommonPassword` — and `WarningValue`, the matched word or detail, which reaches the localizer as `PasswordStrengthText.Value`. A custom evaluator's warning that carries no key is shown exactly as written.
+
+Durations are localized one unit at a time. The keys are `DurationSeconds`, `DurationMinutes`,
+`DurationHours`, `DurationDays`, `DurationMonths`, `DurationYears` and `DurationCenturies`, each with
+the count in `Argument`, plus `DurationInstant` and `DurationEons`. The finished phrase then reaches
+`TimeToCrack` ("Time to crack: …") and `RuleMinimumTimeToCrack` ("At least … to crack") as `Value`:
+
+```csharp
+PasswordStrengthTextKey.DurationDays => $"{text.Argument} jours",
+PasswordStrengthTextKey.TimeToCrack => $"Temps pour le casser : {text.Value}",
+PasswordStrengthTextKey.RuleMinimumTimeToCrack => $"Au moins {text.Value} pour le casser",
+```
 
 ## Accessibility
 
