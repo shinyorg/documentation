@@ -1,0 +1,160 @@
+---
+/**
+ * PlasmaBackground — a slow, faint plasma wash in the brand colors behind every page.
+ *
+ * A tiny WebGL fragment shader draws into a canvas at 1/4 of the viewport's size and CSS stretches
+ * it to full screen: plasma is all low-frequency, so the bilinear upscale is invisible and the GPU
+ * cost stays tiny. It is capped at ~30fps, stops while the tab is hidden, and
+ * draws a single still frame under `prefers-reduced-motion`. No WebGL → no background, nothing else.
+ *
+ * Starlight renders our components inside `<main>` or the fixed header, both of which can form
+ * stacking contexts, so the script appends the canvas straight to `<body>`. There, `z-index: -1`
+ * puts it above the body background (which propagates to the page canvas) and below all content.
+ *
+ * Mounted from `Banner.astro` because that override renders on every page. The header toggle in
+ * `ThemeSelect.astro` sets `<html data-plasma="off">` to hide it and stop the animation loop.
+ */
+---
+
+<script is:inline>
+  (function () {
+    if (window.__plasma) return;
+    window.__plasma = true;
+
+    var canvas = document.createElement('canvas');
+    canvas.className = 'shiny-plasma';
+    canvas.setAttribute('aria-hidden', 'true');
+    var gl = canvas.getContext('webgl', { antialias: false, depth: false, alpha: true, powerPreference: 'low-power' });
+    if (!gl) return;
+
+    var vert = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
+    // Domain-warped plasma: each pass bends the coordinates by the other axis, which folds straight
+    // sine bands into the swirling, filamented look of real plasma. The palette cycles through the
+    // brand colors along the warped field, and a second field picks out the bright filaments.
+    var frag = [
+      'precision mediump float;',
+      'uniform vec2 r;uniform float t;',
+      'void main(){',
+      '  vec2 p=gl_FragCoord.xy/r.y*4.5;',
+      '  for(int i=1;i<6;i++){',
+      '    float f=float(i);',
+      '    p.x+=.7/f*sin(f*p.y+t+.3*f)+.5;',
+      '    p.y+=.6/f*cos(f*p.x+t*.83+.5*f)-.5;',
+      '  }',
+      '  float v=.5+.5*sin(p.x+p.y+t*.4);',
+      // Shiny vivid purple / green / lime, cycled
+      '  vec3 purple=vec3(.416,.239,.941),green=vec3(.059,.749,.478),lime=vec3(.651,.851,0.);',
+      '  float w1=.5+.5*cos(6.2832*v),w2=.5+.5*cos(6.2832*(v-.333)),w3=.5+.5*cos(6.2832*(v-.667));',
+      '  vec3 col=(purple*w1*1.4+green*w2+lime*w3*.6)/(w1*1.4+w2+w3*.6);',
+      '  float glow=.5+.5*sin(p.x*1.6-p.y*1.2-t*.6);',
+      '  glow=glow*glow;',
+      '  float alpha=.2+.8*glow;',
+      '  gl_FragColor=vec4(col*alpha,alpha);',
+      '}',
+    ].join('\n');
+
+    function compile(type, src) {
+      var s = gl.createShader(type);
+      gl.shaderSource(s, src);
+      gl.compileShader(s);
+      return gl.getShaderParameter(s, gl.COMPILE_STATUS) ? s : null;
+    }
+    var vs = compile(gl.VERTEX_SHADER, vert);
+    var fs = compile(gl.FRAGMENT_SHADER, frag);
+    if (!vs || !fs) return;
+    var prog = gl.createProgram();
+    gl.attachShader(prog, vs);
+    gl.attachShader(prog, fs);
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return;
+    gl.useProgram(prog);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, gl.createBuffer());
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    var loc = gl.getAttribLocation(prog, 'p');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    var uRes = gl.getUniformLocation(prog, 'r');
+    var uTime = gl.getUniformLocation(prog, 't');
+
+    var SCALE = 4;
+    function resize() {
+      var w = Math.max(1, Math.ceil(window.innerWidth / SCALE));
+      var h = Math.max(1, Math.ceil(window.innerHeight / SCALE));
+      if (canvas.width !== w || canvas.height !== h) {
+        canvas.width = w;
+        canvas.height = h;
+        gl.viewport(0, 0, w, h);
+      }
+    }
+
+    // Random phase so every page load starts somewhere different.
+    var offset = Math.random() * 1000;
+    function draw(ms) {
+      resize();
+      gl.uniform2f(uRes, canvas.width, canvas.height);
+      gl.uniform1f(uTime, offset + ms * 0.00035);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+
+    var still = window.matchMedia('(prefers-reduced-motion: reduce)');
+    var raf = 0;
+    var last = 0;
+    function loop(ms) {
+      raf = requestAnimationFrame(loop);
+      if (ms - last < 33) return;
+      last = ms;
+      draw(ms);
+    }
+    function enabled() {
+      return document.documentElement.dataset.plasma !== 'off';
+    }
+    function start() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      canvas.style.display = enabled() ? '' : 'none';
+      if (!enabled()) return;
+      if (still.matches || document.hidden) draw(performance.now());
+      else raf = requestAnimationFrame(loop);
+    }
+
+    window.addEventListener('resize', function () { if (!raf && enabled()) draw(performance.now()); });
+    // Fired by the header toggle in ThemeSelect.astro.
+    window.addEventListener('shiny-plasma-change', start);
+    document.addEventListener('visibilitychange', start);
+    if (still.addEventListener) still.addEventListener('change', start);
+
+    function mount() {
+      document.body.appendChild(canvas);
+      start();
+    }
+    if (document.body) mount();
+    else document.addEventListener('DOMContentLoaded', mount);
+  })();
+</script>
+
+<style is:global>
+  .shiny-plasma {
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.22;
+  }
+
+  :root[data-plasma='off'] .shiny-plasma {
+    display: none;
+  }
+
+  :root[data-theme='dark'] .shiny-plasma {
+    opacity: 0.2;
+  }
+
+  @media print {
+    .shiny-plasma {
+      display: none;
+    }
+  }
+</style>
