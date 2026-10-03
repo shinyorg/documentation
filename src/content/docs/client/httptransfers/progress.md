@@ -48,7 +48,15 @@ Delete the `AddShinyService<PerTransferNotificationStrategy>()` registration and
 Both renderers ship **inside `Shiny.Net.Http`**. There is no second package and no second registration call:
 on iOS the package pulls [`Shiny.Mobile.LiveActivities`](/client/liveactivities/) for you — that reference sits on
 the `-ios` target alone, so no other head carries ActivityKit — and `AddTransferProgress()` registers
-`ILiveActivityManager` itself if you have not already called `AddLiveActivities()`.
+`ILiveActivityManager` itself if you have not already called `AddLiveActivities()`. If your app also uses
+Live Activities directly, call `AddLiveActivities(...)` **first** — called after `AddTransferProgress()`, it
+registers a second manager:
+
+```csharp
+builder.Services.AddLiveActivities(o => o.ChannelName = "Deliveries");
+builder.Services.AddHttpTransfers<MyTransferDelegate>();
+builder.Services.AddTransferProgress();
+```
 
 :::caution[iOS: turn on the widget build]
 ActivityKit renders a Live Activity from a **SwiftUI widget extension in your app bundle**, and nothing about
