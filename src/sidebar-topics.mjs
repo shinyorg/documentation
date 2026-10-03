@@ -121,6 +121,26 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Actors',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items:[
+          { label: 'Getting Started', link: 'actors/' },
+          { label: 'Actors & Lifecycle', link: 'actors/lifecycle' },
+          { label: 'State', link: 'actors/state' },
+          { label: 'Concurrency', link: 'actors/concurrency' },
+          { label: 'Event Sourcing', link: 'actors/event-sourcing' },
+          { label: 'Streams', link: 'actors/streams' },
+          { label: 'Reminders', link: 'actors/reminders' },
+          { label: 'Filters, Context & Telemetry', link: 'actors/filters' },
+          { label: 'Remoting', link: 'actors/remoting' },
+          { label: 'MAUI & Blazor', link: 'actors/platforms' },
+          { label: 'Testing', link: 'actors/testing' },
+          { label: 'Build Diagnostics', link: 'actors/diagnostics' },
+          { label: 'Release Notes', link: 'actors/release-notes' }
+        ]
+      },
+      {
         label: 'Dependency Injection',
         jumpTo: true,
         items:[

@@ -1,0 +1,166 @@
+---
+title: Getting Started
+description: Orleans-style virtual actors without the ceremony — AOT/trim-clean, in one process, anywhere .NET runs, including .NET MAUI and Blazor WebAssembly
+---
+
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import { Aside } from '@astrojs/starlight/components';
+
+Orleans-style virtual actors without the ceremony. An actor is a small object with an id, its own state, and
+one call at a time. You never create or destroy one: `Get<ICounter>("bob")` always works, the actor is activated
+on its first call and deactivated when it has been idle a while. Because each actor handles one call at a time,
+there are no locks to write.
+
+It runs in **one process**, anywhere .NET runs: a .NET MAUI app, Blazor WebAssembly, a console app or a server.
+There is no cluster, silo or placement. Other processes and devices call your actors [over HTTP](/actors/remoting/).
+
+- **Only `Microsoft.Extensions.*` abstractions** as dependencies.
+- **Nothing discovered by reflection.** A source generator, shipped inside the package, writes the proxies,
+  wire contracts and registrations. State is serialized through `JsonTypeInfo` from your own `JsonSerializerContext`.
+- **AOT, trim and single-file clean**, enforced by the build: the sample console app publishes NativeAOT with zero warnings.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="actors" /> |
+| Downloads | <NugetDownloads name="Shiny.Actors" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui", "blazor"]} os={["android", "ios", "macos", "windows", "linux", "web"]} />
+
+## Packages
+
+| Package | Description |
+| --- | --- |
+| <NugetBadge name="Shiny.Actors" showLabel={true} /> | The runtime and the [remote client](/actors/remoting/). Includes the source generator |
+| <NugetBadge name="Shiny.Actors.DocumentDb" showLabel={true} /> | [State, reminders and event logs](/actors/state/#providers) in Shiny.DocumentDb: SQLite, PostgreSQL, SQL Server, Cosmos DB, IndexedDB and more |
+| <NugetBadge name="Shiny.Actors.HttpServer" showLabel={true} /> | [Serve actors and streams over HTTP](/actors/remoting/) with Shiny.Net.HttpServer, from a phone if you like |
+| <NugetBadge name="Shiny.Actors.Jobs" showLabel={true} /> | Fire [reminders in the background](/actors/reminders/#in-the-background) with a Shiny.Jobs job |
+| <NugetBadge name="Shiny.Actors.Notifications" showLabel={true} /> | Turn [reminders into OS-scheduled local notifications](/actors/reminders/#on-time-even-when-the-app-is-dead), on time even when the app isn't running |
+| <NugetBadge name="Shiny.Actors.Discovery" showLabel={true} /> | [Find actor servers on the LAN](/actors/remoting/#finding-devices) over mDNS/Bonjour |
+| <NugetBadge name="Shiny.Actors.Testing" showLabel={true} /> | [`ActorTestHost`](/actors/testing/): fake time, in-memory storage, recorded calls and streams |
+
+## Install
+
+```bash
+dotnet add package Shiny.Actors
+```
+
+The source generator ships inside the package under `analyzers/`, so there is nothing else to reference.
+
+## Setup
+
+```csharp
+builder.Services.AddShinyActors();   // every actor in the app is already known
+```
+
+Everything else hangs off the same builder: storage, streams, filters, and every add-on package.
+
+```csharp
+builder.Services.AddShinyActors(actors => actors
+    .UseDocumentDb(new SqliteDatabaseProvider($"Data Source={path}"))   // Shiny.Actors.DocumentDb
+    .AddDurableStream<ChatMessage>()
+    .UseAutoSave()
+    .UseBackgroundReminders()                                           // Shiny.Actors.Jobs
+    .UseReminderNotifications()                                         // Shiny.Actors.Notifications
+    .UseDiscovery()                                                     // Shiny.Actors.Discovery
+    .ServeOverHttp(expose => expose.Expose<IChatRoom>())                // Shiny.Actors.HttpServer
+    .Configure(o => o.IdleTimeout = TimeSpan.FromMinutes(2)));
+```
+
+- **It accumulates.** Calling `AddShinyActors` again (from a library, say) adds to the same configuration rather
+  than replacing it.
+- **Container-built pieces.** `AddCallFilter<T>()`, `UseStateProvider<T>()` and `AddReminderObserver<T>()` are
+  created by the container, so they can take dependencies.
+- **Late configuration.** `Configure((options, services) => ...)` covers anything that only exists once the
+  container is built.
+
+No container? `await using var actors = new ActorSystem(new ActorSystemOptions { ... });`. `ActorSystemOptions` is
+the same raw settings object the builder fills in.
+
+## Your first actor
+
+An actor is an interface deriving from `IActor`, and a class deriving from `Actor` (or `Actor<TState>`) that
+implements it.
+
+```csharp
+public interface ICounter : IActor
+{
+    ValueTask<int> Increment(int by = 1);
+    [OneWay] Task Reset();      // queued; the caller doesn't wait
+}
+
+public class CounterState { public int Count { get; set; } }
+
+public class CounterActor(ILogger<CounterActor> logger) : Actor<CounterState>, ICounter
+{
+    public async ValueTask<int> Increment(int by)
+    {
+        State.Count += by;      // one call at a time - no locks
+        await WriteStateAsync();
+        return State.Count;
+    }
+
+    public Task Reset() => ClearStateAsync().AsTask();
+}
+
+[JsonSerializable(typeof(CounterState))]          // the generator finds this for the actor's state
+partial class AppJson : JsonSerializerContext;
+```
+
+Call it from anywhere with `IActorSystem`:
+
+```csharp
+public class CounterViewModel(IActorSystem actors)
+{
+    public async Task Tap() => Count = await actors.Get<ICounter>("bob").Increment();
+}
+```
+
+- **Methods** return `Task`, `Task<T>`, `ValueTask` or `ValueTask<T>`. A `CancellationToken` parameter flows to the
+  actor, and a caller that cancels stops waiting even while its call is queued.
+- **`[OneWay]`** methods are queued and the caller doesn't wait for them. They can't return a value.
+- **Constructors** take dependencies from a DI scope created for each activation.
+- **The id** is any string, and is available inside the actor as `Id`.
+
+<Aside type="tip">
+Mistakes are caught at build time. A method the generator can't proxy, a state type missing from every
+`JsonSerializerContext`, or two classes for one interface each produce a [diagnostic](/actors/diagnostics/).
+</Aside>
+
+## What you get
+
+| | |
+|---|---|
+| **Virtual actors** | `Get<T>(id)` always works. Activation happens on the first call, and deactivation after `IdleTimeout` (5 min). See [Actors & Lifecycle](/actors/lifecycle/). |
+| **Turn-based** | One call at a time per actor, and calls to different actors run in parallel. Not reentrant by default. |
+| **Deadlock detection** | A call that would wait on itself (`A -> B -> A`) throws `ActorDeadlockException` with the path instead of hanging. |
+| **[State](/actors/state/)** | `Actor<TState>` plus any number of named `IActorState<T>`s. ETag-checked writes, optional auto-save. |
+| **State providers** | In-memory, files, or Shiny.DocumentDb (SQLite, PostgreSQL, SQL Server, Cosmos DB, IndexedDB, and more). |
+| **[Timers & reminders](/actors/reminders/)** | Timers tick as turns. Reminders persist, survive restarts, and activate the actor. |
+| **[Concurrency control](/actors/concurrency/)** | `[Reentrant]`, `[AlwaysInterleave]`, `[ReadOnly]` and `[StatelessWorker]`. |
+| **[Event sourcing](/actors/event-sourcing/)** | `JournaledActor<TState, TEvent>`: state rebuilt from an event log, with snapshots and full history. |
+| **[Migrations](/actors/state/#migrations)** | `[StateVersion(n)]` + `AddStateMigration<T>(...)` upgrade stored state and upcast stored events as they're read. |
+| **[Streams](/actors/streams/)** | `GetStream<T>(key)`: typed pub/sub. Make one durable and subscribers can replay what they missed. |
+| **[Call filters](/actors/filters/)** | `IActorCallFilter` runs around every call, local or remote. |
+| **[Request context](/actors/filters/#request-context)** | `ActorRequestContext` values flow with a call, onward to other actors, and across remote calls. |
+| **[Telemetry](/actors/filters/#telemetry)** | OpenTelemetry-ready traces and metrics from `ActivitySource`/`Meter` named `Shiny.Actors`. |
+| **[Remoting](/actors/remoting/)** | Call actors on another process or device through the same `IActorSystem`, over HTTP. |
+| **[Testing](/actors/testing/)** | Fake time, in-memory storage, recorded calls, and state you can seed and inspect. |
+| **Back pressure** | `MailboxCapacity` bounds each mailbox, and callers wait for room. |
+
+## Samples
+
+The [repository](https://github.com/shinyorg/actors) has three samples:
+
+- **`Sample.Maui`** is a chat app where every room is an actor. It uses SQLite storage, `[AutoSave]`, reminder
+  notifications, a background job, and shares rooms with nearby devices over the LAN through mDNS and a pairing
+  code. It runs on iOS, Android and Mac Catalyst.
+- **`Sample.Blazor`** runs entirely in the browser: event-sourced to-do lists stored in IndexedDB, with a stream
+  driving the UI.
+- **`Sample.Console`** publishes as NativeAOT with zero trim warnings: an HTTP actor server and client, SQLite,
+  durable streams and reminders in one binary.
+
+<AiSkill skillName="shiny-actors" />

@@ -1,0 +1,58 @@
+---
+title: Filters, Context & Telemetry
+description: Call filters around every actor call, request context that flows across calls and devices, and OpenTelemetry traces and metrics
+---
+
+## Call filters
+
+An `IActorCallFilter` runs around every call, local or remote. Use it for logging, validation, authorization and more.
+
+```csharp
+actors.AddCallFilter<AuditFilter>();   // created by the container - or AddCallFilter(instance)
+
+public sealed class AuditFilter : IActorCallFilter
+{
+    public async ValueTask InvokeAsync(ActorCallContext ctx, ActorCallDelegate next)
+    {
+        if (ActorRequestContext.Get("user") is null) throw new UnauthorizedAccessException();
+        await next(ctx);   // ctx.Method, ctx.Arguments, ctx.Result (settable), ctx.ActorId
+    }
+}
+```
+
+- Filters run inside the actor's turn, for both asks and one-way calls.
+- `ctx.Result` can be read and replaced after `next`.
+- An actor that implements `IActorCallFilter` itself filters its own calls, innermost.
+
+## Request context
+
+```csharp
+ActorRequestContext.Set("user", "allan");
+await actors.Get<IWallet>("allan").Deposit(10);   // the actor, and anything it calls, sees "user"
+```
+
+`ActorRequestContext` values flow into the call, onward to the actors it calls, and across
+[remote calls](/actors/remoting/) in the `x-actor-context` header.
+
+## Telemetry
+
+```csharp
+services.AddOpenTelemetry()
+    .WithTracing(t => t.AddSource(ActorTelemetry.Name))
+    .WithMetrics(m => m.AddMeter(ActorTelemetry.Name));
+```
+
+Both the `ActivitySource` and the `Meter` are named `Shiny.Actors`.
+
+**Traces.** There's one span per call, named `{interface}/{method}` and parented to the caller's span. That holds
+across actors and across HTTP: the client span, then the server span, then the actor's.
+
+**Metrics.** None of them carry actor ids, because ids are unbounded:
+
+- calls, by outcome
+- call duration
+- active, activated and deactivated actors
+- queued calls
+- state writes, write duration and conflicts
+- reminders fired
+- stream events

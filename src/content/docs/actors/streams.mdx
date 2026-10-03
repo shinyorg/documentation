@@ -1,0 +1,71 @@
+---
+title: Streams
+description: Typed pub/sub between actors and the rest of the app, with durable replay and implicit consumers
+---
+
+`GetStream<T>(key)` gives you a typed stream. Streams need no setup: publish from anywhere, and subscribe from
+anywhere.
+
+```csharp
+var stream = actors.GetStream<OrderPlaced>("store-1");
+await stream.PublishAsync(new OrderPlaced("coffee", 2));
+
+// anywhere - a MAUI view model, a background service
+await foreach (var order in stream.ReadAllAsync(ct)) { ... }
+```
+
+By default, delivery is in order per publisher and at most once, and nothing is stored. A subscriber only sees events
+published after it subscribed.
+
+## Inside an actor
+
+```csharp
+protected override ValueTask OnActivateAsync(CancellationToken ct)
+{
+    Actors.GetStream<OrderPlaced>("store-1").Subscribe((order, ct) => { ... });
+    return default;
+}
+```
+
+Each event is delivered as a turn of the actor, so it never overlaps a call. The subscription ends with the
+activation.
+
+## Implicit consumers
+
+Implement `IActorStreamConsumer<T>` and events published on key `"store-1"` go to the actor whose id is `"store-1"`,
+activating it if needed:
+
+```csharp
+public class StoreSales : Actor<Sales>, IStoreSales, IActorStreamConsumer<OrderPlaced>
+{
+    public ValueTask OnNextAsync(OrderPlaced order, CancellationToken ct)
+    {
+        State.Total += order.Quantity;
+        return default;
+    }
+}
+```
+
+## Durable streams
+
+A durable stream keeps the last N events of every stream of that type in the event store, numbered, so subscribers
+can replay what they missed:
+
+```csharp
+actors.AddDurableStream<ChatMessage>(retain: 500);   // default 1000
+
+await foreach (var e in stream.ReadFromAsync(afterSequence: lastSeen, ct))   // replay, then live - no gap, no duplicates
+{
+    Show(e.Item);
+    lastSeen = e.Sequence;
+}
+```
+
+The events live in the configured `IActorEventStore`: in-memory, files, or [Shiny.DocumentDb](/actors/state/#shinydocumentdb).
+
+## Remote streams
+
+Streams exposed with [`ExposeStream<T>()`](/actors/remoting/) can be published to and read from another process or
+device. A remote `ReadAllAsync` or `Subscribe` reconnects on its own with backoff (1s, up to 30s). On a durable
+stream it resumes from the last sequence it saw (SSE `Last-Event-ID`), so a phone that drops off Wi-Fi misses nothing.
+A stream that isn't durable misses what was published while it was disconnected.

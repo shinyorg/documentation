@@ -1,0 +1,50 @@
+---
+title: Concurrency
+description: Turn-based execution, deadlock detection, and [Reentrant], [AlwaysInterleave], [ReadOnly] and [StatelessWorker]
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Every call to an actor is a **turn**, and every turn runs on the actor's own exclusive scheduler. The actor's code
+between awaits never overlaps, so you never need a lock. Calls to different actors run in parallel.
+
+What you choose is when a call may *start*:
+
+| | |
+|---|---|
+| default | One call at a time. The next waits for the previous one to finish. |
+| `[Reentrant]` (class) | Any call may start while another waits at an `await`. The actor can call itself. |
+| `[AlwaysInterleave]` (method) | This method starts even while another call is waiting. Use it for status, cancel or health checks. |
+| `[ReadOnly]` (method) | Read-only calls run together, never beside a call that changes state. |
+| `[StatelessWorker(MaxLocalWorkers = 4)]` (class) | Several activations per id, and a call goes to an idle one. No state or reminders (`SACT011`). |
+
+```csharp
+public interface IDownload : IActor
+{
+    Task Start(Uri uri, CancellationToken ct);
+    [AlwaysInterleave] Task Cancel();          // gets in while Start is awaiting
+    [ReadOnly] Task<double> Progress();        // many at once, never beside Start
+}
+
+[StatelessWorker(MaxLocalWorkers = 4)]
+public class ImageResizer : Actor, IImageResizer { ... }
+```
+
+## Deadlock detection
+
+A call that would wait on itself, directly or through other actors (`A -> B -> A`), throws
+`ActorDeadlockException` naming the path instead of hanging. Interleaving calls are exempt, because they can't
+deadlock. Remotely, a deadlock surfaces as status 409.
+
+## Back pressure
+
+By default a mailbox is unbounded. Set `MailboxCapacity` and callers wait for room when an actor falls behind:
+
+```csharp
+actors.Configure(o => o.MailboxCapacity = 100);
+```
+
+<Aside type="caution">
+Don't use `ConfigureAwait(false)` inside an interleaving actor. It leaves the actor's scheduler, and the code after
+it can then run beside another turn.
+</Aside>

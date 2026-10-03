@@ -1,0 +1,142 @@
+---
+title: State
+description: Persistent actor state with ETag-checked writes, named states, auto-save, storage providers and migrations
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## The actor's state
+
+Derive from `Actor<TState>` and the actor gets a `State` that is read before `OnActivateAsync`:
+
+```csharp
+public class CounterActor : Actor<CounterState>, ICounter
+{
+    public async ValueTask<int> Increment(int by)
+    {
+        State.Count += by;
+        await WriteStateAsync();
+        return State.Count;
+    }
+
+    public Task Reset() => ClearStateAsync().AsTask();
+}
+
+[JsonSerializable(typeof(CounterState))]
+partial class AppJson : JsonSerializerContext;
+```
+
+- `WriteStateAsync()`, `ClearStateAsync()` and `ReadStateAsync()` do what they say.
+- `StateExists` tells you whether anything was stored, and `StateETag` is the version that was read.
+- **Serialization** goes through `JsonTypeInfo` from your own `JsonSerializerContext`. The generator finds the
+  context that knows the state type. If none does, you get warning `SACT007` at build time.
+
+## Named states
+
+An actor can have any number of extra states, each stored separately:
+
+```csharp
+[AutoSave]
+public class WalletActor(
+    [ActorState("balance")] IActorState<Balance> balance,
+    [ActorState("history", Provider = "archive")] IActorState<History> history
+) : Actor<Profile>, IWallet
+{
+    public async Task Deposit(decimal amount)
+    {
+        balance.State.Amount += amount;
+        await balance.WriteStateAsync();   // or let [AutoSave] do it
+    }
+}
+```
+
+`CreateState<T>("name")` in a constructor works like the attribute. Every state is read before `OnActivateAsync`.
+
+## ETags
+
+Every write and clear is conditional on the version that was read. If another writer got there first (a second
+process, or another device on a shared database), the write throws `ActorStateConflictException` instead of
+overwriting. The actor then deactivates, so its next call reloads the real state.
+
+## Auto-save
+
+`[AutoSave]` writes changed states after every call, before the caller gets its result, so a failed write fails the
+call.
+
+- A call that throws is not saved, and unchanged state is never rewritten.
+- `[AutoSave(AutoSaveMode.OnDeactivate)]` writes on deactivation instead.
+- `actors.UseAutoSave()` sets the mode for every actor that doesn't have the attribute.
+
+## Providers
+
+| Provider | Set with | ETag | Notes |
+|---|---|---|---|
+| In-memory (default) | — | version counter | Lost when the process ends |
+| Files | `actors.UseFileStorage(dir)` | content hash | `{dir}/{actor}/{hash(id)}[.{state}].json`. Atomic replace, and a lock file makes it safe across processes. Reminders go in `reminders.json`. |
+| Shiny.DocumentDb | `actors.UseDocumentDb(...)` | document version | `Shiny.Actors.DocumentDb`. Any DocumentDb backend, with state, reminders and event logs together. |
+
+### Shiny.DocumentDb
+
+```bash
+dotnet add package Shiny.Actors.DocumentDb
+```
+
+```csharp
+builder.Services.AddShinyActors(x => x.UseDocumentDb(
+    new SqliteDatabaseProvider($"Data Source={Path.Combine(FileSystem.AppDataDirectory, "actors.db")}")
+));
+```
+
+- **A store you already have:** `UseDocumentDb(store)`, plus `MapActorDocuments()` on that store's options.
+- **A store that only exists in the container** (Blazor's IndexedDB, for example): `UseDocumentDb()` with no arguments.
+
+<Aside type="caution" title="SQLitePCLRaw advisory">
+Shiny.DocumentDb.Sqlite 14.0.0 pulls in `SQLitePCLRaw` 2.1.11, which has a high-severity advisory
+(GHSA-2m69-gcr7-jv3q). Pin 2.1.12 or later for each platform: `SQLitePCLRaw.lib.e_sqlite3.android` on Android,
+`.ios` on iOS, and the plain `SQLitePCLRaw.lib.e_sqlite3` elsewhere. Don't add the plain one to an Android target.
+Its Linux `libe_sqlite3.so` shadows Android's, and the app crashes at startup (`libc.so.6 not found`).
+</Aside>
+
+### Mixing providers
+
+Register more providers by name, then choose one per actor or per state:
+
+```csharp
+actors.AddStateProvider("archive", archiveProvider);
+actors.AddDocumentDbStateProvider("archive", store);   // or a DocumentDb store
+
+[StateProvider("archive")]
+public class AuditActor : Actor<AuditLog>, IAudit { ... }
+
+[ActorState("history", Provider = "archive")] IActorState<History> history
+```
+
+### Writing your own
+
+Implement `IActorStateProvider`'s three methods and register it with `actors.UseStateProvider<T>()` (created by the
+container) or `UseStateProvider(instance)`. Writes must be ETag-conditional. The conformance tests in
+`StateProviderTests` in the repository show exactly what a provider must do.
+
+## Migrations
+
+When a state type's shape changes, version it and register a step that upgrades the stored JSON:
+
+```csharp
+[StateVersion(2)]
+public class Profile { public string First { get; set; } = ""; public string Last { get; set; } = ""; }
+
+actors.AddStateMigration<Profile>(1, json =>       // v1 had a single "Name"
+{
+    var parts = json["Name"]!.GetValue<string>().Split(' ', 2);
+    json["First"] = parts[0];
+    json["Last"] = parts.Length > 1 ? parts[1] : "";
+    json.Remove("Name");
+});
+```
+
+- **Upgraded on read.** Stored JSON is upgraded one step at a time as it's read, and the next write stamps the
+  current version (`"$v"`).
+- **Events too.** The same works for [event types](/actors/event-sourcing/). History is never rewritten: events are
+  upcast on replay.
+- **Clear failures.** A missing step, or data written by a newer version of the app, fails activation with a clear
+  message instead of producing a mangled object.

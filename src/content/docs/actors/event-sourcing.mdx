@@ -1,0 +1,48 @@
+---
+title: Event Sourcing
+description: JournaledActor - state rebuilt from an event log, with snapshots, full history and event upcasting
+---
+
+`JournaledActor<TState, TEvent>` stores **what happened** instead of the current state. The state is rebuilt from
+the event log when the actor activates.
+
+```csharp
+[AutoSave]   // confirms raised events after each call
+public class AccountActor : JournaledActor<AccountState, AccountEvent>, IAccount
+{
+    protected override int SnapshotEvery => 100;
+
+    protected override void Apply(AccountState state, AccountEvent e) => state.Balance += e switch
+    {
+        Deposited d => d.Amount,
+        Withdrawn w => -w.Amount,
+        _ => 0
+    };
+
+    public Task Deposit(decimal amount) { RaiseEvent(new Deposited(amount)); return Task.CompletedTask; }
+}
+
+[JsonPolymorphic, JsonDerivedType(typeof(Deposited), "deposited"), JsonDerivedType(typeof(Withdrawn), "withdrawn")]
+public abstract record AccountEvent;
+public record Deposited(decimal Amount) : AccountEvent;
+public record Withdrawn(decimal Amount) : AccountEvent;
+
+[JsonSerializable(typeof(AccountState))]
+[JsonSerializable(typeof(AccountEvent))]
+partial class AppJson : JsonSerializerContext;
+```
+
+- **`RaiseEvent`** (or `RaiseEvents`) applies the event to the state straight away. `ConfirmEventsAsync()` appends
+  the raised events to the log, or `[AutoSave]` confirms them after each call.
+- **Rebuilt, not stored.** On activation the state is rebuilt from the log, starting from the latest snapshot if
+  there is one. `SnapshotEvery` writes a snapshot every that many events (0, the default, never does).
+- **Full history.** `ReadEventsAsync(afterVersion)` returns the confirmed history, for audit, undo or projections.
+- **Conditional appends.** An append is conditional on the version this activation last saw, like an ETag. If another
+  writer got there first, it throws `ActorStateConflictException`, and the actor deactivates and replays on its next call.
+- **Storage.** Logs live in the `IActorEventStore`: in-memory, files (atomic batch files), or
+  [Shiny.DocumentDb](/actors/state/#shinydocumentdb) (one document per event).
+
+## Changing an event's shape
+
+History is never rewritten. Version the event type with `[StateVersion(n)]` and register a migration step with
+`AddStateMigration<T>`, and old events are upcast as they're replayed. See [Migrations](/actors/state/#migrations).

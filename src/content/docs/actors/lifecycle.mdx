@@ -1,0 +1,133 @@
+---
+title: Actors & Lifecycle
+description: Defining actors, activation and deactivation, naming, and timers
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Defining an actor
+
+An actor has two halves: an **interface** that derives from `IActor`, which callers see, and a **class** that
+derives from `Actor` (or `Actor<TState>`, see [State](/actors/state/)) and implements it.
+
+```csharp
+public interface IGreeter : IActor
+{
+    Task<string> Hello(string name, CancellationToken ct = default);
+    [OneWay] Task Ping();
+}
+
+public class GreeterActor(ILogger<GreeterActor> logger) : Actor, IGreeter
+{
+    public Task<string> Hello(string name, CancellationToken ct) => Task.FromResult($"Hi {name}, I'm {Id}");
+    public Task Ping() => Task.CompletedTask;
+}
+```
+
+The source generator finds every actor interface and class at compile time. It writes a local proxy, a remote
+proxy and a wire contract for each interface, and a registration for each class. One module initializer wires them
+all up, so `AddShinyActors()` already knows every actor in the app.
+
+- **Return types:** `Task`, `Task<T>`, `ValueTask` or `ValueTask<T>`. Properties, generic methods and
+  `ref`/`out`/`in` parameters can't be proxied.
+- **`[OneWay]`:** the call is queued and the caller returns straight away. It must not return a value.
+- **Cancellation:** a `CancellationToken` parameter flows to the actor. A caller that cancels stops waiting even while
+  its call is still queued.
+- **One class per interface.** If two classes implement the same interface, pick one with
+  `actors.AddActor<IFoo, Foo>()`.
+- **Libraries.** Actors in a library nothing else in the app touches can be loaded with `actors.AddAssembly(assembly)`.
+
+## Calling an actor
+
+```csharp
+var greeter = actors.Get<IGreeter>("front-desk");
+var reply = await greeter.Hello("Allan");
+```
+
+`Get<T>(id)` returns a cheap reference and activates nothing. The actor is activated on the first call. References
+are cheap, so get one whenever you need it rather than caching it. Inside an actor, other actors are reached through
+the `Actors` property.
+
+## Activation and deactivation
+
+```csharp
+public class SessionActor : Actor<SessionState>, ISession
+{
+    protected override ValueTask OnActivateAsync(CancellationToken ct)
+    {
+        Logger.LogInformation("Session {Id} active", Id);
+        return default;
+    }
+
+    protected override ValueTask OnDeactivateAsync(DeactivationReason reason, CancellationToken ct)
+        => WriteStateAsync(ct);
+
+    public Task End() { DeactivateOnIdle(); return Task.CompletedTask; }
+}
+```
+
+- **Activation** creates the class from a DI scope made for that activation, reads every state, and then calls
+  `OnActivateAsync`.
+- **Deactivation** happens after `IdleTimeout` (5 minutes by default) with no calls, when the actor asks for it with
+  `DeactivateOnIdle()`, or at shutdown. `DeactivationReason` is `Idle`, `Requested` or `Shutdown`.
+  `DeactivationTimeout` (30 seconds) bounds how long `OnDeactivateAsync` may take.
+- **Calls during shutdown.** While an actor is shutting down, a call from one of its own running calls is still
+  taken. Any other call is handed to the next activation, in order.
+- **Everything at once.** `ActorSystem.DeactivateAllAsync()` deactivates every actor, running each one's
+  `OnDeactivateAsync`. `DeactivateAsync<TActor>(id)` deactivates one.
+
+Inside an actor you also get `Id`, `Actors` (the `IActorSystem`), `Logger` and `TimeProvider`.
+
+## Naming
+
+An actor's name defaults to its full type name. The class name is part of every state and reminder key, and the
+interface name is what remote callers use. Pin both with `[ActorName]` before you ship if the type might be renamed
+or moved:
+
+```csharp
+[ActorName("greeter")]
+public interface IGreeter : IActor { ... }
+
+[ActorName("greeter-impl")]
+public class GreeterActor : Actor, IGreeter { ... }
+```
+
+## Timers
+
+```csharp
+protected override ValueTask OnActivateAsync(CancellationToken ct)
+{
+    RegisterTimer(async ct => await RefreshAsync(ct), TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(30));
+    return default;
+}
+```
+
+- A tick runs as a turn of the actor, so it never overlaps a call.
+- A tick that arrives while the previous one is still queued or running is skipped, so ticks never pile up.
+- Timers don't keep an actor active, and are disposed when it deactivates. Dispose the returned `IDisposable` to stop
+  one sooner.
+- Call `RegisterTimer` from inside the actor, for example in `OnActivateAsync`.
+
+For something that must survive deactivation and restarts, use a [reminder](/actors/reminders/).
+
+## Options
+
+| Option | Default | |
+|---|---|---|
+| `IdleTimeout` | 5 minutes | How long an actor may sit without calls before it is deactivated |
+| `DeactivationTimeout` | 30 seconds | How long `OnDeactivateAsync` may take |
+| `DefaultAutoSave` | `None` | The [auto-save](/actors/state/#auto-save) mode for actors without `[AutoSave]` |
+| `MailboxCapacity` | unbounded | Bounds each actor's mailbox. Callers wait for room |
+| `TimeProvider` | system | Replace it to control time, as [`ActorTestHost`](/actors/testing/) does |
+
+```csharp
+builder.Services.AddShinyActors(x => x.Configure(o =>
+{
+    o.IdleTimeout = TimeSpan.FromMinutes(2);
+    o.MailboxCapacity = 100;
+}));
+```
+
+<Aside type="note">
+Without a DI container, `new ActorSystem(new ActorSystemOptions { ... })` takes the same options.
+</Aside>

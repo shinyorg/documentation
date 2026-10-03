@@ -1,0 +1,93 @@
+---
+title: Reminders
+description: Persistent reminders that survive restarts, fire in the background on mobile, and can show OS notifications on time
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A reminder is a persistent timer. It survives deactivation and restarts, and activates the actor when it is due.
+For a timer that only lives as long as the activation, see [Timers](/actors/lifecycle/#timers).
+
+```csharp
+public class Billing : Actor<BillingState>, IBilling, IRemindable
+{
+    public Task Start() => RegisterReminderAsync("invoice", TimeSpan.FromHours(1), TimeSpan.FromDays(1)).AsTask();
+
+    public ValueTask ReceiveReminderAsync(ReminderTick tick, CancellationToken ct)
+    {
+        var late = tick.FiredAt - tick.DueAt;
+        ...
+    }
+}
+```
+
+- **The actor must implement `IRemindable`.** Registering an existing name replaces the reminder.
+- **A `null` period fires once**, then the reminder is removed.
+- `UnregisterReminderAsync(name)` removes one, and `GetRemindersAsync()` lists this actor's reminders.
+- **While the app runs**, reminders fire on time.
+- **Missed ticks** (the app wasn't running) coalesce into one, and `tick.DueAt` tells you how late it is.
+- **At least once.** A reminder only moves on after its actor handled it, and a failure is retried within a minute.
+
+Reminders persist in the `IActorReminderStore`. `UseFileStorage(dir)` keeps them in `dir/reminders.json`, and
+[Shiny.DocumentDb](/actors/state/#shinydocumentdb) keeps them alongside state.
+
+## In the background
+
+On a phone, the OS suspends or kills apps, so a reminder can come due while nothing is running. Add
+`Shiny.Actors.Jobs`:
+
+```bash
+dotnet add package Shiny.Actors.Jobs
+```
+
+```csharp
+builder.Services.AddShinyActors(x => x.UseBackgroundReminders());   // a Shiny.Jobs IJob: BGTaskScheduler / WorkManager
+```
+
+The job fires everything that's due, then deactivates the actors it woke so their state is written before the app is
+suspended again.
+
+<Aside type="caution">
+The OS picks the timing, typically every 15 minutes or more, so treat background reminders as "soon", not "on time".
+</Aside>
+
+## On time, even when the app is dead
+
+Add `Shiny.Actors.Notifications` and give the reminder a notification:
+
+```bash
+dotnet add package Shiny.Actors.Notifications
+```
+
+```csharp
+builder.Services.AddShinyActors(x => x.UseReminderNotifications());   // registers Shiny.Notifications too
+
+await RegisterReminderAsync("standup", TimeSpan.FromHours(1),
+    notification: new ReminderNotification("Standup", "Starts in 5 minutes") { Channel = "alerts" });
+```
+
+Each such reminder becomes an OS-scheduled local notification on iOS, Android, Mac and Windows:
+
+- It's moved when the reminder advances, cancelled when it's removed, and re-synced at startup.
+- The OS shows it on time whether or not the app is running.
+- Tapping it opens the app, where the overdue reminder fires.
+
+`Channel` is an Android notification channel the app has created. Without it, the default channel is used.
+
+## Observing reminders
+
+`IActorReminderObserver` is told about every reminder that is scheduled (registered, advanced, or loaded at startup)
+and every one that is removed. That's how the notifications package works, and you can use it to mirror reminders
+anywhere else:
+
+```csharp
+actors.AddReminderObserver<CalendarMirror>();   // created by the container
+
+public sealed class CalendarMirror : IActorReminderObserver
+{
+    public ValueTask OnScheduledAsync(ActorReminder reminder, CancellationToken ct) { ... }
+    public ValueTask OnRemovedAsync(ActorReminder reminder, CancellationToken ct) { ... }
+}
+```
+
+Calls must be idempotent. A failure is logged and never thrown.

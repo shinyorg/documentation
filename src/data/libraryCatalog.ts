@@ -90,6 +90,21 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'windows'],
             },
             {
+                label: 'Actors',
+                tagline: 'Orleans-style virtual actors in one process — even inside a MAUI or Blazor app',
+                summary: 'Small objects with an id, their own state and one call at a time, so there are no locks to write. Activated on first call and put away when idle, with proxies and registrations generated at compile time — AOT-clean, and callable from other devices over HTTP.',
+                highlights: [
+                    'Turn-based calls with deadlock detection — no locks',
+                    'ETag-checked state, auto-save, event sourcing and migrations',
+                    'Typed and durable streams, timers and persistent reminders',
+                    'Reminders as background jobs or on-time OS notifications on mobile',
+                    'Remoting over HTTP, mDNS discovery and a test host with fake time',
+                ],
+                packages: ['Shiny.Actors', 'Shiny.Actors.DocumentDb', 'Shiny.Actors.HttpServer', 'Shiny.Actors.Testing'],
+                frameworks: ['dotnet', 'maui', 'blazor'],
+                os: ['android', 'ios', 'macos', 'windows', 'linux', 'web'],
+            },
+            {
                 label: 'Dependency Injection',
                 tagline: 'Attribute-driven service registration, generated at compile time',
                 summary: 'Stop wiring up every service by hand. Tag a class with an attribute and a source generator writes the registration — no reflection, no startup scan, fully AOT-compatible.',

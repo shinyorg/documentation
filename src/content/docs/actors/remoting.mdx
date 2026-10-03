@@ -1,0 +1,86 @@
+---
+title: Remoting
+description: Call actors in another process or on another device over HTTP, and find actor servers on the LAN with mDNS
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Other processes and devices call your actors through the same `IActorSystem`. The generator has already written a
+serializable contract and a remote proxy for every actor interface, so there's nothing extra to declare.
+
+## Server
+
+```bash
+dotnet add package Shiny.Actors.HttpServer
+```
+
+The server is [Shiny.Net.HttpServer](/httpserver/), so it runs on a phone too.
+
+```csharp
+builder.Services.AddShinyActors(actors => actors.ServeOverHttp(
+    expose => expose
+        .Expose<ICounter>()            // nothing is reachable unless exposed
+        .ExposeStream<OrderPlaced>(),  // publish + server-sent events
+    http =>
+    {
+        http.AddAuthentication().AddApiKey(o => o.AddKey(key, "client"));
+        http.AddAuthorization(_ => { });
+        http.Configure((HttpServer s) => { s.UseAuthentication(); s.UseAuthorization(); });
+    },
+    authorizationPolicies: []          // every actor route requires authorization
+));
+```
+
+Already building the server yourself? `server.MapActors(expose => ...).RequireAuthorization()` does the mapping alone.
+
+## Client
+
+The client is in the core package and uses a plain `HttpClient`:
+
+```csharp
+IActorSystem actors = new RemoteActorSystem(new HttpClient { BaseAddress = new("http://192.168.1.20:8080/actors/") });
+
+await actors.Get<ICounter>("bob").Increment();
+await foreach (var order in actors.GetStream<OrderPlaced>("store-1").ReadAllAsync(ct)) { ... }
+```
+
+## How it works
+
+| | |
+|---|---|
+| Wire | `POST {prefix}/call/{actor}/{id}/{method}`, with a JSON array of arguments in and a JSON result out. Streams: `POST`/`GET` (SSE) `{prefix}/streams/{type}/{key}`. |
+| JSON | Every `JsonSerializerContext` in a project with actors is registered automatically, and primitives are built in. A type crossing the wire without metadata fails at `MapActors`, not on the first call. |
+| Errors | `RemoteActorException.StatusCode`: 400 bad arguments, 401/403 auth, 404 not exposed, 409 deadlock, 500 the actor threw. Exception details stay hidden unless `IncludeExceptionDetails` is on. |
+| Ids | Any string. Ids that aren't plain are sent as `~base64url`, because `%2F` and `..` don't survive every proxy. |
+| Remote streams | `ReadAllAsync` and `Subscribe` reconnect with backoff (1s, up to 30s). Durable streams resume from the last sequence seen. Others miss what was published meanwhile. |
+| Tracing & context | `traceparent` and `x-actor-context` headers carry the caller's trace and `ActorRequestContext`. |
+
+`IActorTransport` is the seam for a transport other than HTTP. `ActorDispatcher` does the server side and works with
+bytes only.
+
+## Finding devices
+
+```bash
+dotnet add package Shiny.Actors.Discovery
+```
+
+`Shiny.Actors.Discovery` finds actor servers on the local network over mDNS/Bonjour, so nobody has to type an
+address:
+
+```csharp
+builder.Services.AddShinyActors(x => x.UseDiscovery());
+
+// server side
+await using var published = await mdns.PublishActorsAsync(DeviceInfo.Current.Name, port);
+
+// client side
+await foreach (var peer in mdns.BrowseActorPeersAsync(ct))
+    if (peer.IsAvailable) actors = peer.Connect(http => http.DefaultRequestHeaders.Add("X-Api-Key", code));
+```
+
+- The server must listen on the LAN (`Address = IPAddress.Any`). Shiny.Net.HttpServer binds to loopback by default.
+- On Apple platforms, add `_shinyactors._tcp` to `NSBonjourServices`, plus an `NSLocalNetworkUsageDescription`.
+
+<Aside type="caution">
+Anyone on the network can find an advertised server, so put authentication in front of `MapActors`.
+</Aside>
