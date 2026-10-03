@@ -333,6 +333,19 @@ export const sidebarTopics = [
           { label: 'Release Notes', link: 'client/release-notes' }
         ]
       },
+      {
+        label: 'Printing',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'client/printing/' },
+          { label: 'Thermal & Receipt Printers', link: 'client/printing/thermal' },
+          { label: 'Native Printing', link: 'client/printing/native' },
+          { label: 'Blazor', link: 'client/printing/blazor' },
+          { label: 'Platform Setup', link: 'client/printing/platform' },
+          { label: 'Release Notes', link: 'client/release-notes' }
+        ]
+      },
     ]
   },
   {

@@ -1,0 +1,213 @@
+---
+title: Printing | Thermal & Receipt Printers
+description: Build an ESC/POS receipt with a fluent PrintDocument and stream it to a thermal printer over Bluetooth LE or WiFi with Shiny.Printers
+---
+
+Thermal printers have no driver. The app decides what goes on the paper, an encoder turns that into the printer's
+command language, and a transport delivers the bytes. Shiny keeps those three apart:
+
+| Seam | Type | Shipped |
+|---|---|---|
+| What to print | `PrintDocument` | fluent, protocol neutral |
+| Command language | `IPrinterProtocol` | `EscPosProtocol` (complete), `TsplProtocol` (minimal, for label printers) |
+| Transport | `IPrinterConnection` | Bluetooth LE, TCP, Web Bluetooth, Web Serial, WebUSB |
+
+`IPrinter` is the three put together, plus the printer's `PrinterCapabilities`. Because only the transport differs,
+one receipt builder serves every printer you support.
+
+## Building a document
+
+```csharp
+using Shiny.Printers;
+using Shiny.Printers.Document;
+
+PrintDocument Build(PrinterCapabilities caps)
+{
+    var doc = new PrintDocument()
+        .AlignCenter().Bold().Size(2, 2).Line("SHINY MART").ResetStyle()
+        .Line("123 Receipt Street")
+        .AlignLeft().Line(new string('-', caps.CharactersPerLine))
+        .Line(Columns("Coffee", "$3.50", caps.CharactersPerLine))
+        .Bold().Line(Columns("TOTAL", "$3.50", caps.CharactersPerLine)).Bold(false)
+        .Feed()
+        .AlignCenter()
+        .Barcode(BarcodeFormat.Code128, "ORDER-100425", height: 70, textPosition: BarcodeTextPosition.Below)
+        .QrCode("https://shinylib.net", moduleSize: 6, correction: QrCorrectionLevel.Medium)
+        .Feed(2);
+
+    if (caps.SupportsCut)
+        doc.Cut();
+
+    return doc;
+}
+
+static string Columns(string left, string right, int width)
+{
+    var space = width - left.Length - right.Length;
+    return space < 1 ? $"{left} {right}" : left + new string(' ', space) + right;
+}
+```
+
+| Method | Notes |
+|---|---|
+| `Align(...)`, `AlignLeft/Center/Right()` | Applies to everything after it, including barcodes and images. |
+| `Bold()`, `Underline()`, `Size(w, h)` | Magnification is 1-8 in each axis. `ResetStyle()` resets all of them and alignment. |
+| `Text(s)`, `Line(s)`, `WrapText(s, width)`, `Feed(n)` | `WrapText` word-wraps and hard-splits words that cannot fit. |
+| `Barcode(format, data, ...)` | `UpcA`, `UpcE`, `Ean13`, `Ean8`, `Code39`, `Itf`, `Codabar`, `Code93`, `Code128`. |
+| `QrCode(data, moduleSize, correction)` | Module size 1-16. |
+| `Image(PrinterImage)` | See [Images](#images). |
+| `Cut(mode, feedBefore)` | Check `SupportsCut` first. |
+| `Raw(bytes)` | Printer-specific commands - a cash drawer kick, a code page switch. |
+
+### Capabilities are the driver constants
+
+Lay the receipt out against `printer.Capabilities`, never against hard-coded widths:
+
+| Property | 58mm preset | 80mm preset |
+|---|---|---|
+| `CharactersPerLine` (Font A, 1x) | 32 | 48 |
+| `DotsPerLine` (max image width) | 384 | 576 |
+| `SupportsCut` | false | true |
+
+`PrinterCapabilities.Paper58mm` and `Paper80mm` are the presets; it is a record, so
+`Paper80mm with { SupportsCut = false }` describes a cutter-less 80mm unit.
+
+### Text encoding
+
+`EscPosProtocol` defaults to ASCII and code page 0 (PC437). For accented or non-Latin text set both to match your
+printer:
+
+```csharp
+var protocol = new EscPosProtocol { Encoding = myCodePageEncoding, CodePage = 16 };   // e.g. WPC1252
+```
+
+and pass it through the config's `ProtocolFactory`.
+
+## Images
+
+The core library never decodes PNG or JPEG - that keeps it dependency free. Decode to RGBA with whatever your app
+already has and hand the pixels over; `PrinterImage` does the grayscale conversion, dithering and 1-bit packing:
+
+```csharp
+using SkiaSharp;
+using Shiny.Printers.Imaging;
+
+using var codec = SKCodec.Create(stream);
+var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, SKColorType.Rgba8888, SKAlphaType.Unpremul);
+using var bitmap = new SKBitmap(info);
+codec.GetPixels(info, bitmap.GetPixels());
+
+var image = PrinterImage.FromPixels(bitmap.GetPixelSpan(), bitmap.Width, bitmap.Height, ImageDithering.FloydSteinberg);
+if (image.Width <= printer.Capabilities.DotsPerLine)   // a raster wider than the printhead does not print
+    doc.AlignCenter().Image(image);
+```
+
+`ImageDithering.Threshold` suits logos and line art, `FloydSteinberg` photographs. Transparent pixels are composited
+onto white. `FromGrayscale` and `FromPackedBits` take other pixel formats.
+
+## Bluetooth LE
+
+```csharp
+builder.Services.AddBluetoothLePrinting();
+```
+
+On iOS, Mac Catalyst, macOS, Android and Windows this also registers `Shiny.BluetoothLE`; calling
+`AddBluetoothLE<TDelegate>()` yourself as well is fine. **On Linux**, register `AddBluetoothLE()` from
+`Shiny.BluetoothLE.Linux` first - `AddBluetoothLePrinting()` throws if no `IBleManager` is registered yet.
+
+```csharp
+public class BlePrinting(IPrinterScanner scanner, BlePrinterManager manager)
+{
+    public async Task Print(PrintDocument doc)
+    {
+        // requests BLE access, filters on KnownPrinterProfiles, and runs until disposed
+        var found = await scanner.Scan().Take(1).Timeout(TimeSpan.FromSeconds(15)).ToTask();
+
+        var printer = await manager.Connect(found);
+        try
+        {
+            await printer.Print(doc);
+        }
+        finally
+        {
+            (printer as IDisposable)?.Dispose();
+        }
+    }
+}
+```
+
+A scan emits a `DiscoveredPrinter` (`Peripheral`, `Name`, `Rssi`, the matched `Config`) every time the printer
+advertises - de-duplicate on `Uuid`.
+
+### Known printers
+
+Scans filter on the three GATT fingerprints that cover most cheap 58/80mm units:
+
+| Profile | Service | Write characteristic |
+|---|---|---|
+| Generic ESC/POS | `18F0` | `2AF1` |
+| HM-10 / CC254x UART | `FFE0` | `FFE1` |
+| Microchip / ISSC UART | `49535343-fe7d-…` | `49535343-8841-…` |
+
+Add your own to `KnownPrinterProfiles.All` at startup, or connect to a peripheral you already know with an explicit
+config:
+
+```csharp
+var printer = await manager.Connect(peripheralUuid, new BlePrinterConfig
+{
+    ServiceUuid = "0000ff00-0000-1000-8000-00805f9b34fb",
+    WriteCharacteristicUuid = "0000ff02-0000-1000-8000-00805f9b34fb",
+    Capabilities = PrinterCapabilities.Paper58mm,
+    ChunkSize = 100,                                  // default: negotiated MTU - 3
+    InterChunkDelay = TimeSpan.FromMilliseconds(30),  // default: 20ms
+    WriteWithoutResponse = true                       // default; the most compatible mode
+});
+```
+
+Output that comes out garbled or stops half way is almost always a receive buffer overflowing: lower `ChunkSize` and
+raise `InterChunkDelay`.
+
+## WiFi / Ethernet
+
+Networked receipt printers take the **same byte stream** over a raw TCP socket, usually on port 9100.
+
+```csharp
+builder.Services.AddNetworkPrinting();   // also registers IMdnsManager from Shiny.Net.Discovery
+```
+
+```csharp
+// a fixed install - connect by address
+var printer = await networkManager.Connect("192.168.1.50", 9100, PrinterCapabilities.Paper80mm);
+
+// or find printers advertised over Bonjour / mDNS
+var found = await networkScanner.Scan().Take(1).Timeout(TimeSpan.FromSeconds(10)).ToTask();
+var printer = await networkManager.Connect(found);
+```
+
+- `Scan()` browses `_pdl-datastream._tcp` (raw, port 9100) and `_printer._tcp` (LPR) and de-duplicates by
+  host and port; `Scan(serviceType)` browses a vendor-specific type. IPv4 addresses are preferred.
+- mDNS never advertises paper width, so a `DiscoveredNetworkPrinter` assumes **80mm**. Correct it before connecting
+  when you know better: `found with { Capabilities = PrinterCapabilities.Paper58mm }`.
+- `NetworkPrinterConfig.ConnectTimeout` defaults to 10 seconds; a timeout throws `TimeoutException`.
+- Dispose the printer to close the socket.
+
+## Disconnecting
+
+`IPrinter` has no `Disconnect` because what that means depends on the transport. The BLE and network managers return
+a `Printer`, which is `IDisposable` - disposing it disconnects the peripheral or closes the socket. `Printer.Connection`
+exposes the transport (`BlePrinterConnection`, `TcpPrinterConnection`) if you need its state:
+
+```csharp
+if (printer is Printer { Connection: var connection })
+    connection.WhenStatusChanged().Subscribe(state => Console.WriteLine($"printer is {state}"));
+```
+
+## Your own transport or command language
+
+Both seams are public. Implement `IPrinterConnection` for a new transport - `SendAsync` must respect the
+transport's payload limit, and `WhenStatusChanged()` should replay the current state - or `IPrinterProtocol` for a new
+language (`Encode(PrintDocument, PrinterCapabilities)` returns the bytes), then compose them:
+
+```csharp
+IPrinter printer = new Printer(new MyUsbConnection(), new MyZplProtocol(), PrinterCapabilities.Paper58mm);
+```

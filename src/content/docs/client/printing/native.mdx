@@ -1,0 +1,117 @@
+---
+title: Printing | Native Printing
+description: Print a PDF, image, HTML or file on any installed printer through AirPrint, Android PrintManager, Windows GDI+ / shell or CUPS with Shiny.Printing
+---
+
+`Shiny.Printing` targets ordinary printers through each OS's own print pipeline - the system dialog, the spooler and
+the installed driver - so anything the OS can print to is reachable: AirPrint, laser, inkjet, a CUPS queue. It is
+completely separate from the [thermal stack](/client/printing/thermal), which talks to receipt printers directly.
+
+```csharp
+builder.Services.AddNativePrinting();          // Shiny.Printing
+builder.Services.AddPrintDocumentRendering();  // Shiny.Printing.Rendering - optional
+```
+
+## Printing
+
+```csharp
+public class Reports(IPrintService print)
+{
+    public async Task PrintInvoice(byte[] pdf)
+    {
+        var result = await print.Print(PrintJob.Pdf(pdf, new() { JobName = "Invoice 1042" }));
+        if (!result.IsSuccess)
+            Console.WriteLine($"{result.Status}: {result.Error}");
+    }
+}
+```
+
+| Job | Content |
+|---|---|
+| `PrintJob.Pdf(bytes)` / `PrintJob.Pdf(stream)` | A PDF document. |
+| `PrintJob.Image(bytes)` | A PNG or JPEG. |
+| `PrintJob.Html(markup)` | HTML, rendered by the platform. |
+| `PrintJob.HtmlUrl(uri)` | A web page. Blazor only today. |
+| `PrintJob.File(path)` | A file on disk, routed by its extension (`.pdf`, image types, `.htm/.html`). |
+
+`Print` returns a `PrintResult` rather than throwing for platform limits:
+
+| `Status` | Meaning |
+|---|---|
+| `Completed` | The job finished (where the platform reports it - AirPrint does). |
+| `Submitted` | Handed to the spooler; its final state is not observable from here. |
+| `Cancelled` | The user dismissed the print dialog. |
+| `Failed` | Could not be submitted - `Error` says why. |
+
+`IsSuccess` covers `Completed` and `Submitted`.
+
+## Feature-detect, don't catch
+
+Every platform supports a different slice. Check `IPrintService.Capabilities` before offering a button:
+
+```csharp
+var canHtml = print.Capabilities.HasFlag(PrintingCapabilities.Html);
+```
+
+| Platform | Backend | PDF | Image | HTML | Silent | Enumerate |
+|---|---|:-:|:-:|:-:|:-:|:-:|
+| iOS / Mac Catalyst | AirPrint (`UIPrintInteractionController`) | ✅ | ✅ | ✅ | ⚠️¹ | ❌ |
+| Android | `PrintManager` + `WebView` | ✅ | ✅ | ✅ | ❌² | ❌ |
+| Windows | GDI+ (`System.Drawing.Printing`) + shell verb | ✅ | ✅ | ❌³ | ✅ | ✅ |
+| Linux / macOS | CUPS `lp` / `lpstat` | ✅ | ✅ | ❌³ | ✅ | ✅ |
+| Blazor | `window.print()` | ✅ | ✅ | ✅ | ❌ | ❌ |
+
+¹ iOS can only print silently to a `UIPrinter` the user picked before - pass its URL as `PrinterId`.<br/>
+² Android always shows the system dialog; there is no silent print API.<br/>
+³ Render HTML to a PDF first.
+
+**Windows PDFs** go through the shell `print` / `printto` verb of whichever app is registered for `.pdf`; a machine
+with no PDF app cannot print one. **Mac Catalyst** uses AirPrint; an AppKit or console macOS app resolves the plain
+`net10.0` build and therefore CUPS.
+
+## Silent printing to a named printer
+
+```csharp
+if (print.Capabilities.HasFlag(PrintingCapabilities.EnumeratePrinters))
+{
+    var printers = await print.GetPrinters();            // PrinterInfo: Id, DisplayName, IsDefault
+    var target = printers.FirstOrDefault(x => x.IsDefault);
+
+    await print.Print(PrintJob.Pdf(pdf, new()
+    {
+        PreferSilent = true,
+        PrinterId = target?.Id,
+        Copies = 2,
+        Orientation = PrintOrientation.Landscape,
+        Duplex = PrintDuplex.TwoSidedLongEdge,
+        Color = PrintColorMode.Monochrome
+    }));
+}
+```
+
+`PreferSilent` is honoured only where `PrintingCapabilities.Silent` is set. CUPS never shows a dialog, so it always
+prints straight to the queue (`PrinterId` null means the CUPS default). Android ignores the layout options and lets
+the user choose them in its dialog.
+
+## Printing a receipt on an office printer
+
+`Shiny.Printing.Rendering` lays a thermal `PrintDocument` out on PDF pages with SkiaSharp - text runs, alignment, bold,
+underline, magnification, feeds and images. A cut starts a new page. Barcodes and QR codes currently render as their
+data in text.
+
+```csharp
+public class ReceiptCopy(IPrintService print, IPrintDocumentRenderer renderer)
+{
+    public Task<PrintResult> Print(PrintDocument receipt)
+    {
+        var pdf = renderer.RenderToPdf(receipt, PrintRenderOptions.Letter);   // or .A4 (default)
+        return print.Print(PrintJob.Pdf(pdf));
+    }
+}
+```
+
+`PrintRenderOptions` sets the page size, margin, font size, line spacing and font family (monospace by default, so
+column-aligned receipts stay aligned).
+
+On **Linux**, add `SkiaSharp.NativeAssets.Linux` to your app: SkiaSharp's plain `net10.0` build only carries the macOS
+and Windows natives, so rendering fails with `DllNotFoundException: libSkiaSharp` without it.

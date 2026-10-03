@@ -1,0 +1,114 @@
+---
+title: Printing | Blazor
+description: Drive ESC/POS thermal printers from Blazor over Web Bluetooth, Web Serial and WebUSB, and print through the browser dialog with window.print
+---
+
+Both printing models work in Blazor WebAssembly and Blazor Server.
+
+```csharp
+builder.Services.AddBrowserPrinting();   // Shiny.Printers.Blazor - thermal, over browser device APIs
+builder.Services.AddBlazorPrinting();    // Shiny.Printing.Blazor - IPrintService over window.print()
+```
+
+## Thermal printers from the browser
+
+`Shiny.Printers.Blazor` plugs three browser transports into the same `IPrinterConnection` seam as Bluetooth LE and
+TCP, so the identical `PrintDocument` and `EscPosProtocol` drive them.
+
+```razor
+@inject BrowserPrinterManager Printers
+@implements IAsyncDisposable
+
+<button @onclick="Connect" disabled="@(!support.Bluetooth)">Connect printer</button>
+
+@code {
+    BrowserPrintingSupport support = new(false, false, false, false);
+    BrowserPrinter? printer;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            support = await Printers.GetSupport();   // JS interop is only legal after the first render
+            StateHasChanged();
+        }
+    }
+
+    async Task Connect()
+    {
+        try
+        {
+            // must run from a user gesture - the browser rejects the chooser otherwise
+            printer = await Printers.RequestBluetooth();   // ...or RequestSerial() / RequestUsb()
+
+            await printer.Print(new PrintDocument()
+                .AlignCenter().Bold().Line("SHINY MART").ResetStyle()
+                .QrCode("https://shinylib.net")
+                .Feed(3));
+        }
+        catch (OperationCanceledException)
+        {
+            // the user dismissed the device chooser
+        }
+    }
+
+    // BrowserPrinter owns its connection - dispose it to hand the device back to the browser
+    public ValueTask DisposeAsync() => printer?.DisposeAsync() ?? ValueTask.CompletedTask;
+}
+```
+
+**There is no scanner.** Every browser device API opens a chooser that only the user can dismiss, and only from a
+user gesture, so `RequestBluetooth()`, `RequestSerial()` and `RequestUsb()` do the scan and the connect in one call.
+Call them from a click handler - never from `OnInitialized` or `OnAfterRender`.
+
+| Transport | Browser API | Best for | Browsers |
+|---|---|---|---|
+| `RequestBluetooth()` | `navigator.bluetooth` | Cheap 58/80mm BLE printers - the same GATT fingerprints as `Shiny.Printers.BluetoothLE` | Chrome, Edge, Opera - desktop and Android |
+| `RequestSerial()` | `navigator.serial` | USB-serial / RS-232 receipt printers | Chrome, Edge - desktop only |
+| `RequestUsb()` | `navigator.usb` | Devices with a raw bulk OUT endpoint | Chrome, Edge - desktop and Android |
+
+All three are Chromium-only - never Safari, Firefox or anything on iOS - and need a secure context (HTTPS or
+`localhost`). `GetSupport()` reports all four in one call.
+
+Each transport has its own config, carrying the same `Capabilities` and `ProtocolFactory` as the native ones:
+
+```csharp
+printer = await Printers.RequestSerial(new()
+{
+    BaudRate = 19200,                          // default 9600 8N1
+    FlowControl = WebSerialFlowControl.Hardware,
+    Capabilities = PrinterCapabilities.Paper80mm
+});
+```
+
+| Config | Notable settings |
+|---|---|
+| `WebBluetoothPrinterConfig` | `Profiles` (defaults to `KnownWebPrinterProfiles.All`), `AcceptAllDevices`, `WriteWithoutResponse`, `ChunkSize` (180) |
+| `WebSerialPrinterConfig` | `BaudRate`, `DataBits`, `StopBits`, `Parity`, `FlowControl`, `UsbVendorIds`, `ChunkSize` (1024) |
+| `WebUsbPrinterConfig` | `Filters` (default: USB printer class 7), `ChunkSize` (4096) |
+
+- **Web Bluetooth never exposes the negotiated MTU**, so the chunk size cannot be derived the way the native BLE
+  transport does - it defaults to a safe 180 bytes. Web Bluetooth also needs full 128-bit lowercase UUIDs.
+- **WebUSB claims the interface directly** and so competes with the OS printer driver; on Windows and macOS a
+  printer installed in the system print queue usually cannot be claimed. Prefer Web Serial where the device has a
+  port.
+- **Port-9100 printers are out of reach from WebAssembly** - browsers cannot open raw TCP sockets. Under **Blazor
+  Server**, `Shiny.Printers.Network` works as-is because the socket runs on the server.
+
+`BrowserPrinter.Connection` exposes the transport, device `Name`, `Id`, a diagnostic `Detail` (matched profile,
+baud rate, USB endpoint) and `WhenStatusChanged()`, which fires when the browser reports the device has gone.
+
+## The browser print dialog
+
+`Shiny.Printing.Blazor` is the `IPrintService` for the web. PDF, image and HTML content is rendered into a hidden
+iframe and printed with `window.print()`:
+
+```csharp
+@inject IPrintService Print
+
+var result = await Print.Print(PrintJob.Html("<h1>Hello</h1>"));
+```
+
+The browser always shows its own dialog, so silent printing and printer enumeration are not available, and
+`PrintJob.File` fails - there is no file system to read from. `PrintJob.HtmlUrl` loads a page into the iframe, which
+the browser only allows for same-origin URLs.

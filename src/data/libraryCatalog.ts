@@ -319,6 +319,20 @@ export const categories: CategoryCopy[] = [
                 frameworks: ['maui', 'dotnet', 'blazor'],
                 os: ['android', 'ios', 'tvos', 'windows', 'linux', 'macos'],
             },
+            {
+                label: 'Printing',
+                tagline: 'Receipt printers over BLE, WiFi and the browser, plus OS-native printing',
+                summary: 'Build a receipt once as a PrintDocument and stream it as ESC/POS to a thermal printer over Bluetooth LE, TCP or the browser - or hand a PDF, image or HTML to AirPrint, Android, Windows or CUPS for any installed printer.',
+                highlights: [
+                    'Fluent receipts: styled text, barcodes, QR codes, dithered images, cut',
+                    'BLE, raw TCP 9100 with mDNS discovery, Web Bluetooth / Serial / USB',
+                    'AirPrint, PrintManager, GDI+ / shell, CUPS and window.print()',
+                    'Render the same receipt to PDF for an office printer',
+                ],
+                packages: ['Shiny.Printers', 'Shiny.Printing'],
+                frameworks: ['maui', 'dotnet', 'blazor'],
+                os: ['android', 'ios', 'windows', 'linux', 'macos', 'web'],
+            },
         ],
     },
     {

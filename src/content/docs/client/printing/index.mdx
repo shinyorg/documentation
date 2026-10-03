@@ -1,0 +1,90 @@
+---
+title: Printing | Getting Started
+description: Cross-platform printing for .NET - thermal / receipt printing (ESC/POS, TSPL) over Bluetooth LE, WiFi and the browser, plus OS-native printing of PDF, image and HTML through AirPrint, Android PrintManager, Windows and CUPS
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+Shiny ships **two printing models**, because a receipt printer and an office printer are not the same problem.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Thermal | <NugetDownloads name="Shiny.Printers" /> |
+| Native | <NugetDownloads name="Shiny.Printing" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet", "blazor"]} os={["android", "ios", "windows", "linux", "macos"]} />
+
+## Which one do I want?
+
+| You have | Use | What happens |
+|---|---|---|
+| A 58/80mm receipt, kitchen or label printer | [**Thermal printing**](/client/printing/thermal) - `Shiny.Printers` | You build a `PrintDocument`; an encoder turns it into ESC/POS (or TSPL) bytes; a transport - Bluetooth LE, TCP or a browser API - streams them to the device. Your app owns the layout; there is no driver. |
+| Any printer the OS already knows about - AirPrint, laser, inkjet, a CUPS queue | [**Native printing**](/client/printing/native) - `Shiny.Printing` | You hand a PDF, image, HTML or file to the OS print pipeline - its dialog, spooler and driver. |
+
+They meet in one place: `Shiny.Printing.Rendering` renders a thermal `PrintDocument` to a PDF, so the very same
+receipt can go to either kind of printer.
+
+## Packages
+
+| Package | Platforms | What it does |
+|---|---|---|
+| `Shiny.Printers` | any .NET | The document model, `PrinterCapabilities`, the `EscPosProtocol` and `TsplProtocol` encoders and `PrinterImage`. No dependencies; AOT and trim clean. |
+| `Shiny.Printers.BluetoothLE` | iOS, Mac Catalyst, macOS, Android, Windows, Linux | Scan for and connect to BLE printers through `Shiny.BluetoothLE`, with MTU-chunked writes. |
+| `Shiny.Printers.Network` | everywhere, including Blazor **Server** | Raw TCP to port 9100 (JetDirect), and mDNS discovery through `Shiny.Net.Discovery`. |
+| `Shiny.Printers.Blazor` | Blazor WebAssembly / Server | Web Bluetooth, Web Serial and WebUSB transports. |
+| `Shiny.Printing` | iOS, Mac Catalyst, Android, Windows, Linux, macOS | `IPrintService` over AirPrint, `PrintManager`, GDI+ / shell and CUPS. |
+| `Shiny.Printing.Rendering` | any .NET | Renders a `PrintDocument` to PDF with SkiaSharp. |
+| `Shiny.Printing.Blazor` | Blazor WebAssembly / Server | `IPrintService` over the browser's `window.print()`. |
+
+## Quick start
+
+```csharp
+// MauiProgram.cs
+builder.Services.AddBluetoothLePrinting();     // BLE receipt printers - registers Shiny.BluetoothLE too
+builder.Services.AddNetworkPrinting();         // WiFi receipt printers - registers mDNS discovery too
+builder.Services.AddNativePrinting();          // the platform IPrintService
+builder.Services.AddPrintDocumentRendering();  // optional: receipt -> PDF
+```
+
+```csharp
+public class Checkout(IPrinterScanner scanner, BlePrinterManager printers)
+{
+    public async Task PrintReceipt()
+    {
+        var found = await scanner.Scan().Take(1).Timeout(TimeSpan.FromSeconds(15)).ToTask();
+        var printer = await printers.Connect(found);
+        try
+        {
+            var caps = printer.Capabilities;
+            var doc = new PrintDocument()
+                .AlignCenter().Bold().Size(2, 2).Line("SHINY MART").ResetStyle()
+                .AlignLeft().Line(new string('-', caps.CharactersPerLine))
+                .Line("Coffee            $3.50")
+                .AlignCenter().QrCode("https://shinylib.net")
+                .Feed(2);
+
+            if (caps.SupportsCut)
+                doc.Cut();
+
+            await printer.Print(doc);
+        }
+        finally
+        {
+            (printer as IDisposable)?.Dispose();   // disconnects
+        }
+    }
+}
+```
+
+Every `Add*` extension lives in the `Shiny` namespace. Before running on a device, work through
+[Platform Setup](/client/printing/platform) - iOS in particular silently returns no network printers without its
+Info.plist entries.
+
+## Samples
+
+The client repository's samples include both pages: **Thermal Printer** (BLE + WiFi scan, connect by address, print a
+receipt with a logo, barcode and QR code) and **Native Print** (render that receipt to PDF, print HTML, list printers
+and print silently where the OS allows it), in `Sample.Shared.Maui` for every MAUI head and Linux, plus a
+**Printing** page in `Sample.Blazor` for the browser transports.

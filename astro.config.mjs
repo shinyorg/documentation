@@ -44,14 +44,14 @@ const announcementConfig = {
       id: 'client-v580',
       title: 'Shiny Client 5.8',
       description: 'SIRI & Gemini Integration, GamePads, Location Updates, Resumable Uploads, & Watch Libraries!',
-      href: '/client/ble',
+      href: '/client/appfunctions',
       cta: 'AWESOME!',
     },
     {
       id: 'client-v590',
       title: 'Shiny Client 5.9',
-      description: 'Easier Live Activities - No XCode project required!',
-      href: '/client/liveactivities',
+      description: 'Easy Live Activities, Printing APIs for Device & BluetoothLE',
+      href: '/client/printing',
       cta: 'Live it up!',
     }, 
     {
