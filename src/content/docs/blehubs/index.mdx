@@ -1,0 +1,158 @@
+---
+title: BluetoothLE Hubs
+description: SignalR style hubs over Bluetooth LE - one device hosts, nearby devices connect and call it through a source generated, strongly typed proxy.
+---
+import { Steps } from '@astrojs/starlight/components';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="bluetoothle-hubs" /> |
+| Shared + Generator | <NugetDownloads name="Shiny.BluetoothLE.Hubs" /> |
+| Host | <NugetDownloads name="Shiny.BluetoothLE.Hubs.Host" /> |
+| Client | <NugetDownloads name="Shiny.BluetoothLE.Hubs.Client" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos"]} />
+
+BluetoothLE Hubs brings the SignalR programming model to Bluetooth LE. One device **hosts** a hub, and nearby devices
+**discover** it, **connect**, and **call** it through a strongly typed proxy. The host **pushes** events back to all
+clients, one client, everyone else, or a group. No server, no network, no Wi-Fi: just phones in the same room.
+
+It's built on [BluetoothLE](/client/ble/) (client) and [BluetoothLE Hosting](/client/blehosting/) (host). The
+chunking, correlation, timeouts and reconnection rules are handled for you, and the code is generated at compile
+time, so it is AOT- and trim-safe with no reflection.
+
+## Features
+
+- **One interface describes the whole hub.** Its methods are client → host calls (`Task`, `Task<T>`,
+  `IAsyncEnumerable<T>`) and its events are host → client pushes.
+- **Source generated**: the client proxy, hub dispatcher and typed push methods, with compile-time diagnostics for
+  mistakes.
+- **Hubs:** `Context`, `Clients` (All / Others / Caller / Client / Group…), `Groups`,
+  `OnConnectedAsync` / `OnDisconnectedAsync` and `Context.Abort()`.
+- **Outside a hub:** `IHubContext<THub>` to push, disconnect clients, or start and stop a single hub.
+- **Calls:** streaming with cancellation that reaches the host, timeouts, and remote exceptions.
+- **Large messages** are chunked to the negotiated MTU automatically.
+- **File transfers** over L2CAP with progress (avatars, logs, photos…).
+- **Several hubs per device**, and several hub clients share one BLE connection.
+
+## Setup
+
+<Steps>
+1. Install the packages. The host app needs `Host`, the client app needs `Client`, and an app that can play
+   either role installs both. The shared package (with the source generator) comes along automatically.
+   ```bash
+   dotnet add package Shiny.BluetoothLE.Hubs.Host
+   dotnet add package Shiny.BluetoothLE.Hubs.Client
+   ```
+
+2. Describe the hub in an interface that both sides can see:
+   ```csharp
+   using Shiny.BluetoothLE.Hubs;
+
+   [BleHubClient]
+   public interface IChatHub
+   {
+       Task<bool> Send(string message);         // client -> host
+       event Action<string, string> Received;   // host -> clients (who, message)
+   }
+
+   [JsonSerializable(typeof(string))]
+   [JsonSerializable(typeof(bool))]
+   public partial class ChatJsonContext : JsonSerializerContext;
+   ```
+
+3. Implement it on the host:
+   ```csharp
+   public class ChatHub : BleHub<IChatHub>
+   {
+       public async Task<bool> Send(string message)
+       {
+           await this.Clients.All.Received(this.Context.Client.Name ?? "?", message);
+           return true;
+       }
+   }
+   ```
+
+4. Register everything in `MauiProgram`:
+   ```csharp
+   Shiny.Json.AddContext(ChatJsonContext.Default);
+
+   // host
+   builder.Services.AddBluetoothLeHosting();
+   builder.Services.AddBleHub<ChatHub>(ServiceUuid, ChatCharacteristicUuid);
+
+   // client
+   builder.Services.AddBluetoothLE();
+   builder.Services.AddBleHubClient<IChatHub>(ServiceUuid, ChatCharacteristicUuid);
+   ```
+
+5. Start hosting on one device:
+   ```csharp
+   await hubContext.Start();   // IHubContext<ChatHub> - or IBleHubHost.Start() for every hub
+   ```
+
+6. Connect and call it from another:
+   ```csharp
+   // IBleHubClient<IChatHub> client
+   client.Hub.Received += (who, message) => MainThread.BeginInvokeOnMainThread(() => Messages.Add($"{who}: {message}"));
+
+   var host = await client.Discover().FirstAsync();
+   await client.Connect(host, new BleHubConnectOptions("Allan"));
+   await client.Hub.Send("hello!");
+   ```
+</Steps>
+
+:::note
+Bluetooth needs **two physical devices**. The iOS simulator has no Bluetooth and Android emulators are unreliable.
+:::
+
+## Platform Setup
+
+**Android** (`Platforms/Android/AndroidManifest.xml`):
+
+```xml
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+```
+
+**iOS** (`Platforms/iOS/Info.plist`):
+
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Bluetooth is used to talk to nearby devices</string>
+```
+
+| Feature | iOS | macOS / Mac Catalyst | Android | Windows |
+|---------|-----|----------------------|---------|---------|
+| Host a hub | Foreground | Yes | Yes | — (can't host) |
+| Connect as a client | Yes | Yes | Yes | Yes |
+| [File transfers](./files) | Yes | Yes | API 29+ | — |
+
+## Sample
+
+The [Tic Tac Toe sample](https://github.com/shinyorg/bluetoothle-hubs/tree/main/samples/TicTacToe) is a .NET MAUI
+app for iOS and Android.
+- One phone hosts and plays X. The next phone to join plays O, and anyone after that spectates.
+- Moves are hub calls, and board updates and emotes are pushes.
+- Avatars are uploaded and downloaded over L2CAP.
+- Spectators sit in a group the host can remove in one go.
+
+## Next
+
+- [Contracts & Source Generator](./contracts): what a hub interface may contain and what gets generated
+- [Hosting Hubs](./hosting): `BleHub<T>`, `IHubContext<THub>`, groups, start/stop
+- [Connecting Clients](./client): discovery, calls, streams, events, failures
+- [File Transfers](./files): L2CAP uploads and downloads
+- [How It Works](./how-it-works): GATT layout, wire protocol, limits and best practices
+
+<AiSkill skillName="shiny-ble-hubs" />

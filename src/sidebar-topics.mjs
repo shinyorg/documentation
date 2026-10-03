@@ -199,6 +199,20 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'BluetoothLE Hubs',
+        jumpTo: true,
+        badge: { text: 'New', variant: 'success' },
+        items: [
+          { label: 'Getting Started', link: 'blehubs/' },
+          { label: 'Contracts & Source Generator', link: 'blehubs/contracts' },
+          { label: 'Hosting Hubs', link: 'blehubs/hosting' },
+          { label: 'Connecting Clients', link: 'blehubs/client' },
+          { label: 'File Transfers', link: 'blehubs/files' },
+          { label: 'How It Works', link: 'blehubs/how-it-works' },
+          { label: 'Release Notes', link: 'blehubs/release-notes' }
+        ]
+      },
+      {
         label: 'Beacons',
         jumpTo: true,
         badge: { text: 'New', variant: 'success' },
@@ -897,6 +911,7 @@ export const sidebarTopics = [
       },
       { label: 'Quick Entry', link: 'controls/quick-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
       { label: 'File Drop', link: 'controls/file-drop/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+      { label: 'Keyboard Shortcuts', link: 'controls/keyboard-shortcuts/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
       { label: 'FrostedGlassView', link: 'controls/frostedglass/', jumpTo: true },
       {
         label: 'Images',

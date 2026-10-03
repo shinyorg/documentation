@@ -53,8 +53,9 @@ the `-ios` target alone, so no other head carries ActivityKit — and `AddTransf
 :::caution[iOS needs a widget extension]
 ActivityKit renders a Live Activity from a **SwiftUI widget extension in your app bundle**, and nothing about
 that layout can be driven from C#. Without it — and without `NSSupportsLiveActivities` in Info.plist — the
-activity starts and renders nothing, silently. See [the widget extension](/client/liveactivities/widget) for the
-ready-made template and its Xcode wiring, and check both of these first if an iOS activity never appears.
+activity starts and renders nothing, silently. Set `<ShinyLiveActivityWidget>true</ShinyLiveActivityWidget>` in
+your app's `.csproj` and both are built into the app for you, with no Xcode project; see
+[the widget extension](/client/liveactivities/widget).
 :::
 
 ## Configuring what shows

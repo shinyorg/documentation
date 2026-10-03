@@ -181,6 +181,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'macos', 'windows', 'linux'],
             },
             {
+                label: 'BluetoothLE Hubs',
+                tagline: 'SignalR style hubs between nearby devices over Bluetooth LE',
+                summary: 'One device hosts a hub and nearby devices connect and call it through a source generated, strongly typed proxy. The host pushes events to everyone, one client or a group - no server or network required.',
+                highlights: [
+                    'One interface describes calls and pushes',
+                    'Source generated proxies, AOT safe',
+                    'Groups, streaming and per hub start/stop',
+                    'L2CAP file transfers',
+                ],
+                packages: ['Shiny.BluetoothLE.Hubs', 'Shiny.BluetoothLE.Hubs.Host', 'Shiny.BluetoothLE.Hubs.Client'],
+                frameworks: ['dotnet', 'maui'],
+                os: ['android', 'ios', 'macos'],
+            },
+            {
                 label: 'Beacons',
                 tagline: 'iBeacon and Eddystone — ranging, region monitoring and broadcasting',
                 summary: "Both beacon formats that matter — Apple's iBeacon and Google's Eddystone. Range for proximity in the foreground, monitor regions in the background, or broadcast as a beacon yourself.",

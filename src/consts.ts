@@ -302,7 +302,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
-        // iOS/iPadOS 16.2+ via ActivityKit (needs your own widget extension), Android 16 Live
+        // iOS/iPadOS 16.2+ via ActivityKit (widget extension built by ShinyLiveActivityWidget), Android 16 Live
         // Updates, ordinary ongoing notification on Android 8-15, no-op everywhere else.
         "id": "liveactivities",
         "nuget": "Shiny.Mobile.LiveActivities",
@@ -1189,6 +1189,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Speech Add-ins (speech-to-text tools)",
         "category": "controls",
         "version": "1.5.0"
+    },
+    {
+        "id": "keyboard-shortcuts",
+        "nuget": "Shiny.Maui.Controls",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "Keyboard Shortcuts",
+        "category": "controls",
+        "version": "1.6.0",
+        "hideFromAppBuilder": true
     },
     {
         "id": "keyframe",

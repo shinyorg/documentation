@@ -1,0 +1,142 @@
+---
+title: Hosting Hubs
+description: Implement BleHub<T>, push to clients and groups, react to connects and disconnects, and start or stop hubs with IHubContext.
+---
+
+## Registration
+
+```csharp
+builder.Services.AddBluetoothLeHosting();
+
+builder.Services.AddBleHub<GameHub>(ServiceUuid, GameHubCharacteristicUuid, o =>
+{
+    o.MaxClients = 6;   // default 8, null = unlimited
+    o.ValidateClient = info => String.IsNullOrWhiteSpace(info.Name) ? "A player name is required" : null;
+});
+
+builder.Services.ConfigureBleHubHost(o =>
+{
+    o.LocalName = "TTT";   // advertised name - keep it short
+});
+```
+
+- Every hub needs **its own characteristic UUID**. Use full 128-bit UUIDs.
+- Hubs should **share one service UUID**. Each extra 128-bit UUID in the advertisement eats 18 of its 31 bytes.
+- `ValidateClient` sees the client's handshake (`Name`, `AppVersion`, `Properties`). Return a reason to refuse the
+  client, or `null` to accept it.
+
+## Writing a Hub
+
+```csharp
+public class GameHub(GameEngine engine) : BleHub<IGameHub>
+{
+    public override async Task OnConnectedAsync()
+        => await this.Groups.AddToGroupAsync(this.Context.ConnectionId, "lobby");
+
+    public override async Task OnDisconnectedAsync(string? reason)
+    {
+        engine.Leave(this.Context.ConnectionId);
+        await this.Clients.All.StateChanged(engine.Snapshot());
+    }
+
+    public async Task<MoveResult> MakeMove(int cell)
+    {
+        var error = engine.TryMove(this.Context.ConnectionId, cell);
+        if (error != null)
+            return new MoveResult(false, error);
+
+        await this.Clients.All.StateChanged(engine.Snapshot());
+        return new MoveResult(true, null);
+    }
+
+    // the contract's CancellationToken may be taken (as the last parameter) or left out
+    public async IAsyncEnumerable<int> Countdown(int from, [EnumeratorCancellation] CancellationToken ct)
+    {
+        for (var i = from; i > 0; i--)
+        {
+            yield return i;
+            await Task.Delay(1000, ct);
+        }
+    }
+    ...
+}
+```
+
+:::caution
+A **new hub instance** is created, in its own DI scope, for **every call**, just like SignalR. Never keep state in hub
+fields. Use singletons, or `Context.Items` for per-connection state.
+:::
+
+### Context
+
+| Member | |
+|---|---|
+| `ConnectionId` | The caller's id |
+| `Client` | `Name`, `AppVersion`, `Properties`, `Mtu`, `ConnectedAt`, `Items` |
+| `Items` | Per-connection state, kept while the client is connected |
+| `ConnectionAborted` | Cancelled when the client goes away |
+| `Abort(reason)` | Asks the client to leave. Called from a hub method, it takes effect **after** that method's reply is sent |
+
+### Clients
+
+| Target | Who |
+|---|---|
+| `All` | Everyone connected |
+| `Caller` / `Others` | The caller / everyone except the caller |
+| `Client(id)` / `Clients(ids)` | Specific connections |
+| `AllExcept(ids)` | Everyone but these |
+| `Group(name)` / `Groups(names)` | Group members |
+| `GroupExcept(name, ids)` / `OthersInGroup(name)` | Group members, minus some |
+
+Every target exposes the contract's events as methods (`Clients.Others.Emote("host", "👋")`).
+
+### Groups
+
+`Groups.AddToGroupAsync(connectionId, name)`, `RemoveFromGroupAsync`, and `GetMembers(name)`. When a client leaves,
+its memberships are removed automatically, after `OnDisconnectedAsync` has run.
+
+### Errors
+
+An exception thrown by a hub method is sent back to the caller as a `BleHubRemoteException` (with `RemoteErrorType` and
+`Message`). The connection stays up.
+
+## Outside a Hub: IHubContext
+
+Inject `IHubContext<THub>` anywhere: services, view models, timers.
+
+```csharp
+public class Lobby(IHubContext<GameHub> hub)
+{
+    public Task Open() => hub.Start();                          // start just this hub
+    public Task Close() => hub.Stop("The lobby is closed");     // clients get the reason
+    public bool IsOpen => hub.IsRunning;
+
+    public Task Broadcast(GameState state) => hub.Clients.All.StateChanged(state);
+    public Task Kick(string connectionId) => hub.Disconnect(connectionId, "Removed by host");
+
+    public IReadOnlyList<BleHubConnectedClient> Players => hub.ConnectedClients;
+}
+```
+
+`IHubContext<THub>` also has `Groups` and the `ClientConnected` / `ClientDisconnected` events.
+
+## Starting & Stopping
+
+| | |
+|---|---|
+| `IBleHubHost.Start()` / `Stop(reason)` | Every registered hub |
+| `IHubContext<THub>.Start()` / `Stop(reason)` | Just that hub |
+
+- **Stopping a hub** tells its clients to disconnect (they receive the reason) and refuses new clients with "Hub is
+  not running".
+- **Shared services**: hubs that share a service UUID live in one GATT service. It stays up while any of them is
+  running, so stopping one hub never drops another hub's clients.
+- **Advertising** always lists exactly the services that have a running hub, and stops when none do.
+- **Shared resources**: BLE access, the [file server](./files) and the cleanup sweep start with the first running hub
+  and stop with the last.
+
+:::note[Disconnecting is cooperative]
+iOS can't force a central (client) off a peripheral (host). So `Stop`, `Disconnect` and `Abort` **ask** the client to
+leave, and the client library always complies. A client that silently drops is removed when it unsubscribes, or by a
+periodic sweep (`BleHubHostOptions.ClientSweepInterval`, 10s by default).
+:::

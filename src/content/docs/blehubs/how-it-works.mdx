@@ -1,0 +1,60 @@
+---
+title: How It Works
+description: The GATT layout, wire protocol, limits and best practices behind BluetoothLE Hubs.
+---
+
+## GATT Layout
+
+- Each hub is **one characteristic** with **Write** (client → host) and **Notify** (host → client).
+- Hubs that share a service UUID become characteristics of one GATT service. Calls are routed by characteristic, so
+  messages never carry a hub name.
+- The host advertises the service UUIDs of its running hubs, plus an optional local name. Clients scan by service
+  UUID.
+
+Why not reads for responses? A client can't tell when a response is ready to read, so it would have to poll. Reads are
+also ambiguous with several calls in flight, and they are still capped by the MTU. Correlated, chunked notifications
+avoid all of that.
+
+## Messages & Framing
+
+A BLE write or notification can carry only `MTU - 3` bytes: 20 bytes at the BLE minimum, usually 182 or more on iOS,
+and up to 512. Every message (call, reply, stream item, push) is split into frames that fit:
+
+```
+[version][kind][message id:2][sequence:2][flags][total length:4 - first frame only] + chunk
+```
+
+- **Matching replies**: the receiver puts frames back together by message id, and replies are matched to calls the
+  same way. Many calls can be in flight at once.
+- **Sending order**: the host sends each message to a client as a whole, so frames never interleave. The client raises
+  pushes in the order they arrived.
+- **Arguments** are serialized one by one with their static type, which keeps everything AOT-safe.
+- **Handshake**: when a client connects, it exchanges a handshake with the host carrying the protocol version, client
+  name and properties, and the file transfer channel. Mismatched protocol versions are refused.
+
+## Limits
+
+| | Default | Change with |
+|---|---|---|
+| Largest message | 256 KB | `ConfigureBleHubProtocol(o => o.MaxPayloadSize = …)` |
+| Call timeout | 30s | `RequestTimeout` |
+| Partial message lifetime | 30s | `ReassemblyTimeout` |
+| Partial messages per client | 16 | `MaxPartialMessages` |
+| Clients per hub | 8 | `AddBleHub<T>(…, o => o.MaxClients = …)` |
+
+Throughput over GATT is a few KB/s, which is plenty for game moves, commands and state. Use
+[file transfers](./files) for anything big.
+
+## Best Practices
+
+- **Put the contract where both sides compile against it**, and treat names as a public API. Add new members, and
+  don't rename or reorder existing ones.
+- **Register every wire type** in a `JsonSerializerContext`. A missing registration fails at runtime, not at compile
+  time.
+- **Keep `LocalName` short** (about 8 characters) and **share one service UUID** between hubs. The advertisement is
+  only 31 bytes.
+- **Marshal hub events to the UI thread.**
+- **Never store state on the hub instance.** It is recreated for every call.
+- **Foreground only (for now).** When an iOS host is in the background, it advertises without its local name, and
+  only through the overflow area.
+- **Test on two real devices**, in both directions (iOS host with an Android client, and the reverse).

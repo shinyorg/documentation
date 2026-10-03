@@ -1,0 +1,101 @@
+---
+title: Contracts & Source Generator
+description: Describe a BluetoothLE hub with one [BleHubClient] interface - the source generator builds the client proxy, hub dispatcher and typed pushes.
+---
+
+A hub is described by **one interface** marked `[BleHubClient]`. Put it somewhere both sides can see it: a shared
+project, or the same app when a device can play either role.
+
+```csharp
+using Shiny.BluetoothLE.Hubs;
+
+[BleHubClient]
+public interface IGameHub
+{
+    // client -> host
+    Task<JoinResult> Join(string playerName, string? avatarFile);
+    Task<MoveResult> MakeMove(int cell);
+    Task Rematch();
+    IAsyncEnumerable<int> Countdown(int from, CancellationToken cancellationToken);
+
+    // host -> clients
+    event Action<GameState> StateChanged;
+    event Action<string, string> Emote;
+}
+```
+
+## Methods: client → host
+
+| Return type | Meaning |
+|---|---|
+| `Task` | Completes once the hub method has run on the host |
+| `Task<T>` | Returns the hub method's result |
+| `IAsyncEnumerable<T>` | Streams items as the hub yields them. Breaking out of the loop cancels the hub method |
+
+- **`CancellationToken`**: a trailing `CancellationToken` parameter is never sent over the wire. Cancelling it on the
+  client cancels the hub method on the host.
+- **Parameters** can be any serializable type: primitives, records, arrays and so on.
+- **Names are the wire identity.** Methods are called **by name**, so names must be unique (no overloads), and renaming
+  a method breaks clients that are already deployed. Add new methods rather than changing existing ones.
+
+## Events: host → clients
+
+Events are fire-and-forget pushes from the host. They must be `Action` or `Action<T1..T4>`:
+
+```csharp
+event Action Pinged;
+event Action<GameState> StateChanged;
+event Action<string, string> Emote;
+```
+
+On the client they are ordinary .NET events on the generated proxy. On the host the generator turns each one into a
+method you call on a push target: `Clients.All.StateChanged(state)`.
+
+## Serialization
+
+Every argument, result and event value is serialized on its own with its static type. By default this uses Shiny's
+AOT-friendly JSON, so **every type that crosses the wire must be in a `JsonSerializerContext`**, including primitives
+used as arguments:
+
+```csharp
+[JsonSerializable(typeof(JoinResult))]
+[JsonSerializable(typeof(MoveResult))]
+[JsonSerializable(typeof(GameState))]
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(int))]
+[JsonSourceGenerationOptions(UseStringEnumConverter = true)]
+public partial class GameJsonContext : JsonSerializerContext;
+
+// at startup, on both sides
+Shiny.Json.AddContext(GameJsonContext.Default);
+```
+
+To use something else (MessagePack, protobuf…), register your own `IBleHubSerializer` before `AddBleHub` /
+`AddBleHubClient`.
+
+## What Gets Generated
+
+The generator ships inside the `Shiny.BluetoothLE.Hubs` package, so there's nothing to install.
+
+| Generated | When | Example |
+|---|---|---|
+| Client proxy | The project references `Shiny.BluetoothLE.Hubs.Client` | `GameHubClient : BleHubClient, IGameHub, IBleHubClient<IGameHub>` |
+| Typed pushes | The project references `Shiny.BluetoothLE.Hubs.Host` | `Clients.All.StateChanged(state)` |
+| Hub dispatcher | For every `class X : BleHub<TContract>` | maps method names to typed calls, with no reflection |
+| `IHubContext<X>.Clients` | For every hub | a C# 14 extension property: `hubContext.Clients.Group("a").Emote(...)` |
+
+- **Proxy name**: the interface name without its leading `I`, plus `Client`. Change it with
+  `[BleHubClient(ProxyName = "MyClient")]`.
+- **Contracts from other assemblies**: proxies are generated for contracts declared in a referenced assembly too.
+  Those proxies are `internal`.
+
+## Diagnostics
+
+| Id | Problem |
+|---|---|
+| `SBH001` | The hub doesn't implement a contract method, or the signature doesn't match. A trailing `CancellationToken` on the hub method is optional |
+| `SBH002` | A method returns something other than `Task`, `Task<T>` or `IAsyncEnumerable<T>` |
+| `SBH003` | Overloaded method names |
+| `SBH004` | An event that isn't `Action` / `Action<…>`, or has more than 4 arguments |
+| `SBH005` | `BleHub<T>` where `T` isn't an interface marked `[BleHubClient]` |
+| `SBH006` | Generic methods, `ref` / `out` / `in` parameters, or more than 255 parameters |

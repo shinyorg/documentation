@@ -1,0 +1,119 @@
+---
+title: Connecting Clients
+description: Discover BluetoothLE hub hosts, connect, call hub methods, consume streams and handle pushes with the generated client proxy.
+---
+
+## Registration
+
+```csharp
+builder.Services.AddBluetoothLE();
+builder.Services.AddBleHubClient<IGameHub>(ServiceUuid, GameHubCharacteristicUuid);
+```
+
+This registers the **generated proxy** (`GameHubClient` for `IGameHub`) as a singleton. Inject whichever shape you
+prefer:
+
+| Inject | You get |
+|---|---|
+| `IBleHubClient<IGameHub>` | Connection management, plus `.Hub` for calls and events (easiest to mock) |
+| `GameHubClient` | The concrete generated proxy |
+| `IGameHub` | Calls and events only |
+
+## Discover & Connect
+
+```csharp
+public partial class JoinViewModel(IBleHubClient<IGameHub> client) : ObservableObject
+{
+    IDisposable? scan;
+    public ObservableCollection<BleHubHostInfo> Hosts { get; } = new();
+
+    public void OnAppearing() => this.scan = client
+        .Discover()   // scans for the hub's service UUID - dispose to stop
+        .Subscribe(host => MainThread.BeginInvokeOnMainThread(() =>
+        {
+            if (!this.Hosts.Any(x => x.Id == host.Id))
+                this.Hosts.Add(host);    // host.Name (advertised), host.Rssi
+        }));
+
+    [RelayCommand]
+    async Task Join(BleHubHostInfo host)
+    {
+        this.scan?.Dispose();
+        await client.Connect(host, new BleHubConnectOptions(
+            Name: "Allan",
+            AppVersion: AppInfo.Current.VersionString,
+            Properties: new() { ["team"] = "blue" }
+        ));
+        var result = await client.Hub.Join("Allan", null);
+    }
+}
+```
+
+`Connect` does the following:
+1. Connects to the host.
+2. Requests the largest MTU the platforms allow.
+3. Subscribes for pushes.
+4. Completes the handshake.
+
+The host may refuse the client: it is full, `ValidateClient` said no, or the hub isn't running. In that case
+`Connect` throws a `BleHubException` with the reason.
+
+| Member | |
+|---|---|
+| `Status` | `Disconnected`, `Connecting`, `Connected`, `Disconnecting` |
+| `StatusChanged` / `Connected` / `Disconnected` | `Disconnected` carries the reason (host stopped, kicked, connection lost, you called `Disconnect`) |
+| `Host` / `HostName` | The connected host, and the name it gave in the handshake |
+| `CanTransferFiles` | See [File Transfers](./files) |
+| `Disconnect()` | Leaves the hub |
+
+## Calls
+
+```csharp
+var result = await client.Hub.MakeMove(4);
+await client.Hub.Rematch();
+
+using var cts = new CancellationTokenSource();
+await foreach (var n in client.Hub.Countdown(10, cts.Token))
+{
+    if (n == 3)
+        break;   // cancels the hub method on the host
+}
+```
+
+- **Concurrent calls** are fine. Each is matched to its own reply.
+- **Timeouts**: a call that gets no reply within `BleHubProtocolOptions.RequestTimeout` (30s by default) throws a
+  `TimeoutException`. Streams aren't timed out.
+- **Cancellation**: cancelling a call's `CancellationToken` stops waiting and cancels the hub method on the host.
+
+```csharp
+builder.Services.ConfigureBleHubProtocol(o => o.RequestTimeout = TimeSpan.FromSeconds(10));
+```
+
+## Events (pushes)
+
+```csharp
+client.Hub.StateChanged += state => MainThread.BeginInvokeOnMainThread(() => this.Apply(state));
+client.Hub.Emote += (from, emoji) => MainThread.BeginInvokeOnMainThread(() => this.Show($"{from} {emoji}"));
+```
+
+Events are raised on a **background thread**, one at a time and **in the order the host sent them**. Marshal to the
+UI thread yourself.
+
+## Failures
+
+| Exception | When |
+|---|---|
+| `BleHubRemoteException` | The hub method threw. Includes `RemoteErrorType` and `Message` |
+| `BleHubDisconnectedException` | You called while not connected, or the connection dropped while a call was in flight (`Reason` says why) |
+| `TimeoutException` | No reply within `RequestTimeout` |
+| `OperationCanceledException` | You cancelled the call |
+
+## Several Hubs on One Host
+
+Register a client per hub contract. Connecting each to the same host shares **one** BLE connection, which is reference
+counted, so disconnecting one hub client leaves the others connected.
+
+```csharp
+builder.Services.AddBleHubClient<IGameHub>(ServiceUuid, GameHubCharacteristicUuid);
+builder.Services.AddBleHubClient<IChatHub>(ServiceUuid, ChatHubCharacteristicUuid);
+```

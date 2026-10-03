@@ -119,6 +119,15 @@ const ProjectFile = (props: Props) => {
         pr += "</ItemGroup>\r\n";
     }
 
+    const hasLiveActivities = nugets.find(x => x.nuget === "Shiny.Mobile.LiveActivities") !== undefined;
+    if (isMaui && hasLiveActivities) {
+        pr += "\r\n<PropertyGroup Condition=\"$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'\">\r\n";
+        pr += "\t<!-- Builds the Live Activity widget extension into the app (no Xcode project) and adds NSSupportsLiveActivities.\r\n";
+        pr += "\t     Without it Start() succeeds and nothing appears - https://shinylib.net/client/liveactivities/widget/ -->\r\n";
+        pr += "\t<ShinyLiveActivityWidget>true</ShinyLiveActivityWidget>\r\n";
+        pr += "</PropertyGroup>\r\n";
+    }
+
     if (isMaui && (hasNotifications || hasPush)) {
         pr += "\r\n<ItemGroup Condition=\"$(TargetFramework.Contains('-ios'))\">\r\n";
         if (hasNotifications) {

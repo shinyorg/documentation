@@ -48,6 +48,13 @@ const announcementConfig = {
       cta: 'AWESOME!',
     },
     {
+      id: 'client-v590',
+      title: 'Shiny Client 5.9',
+      description: 'Easier Live Activities - No XCode project required!',
+      href: '/client/liveactivities',
+      cta: 'Live it up!',
+    }, 
+    {
       id: 'appdevicebridge-10',
       title: 'App Device Bridge',
       description: 'Release updates without the AppStore on .NET!',
@@ -61,6 +68,13 @@ const announcementConfig = {
       href: '/controls/',
       cta: 'What!?!',
     },
+    {
+      id: 'controls-16',
+      title: 'Shiny Controls 1.6',
+      description: 'Keyboard Hot Keys',
+      href: '/controls/',
+      cta: 'What!?!',
+    },   
     {
       id: 'docdb-v14',
       title: 'Document DB 14',
@@ -82,6 +96,20 @@ const announcementConfig = {
       href: '/mauishell/',
       cta: 'Shortcut me to it',
     },
+    {
+      id: 'blehubs-10',
+      title: 'BLE Hubs 1.0',
+      description: 'Think SignalR for BLE!',
+      href: '/blehubs/',
+      cta: 'Hub it up!',
+    },
+    {
+      id: 'actors-10',
+      title: 'Actors 1.0',
+      description: 'Tiny Orleans for your .NET apps!',
+      href: '/actors/',
+      cta: 'Teach Me!',
+    }    
   ],
 };
 

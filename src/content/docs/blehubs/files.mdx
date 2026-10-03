@@ -1,0 +1,87 @@
+---
+title: File Transfers
+description: Move files between a BluetoothLE hub host and its clients over an L2CAP channel, with progress.
+---
+
+Hub messages are great for game moves, commands and state, but they are chunked over GATT at a few KB/s. Files, such
+as photos, logs and recordings, go over a separate **L2CAP** channel instead. It is much faster, and you get progress
+reporting.
+
+## Host
+
+```csharp
+builder.Services.ConfigureBleHubHost(o => o.EnableFileTransfers(
+    Path.Combine(FileSystem.AppDataDirectory, "shared"),
+    ft =>
+    {
+        ft.AllowUploads = true;
+        ft.AllowDownloads = true;
+        ft.MaxUploadSize = 2 * 1024 * 1024;
+        ft.OverwriteExistingUploads = false;
+        ft.Authorize = req => req.Request.FileName.EndsWith(".jpg") && req.Client != null;
+    }
+));
+
+// IBleHubHost
+host.FileTransferred += (_, e) => Console.WriteLine($"{e.Client?.Name} {e.Type} {e.FileName} ({e.BytesTransferred} bytes)");
+host.FileTransferProgress += (_, e) => Console.WriteLine($"{e.FileName} {e.Progress.PercentComplete:P0}");
+```
+
+- **Safe paths**: uploads land in the root directory and downloads are served from it. Peer-supplied names can never
+  escape it.
+- **`Authorize`** sees the request (file name, size, upload or download) and the hub client it came from, when it can
+  be matched.
+
+### Custom handling
+
+To serve from a database, generate content on the fly, or route per client, register an `IBleHubFileHandler`. Every
+request must be accepted or rejected:
+
+```csharp
+public class FileHandler : IBleHubFileHandler
+{
+    public async Task Handle(BleHubFileRequest request, CancellationToken ct)
+    {
+        var r = request.Request;
+        if (r.Type == L2CapTransferType.Download && r.FileName == "scores.json")
+        {
+            var bytes = BuildScores();
+            await r.AcceptDownload(new MemoryStream(bytes), bytes.Length, cancellationToken: ct);
+        }
+        else
+        {
+            await r.Reject(L2CapTransferError.NotPermitted, "nope", ct);
+        }
+    }
+}
+
+builder.Services.AddSingleton<IBleHubFileHandler, FileHandler>();
+```
+
+## Client
+
+```csharp
+if (client.CanTransferFiles)
+{
+    await client.UploadFile(
+        localPhotoPath,
+        "avatar-allan.jpg",
+        new Progress<TransferProgress>(p => this.Progress = p.PercentComplete)
+    );
+
+    await client.DownloadFile("scores.json", Path.Combine(FileSystem.CacheDirectory, "scores.json"));
+    await client.UploadStream(stream, stream.Length, "log.txt");
+}
+```
+
+- **No setup**: the client learns the L2CAP channel during the handshake, so there's nothing to configure.
+- **`CanTransferFiles` is false** when the host doesn't serve files or L2CAP isn't available. The file methods then
+  throw `BleHubFileTransferNotSupportedException`.
+- **Refusals** (not found, not permitted, too large…) throw `L2CapTransferException` with an `Error` code.
+- **Failed downloads** never leave a partial file behind.
+
+| Platform | L2CAP |
+|---|---|
+| iOS / macOS / Mac Catalyst | Yes |
+| Android | API 29+ |
+| Windows | No |
