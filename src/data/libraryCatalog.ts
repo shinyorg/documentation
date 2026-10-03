@@ -533,7 +533,7 @@ export const categories: CategoryCopy[] = [
                 highlights: [
                     'Start, update and end from C#',
                     'Push tokens and server-side updates',
-                    'iOS widget extension guide',
+                    'iOS widget built for you — no Xcode project',
                     'HTTP transfer progress, already wired up',
                 ],
                 packages: ['Shiny.Mobile.LiveActivities'],

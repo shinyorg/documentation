@@ -50,7 +50,7 @@ on iOS the package pulls [`Shiny.Mobile.LiveActivities`](/client/liveactivities/
 the `-ios` target alone, so no other head carries ActivityKit — and `AddTransferProgress()` registers
 `ILiveActivityManager` itself if you have not already called `AddLiveActivities()`.
 
-:::caution[iOS needs a widget extension]
+:::caution[iOS: turn on the widget build]
 ActivityKit renders a Live Activity from a **SwiftUI widget extension in your app bundle**, and nothing about
 that layout can be driven from C#. Without it — and without `NSSupportsLiveActivities` in Info.plist — the
 activity starts and renders nothing, silently. Set `<ShinyLiveActivityWidget>true</ShinyLiveActivityWidget>` in

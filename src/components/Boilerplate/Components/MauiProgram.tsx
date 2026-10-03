@@ -165,7 +165,7 @@ const MauiProgram = (props: Props) => {
   }
   if (has('liveactivities')) {
     src += `
-      // iOS needs a widget extension of your own - https://shinylib.net/client/liveactivities/widget/
+      // iOS: the widget extension is built into the app by <ShinyLiveActivityWidget>true</ShinyLiveActivityWidget> in the .csproj (no Xcode project) - https://shinylib.net/client/liveactivities/widget/
       // Unsupported platforms register a no-op manager, so no #if is needed in shared code.
       builder.Services.AddLiveActivities();
       // OR, when a server pushes updates (the delegate is the only way to learn the tokens):
