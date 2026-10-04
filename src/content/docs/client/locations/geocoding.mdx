@@ -11,7 +11,7 @@ import NugetDownloads from '/src/components/NugetDownloads.astro';
 |---------|---------|
 | Downloads | <NugetDownloads name="Shiny.Gps" /> |
 
-<PlatformSupport os={["android", "ios"]} />
+<PlatformSupport os={["android", "ios", "windows", "macos", "linux", "web"]} />
 
 :::note[Packages]
 GPS, motion activity and geocoding ship in **`Shiny.Gps`**; geofencing ships in **`Shiny.Geofencing`**. The two are
@@ -21,7 +21,8 @@ namespace, and `Position`/`Distance` moved into `Shiny.Core`.
 :::
 
 Reverse geocoding turns a `Position` into a readable address: street, city, region, postal code and country. Shiny uses the
-geocoder built into each platform, so there is no API key to manage, but it needs network access.
+geocoder built into the platform where there is one, and the free [OpenStreetMap Nominatim](https://nominatim.org) API
+everywhere else, so there is no API key to manage on any platform. Every geocoder needs network access.
 
 | Platform | Geocoder |
 |----------|----------|
@@ -29,7 +30,8 @@ geocoder built into each platform, so there is no API key to manage, but it need
 | iOS / Mac Catalyst 15-25 | CoreLocation `CLGeocoder` |
 | Android 33+ | `android.location.Geocoder` (listener API) |
 | Android < 33 | `android.location.Geocoder` (run off the calling thread) |
-| Windows, Blazor | Not supported - `AddGeocoding()` registers nothing |
+| Android without Google Play Services | `NominatimGeocoder` (OpenStreetMap) |
+| Windows, Linux, macOS, Blazor WebAssembly | `NominatimGeocoder` (OpenStreetMap) |
 
 ## Setup
 
@@ -38,6 +40,8 @@ using Shiny;
 
 services.AddGeocoding();
 ```
+
+On Blazor WebAssembly, `AddGeocoding()` comes with `Shiny.Locations.Blazor`, which references `Shiny.Gps`.
 
 Reverse geocoding doesn't need a location permission, because you pass it the position. Getting that position from the GPS
 still does.
@@ -67,9 +71,60 @@ public class AddressService(IGeocoder geocoder, IGpsManager gps)
 `ReverseGeocode` returns the matches, most relevant first, and an empty list when nothing matched.
 
 :::note[Android]
-`IsSupported` is `false` on devices without a geocoding backend (typically devices without Google Play Services). Calling
-`ReverseGeocode` there throws `InvalidOperationException`.
+Devices without a geocoding backend (typically devices without Google Play Services) have no native geocoder, so
+`AddGeocoding()` registers `NominatimGeocoder` on them instead and `IsSupported` stays `true`.
 :::
+
+## OpenStreetMap (Nominatim)
+
+Where the platform has no geocoder, `AddGeocoding()` registers `NominatimGeocoder`, which calls the
+[Nominatim `reverse` API](https://nominatim.org/release-docs/latest/api/Reverse/). The public server at
+`nominatim.openstreetmap.org` is free, with a [usage policy](https://operations.osmfoundation.org/policies/nominatim/)
+that `NominatimGeocoder` keeps to for you:
+
+- **One request at a time, at most one a second.** Calls queue rather than fail, so a burst of lookups takes a second each.
+- **Results are cached.** The last 100 lookups are kept in memory, keyed on the position rounded to about a metre.
+- **The app identifies itself.** Every request sends a User-Agent built from your entry assembly's name and version.
+  Browsers don't let an app set that header, so Blazor sends the page's Referer instead, which the policy accepts.
+
+Geocode on demand, or when the user has moved a meaningful distance. Don't geocode every GPS reading against the public
+server; heavy use gets blocked, which shows up as an `HttpRequestException` (HTTP 403 or 429).
+
+Configure it when you register:
+
+```csharp
+services.AddGeocoding(o =>
+{
+    o.UserAgent = "MyApp/1.0 (contact@myapp.com)";
+    o.Email = "contact@myapp.com"; // lets the server operators reach you before they block you
+    o.Language = "en";             // defaults to the current UI culture
+});
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `BaseUri` | `https://nominatim.openstreetmap.org/` | The Nominatim server. Point it at your own server for heavy use. |
+| `UserAgent` | `<EntryAssembly>/<version> (Shiny.Gps)` | Identifies your app. Not sent from the browser. |
+| `Email` | `null` | Contact address sent with each request. |
+| `Language` | Current UI culture | The language results come back in. `null` returns local names. |
+| `MinimumRequestInterval` | 1 second | The minimum gap between requests. Lower it only for your own server. |
+| `CacheSize` | 100 | How many results are kept in memory. `0` turns caching off. |
+
+Nominatim returns at most one placemark per lookup.
+
+:::caution[Attribution]
+Nominatim data is © OpenStreetMap contributors, under the [ODbL](https://www.openstreetmap.org/copyright). Show
+`NominatimGeocoder.Attribution` ("© OpenStreetMap contributors") wherever you display its results, ideally linked to
+https://www.openstreetmap.org/copyright.
+:::
+
+To use OpenStreetMap on every platform, native ones included, register it yourself before calling `AddGeocoding()`, which
+keeps an `IGeocoder` that's already registered:
+
+```csharp
+services.AddSingleton<IGeocoder>(new NominatimGeocoder(new NominatimOptions { Email = "contact@myapp.com" }));
+services.AddGeocoding();
+```
 
 ## Placemark
 
@@ -86,9 +141,9 @@ public class AddressService(IGeocoder geocoder, IGpsManager gps)
 | `PostalCode` | Postal or zip code |
 | `CountryCode` | ISO 3166-1 alpha-2 country code |
 | `CountryName` | Localized country name |
-| `FormattedAddress` | The full address on one line, formatted by the platform |
+| `FormattedAddress` | The full address on one line, formatted by the platform (Nominatim's `display_name`) |
 
-A component the platform couldn't resolve is `null`. Results come back in the device's language.
+A component the geocoder couldn't resolve is `null`. Results come back in the device's language, or `NominatimOptions.Language` for Nominatim.
 
 ## AI Coding Assistant
 
