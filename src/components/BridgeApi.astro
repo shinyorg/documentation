@@ -1,0 +1,742 @@
+---
+/**
+ * App Device Bridge API reference, rendered from src/data/appdevicebridge/bridges.json — which
+ * scripts/extract-bridges.mjs generates from the library's typed clients. Don't hand-edit the JSON; re-run the script.
+ *
+ *   <BridgeApi bridges={["GpsBridge", "MotionBridge"]} show="requests" />
+ *   <BridgeApi bridges={["GpsBridge", "MotionBridge"]} show="events" />
+ *   <BridgeApi bridges={["GpsBridge", "MotionBridge"]} show="types" />
+ */
+import data from '../data/appdevicebridge/bridges.json';
+
+type Field = { name: string; type: string; optional: boolean; doc: string };
+type TypeDef =
+  | { kind: 'object'; summary: string; fields: Field[] }
+  | { kind: 'enum'; summary: string; values: string[] }
+  | { kind: 'alias'; summary: string; type: string };
+type Param = { name: string; type: string; optional?: boolean };
+type Request = {
+  ts: string; cs: string; verb: string; route: string; summary: string;
+  routeParams: Param[]; query: Param[];
+  body: { kind: 'json' | 'raw'; name: string; type: string; optional?: boolean; contentType?: string } | null;
+  returns: string; errors: number[];
+  overloads: { ts: string; cs: string; summary: string }[];
+};
+type BridgeEvent = { event: string; ts: string; cs: string; summary: string; payload: string };
+type Bridge = { name: string; summary: string; prefix: string; requests: Request[]; events: BridgeEvent[] };
+
+export interface Props {
+  bridges: string[];
+  show: 'requests' | 'events' | 'types';
+}
+
+const { bridges: names, show } = Astro.props as Props;
+const types = data.types as Record<string, TypeDef>;
+const bridges = names.map((n) => {
+  const b = (data.bridges as Bridge[]).find((x) => x.name === n);
+  if (!b) throw new Error(`BridgeApi: no bridge named ${n} in bridges.json — re-run scripts/extract-bridges.mjs?`);
+  return b;
+});
+const grouped = bridges.length > 1;
+
+// ---------------------------------------------------------------- helpers
+
+const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+/** Doc comments use `code` spans; everything else is plain text. */
+const md = (s: string) => esc(s).replace(/`+([^`]+?)`+/g, '<code>$1</code>');
+
+const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+const typeId = (t: string) => `type-${slug(t)}`;
+const reqId = (r: Request) => `req-${r.verb.toLowerCase()}-${slug(r.route)}${r.body?.kind === 'raw' && r.body.contentType?.startsWith('text') ? '-text' : ''}`;
+const evtId = (e: BridgeEvent) => `evt-${slug(e.event)}`;
+
+/** The named types a type expression refers to, in order. */
+const refs = (t: string) => (t.match(/[A-Za-z_]\w*/g) ?? []).filter((w) => w in types);
+
+/** Every type the shown bridges reach, depth first, in the order the page first uses them. */
+const reachable: string[] = [];
+const visit = (t: string) => {
+  for (const name of refs(t)) {
+    if (reachable.includes(name)) continue;
+    reachable.push(name);
+    const def = types[name];
+    if (def.kind === 'object') def.fields.forEach((f) => visit(f.type));
+    if (def.kind === 'alias') visit(def.type);
+  }
+};
+for (const b of bridges) {
+  for (const r of b.requests) {
+    [...r.routeParams, ...r.query].forEach((p) => visit(p.type));
+    if (r.body) visit(r.body.type);
+    visit(r.returns);
+  }
+  for (const e of b.events) visit(e.payload);
+}
+
+/** A type expression with its named types linked to their entries under Types. */
+const typeHtml = (t: string) =>
+  esc(t).replace(/[A-Za-z_]\w*/g, (w) =>
+    w in types ? `<a href="#${typeId(w)}" class="ba-typelink">${w}</a>` : `<span class="ba-prim">${w}</span>`
+  );
+
+const firstSentence = (s: string) => {
+  const m = s.match(/^(.+?[.!?])(\s|$)/);
+  return m ? m[1] : s;
+};
+
+const routeHtml = (route: string) =>
+  `<span class="ba-route-prefix">/_bridge/</span>` +
+  esc(route).replace(/\{(\w+)\}/g, '<span class="ba-route-param">{$1}</span>');
+
+const errorText: Record<number, string> = {
+  400: 'Bad request',
+  403: 'Forbidden',
+  404: 'Not found',
+  409: 'Conflict',
+  410: 'Gone',
+  413: 'Too large',
+  422: 'Invalid state',
+  501: 'Not on this platform',
+  502: 'Upstream failed',
+  503: 'Unavailable',
+};
+
+/** What a response type means on the wire. */
+const responseHtml = (r: Request) => {
+  if (r.returns === 'void') return `<span class="ba-status ba-status--ok">204</span> No content`;
+  if (r.returns === 'Blob') return `<span class="ba-status ba-status--ok">200</span> Binary content <span class="ba-muted">— Blob in TypeScript, Stream / byte[] in C#</span>`;
+  const nullable = /\|\s*null$/.test(r.returns);
+  const t = r.returns.replace(/\s*\|\s*null$/, '');
+  return `<span class="ba-status ba-status--ok">200</span> ${typeHtml(t)}` + (nullable ? ` <span class="ba-muted">· or <code>204</code> when there is none</span>` : '');
+};
+
+const objectDef = (t: string) => {
+  const name = t.replace(/\[\]$/, '').replace(/\s*\|\s*null$/, '');
+  const def = types[name];
+  return def?.kind === 'object' && def.fields.length ? { name, def } : null;
+};
+
+const verbClass = (v: string) => `ba-verb ba-verb--${v.toLowerCase()}`;
+---
+
+{show === 'requests' && (
+  <div class="bridge-api not-content">
+    {bridges.map((b) => (
+      <section class="ba-group">
+        {grouped && (
+          <header class="ba-group-head">
+            <span class="ba-group-name">{b.name.replace(/Bridge$/, '')}</span>
+            <code class="ba-group-prefix">/_bridge/{b.prefix}</code>
+            <span class="ba-group-count">{b.requests.length} requests · {b.events.length} events</span>
+          </header>
+        )}
+        {grouped && b.summary && <p class="ba-group-summary" set:html={md(b.summary)} />}
+
+        <nav class="ba-index" aria-label={`${b.name} requests`}>
+          {b.requests.map((r) => (
+            <a class="ba-index-row" href={`#${reqId(r)}`}>
+              <span class={verbClass(r.verb)}>{r.verb}</span>
+              <code class="ba-index-route" set:html={routeHtml(r.route)} />
+              <span class="ba-index-summary" set:html={md(firstSentence(r.summary))} />
+            </a>
+          ))}
+        </nav>
+
+        {b.requests.map((r) => {
+          const body = r.body && objectDef(r.body.type);
+          const ret = objectDef(r.returns);
+          return (
+            <article class="ba-card" id={reqId(r)}>
+              <header class="ba-card-head">
+                <span class={verbClass(r.verb)}>{r.verb}</span>
+                <code class="ba-route" set:html={routeHtml(r.route)} />
+                <a class="ba-anchor" href={`#${reqId(r)}`} aria-label="Link to this request">#</a>
+              </header>
+
+              <div class="ba-card-body">
+                <p class="ba-summary" set:html={md(r.summary)} />
+                {r.overloads.map((o) => (
+                  <p class="ba-summary ba-summary--alt" set:html={`<code>${o.ts}</code> / <code>${o.cs}</code> — ${md(o.summary)}`} />
+                ))}
+
+                <div class="ba-clients">
+                  <span class="ba-client"><span class="ba-lang ba-lang--cs">C#</span><code>I{b.name}.{[r.cs, ...r.overloads.map((o) => o.cs)].join(' / ')}</code></span>
+                  <span class="ba-client"><span class="ba-lang ba-lang--ts">TS</span><code>{b.name}.{[r.ts, ...r.overloads.map((o) => o.ts)].join(' / ')}</code></span>
+                </div>
+
+                {(r.routeParams.length > 0 || r.query.length > 0) && (
+                  <table class="ba-params">
+                    <thead><tr><th>Parameter</th><th>In</th><th>Type</th><th></th></tr></thead>
+                    <tbody>
+                      {r.routeParams.map((p) => (
+                        <tr><td><code>{p.name}</code></td><td><span class="ba-in">path</span></td><td><code set:html={typeHtml(p.type)} /></td><td><span class="ba-req-flag">required</span></td></tr>
+                      ))}
+                      {r.query.map((p) => (
+                        <tr><td><code>{p.name}</code></td><td><span class="ba-in">query</span></td><td><code set:html={typeHtml(p.type)} /></td><td>{p.optional ? <span class="ba-muted">optional</span> : <span class="ba-req-flag">required</span>}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <dl class="ba-io">
+                  {r.body && (
+                    <>
+                      <dt>Body</dt>
+                      <dd>
+                        {r.body.kind === 'raw'
+                          ? <span><code>{r.body.contentType}</code> <span class="ba-muted">— raw content, not JSON</span></span>
+                          : <span><code>application/json</code> · <code set:html={typeHtml(r.body.type)} />{r.body.optional && <span class="ba-muted"> (optional)</span>}</span>}
+                        {body && (
+                          <details class="ba-fields">
+                            <summary>{body.name} · {body.def.fields.length} {body.def.fields.length === 1 ? 'field' : 'fields'}</summary>
+                            <table>
+                              <tbody>
+                                {body.def.fields.map((f) => (
+                                  <tr><td><code>{f.name}</code></td><td><code set:html={typeHtml(f.type)} /></td><td set:html={md(f.doc)} /></tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </details>
+                        )}
+                      </dd>
+                    </>
+                  )}
+                  <dt>Response</dt>
+                  <dd>
+                    <span set:html={responseHtml(r)} />
+                    {ret && (
+                      <details class="ba-fields">
+                        <summary>{ret.name} · {ret.def.fields.length} {ret.def.fields.length === 1 ? 'field' : 'fields'}</summary>
+                        <table>
+                          <tbody>
+                            {ret.def.fields.map((f) => (
+                              <tr><td><code>{f.name}</code></td><td><code set:html={typeHtml(f.type)} /></td><td set:html={md(f.doc)} /></tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </details>
+                    )}
+                  </dd>
+                  {r.errors.length > 0 && (
+                    <>
+                      <dt>Errors</dt>
+                      <dd class="ba-errors">
+                        {r.errors.map((code) => (
+                          <span class="ba-error"><span class="ba-status ba-status--err">{code}</span>{errorText[code] ?? ''}</span>
+                        ))}
+                      </dd>
+                    </>
+                  )}
+                </dl>
+              </div>
+            </article>
+          );
+        })}
+      </section>
+    ))}
+  </div>
+)}
+
+{show === 'events' && (
+  <div class="bridge-api not-content">
+    {bridges.every((b) => b.events.length === 0) && (
+      <p class="ba-empty">This bridge raises no events — everything it does is a request and its response.</p>
+    )}
+    {bridges.filter((b) => b.events.length > 0).map((b) => (
+      <section class="ba-group">
+        {grouped && (
+          <header class="ba-group-head">
+            <span class="ba-group-name">{b.name.replace(/Bridge$/, '')}</span>
+            <span class="ba-group-count">{b.events.length} {b.events.length === 1 ? 'event' : 'events'}</span>
+          </header>
+        )}
+        <div class="ba-events">
+          {b.events.map((e) => {
+            const payload = objectDef(e.payload);
+            return (
+              <article class="ba-card ba-card--event" id={evtId(e)}>
+                <header class="ba-card-head">
+                  <span class="ba-verb ba-verb--event">EVENT</span>
+                  <code class="ba-route ba-event-name">{e.event}</code>
+                  <a class="ba-anchor" href={`#${evtId(e)}`} aria-label="Link to this event">#</a>
+                </header>
+                <div class="ba-card-body">
+                  <p class="ba-summary" set:html={md(e.summary)} />
+                  <div class="ba-clients">
+                    <span class="ba-client"><span class="ba-lang ba-lang--cs">C#</span><code>I{b.name}.{e.cs}</code></span>
+                    <span class="ba-client"><span class="ba-lang ba-lang--ts">TS</span><code>{b.name}.{e.ts}</code></span>
+                  </div>
+                  <dl class="ba-io">
+                    <dt>Payload</dt>
+                    <dd><code set:html={typeHtml(e.payload)} /></dd>
+                  </dl>
+                  {payload && (
+                    <table class="ba-payload">
+                      <tbody>
+                        {payload.def.fields.map((f) => (
+                          <tr><td><code>{f.name}</code></td><td><code set:html={typeHtml(f.type)} /></td><td set:html={md(f.doc)} /></tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      </section>
+    ))}
+  </div>
+)}
+
+{show === 'types' && (
+  <div class="bridge-api not-content">
+    <p class="ba-types-intro">
+      JSON property names are camelCase and enums travel as their names. A <code>?</code> marks a property the payload may omit;
+      <code>| null</code> one that may be null.
+    </p>
+    <div class="ba-types">
+      {reachable.map((name) => {
+        const def = types[name];
+        return (
+          <article class="ba-type" id={typeId(name)}>
+            <header class="ba-type-head">
+              <code class="ba-type-name">{name}</code>
+              <span class={`ba-kind ba-kind--${def.kind}`}>{def.kind === 'object' ? 'object' : def.kind === 'enum' ? 'enum' : 'alias'}</span>
+              <a class="ba-anchor" href={`#${typeId(name)}`} aria-label="Link to this type">#</a>
+            </header>
+            {def.summary && <p class="ba-summary" set:html={md(def.summary)} />}
+            {def.kind === 'enum' && (
+              <div class="ba-enum">{def.values.map((v) => <code class="ba-enum-value">"{v}"</code>)}</div>
+            )}
+            {def.kind === 'alias' && <p><code set:html={typeHtml(def.type)} /></p>}
+            {def.kind === 'object' && def.fields.length === 0 && <p class="ba-muted">No properties.</p>}
+            {def.kind === 'object' && def.fields.length > 0 && (
+              <table class="ba-payload">
+                <tbody>
+                  {def.fields.map((f) => (
+                    <tr>
+                      <td><code>{f.name}{f.optional ? '?' : ''}</code></td>
+                      <td><code set:html={typeHtml(f.type)} /></td>
+                      <td set:html={md(f.doc)} />
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </article>
+        );
+      })}
+    </div>
+  </div>
+)}
+
+<style is:global>
+  .bridge-api {
+    --ba-border: var(--sl-color-gray-5);
+    --ba-surface: var(--sl-color-gray-7, var(--sl-color-black));
+    --ba-head: var(--sl-color-gray-6);
+    --ba-muted: var(--sl-color-gray-3);
+    --ba-get: #0f8a5f;
+    --ba-post: #2f6fdc;
+    --ba-put: #b7791f;
+    --ba-delete: #d03b3b;
+    --ba-event: #7c5cea;
+    margin-top: 1rem;
+    font-size: var(--sl-text-sm);
+  }
+  :root[data-theme='dark'] .bridge-api {
+    --ba-get: #2be5a0;
+    --ba-post: #6ea8ff;
+    --ba-put: #f6c454;
+    --ba-delete: #ff7b7b;
+    --ba-event: #b9a3ff;
+  }
+
+  .bridge-api code {
+    font-family: var(--__sl-font-mono);
+    font-size: 0.92em;
+  }
+  .bridge-api p {
+    margin: 0;
+  }
+  .bridge-api .ba-muted {
+    color: var(--ba-muted);
+  }
+
+  /* ---------- groups (a page with several bridges) */
+  .bridge-api .ba-group + .ba-group {
+    margin-top: 2.5rem;
+  }
+  .bridge-api .ba-group-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.4rem 0.75rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 2px solid var(--sl-color-accent);
+    margin-bottom: 0.6rem;
+  }
+  .bridge-api .ba-group-name {
+    font-size: var(--sl-text-lg);
+    font-weight: 700;
+    color: var(--sl-color-white);
+  }
+  .bridge-api .ba-group-prefix {
+    color: var(--sl-color-text-accent);
+  }
+  .bridge-api .ba-group-count {
+    margin-left: auto;
+    color: var(--ba-muted);
+    font-size: var(--sl-text-xs);
+  }
+  .bridge-api .ba-group-summary {
+    color: var(--sl-color-gray-2);
+    margin-bottom: 0.9rem !important;
+  }
+
+  /* ---------- verbs */
+  .bridge-api .ba-verb {
+    flex: none;
+    display: inline-block;
+    min-width: 4.1rem;
+    padding: 0.12rem 0.45rem;
+    border-radius: 0.3rem;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-align: center;
+    color: var(--ba-c);
+    background: color-mix(in srgb, var(--ba-c) 14%, transparent);
+    border: 1px solid color-mix(in srgb, var(--ba-c) 45%, transparent);
+  }
+  .bridge-api .ba-verb--get { --ba-c: var(--ba-get); }
+  .bridge-api .ba-verb--post { --ba-c: var(--ba-post); }
+  .bridge-api .ba-verb--put { --ba-c: var(--ba-put); }
+  .bridge-api .ba-verb--delete { --ba-c: var(--ba-delete); }
+  .bridge-api .ba-verb--event { --ba-c: var(--ba-event); }
+
+  .bridge-api .ba-route-prefix {
+    color: var(--ba-muted);
+  }
+  .bridge-api .ba-route-param {
+    color: var(--sl-color-text-accent);
+    font-weight: 600;
+  }
+
+  /* ---------- index */
+  .bridge-api .ba-index {
+    background: var(--sl-color-bg);
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--ba-border);
+    border-radius: 0.6rem;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+  }
+  .bridge-api .ba-index-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 18rem) minmax(0, 1fr);
+    align-items: center;
+    gap: 0.75rem;
+    padding: 0.45rem 0.75rem;
+    text-decoration: none;
+    color: var(--sl-color-gray-2);
+  }
+  .bridge-api .ba-index-row + .ba-index-row {
+    border-top: 1px solid var(--ba-border);
+  }
+  .bridge-api .ba-index-row:hover {
+    background: var(--ba-head);
+  }
+  .bridge-api .ba-index-route {
+    color: var(--sl-color-white);
+    overflow-wrap: anywhere;
+  }
+  .bridge-api .ba-index-summary {
+    font-size: var(--sl-text-xs);
+    color: var(--ba-muted);
+  }
+  @media (max-width: 50rem) {
+    .bridge-api .ba-index-row {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+    .bridge-api .ba-index-summary {
+      grid-column: 1 / -1;
+    }
+  }
+
+  /* ---------- cards */
+  .bridge-api .ba-card {
+    background: var(--sl-color-bg);
+    border: 1px solid var(--ba-border);
+    border-radius: 0.6rem;
+    margin-bottom: 1rem;
+    overflow: hidden;
+    scroll-margin-top: calc(var(--sl-nav-height, 3.5rem) + 1rem);
+  }
+  .bridge-api .ba-card:target {
+    border-color: var(--sl-color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sl-color-accent) 25%, transparent);
+  }
+  .bridge-api .ba-card-head {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    padding: 0.55rem 0.8rem;
+    background: var(--ba-head);
+    border-bottom: 1px solid var(--ba-border);
+  }
+  .bridge-api .ba-route {
+    font-size: 0.95em !important;
+    color: var(--sl-color-white);
+    overflow-wrap: anywhere;
+  }
+  .bridge-api .ba-event-name {
+    color: var(--ba-event);
+    font-weight: 600;
+  }
+  .bridge-api .ba-anchor {
+    margin-left: auto;
+    color: var(--ba-muted);
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .bridge-api .ba-card:hover .ba-anchor,
+  .bridge-api .ba-type:hover .ba-anchor,
+  .bridge-api .ba-anchor:focus {
+    opacity: 1;
+  }
+  .bridge-api .ba-card-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.7rem;
+    padding: 0.75rem 0.85rem 0.85rem;
+  }
+  .bridge-api .ba-summary {
+    color: var(--sl-color-gray-1);
+    line-height: 1.55;
+  }
+  .bridge-api .ba-summary--alt {
+    color: var(--sl-color-gray-2);
+    font-size: var(--sl-text-xs);
+  }
+
+  .bridge-api .ba-clients {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+  }
+  .bridge-api .ba-client {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    color: var(--sl-color-gray-2);
+  }
+  .bridge-api .ba-lang {
+    font-size: 0.65rem;
+    font-weight: 700;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.25rem;
+    color: var(--sl-color-black);
+  }
+  .bridge-api .ba-lang--cs { background: #9b7bff; }
+  .bridge-api .ba-lang--ts { background: #6ea8ff; }
+
+  /* ---------- parameters, body, response */
+  .bridge-api .ba-params,
+  .bridge-api .ba-payload,
+  .bridge-api .ba-fields table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--sl-text-xs);
+  }
+  .bridge-api .ba-params th {
+    text-align: left;
+    font-weight: 600;
+    color: var(--ba-muted);
+    padding: 0.25rem 0.5rem;
+    border-bottom: 1px solid var(--ba-border);
+  }
+  .bridge-api .ba-params td,
+  .bridge-api .ba-payload td,
+  .bridge-api .ba-fields td {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--ba-border);
+    vertical-align: top;
+  }
+  .bridge-api .ba-params tr:last-child td,
+  .bridge-api .ba-payload tr:last-child td,
+  .bridge-api .ba-fields tr:last-child td {
+    border-bottom: none;
+  }
+  .bridge-api .ba-payload td:first-child,
+  .bridge-api .ba-fields td:first-child {
+    white-space: nowrap;
+    color: var(--sl-color-white);
+  }
+  .bridge-api .ba-payload td:nth-child(2),
+  .bridge-api .ba-fields td:nth-child(2) {
+    white-space: nowrap;
+  }
+  .bridge-api .ba-payload td:last-child,
+  .bridge-api .ba-fields td:last-child {
+    color: var(--sl-color-gray-2);
+    width: 100%;
+  }
+  .bridge-api .ba-in {
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--ba-muted);
+  }
+  .bridge-api .ba-req-flag {
+    font-size: 0.68rem;
+    color: var(--ba-delete);
+  }
+
+  .bridge-api .ba-io {
+    display: grid;
+    grid-template-columns: 5.5rem minmax(0, 1fr);
+    gap: 0.5rem 0.75rem;
+    margin: 0;
+  }
+  .bridge-api .ba-io dt {
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ba-muted);
+    padding-top: 0.15rem;
+  }
+  .bridge-api .ba-io dd {
+    margin: 0;
+    color: var(--sl-color-gray-1);
+  }
+  .bridge-api .ba-status {
+    display: inline-block;
+    font-family: var(--__sl-font-mono);
+    font-size: 0.7rem;
+    font-weight: 700;
+    padding: 0 0.3rem;
+    border-radius: 0.25rem;
+    margin-right: 0.3rem;
+  }
+  .bridge-api .ba-status--ok {
+    color: var(--ba-get);
+    background: color-mix(in srgb, var(--ba-get) 14%, transparent);
+  }
+  .bridge-api .ba-status--err {
+    color: var(--ba-delete);
+    background: color-mix(in srgb, var(--ba-delete) 14%, transparent);
+  }
+  .bridge-api .ba-errors {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.9rem;
+  }
+  .bridge-api .ba-error {
+    color: var(--sl-color-gray-2);
+  }
+
+  .bridge-api .ba-fields {
+    margin-top: 0.45rem;
+    border: 1px solid var(--ba-border);
+    border-radius: 0.4rem;
+  }
+  .bridge-api .ba-fields summary {
+    cursor: pointer;
+    padding: 0.3rem 0.55rem;
+    font-size: var(--sl-text-xs);
+    color: var(--ba-muted);
+  }
+  .bridge-api .ba-fields[open] summary {
+    border-bottom: 1px solid var(--ba-border);
+  }
+
+  .bridge-api .ba-typelink {
+    color: var(--sl-color-text-accent);
+    text-decoration: none;
+    border-bottom: 1px dotted currentColor;
+  }
+  .bridge-api .ba-typelink:hover {
+    border-bottom-style: solid;
+  }
+  .bridge-api .ba-prim {
+    color: var(--sl-color-gray-2);
+  }
+
+  /* ---------- events */
+  .bridge-api .ba-card--event .ba-card-head {
+    background: color-mix(in srgb, var(--ba-event) 9%, var(--ba-head));
+  }
+  .bridge-api .ba-payload {
+    border: 1px solid var(--ba-border);
+    border-radius: 0.4rem;
+    border-collapse: separate;
+    border-spacing: 0;
+  }
+  .bridge-api .ba-empty {
+    padding: 0.9rem 1rem;
+    border: 1px dashed var(--ba-border);
+    border-radius: 0.6rem;
+    color: var(--ba-muted);
+  }
+
+  /* ---------- types */
+  .bridge-api .ba-types-intro {
+    color: var(--sl-color-gray-2);
+    margin-bottom: 1rem !important;
+  }
+  .bridge-api .ba-types {
+    display: flex;
+    flex-direction: column;
+    gap: 0.9rem;
+  }
+  .bridge-api .ba-type {
+    background: var(--sl-color-bg);
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    padding: 0.7rem 0.85rem;
+    border: 1px solid var(--ba-border);
+    border-radius: 0.6rem;
+    scroll-margin-top: calc(var(--sl-nav-height, 3.5rem) + 1rem);
+  }
+  .bridge-api .ba-type:target {
+    border-color: var(--sl-color-accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--sl-color-accent) 25%, transparent);
+  }
+  .bridge-api .ba-type-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+  }
+  .bridge-api .ba-type-name {
+    font-weight: 700;
+    color: var(--sl-color-white);
+  }
+  .bridge-api .ba-kind {
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 0.05rem 0.4rem;
+    border-radius: 1rem;
+    border: 1px solid var(--ba-border);
+    color: var(--ba-muted);
+  }
+  .bridge-api .ba-enum {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+  }
+  .bridge-api .ba-enum-value {
+    padding: 0.1rem 0.45rem;
+    border-radius: 0.3rem;
+    background: var(--ba-head);
+    color: var(--ba-put);
+  }
+</style>
