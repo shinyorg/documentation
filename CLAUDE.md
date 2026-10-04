@@ -70,3 +70,18 @@ So "update the templates from the builder" really means: apply the same edits (e
 2. Bump the NuGet package version: in `~/Desktop/dev/templates/Template.csproj` (the `Shiny.Templates` package project), increment `<PackageVersion>` by one **minor** (e.g. `7.0.0` → `7.1.0`).
 3. From this repo, run `node scripts/extract-templates.mjs` to regenerate all three `templateFiles.<id>.ts`.
 4. `npm run build` here to confirm, and `git diff` both repos to review.
+
+### Regenerate the App Device Bridge API reference
+
+The Requests / Events / Types sections on every `appdevicebridge/` bridge page (and the catalog on `bridges.mdx`) render
+from `src/data/appdevicebridge/bridges.json` via `src/components/BridgeApi.astro` and `BridgeCatalog.astro`. That JSON
+is **generated** — never hand-edit it. Its source of truth is the sibling repo `~/Desktop/dev/webapphost`: the generated
+TypeScript clients in `clients/typescript/src/*.ts` (routes, verbs, query, bodies, responses, events, doc comments) plus
+the C# `[BridgeClient]` interfaces (C# method names).
+
+1. In `webapphost`, make sure the TypeScript clients are current (its `tools/Shiny.AppDeviceBridge.TypeScript` tool) and
+   `clients/typescript` has `npm install`ed — the script borrows that package's TypeScript 5 compiler API.
+2. From this repo: `node scripts/extract-bridges.mjs` (optionally pass the repo path).
+3. A new bridge class needs `<BridgeApi bridges={["XBridge"]} show="requests|events|types" />` on its page and an entry
+   in the `pages` map in `BridgeCatalog.astro`.
+4. `npm run build`.
