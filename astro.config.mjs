@@ -71,7 +71,7 @@ const announcementConfig = {
     {
       id: 'controls-16',
       title: 'Shiny Controls 1.6',
-      description: 'Keyboard Hot Keys',
+      description: 'Keyboard Hot Keys, Confetti, Marquee, Date/Time Ranges',
       href: '/controls/',
       cta: 'What!?!',
     },   

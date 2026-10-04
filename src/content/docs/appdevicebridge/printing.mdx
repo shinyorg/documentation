@@ -1,0 +1,254 @@
+---
+title: Printing
+description: Receipt and label printers over Bluetooth LE or the network, and the operating system's own printing, for a Shiny.AppDeviceBridge web app
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Printers" />
+<NugetBadge name="Shiny.AppDeviceBridge.Printing" />
+
+Two bridges, one for each of [Shiny's printing models](/client/printing/) (Shiny 5.9). Pick by the printer:
+
+| You have | Bridge | What it does |
+| --- | --- | --- |
+| A 58mm or 80mm receipt, label or kitchen printer | **printers** — `Shiny.AppDeviceBridge.Printers` | The page builds a receipt; the device turns it into ESC/POS (or TSPL) and streams it over Bluetooth LE or raw TCP. It can also render the receipt to a PDF. |
+| Any printer the operating system knows — AirPrint, laser, inkjet, a CUPS queue | **printing** — `Shiny.AppDeviceBridge.Printing` | The page hands a PDF, an image or HTML to the OS print dialog or spooler. |
+
+They meet in `POST /_bridge/printers/render`: the same receipt, as a PDF, can go to an office printer through the
+printing bridge.
+
+A web page can't do either on its own. `window.print()` always shows the browser's dialog and knows nothing of
+receipt printers, and Web Bluetooth and Web Serial don't exist in the WebView on iOS or macOS.
+
+## Platforms
+
+| | Android | iOS | Mac Catalyst | macOS | Windows | Linux |
+| --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| Receipt printers on the network | yes | yes | yes | yes | yes | yes |
+| Receipt printers over Bluetooth LE | yes | yes | yes | yes | yes | with Shiny.BluetoothLE.Linux |
+| Rendering a receipt to PDF | yes | yes | yes | yes | yes | with SkiaSharp.NativeAssets.Linux |
+| OS printing | PrintManager | AirPrint | AirPrint | CUPS | spooler | CUPS |
+
+Anything a platform lacks answers `501`.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Printers
+dotnet add package Shiny.AppDeviceBridge.Printing
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge
+        .AddPrintersBridge()
+        .AddPrintingBridge(),
+    webApp => { /* … */ }
+);
+```
+
+`AddPrintersBridge()` registers Shiny's Bluetooth LE service for the platform, mDNS for finding network printers, and
+the PDF renderer. `AddPrintingBridge()` registers the platform's print service. There's nothing else to call.
+
+On the page, register the clients (`AddPrintersBridgeClient()`, `AddPrintingBridgeClient()`), or in TypeScript use
+`PrintersBridge` and `PrintingBridge` from `@shinyorg/appdevicebridge`.
+
+## Receipt printers
+
+| Route | |
+| --- | --- |
+| `GET printers/status` | the connected printer and its capabilities, Bluetooth access, and what this platform supports |
+| `POST printers/scan` | `{ "transport": "Ble" }` or `"Network"`: the printers seen in `scanMs` (5 s, 30 s at most) |
+| `POST/DELETE printers/connection` | connect to a printer a scan found, or one named outright; one at a time |
+| `POST printers/print` | print a receipt on the connected printer |
+| `POST printers/render` | render a receipt to `application/pdf`; needs no printer |
+| `printers.disconnected` | the printer went away |
+
+### Connect
+
+```csharp
+@inject IPrintersBridge Printers
+
+var found = await Printers.ScanAsync(new PrinterScanRequest(PrinterTransport.Ble));
+var printer = await Printers.ConnectAsync(new PrinterConnectRequest(Id: found[0].Id));
+```
+
+```ts
+import { PrintersBridge } from "@shinyorg/appdevicebridge";
+
+const printers = new PrintersBridge();
+
+// a fixed install: connect by address
+const printer = await printers.connect({ transport: "Network", host: "192.168.1.50", port: 9100, paper: "Paper58mm" });
+```
+
+- **Bluetooth** scans match the known printer models in Shiny.Printers, so a scanned printer comes with its GATT
+  service and write characteristic. A printer no profile knows can be connected by `peripheralUuid` with its
+  `serviceUuid` and `writeCharacteristicUuid`. A cheap printer that garbles a long receipt usually needs a lower
+  `chunkSize` and a `chunkDelayMs`.
+- **Network** scans browse mDNS for `_pdl-datastream._tcp` and `_printer._tcp`. mDNS never says how wide the paper is,
+  so a network printer is assumed to be 80mm: pass `paper` when you know better.
+- **Capabilities:** `paper` picks a preset — `Paper58mm` is 32 columns and 384 dots, `Paper80mm` 48 columns and 576
+  dots with a cutter — and `capabilities` describes anything else. `language` is `EscPos` (the default) or `Tspl` for
+  label printers, with the stock in `label`.
+- **Lay out against the printer:** `ConnectAsync` and `GET printers/status` return its `capabilities`. Use
+  `charactersPerLine` for columns, never a hard-coded 32 or 48.
+
+### Print
+
+A receipt is a list of elements. Each has a `type`, and reads only the fields that type uses:
+
+| `type` | Fields |
+| --- | --- |
+| `Text`, `Line` | `text`; a line ends with a line break |
+| `Align` | `align`: `Left`, `Center`, `Right` |
+| `Bold`, `Underline` | `on` (true) |
+| `Size` | `width`, `height`: 1–8 times the normal character |
+| `ResetStyle` | |
+| `Feed` | `lines` (1) |
+| `Barcode` | `text`, `barcode` (`Code128`, `Ean13`, …), `height` (80 dots), `width` (2–6), `barcodeText` (`Below`) |
+| `QrCode` | `text`, `moduleSize` (1–16, 6), `correction` (`Medium`) |
+| `Image` | `data`: a base64 PNG or JPEG; `dithering`: `Threshold` for logos, `FloydSteinberg` for photos |
+| `Cut` | `cut` (`Partial`), `lines` to feed first (3) |
+| `Raw` | `data`: base64 bytes sent as they are — a cash drawer kick, a code page |
+
+In C#, `PrintElements` builds the list the way `PrintDocument` does:
+
+```csharp
+var columns = printer.Capabilities.CharactersPerLine;
+
+var receipt = new PrintElements()
+    .AlignCenter().Bold().Size(2).Line("SHINY MART").ResetStyle()
+    .AlignLeft().Line(new string('-', columns))
+    .Barcode(PrintBarcodeFormat.Code128, "ORDER-100425", height: 70)
+    .QrCode("https://example.com/r/100425")
+    .Feed(2)
+    .Cut();
+
+await Printers.PrintAsync(receipt.ToRequest());
+```
+
+```ts
+await printers.print({
+  elements: [
+    { type: "Align", align: "Center" },
+    { type: "Bold" },
+    { type: "Line", text: "SHINY MART" },
+    { type: "ResetStyle" },
+    { type: "QrCode", text: "https://example.com/r/100425" },
+    { type: "Cut" },
+  ],
+});
+```
+
+- An **image** is decoded on the device and scaled down to the printer's `dotsPerLine` if it's wider.
+- A **cut** on a printer without a cutter only feeds the paper, so one receipt works on every printer.
+- A **barcode**, QR code or image the printer can't print answers `400`, naming the element:
+  `elements[3]: this printer does not print Ean13 barcodes.` So does any element missing what it needs.
+- Prints are serialized, one receipt at a time. Without a printer, `print` answers `409 not_connected`.
+- A network printer that's been switched off is only noticed when a write fails. That print answers
+  `409 printer_failed`, the connection is dropped, and `printers.disconnected` fires.
+
+### Render to PDF
+
+```ts
+const pdf = await printers.render({ elements, pageWidth: 612, pageHeight: 792 });  // a Blob; Letter, in points
+```
+
+The page is A4 by default, with a 36-point margin and 12-point monospace text. Images fit the connected printer's
+width, or `paper`'s.
+
+## OS printing
+
+| Route | |
+| --- | --- |
+| `GET printing/capabilities` | what this platform can print, and how |
+| `GET printing/printers` | the installed printers; empty where they can't be listed |
+| `POST printing/print` | print a PDF, an image (base64), HTML or a web page, as JSON |
+| `POST printing/html-to-pdf` | lay HTML out on pages and return the PDF, with no print UI (iOS, Mac Catalyst, Android) |
+| `POST printing/print/pdf`, `POST printing/print/image` | print a PDF, PNG or JPEG sent as the raw body, with the options in the query |
+
+```csharp
+@inject IPrintingBridge Printing
+
+var result = await Printing.PrintAsync(new PrintJobRequest(
+    PrintJobContent.Pdf,
+    Data: Convert.ToBase64String(pdf),
+    Options: new PrintJobOptions(JobName: "Invoice 1042")
+));
+if (result.Status is PrintJobStatus.Cancelled) { /* the dialog was closed */ }
+```
+
+```ts
+const printing = new PrintingBridge();
+const caps = await printing.getCapabilities();
+
+if (caps.silent && caps.listPrinters) {
+  const target = (await printing.getPrinters()).find(x => x.isDefault);
+  await printing.print({ content: "Pdf", data: base64, options: { silent: true, printerId: target?.id } });
+}
+```
+
+| Platform | Backend | PDF | Image | HTML | HTML to PDF | Silent | List printers |
+| --- | --- | :-: | :-: | :-: | :-: | :-: | :-: |
+| iOS, Mac Catalyst | AirPrint | yes | yes | yes | yes | to a printer picked before | no |
+| Android | PrintManager | yes | yes | yes | yes | no — always the dialog | no |
+| Windows | GDI+ and the shell | yes | yes | no | no | yes | yes |
+| Linux, macOS | CUPS (`lp`, `lpstat`) | yes | yes | no | no | yes | yes |
+
+- **Large documents:** the JSON route holds the whole request, so it's capped at 16 MB (`MaxJsonBytes`). Send anything
+  bigger as the body of `print/pdf` or `print/image`. These stream it to a temporary file on the device and take up to
+  512 MB (`MaxFileBytes`), with the options as query parameters. The format is read from the bytes, and a body that isn't
+  a PDF, PNG or JPEG answers `400`. Past either limit, the answer is `413 too_large`.
+
+  ```ts
+  const file = await fetch("/invoices/1042.pdf").then(r => r.blob());
+  await printing.printPdf(file, { jobName: "Invoice 1042", copies: 2 });
+  ```
+
+  ```csharp
+  builder.UseAppDeviceBridge(bridge => bridge.AddPrintingBridge(o => o.MaxFileBytes = 1024L * 1024 * 1024));
+
+  await using var pdf = File.OpenRead(path);
+  await Printing.PrintPdfAsync(pdf, jobName: "Invoice 1042");
+  ```
+- **Content:** `Pdf` and `Image` (PNG or JPEG) carry base64 `data`; `Html` carries `html`; `Url` carries an http or
+  https `url`. Content the platform can't print answers `501`: render HTML to a PDF first on Windows and CUPS.
+- **The answer** comes once the dialog closes or the job is spooled. `Completed` and `Submitted` both mean it printed or
+  will, and `Cancelled` is a result, not an error. A job that fails answers `Failed` with the `error`.
+- **Options:** `jobName`, `copies` (1–99), `orientation`, `duplex` and `color`. Android's dialog lets the person choose
+  these instead. `silent` is ignored where the platform always shows the dialog.
+- **HTML to PDF:** `html-to-pdf` lays a document out with the same engine printing uses and answers `application/pdf`,
+  for saving, sharing or attaching rather than printing. The page is A4 portrait with a 36-point margin unless
+  `pageWidth`, `pageHeight`, `orientation` or `margin` say otherwise. It works on iOS, Mac Catalyst and Android, where
+  `capabilities.htmlToPdf` is true, and answers `501` on Windows, Linux and macOS.
+
+  ```ts
+  const pdf = await printing.htmlToPdf({ html: invoiceHtml, pageWidth: 612, pageHeight: 792 });  // a Blob
+  ```
+- **Windows** prints a PDF through the registered PDF app's shell verb, so a machine with no PDF app fails.
+
+## Security
+
+Both bridges sit behind the bridge policy like every other. On top of that, the printers bridge limits where it
+connects, because a receipt can carry raw bytes:
+
+- A printer named by address must be an **IP address on the local network** (loopback, private or link-local), never a
+  host name that could resolve anywhere.
+- It must be on a **raw printer port**: 9100, 9101 or 9102. Add others with
+  `AddPrintersBridge(o => o.NetworkPorts.Add(…))`. A printer a scan found is connected where it advertised.
+- The printing bridge prints only http and https URLs, not `file:` or anything else on the device.
+
+## Platform setup
+
+- **iOS and Mac Catalyst:** `NSBluetoothAlwaysUsageDescription`, `NSLocalNetworkUsageDescription`, and
+  `_pdl-datastream._tcp` and `_printer._tcp` in `NSBonjourServices`. Without the Bonjour entries a network scan finds
+  nothing, and without the local network description iOS blocks the socket to the printer too.
+- **macOS (sandboxed):** the same Info.plist keys, plus the `com.apple.security.network.client`,
+  `com.apple.security.device.bluetooth` and `com.apple.security.print` entitlements.
+- **Android:** `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT`. OS printing shows its dialog from the foreground activity, so
+  print while the app is visible.
+- **Linux:** Bluetooth printers need Shiny.BluetoothLE.Linux registered with `services.AddBluetoothLE()`. Rendering
+  needs `SkiaSharp.NativeAssets.Linux` in the app, or `render` answers `501`. CUPS printing needs `lp` and `lpstat`
+  (`cups-client`).

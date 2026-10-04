@@ -17,6 +17,21 @@
  * `cleanTopicsForStarlight` turns it into a pill in the sidebar — on its own when the item has
  * no other badge, or as a second pill beside an existing one (e.g. `Flyout [New] [MAUI]`).
  * Prefer this over spelling "(MAUI Only)" out in the label.
+ *
+ * `dateCreated: 'YYYY-MM-DD'` records when an item's page first landed (seeded from git history —
+ * the first commit that added the file). It shows as a hover tooltip on the sidebar link.
+ *
+ * `dateUpdated: 'YYYY-MM-DD'` marks the last *major* change to an item. An item is "New" (pill in the
+ * sidebar and in the header finder) while the later of `dateCreated` / `dateUpdated` falls inside the
+ * last `NEW_BADGE_DAYS` days — so new pages start out New, and a big update brings it back. Don't
+ * hand-write `badge: { text: 'New' }`; bump `dateUpdated` instead.
+ *
+ * Only libraries are ever New: an item flagged `jumpTo: true`, anything beneath one, or a page listed
+ * beside one inside a category group. Site pages (NuGets, Getting Help, AI Skills…), Theming, and
+ * category groups (Office, Images…) never get the pill.
+ *
+ * A group (no `link`) takes its `dateCreated` from its landing page (first child) unless it sets its
+ * own, and also turns New when any descendant has a recent `dateUpdated`.
  */
 export const sidebarTopics = [
   {
@@ -25,30 +40,30 @@ export const sidebarTopics = [
     link: '/foundation/appbuilder/',
     icon: 'open-book',
     items: [
-      { label: 'App Builder', link: 'foundation/appbuilder' },
-      { label: 'Architecture', link: 'foundation/architecture' },
+      { label: 'App Builder', link: 'foundation/appbuilder', dateCreated: '2026-04-22' },
+      { label: 'Architecture', link: 'foundation/architecture', dateCreated: '2026-04-22' },
       {
         label: 'Hosting Models',
         items:[
-          { label: 'Getting Started', link: 'foundation/hosting/' },
-          { label: 'MAUI', link: 'foundation/hosting/maui' },
-          { label: 'Native', link: 'foundation/hosting/native' },
-          { label: 'Manual', link: 'foundation/hosting/manual' }
+          { label: 'Getting Started', link: 'foundation/hosting/', dateCreated: '2026-04-22' },
+          { label: 'MAUI', link: 'foundation/hosting/maui', dateCreated: '2026-04-22' },
+          { label: 'Native', link: 'foundation/hosting/native', dateCreated: '2026-04-22' },
+          { label: 'Manual', link: 'foundation/hosting/manual', dateCreated: '2026-04-22' }
         ]
       },
       {
         label: 'Core',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'client/core/' },
-          { label: 'Platform', link: 'client/core/platform' },
-          { label: 'Lifecycle Hooks', link: 'client/core/lifecycle' },
-          { label: 'Startup Tasks', link: 'client/core/startup' },
-          { label: 'Device Monitoring', link: 'client/core/device-monitoring' },
-          { label: 'Access & Permissions', link: 'client/core/permissions' },
-          { label: 'Android Foreground Service', link: 'client/core/android-foreground' },
-          { label: 'Utilities', link: 'client/core/utilities' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/core/', dateCreated: '2026-09-11' },
+          { label: 'Platform', link: 'client/core/platform', dateCreated: '2026-09-11' },
+          { label: 'Lifecycle Hooks', link: 'client/core/lifecycle', dateCreated: '2023-07-06' },
+          { label: 'Startup Tasks', link: 'client/core/startup', dateCreated: '2023-07-06' },
+          { label: 'Device Monitoring', link: 'client/core/device-monitoring', dateCreated: '2026-09-11' },
+          { label: 'Access & Permissions', link: 'client/core/permissions', dateCreated: '2026-09-11' },
+          { label: 'Android Foreground Service', link: 'client/core/android-foreground', dateCreated: '2023-07-06' },
+          { label: 'Utilities', link: 'client/core/utilities', dateCreated: '2026-09-11' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
@@ -59,131 +74,131 @@ export const sidebarTopics = [
               label: 'General',
               collapsed: true,
               items:[
-                { label: 'Introduction', link: 'mediator/' },
-                { label: 'Getting Started', link: 'mediator/getting-started' },
-                { label: 'Requests', link: 'mediator/requests' },
-                { label: 'Commands', link: 'mediator/commands' },
-                { label: 'Streams', link: 'mediator/streams' },
-                { label: 'Events', link: 'mediator/events' },
-                { label: 'Exception Handling', link: 'mediator/exceptionhandlers' },
-                { label: 'Contract Keys', link: 'mediator/contractkeys' },
-                { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration' },
-                { label: 'Execution Contexts', link: 'mediator/context' },
-                { label: 'Advanced', link: 'mediator/advanced' },
+                { label: 'Introduction', link: 'mediator/', dateCreated: '2024-06-08' },
+                { label: 'Getting Started', link: 'mediator/getting-started', dateCreated: '2024-06-08' },
+                { label: 'Requests', link: 'mediator/requests', dateCreated: '2024-06-26' },
+                { label: 'Commands', link: 'mediator/commands', dateCreated: '2025-01-22' },
+                { label: 'Streams', link: 'mediator/streams', dateCreated: '2024-06-26' },
+                { label: 'Events', link: 'mediator/events', dateCreated: '2024-06-26' },
+                { label: 'Exception Handling', link: 'mediator/exceptionhandlers', dateCreated: '2025-01-29' },
+                { label: 'Contract Keys', link: 'mediator/contractkeys', dateCreated: '2024-07-06' },
+                { label: 'Source Generation (AOT)', link: 'mediator/sourcegeneration', dateCreated: '2025-10-27' },
+                { label: 'Execution Contexts', link: 'mediator/context', dateCreated: '2024-09-28' },
+                { label: 'Advanced', link: 'mediator/advanced', dateCreated: '2024-06-09' },
               ]
           },
           {
               label: 'Middleware',
               collapsed: true,
               items:[
-                { label: 'Introduction', link: 'mediator/middleware/' },
-                { label: 'Validation', link: 'mediator/middleware/validation' },
-                { label: 'Caching', link: 'mediator/middleware/caching' },
-                { label: 'Resiliency', link: 'mediator/middleware/resilience' },
-                { label: 'Offline', link: 'mediator/middleware/offline' },
-                { label: 'Performance Logging', link: 'mediator/middleware/performancelogging' },
-                { label: 'Main Thread', link: 'mediator/middleware/mainthread' },
-                { label: 'Replay', link: 'mediator/middleware/replay' },
-                { label: 'Refresh Timer', link: 'mediator/middleware/refresh' },
-                { label: 'Event Sample', link: 'mediator/middleware/sample' },
-                { label: 'Event Throttle', link: 'mediator/middleware/throttle' },
-                { label: 'Command Scheduling', link: 'mediator/middleware/scheduling' },
-                { label: 'Middleware Ordering', link: 'mediator/middleware/ordering' }
+                { label: 'Introduction', link: 'mediator/middleware/', dateCreated: '2024-06-08' },
+                { label: 'Validation', link: 'mediator/middleware/validation', dateCreated: '2024-07-20' },
+                { label: 'Caching', link: 'mediator/middleware/caching', dateCreated: '2024-06-26' },
+                { label: 'Resiliency', link: 'mediator/middleware/resilience', dateCreated: '2024-06-26' },
+                { label: 'Offline', link: 'mediator/middleware/offline', dateCreated: '2024-06-26' },
+                { label: 'Performance Logging', link: 'mediator/middleware/performancelogging', dateCreated: '2024-06-26' },
+                { label: 'Main Thread', link: 'mediator/middleware/mainthread', dateCreated: '2024-06-26' },
+                { label: 'Replay', link: 'mediator/middleware/replay', dateCreated: '2024-06-26' },
+                { label: 'Refresh Timer', link: 'mediator/middleware/refresh', dateCreated: '2024-06-26' },
+                { label: 'Event Sample', link: 'mediator/middleware/sample', dateCreated: '2026-02-26' },
+                { label: 'Event Throttle', link: 'mediator/middleware/throttle', dateCreated: '2026-02-08' },
+                { label: 'Command Scheduling', link: 'mediator/middleware/scheduling', dateCreated: '2025-01-22' },
+                { label: 'Middleware Ordering', link: 'mediator/middleware/ordering', dateCreated: '2026-02-08' }
               ]
           },
           {
               label: 'HTTP',
               collapsed: true,
               items:[
-                { label: 'Getting Started', link: 'mediator/http/' },
-                { label: 'Request Contracts', link: 'mediator/http/contracts' },
-                { label: 'Decorators', link: 'mediator/http/decorators' },
-                { label: 'OpenAPI Generation', link: 'mediator/http/openapi' },
-                { label: 'Configuration & AOT', link: 'mediator/http/configuration' },
+                { label: 'Getting Started', link: 'mediator/http/', dateCreated: '2026-02-26' },
+                { label: 'Request Contracts', link: 'mediator/http/contracts', dateCreated: '2026-02-26' },
+                { label: 'Decorators', link: 'mediator/http/decorators', dateCreated: '2026-02-26' },
+                { label: 'OpenAPI Generation', link: 'mediator/http/openapi', dateCreated: '2026-02-26' },
+                { label: 'Configuration & AOT', link: 'mediator/http/configuration', dateCreated: '2026-02-26' },
               ]
           },
           {
               label: 'Extensions',
               collapsed: true,
               items:[
-                { label: 'AI Tools', link: 'mediator/extensions/ai' },
-                { label: 'App Functions', link: 'mediator/extensions/appfunctions', badge: { text: 'New', variant: 'success' } },
-                { label: 'MAUI', link: 'mediator/extensions/maui' },
-                { label: 'Blazor', link: 'mediator/extensions/blazor' },
-                { label: 'Uno Platform', link: 'mediator/extensions/unoplatform' },
-                { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet' },
-                { label: 'Prism', link: 'mediator/extensions/prism' },
-                { label: 'Dapper', link: 'mediator/extensions/dapper' }
+                { label: 'AI Tools', link: 'mediator/extensions/ai', dateCreated: '2026-04-27' },
+                { label: 'App Functions', link: 'mediator/extensions/appfunctions', dateCreated: '2026-09-30', dateUpdated: '2026-09-30' },
+                { label: 'MAUI', link: 'mediator/extensions/maui', dateCreated: '2025-01-22' },
+                { label: 'Blazor', link: 'mediator/extensions/blazor', dateCreated: '2025-01-22' },
+                { label: 'Uno Platform', link: 'mediator/extensions/unoplatform', dateCreated: '2025-02-08' },
+                { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet', dateCreated: '2024-07-05' },
+                { label: 'Prism', link: 'mediator/extensions/prism', dateCreated: '2024-06-30' },
+                { label: 'Dapper', link: 'mediator/extensions/dapper', dateCreated: '2025-01-22' }
               ]
           },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/mediator/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'mediator/release-notes' }
+          { label: 'Release Notes', link: 'mediator/release-notes', dateCreated: '2024-06-14' }
         ]
       },
       {
         label: 'Actors',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-10-03',
         items:[
-          { label: 'Getting Started', link: 'actors/' },
-          { label: 'Actors & Lifecycle', link: 'actors/lifecycle' },
-          { label: 'State', link: 'actors/state' },
-          { label: 'Concurrency', link: 'actors/concurrency' },
-          { label: 'Event Sourcing', link: 'actors/event-sourcing' },
-          { label: 'Streams', link: 'actors/streams' },
-          { label: 'Reminders', link: 'actors/reminders' },
-          { label: 'Filters, Context & Telemetry', link: 'actors/filters' },
-          { label: 'Remoting', link: 'actors/remoting' },
-          { label: 'MAUI & Blazor', link: 'actors/platforms' },
-          { label: 'Testing', link: 'actors/testing' },
-          { label: 'Build Diagnostics', link: 'actors/diagnostics' },
-          { label: 'Release Notes', link: 'actors/release-notes' }
+          { label: 'Getting Started', link: 'actors/', dateCreated: '2026-10-03' },
+          { label: 'Actors & Lifecycle', link: 'actors/lifecycle', dateCreated: '2026-10-03' },
+          { label: 'State', link: 'actors/state', dateCreated: '2026-10-03' },
+          { label: 'Concurrency', link: 'actors/concurrency', dateCreated: '2026-10-03' },
+          { label: 'Event Sourcing', link: 'actors/event-sourcing', dateCreated: '2026-10-03' },
+          { label: 'Streams', link: 'actors/streams', dateCreated: '2026-10-03' },
+          { label: 'Reminders', link: 'actors/reminders', dateCreated: '2026-10-03' },
+          { label: 'Filters, Context & Telemetry', link: 'actors/filters', dateCreated: '2026-10-03' },
+          { label: 'Remoting', link: 'actors/remoting', dateCreated: '2026-10-03' },
+          { label: 'MAUI & Blazor', link: 'actors/platforms', dateCreated: '2026-10-03' },
+          { label: 'Testing', link: 'actors/testing', dateCreated: '2026-10-03' },
+          { label: 'Build Diagnostics', link: 'actors/diagnostics', dateCreated: '2026-10-03' },
+          { label: 'Release Notes', link: 'actors/release-notes', dateCreated: '2026-10-03' }
         ]
       },
       {
         label: 'Dependency Injection',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'di/' },
-          { label: 'AI Tools', link: 'di/ai-tools' },
-          { label: 'Advanced Registration', link: 'di/advanced' },
-          { label: 'Categories', link: 'di/categories' },
-          { label: 'Configuration', link: 'di/configuration' },
-          { label: 'Release Notes', link: 'di/release-notes' }
+          { label: 'Getting Started', link: 'di/', dateCreated: '2025-07-03' },
+          { label: 'AI Tools', link: 'di/ai-tools', dateCreated: '2026-04-29' },
+          { label: 'Advanced Registration', link: 'di/advanced', dateCreated: '2026-02-26' },
+          { label: 'Categories', link: 'di/categories', dateCreated: '2026-02-26' },
+          { label: 'Configuration', link: 'di/configuration', dateCreated: '2026-02-26' },
+          { label: 'Release Notes', link: 'di/release-notes', dateCreated: '2025-07-03' }
         ]
       },
       {
         label: 'Reflector',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'reflector/' },
-          { label: 'JSON Serialization', link: 'reflector/json' },
-          { label: 'Assembly Info', link: 'reflector/assembly-info' },
-          { label: 'Configuration', link: 'reflector/configuration' },
-          { label: 'Release Notes', link: 'reflector/release-notes' }
+          { label: 'Getting Started', link: 'reflector/', dateCreated: '2025-07-03' },
+          { label: 'JSON Serialization', link: 'reflector/json', dateCreated: '2026-02-26' },
+          { label: 'Assembly Info', link: 'reflector/assembly-info', dateCreated: '2026-02-26' },
+          { label: 'Configuration', link: 'reflector/configuration', dateCreated: '2026-02-26' },
+          { label: 'Release Notes', link: 'reflector/release-notes', dateCreated: '2026-02-26' }
         ]
       },
       {
         label: 'Serialization',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'serialization/' },
-          { label: 'Release Notes', link: 'serialization/release-notes' }
+          { label: 'Getting Started', link: 'serialization/', dateCreated: '2026-06-07' },
+          { label: 'Release Notes', link: 'serialization/release-notes', dateCreated: '2026-06-07' }
         ]
       },
       {
         label: 'Localization Generator',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'localizegen/' },
-          { label: 'Usage Examples', link: 'localizegen/usage' },
-          { label: 'Release Notes', link: 'localizegen/release-notes' }
+          { label: 'Getting Started', link: 'localizegen/', dateCreated: '2025-07-03' },
+          { label: 'Usage Examples', link: 'localizegen/usage', dateCreated: '2026-02-26' },
+          { label: 'Release Notes', link: 'localizegen/release-notes', dateCreated: '2026-02-26' }
         ]
       },
-      { label: 'AI Skills', link: 'foundation/ai-skills' },
-      { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps' },
-      { label: 'NuGets', link: 'foundation/nugets' },
-      { label: 'Getting Help', link: 'foundation/support' },
+      { label: 'AI Skills', link: 'foundation/ai-skills', dateCreated: '2026-04-22' },
+      { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps', dateCreated: '2026-06-11' },
+      { label: 'NuGets', link: 'foundation/nugets', dateCreated: '2026-09-23' },
+      { label: 'Getting Help', link: 'foundation/support', dateCreated: '2026-09-04' },
     ],
   },
   {
@@ -196,154 +211,154 @@ export const sidebarTopics = [
         label: 'BluetoothLE',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'client/ble/' },
-          { label: 'BLE Manager', link: 'client/ble/manager' },
-          { label: 'Peripheral', link: 'client/ble/peripheral' },
-          { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt' },
-          { label: 'L2CAP', link: 'client/ble/l2cap' },
-          { label: 'Background Operations', link: 'client/ble/background' },
-          { label: 'Best Practice/FAQ', link: 'client/ble/best-practices' },
+          { label: 'Getting Started', link: 'client/ble/', dateCreated: '2023-07-06' },
+          { label: 'BLE Manager', link: 'client/ble/manager', dateCreated: '2023-07-06' },
+          { label: 'Peripheral', link: 'client/ble/peripheral', dateCreated: '2023-07-06' },
+          { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt', dateCreated: '2023-07-06' },
+          { label: 'L2CAP', link: 'client/ble/l2cap', dateCreated: '2026-05-29' },
+          { label: 'Background Operations', link: 'client/ble/background', dateCreated: '2023-07-06' },
+          { label: 'Best Practice/FAQ', link: 'client/ble/best-practices', dateCreated: '2023-07-06' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'BluetoothLE Hosting',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'client/blehosting/' },
-          { label: 'GATT Service', link: 'client/blehosting/gatt' },
-          { label: 'Source Generator', link: 'client/blehosting/source-generator' },
-          { label: 'L2CAP', link: 'client/blehosting/l2cap' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/blehosting/', dateCreated: '2023-07-06' },
+          { label: 'GATT Service', link: 'client/blehosting/gatt', dateCreated: '2023-07-06' },
+          { label: 'Source Generator', link: 'client/blehosting/source-generator', dateCreated: '2026-08-11' },
+          { label: 'L2CAP', link: 'client/blehosting/l2cap', dateCreated: '2026-05-29' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'BluetoothLE Hubs',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-10-03',
         items: [
-          { label: 'Getting Started', link: 'blehubs/' },
-          { label: 'Contracts & Source Generator', link: 'blehubs/contracts' },
-          { label: 'Hosting Hubs', link: 'blehubs/hosting' },
-          { label: 'Connecting Clients', link: 'blehubs/client' },
-          { label: 'File Transfers', link: 'blehubs/files' },
-          { label: 'How It Works', link: 'blehubs/how-it-works' },
-          { label: 'Release Notes', link: 'blehubs/release-notes' }
+          { label: 'Getting Started', link: 'blehubs/', dateCreated: '2026-10-02' },
+          { label: 'Contracts & Source Generator', link: 'blehubs/contracts', dateCreated: '2026-10-02' },
+          { label: 'Hosting Hubs', link: 'blehubs/hosting', dateCreated: '2026-10-02' },
+          { label: 'Connecting Clients', link: 'blehubs/client', dateCreated: '2026-10-02' },
+          { label: 'File Transfers', link: 'blehubs/files', dateCreated: '2026-10-02' },
+          { label: 'How It Works', link: 'blehubs/how-it-works', dateCreated: '2026-10-02' },
+          { label: 'Release Notes', link: 'blehubs/release-notes', dateCreated: '2026-10-02' }
         ]
       },
       {
         label: 'Beacons',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-17',
         items: [
-          { label: 'Getting Started', link: 'client/beacons/' },
-          { label: 'Ranging', link: 'client/beacons/ranging' },
-          { label: 'Region Monitoring', link: 'client/beacons/monitoring' },
-          { label: 'Eddystone', link: 'client/beacons/eddystone' },
-          { label: 'Broadcasting', link: 'client/beacons/broadcasting' },
-          { label: 'Distance & Accuracy', link: 'client/beacons/distance' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/beacons/', dateCreated: '2026-09-09' },
+          { label: 'Ranging', link: 'client/beacons/ranging', dateCreated: '2026-09-09' },
+          { label: 'Region Monitoring', link: 'client/beacons/monitoring', dateCreated: '2026-09-09' },
+          { label: 'Eddystone', link: 'client/beacons/eddystone', dateCreated: '2026-09-09' },
+          { label: 'Broadcasting', link: 'client/beacons/broadcasting', dateCreated: '2026-09-09' },
+          { label: 'Distance & Accuracy', link: 'client/beacons/distance', dateCreated: '2026-09-09' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'OBD',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'obd/' },
-          { label: 'Commands', link: 'obd/commands' },
-          { label: 'Mode 06 Test Results', link: 'obd/mode06' },
-          { label: 'VIN Decoding', link: 'obd/vin' },
-          { label: 'Connection & Adapters', link: 'obd/connection' },
-          { label: 'BLE Transport', link: 'obd/ble' },
-          { label: 'WiFi Transport', link: 'obd/wifi' },
-          { label: 'Serial Transport', link: 'obd/serial' },
-          { label: 'Custom Transports', link: 'obd/transports' },
-          { label: 'Adapter Emulator', link: 'obd/emulator', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'obd/release-notes' }
+          { label: 'Getting Started', link: 'obd/', dateCreated: '2026-03-01' },
+          { label: 'Commands', link: 'obd/commands', dateCreated: '2026-03-01' },
+          { label: 'Mode 06 Test Results', link: 'obd/mode06', dateCreated: '2026-08-07' },
+          { label: 'VIN Decoding', link: 'obd/vin', dateCreated: '2026-08-07' },
+          { label: 'Connection & Adapters', link: 'obd/connection', dateCreated: '2026-03-01' },
+          { label: 'BLE Transport', link: 'obd/ble', dateCreated: '2026-03-01' },
+          { label: 'WiFi Transport', link: 'obd/wifi', dateCreated: '2026-08-07' },
+          { label: 'Serial Transport', link: 'obd/serial', dateCreated: '2026-08-07' },
+          { label: 'Custom Transports', link: 'obd/transports', dateCreated: '2026-03-01' },
+          { label: 'Adapter Emulator', link: 'obd/emulator', dateCreated: '2026-08-08', dateUpdated: '2026-09-02' },
+          { label: 'Release Notes', link: 'obd/release-notes', dateCreated: '2026-03-01' }
         ]
       },
       {
         label: 'Locations',
         jumpTo: true,
         items:[
-          { label: 'Architecture', link: 'client/locations/architecture' },
-          { label: 'GPS', link: 'client/locations/gps' },
-          { label: 'Platform GPS Requests', link: 'client/locations/platform-requests' },
-          { label: 'Geofencing', link: 'client/locations/geofencing' },
-          { label: 'Reverse Geocoding', link: 'client/locations/geocoding', badge: { text: 'New', variant: 'success' } },
-          { label: 'Motion Activity', link: 'client/locations/motionactivity' },
-          { label: 'AI Tools', link: 'client/locations/ai-tools', badge: { text: 'New', variant: 'success' } },
+          { label: 'Architecture', link: 'client/locations/architecture', dateCreated: '2026-06-09' },
+          { label: 'GPS', link: 'client/locations/gps', dateCreated: '2023-07-06' },
+          { label: 'Platform GPS Requests', link: 'client/locations/platform-requests', dateCreated: '2026-03-28' },
+          { label: 'Geofencing', link: 'client/locations/geofencing', dateCreated: '2023-07-06' },
+          { label: 'Reverse Geocoding', link: 'client/locations/geocoding', dateCreated: '2026-09-26', dateUpdated: '2026-09-26' },
+          { label: 'Motion Activity', link: 'client/locations/motionactivity', dateCreated: '2026-04-23' },
+          { label: 'AI Tools', link: 'client/locations/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Network Discovery',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'client/discovery/' },
-          { label: 'Browsing & Resolving', link: 'client/discovery/browsing' },
-          { label: 'Publishing', link: 'client/discovery/publishing' },
-          { label: 'SSDP & UPnP', link: 'client/discovery/ssdp' },
-          { label: 'WS-Discovery & ONVIF', link: 'client/discovery/wsdiscovery' },
-          { label: 'Platform Setup', link: 'client/discovery/platform' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/discovery/', dateCreated: '2026-08-07' },
+          { label: 'Browsing & Resolving', link: 'client/discovery/browsing', dateCreated: '2026-08-07' },
+          { label: 'Publishing', link: 'client/discovery/publishing', dateCreated: '2026-08-07' },
+          { label: 'SSDP & UPnP', link: 'client/discovery/ssdp', dateCreated: '2026-08-08' },
+          { label: 'WS-Discovery & ONVIF', link: 'client/discovery/wsdiscovery', dateCreated: '2026-08-08' },
+          { label: 'Platform Setup', link: 'client/discovery/platform', dateCreated: '2026-08-07' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Wi-Fi',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-02',
         items: [
-          { label: 'Getting Started', link: 'client/wifi/' },
-          { label: 'Networks', link: 'client/wifi/networks' },
-          { label: 'Known Networks', link: 'client/wifi/known-networks' },
-          { label: 'Hotspot', link: 'client/wifi/hotspot' },
-          { label: 'Platform Setup', link: 'client/wifi/platform' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/wifi/', dateCreated: '2026-08-20' },
+          { label: 'Networks', link: 'client/wifi/networks', dateCreated: '2026-08-20' },
+          { label: 'Known Networks', link: 'client/wifi/known-networks', dateCreated: '2026-08-20' },
+          { label: 'Hotspot', link: 'client/wifi/hotspot', dateCreated: '2026-08-20' },
+          { label: 'Platform Setup', link: 'client/wifi/platform', dateCreated: '2026-08-20' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Wearables',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-19',
         items: [
-          { label: 'Getting Started', link: 'client/wearables/' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/wearables/', dateCreated: '2026-09-18' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Screen Recording',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-02',
         items: [
-          { label: 'Getting Started', link: 'client/screenrecorder/' },
-          { label: 'Platform Setup', link: 'client/screenrecorder/platform' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/screenrecorder/', dateCreated: '2026-08-31' },
+          { label: 'Platform Setup', link: 'client/screenrecorder/platform', dateCreated: '2026-08-31' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Gamepads',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-21',
         items: [
-          { label: 'Getting Started', link: 'client/gamepad/' },
-          { label: 'Platform Setup', link: 'client/gamepad/platform' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/gamepad/', dateCreated: '2026-09-20' },
+          { label: 'Platform Setup', link: 'client/gamepad/platform', dateCreated: '2026-09-20' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Printing',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-10-03',
         items: [
-          { label: 'Getting Started', link: 'client/printing/' },
-          { label: 'Thermal & Receipt Printers', link: 'client/printing/thermal' },
-          { label: 'Native Printing', link: 'client/printing/native' },
-          { label: 'Blazor', link: 'client/printing/blazor' },
-          { label: 'Platform Setup', link: 'client/printing/platform' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/printing/', dateCreated: '2026-10-03' },
+          { label: 'Thermal & Receipt Printers', link: 'client/printing/thermal', dateCreated: '2026-10-03' },
+          { label: 'Native Printing', link: 'client/printing/native', dateCreated: '2026-10-03' },
+          { label: 'Blazor', link: 'client/printing/blazor', dateCreated: '2026-10-03' },
+          { label: 'Platform Setup', link: 'client/printing/platform', dateCreated: '2026-10-03' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
     ]
@@ -358,63 +373,63 @@ export const sidebarTopics = [
         label: 'Music',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'music/' },
-          { label: 'Permissions', link: 'music/permissions' },
-          { label: 'Querying Music', link: 'music/querying' },
-          { label: 'Playback', link: 'music/playback' },
-          { label: 'Audio Output', link: 'music/output-devices', badge: { text: 'New', variant: 'success' } },
-          { label: 'Lyrics', link: 'music/lyrics' },
-          { label: 'Album Art', link: 'music/album-art' },
-          { label: 'Copying Tracks', link: 'music/copying' },
-          { label: 'Audio Analysis', link: 'music/analysis' },
-          { label: 'AI Tools', link: 'music/ai-tools' },
-          { label: 'Release Notes', link: 'music/release-notes' }
+          { label: 'Getting Started', link: 'music/', dateCreated: '2026-03-01' },
+          { label: 'Permissions', link: 'music/permissions', dateCreated: '2026-03-01' },
+          { label: 'Querying Music', link: 'music/querying', dateCreated: '2026-03-01' },
+          { label: 'Playback', link: 'music/playback', dateCreated: '2026-03-01' },
+          { label: 'Audio Output', link: 'music/output-devices', dateCreated: '2026-07-26', dateUpdated: '2026-07-26' },
+          { label: 'Lyrics', link: 'music/lyrics', dateCreated: '2026-04-23' },
+          { label: 'Album Art', link: 'music/album-art', dateCreated: '2026-04-23' },
+          { label: 'Copying Tracks', link: 'music/copying', dateCreated: '2026-03-01' },
+          { label: 'Audio Analysis', link: 'music/analysis', dateCreated: '2026-07-24' },
+          { label: 'AI Tools', link: 'music/ai-tools', dateCreated: '2026-07-07' },
+          { label: 'Release Notes', link: 'music/release-notes', dateCreated: '2026-03-01' }
         ]
       },
       {
         label: 'Health',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'health/' },
-          { label: 'Reading Data', link: 'health/reading' },
-          { label: 'Writing Data', link: 'health/writing' },
-          { label: 'Observing Data', link: 'health/observing' },
-          { label: 'AI Tools', link: 'health/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Platform Notes', link: 'health/platform-notes' },
-          { label: 'Release Notes', link: 'health/release-notes' }
+          { label: 'Getting Started', link: 'health/', dateCreated: '2026-04-22' },
+          { label: 'Reading Data', link: 'health/reading', dateCreated: '2026-04-23' },
+          { label: 'Writing Data', link: 'health/writing', dateCreated: '2026-04-23' },
+          { label: 'Observing Data', link: 'health/observing', dateCreated: '2026-04-27' },
+          { label: 'AI Tools', link: 'health/ai-tools', dateCreated: '2026-06-15', dateUpdated: '2026-06-15' },
+          { label: 'Platform Notes', link: 'health/platform-notes', dateCreated: '2026-04-23' },
+          { label: 'Release Notes', link: 'health/release-notes', dateCreated: '2026-04-22' }
         ]
       },
       {
         label: 'In-App Purchases',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'pay/', badge: { text: 'New', variant: 'success' } },
-          { label: 'Store Setup', link: 'pay/store-setup' },
-          { label: 'Server', link: 'pay/server' },
-          { label: 'Release Notes', link: 'pay/release-notes' }
+          { label: 'Getting Started', link: 'pay/', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' },
+          { label: 'Store Setup', link: 'pay/store-setup', dateCreated: '2026-09-15' },
+          { label: 'Server', link: 'pay/server', dateCreated: '2026-09-15' },
+          { label: 'Release Notes', link: 'pay/release-notes', dateCreated: '2026-09-15' }
         ]
       },
       {
         label: 'Contact Store',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'client/contactstore/' },
-          { label: 'Permissions', link: 'client/contactstore/permissions' },
-          { label: 'Querying', link: 'client/contactstore/querying' },
-          { label: 'AI Tools', link: 'client/contactstore/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/contactstore/', dateCreated: '2026-03-24' },
+          { label: 'Permissions', link: 'client/contactstore/permissions', dateCreated: '2026-03-24' },
+          { label: 'Querying', link: 'client/contactstore/querying', dateCreated: '2026-03-24' },
+          { label: 'AI Tools', link: 'client/contactstore/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Calendar Store',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-02',
         items:[
-          { label: 'Getting Started', link: 'client/calendarstore/' },
-          { label: 'Permissions', link: 'client/calendarstore/permissions' },
-          { label: 'Querying', link: 'client/calendarstore/querying' },
-          { label: 'AI Tools', link: 'client/calendarstore/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/calendarstore/', dateCreated: '2026-07-24' },
+          { label: 'Permissions', link: 'client/calendarstore/permissions', dateCreated: '2026-07-24' },
+          { label: 'Querying', link: 'client/calendarstore/querying', dateCreated: '2026-07-24' },
+          { label: 'AI Tools', link: 'client/calendarstore/ai-tools', dateCreated: '2026-07-24', dateUpdated: '2026-09-17' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
     ]
@@ -429,15 +444,15 @@ export const sidebarTopics = [
         label: 'AI Conversations',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'aiconversation/' },
-          { label: 'Architecture', link: 'aiconversation/architecture' },
-          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider' },
-          { label: 'Message Store', link: 'aiconversation/message-store' },
-          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements' },
-          { label: 'Structured Turns & Questions', link: 'aiconversation/structured-turns' },
-          { label: 'Wake Word', link: 'aiconversation/wake-word' },
-          { label: 'AI Tools', link: 'aiconversation/ai-tools' },
-          { label: 'MAUI Chat UI', link: 'aiconversation/chat-view' },
+          { label: 'Getting Started', link: 'aiconversation/', dateCreated: '2026-05-06' },
+          { label: 'Architecture', link: 'aiconversation/architecture', dateCreated: '2026-06-09' },
+          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider', dateCreated: '2026-05-06' },
+          { label: 'Message Store', link: 'aiconversation/message-store', dateCreated: '2026-05-06' },
+          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements', dateCreated: '2026-05-06' },
+          { label: 'Structured Turns & Questions', link: 'aiconversation/structured-turns', dateCreated: '2026-07-31' },
+          { label: 'Wake Word', link: 'aiconversation/wake-word', dateCreated: '2026-05-06' },
+          { label: 'AI Tools', link: 'aiconversation/ai-tools', dateCreated: '2026-05-06' },
+          { label: 'MAUI Chat UI', link: 'aiconversation/chat-view', dateCreated: '2026-07-31' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },
@@ -445,60 +460,60 @@ export const sidebarTopics = [
         label: 'Speech',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'speech/' },
-          { label: 'Architecture', link: 'speech/architecture' },
-          { label: 'Audio (Monitor & Devices)', link: 'speech/audio' },
-          { label: 'Effects & Recording', link: 'speech/audio-effects' },
-          { label: 'Emotion & Tone', link: 'speech/emotion' },
-          { label: 'Azure AI Speech', link: 'speech/azure' },
-          { label: 'ElevenLabs', link: 'speech/elevenlabs' },
-          { label: 'OpenAI', link: 'speech/openai' },
-          { label: 'Typecast', link: 'speech/typecast' },
-          { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai' },
-          { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper' },
-          { label: 'Custom Provider', link: 'speech/custom-provider' },
+          { label: 'Getting Started', link: 'speech/', dateCreated: '2026-05-02' },
+          { label: 'Architecture', link: 'speech/architecture', dateCreated: '2026-06-09' },
+          { label: 'Audio (Monitor & Devices)', link: 'speech/audio', dateCreated: '2026-07-09' },
+          { label: 'Effects & Recording', link: 'speech/audio-effects', dateCreated: '2026-08-02' },
+          { label: 'Emotion & Tone', link: 'speech/emotion', dateCreated: '2026-08-05' },
+          { label: 'Azure AI Speech', link: 'speech/azure', dateCreated: '2026-05-02' },
+          { label: 'ElevenLabs', link: 'speech/elevenlabs', dateCreated: '2026-05-02' },
+          { label: 'OpenAI', link: 'speech/openai', dateCreated: '2026-05-11' },
+          { label: 'Typecast', link: 'speech/typecast', dateCreated: '2026-07-05' },
+          { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai', dateCreated: '2026-05-11' },
+          { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper', dateCreated: '2026-07-30' },
+          { label: 'Custom Provider', link: 'speech/custom-provider', dateCreated: '2026-05-02' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'speech/release-notes' }
+          { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02' }
         ]
       },
       {
         label: 'Face Intelligence',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-02',
         items: [
-          { label: 'Getting Started', link: 'faceintelligence/' },
-          { label: 'Architecture', link: 'faceintelligence/architecture' },
-          { label: 'Enrollment', link: 'faceintelligence/enrollment' },
-          { label: 'Recognition & Tuning', link: 'faceintelligence/recognition' },
-          { label: 'MAUI Controls', link: 'faceintelligence/controls' },
-          { label: 'ONNX Models', link: 'faceintelligence/models' },
-          { label: 'Stores', link: 'faceintelligence/stores' },
-          { label: 'Release Notes', link: 'faceintelligence/release-notes' }
+          { label: 'Getting Started', link: 'faceintelligence/', dateCreated: '2026-07-27' },
+          { label: 'Architecture', link: 'faceintelligence/architecture', dateCreated: '2026-07-27' },
+          { label: 'Enrollment', link: 'faceintelligence/enrollment', dateCreated: '2026-07-27' },
+          { label: 'Recognition & Tuning', link: 'faceintelligence/recognition', dateCreated: '2026-07-27' },
+          { label: 'MAUI Controls', link: 'faceintelligence/controls', dateCreated: '2026-07-27' },
+          { label: 'ONNX Models', link: 'faceintelligence/models', dateCreated: '2026-07-27' },
+          { label: 'Stores', link: 'faceintelligence/stores', dateCreated: '2026-07-27' },
+          { label: 'Release Notes', link: 'faceintelligence/release-notes', dateCreated: '2026-07-27' }
         ]
       },
       {
         label: 'Voice Intelligence',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-02',
         items: [
-          { label: 'Getting Started', link: 'voiceintelligence/' },
-          { label: 'Guided Enrollment', link: 'voiceintelligence/enrollment' },
-          { label: 'Recognition & Tuning', link: 'voiceintelligence/recognition' },
-          { label: 'Audio Capture', link: 'voiceintelligence/capture' },
-          { label: 'MAUI Control', link: 'voiceintelligence/controls' },
-          { label: 'ONNX Models', link: 'voiceintelligence/models' },
-          { label: 'Release Notes', link: 'voiceintelligence/release-notes' }
+          { label: 'Getting Started', link: 'voiceintelligence/', dateCreated: '2026-07-27' },
+          { label: 'Guided Enrollment', link: 'voiceintelligence/enrollment', dateCreated: '2026-07-27' },
+          { label: 'Recognition & Tuning', link: 'voiceintelligence/recognition', dateCreated: '2026-07-27' },
+          { label: 'Audio Capture', link: 'voiceintelligence/capture', dateCreated: '2026-07-27' },
+          { label: 'MAUI Control', link: 'voiceintelligence/controls', dateCreated: '2026-07-27' },
+          { label: 'ONNX Models', link: 'voiceintelligence/models', dateCreated: '2026-07-27' },
+          { label: 'Release Notes', link: 'voiceintelligence/release-notes', dateCreated: '2026-07-27' }
         ]
       },
       {
         label: 'Document Intelligence',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-02',
         items: [
-          { label: 'Getting Started', link: 'documentintelligence/' },
-          { label: 'Scanning', link: 'documentintelligence/scanning' },
-          { label: 'Extraction', link: 'documentintelligence/extraction' },
-          { label: 'Release Notes', link: 'documentintelligence/release-notes' }
+          { label: 'Getting Started', link: 'documentintelligence/', dateCreated: '2026-07-27' },
+          { label: 'Scanning', link: 'documentintelligence/scanning', dateCreated: '2026-07-27' },
+          { label: 'Extraction', link: 'documentintelligence/extraction', dateCreated: '2026-07-27' },
+          { label: 'Release Notes', link: 'documentintelligence/release-notes', dateCreated: '2026-07-27' }
         ]
       },
     ]
@@ -513,79 +528,79 @@ export const sidebarTopics = [
         label: 'Jobs',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'client/jobs/' },
-          { label: 'Architecture', link: 'client/jobs/architecture' },
-          { label: 'Create a Job', link: 'client/jobs/create' },
-          { label: 'Managing Jobs', link: 'client/jobs/managing' },
-          { label: 'FAQ', link: 'client/jobs/faq' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/jobs/', dateCreated: '2023-07-06' },
+          { label: 'Architecture', link: 'client/jobs/architecture', dateCreated: '2026-06-09' },
+          { label: 'Create a Job', link: 'client/jobs/create', dateCreated: '2023-07-06' },
+          { label: 'Managing Jobs', link: 'client/jobs/managing', dateCreated: '2026-03-26' },
+          { label: 'FAQ', link: 'client/jobs/faq', dateCreated: '2023-07-06' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Local Notifications',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'client/notifications/' },
-          { label: 'Sending Notifications', link: 'client/notifications/sending' },
-          { label: 'Channels', link: 'client/notifications/channels' },
-          { label: 'Platform Specific', link: 'client/notifications/platform' },
-          { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling' },
-          { label: 'AI Tools', link: 'client/notifications/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/notifications/', dateCreated: '2023-07-06' },
+          { label: 'Sending Notifications', link: 'client/notifications/sending', dateCreated: '2026-03-26' },
+          { label: 'Channels', link: 'client/notifications/channels', dateCreated: '2023-07-06' },
+          { label: 'Platform Specific', link: 'client/notifications/platform', dateCreated: '2026-03-28' },
+          { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling', dateCreated: '2026-03-26' },
+          { label: 'AI Tools', link: 'client/notifications/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Push Notifications',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'client/push/' },
-          { label: 'Architecture', link: 'client/push/architecture' },
-          { label: 'Native', link: 'client/push/native' },
-          { label: 'Platform Specific', link: 'client/push/platform' },
-          { label: 'Azure Push Notifications', link: 'client/push/azure' },
-          { label: 'Firebase (iOS)', link: 'client/push/firebase-ios' },
-          { label: 'FAQ', link: 'client/push/faq' },
+          { label: 'Getting Started', link: 'client/push/', dateCreated: '2023-07-06' },
+          { label: 'Architecture', link: 'client/push/architecture', dateCreated: '2026-06-09' },
+          { label: 'Native', link: 'client/push/native', dateCreated: '2026-03-27' },
+          { label: 'Platform Specific', link: 'client/push/platform', dateCreated: '2026-03-28' },
+          { label: 'Azure Push Notifications', link: 'client/push/azure', dateCreated: '2026-03-27' },
+          { label: 'Firebase (iOS)', link: 'client/push/firebase-ios', dateCreated: '2026-03-27' },
+          { label: 'FAQ', link: 'client/push/faq', dateCreated: '2023-07-06' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Live Activities',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'client/liveactivities/', badge: { text: 'New', variant: 'success' } },
-          { label: 'iOS Widget Extension', link: 'client/liveactivities/widget' },
-          { label: 'Push Tokens & Server Updates', link: 'client/liveactivities/push' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/liveactivities/', dateCreated: '2026-07-31', dateUpdated: '2026-09-17' },
+          { label: 'iOS Widget Extension', link: 'client/liveactivities/widget', dateCreated: '2026-09-06' },
+          { label: 'Push Tokens & Server Updates', link: 'client/liveactivities/push', dateCreated: '2026-07-31' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'App Functions',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-29',
         items: [
-          { label: 'Getting Started', link: 'client/appfunctions/' },
-          { label: 'Delegates & In-App Calls', link: 'client/appfunctions/delegates' },
-          { label: 'Platform & Testing', link: 'client/appfunctions/platform' },
-          { label: 'AI Tools', link: 'client/appfunctions/ai-tools', badge: { text: 'New', variant: 'success' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/appfunctions/', dateCreated: '2026-09-29' },
+          { label: 'Delegates & In-App Calls', link: 'client/appfunctions/delegates', dateCreated: '2026-09-29' },
+          { label: 'Platform & Testing', link: 'client/appfunctions/platform', dateCreated: '2026-09-29' },
+          { label: 'AI Tools', link: 'client/appfunctions/ai-tools', dateCreated: '2026-09-30', dateUpdated: '2026-09-30' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'HTTP Transfers',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'client/httptransfers/' },
-          { label: 'Architecture', link: 'client/httptransfers/architecture' },
-          { label: 'Transfers', link: 'client/httptransfers/transfers' },
-          { label: 'Azure Blob Storage', link: 'client/httptransfers/azure' },
-          { label: 'AWS S3', link: 'client/httptransfers/aws-s3' },
-          { label: 'Resumable Uploads (tus)', link: 'client/httptransfers/tus' },
-          { label: 'Transfer Delegate', link: 'client/httptransfers/delegate' },
-          { label: 'Monitoring', link: 'client/httptransfers/monitoring' },
-          { label: 'Transfer Progress', link: 'client/httptransfers/progress' },
+          { label: 'Getting Started', link: 'client/httptransfers/', dateCreated: '2023-07-06' },
+          { label: 'Architecture', link: 'client/httptransfers/architecture', dateCreated: '2026-06-09' },
+          { label: 'Transfers', link: 'client/httptransfers/transfers', dateCreated: '2026-03-26' },
+          { label: 'Azure Blob Storage', link: 'client/httptransfers/azure', dateCreated: '2026-03-28' },
+          { label: 'AWS S3', link: 'client/httptransfers/aws-s3', dateCreated: '2026-04-24' },
+          { label: 'Resumable Uploads (tus)', link: 'client/httptransfers/tus', dateCreated: '2026-09-28' },
+          { label: 'Transfer Delegate', link: 'client/httptransfers/delegate', dateCreated: '2026-03-28' },
+          { label: 'Monitoring', link: 'client/httptransfers/monitoring', dateCreated: '2026-03-26' },
+          { label: 'Transfer Progress', link: 'client/httptransfers/progress', dateCreated: '2026-08-21' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
     ]
@@ -600,69 +615,70 @@ export const sidebarTopics = [
         label: 'MAUI Shell',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'mauishell/' },
-          { label: 'Navigation', link: 'mauishell/navigation' },
-          { label: 'Navigation Interceptors', link: 'mauishell/interceptors' },
-          { label: 'Dialogs', link: 'mauishell/dialogs' },
-          { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle' },
-          { label: 'Source Generation', link: 'mauishell/sourcegen' },
-          { label: 'App Links', link: 'mauishell/applinks' },
-          { label: 'App Shortcuts', link: 'mauishell/appshortcuts' },
-          { label: 'AI Integration', link: 'mauishell/ai' },
-          { label: 'Release Notes', link: 'mauishell/release-notes' }
+          { label: 'Getting Started', link: 'mauishell/', dateCreated: '2025-06-03' },
+          { label: 'Navigation', link: 'mauishell/navigation', dateCreated: '2026-02-25' },
+          { label: 'Navigation Interceptors', link: 'mauishell/interceptors', dateCreated: '2026-09-06' },
+          { label: 'Dialogs', link: 'mauishell/dialogs', dateCreated: '2026-03-11' },
+          { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle', dateCreated: '2026-02-25' },
+          { label: 'Source Generation', link: 'mauishell/sourcegen', dateCreated: '2026-02-25' },
+          { label: 'App Links', link: 'mauishell/applinks', dateCreated: '2026-09-04' },
+          { label: 'App Shortcuts', link: 'mauishell/appshortcuts', dateCreated: '2026-09-04' },
+          { label: 'AI Integration', link: 'mauishell/ai', dateCreated: '2026-04-26' },
+          { label: 'Release Notes', link: 'mauishell/release-notes', dateCreated: '2026-03-04' }
         ]
       },
       {
         label: 'MAUI Hosting',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'mauihost/' },
-          { label: 'App Support', link: 'mauihost/appsupport' },
-          { label: 'App Store', link: 'mauihost/appstore' },
-          { label: 'Startup Service', link: 'mauihost/startup' },
-          { label: 'Desktop Backends', link: 'mauihost/desktop' },
-          { label: 'Release Notes', link: 'mauihost/release-notes' }
+          { label: 'Getting Started', link: 'mauihost/', dateCreated: '2026-03-09' },
+          { label: 'App Support', link: 'mauihost/appsupport', dateCreated: '2026-05-29' },
+          { label: 'App Store', link: 'mauihost/appstore', dateCreated: '2026-05-29' },
+          { label: 'Startup Service', link: 'mauihost/startup', dateCreated: '2026-09-19' },
+          { label: 'Desktop Backends', link: 'mauihost/desktop', dateCreated: '2026-09-08' },
+          { label: 'Release Notes', link: 'mauihost/release-notes', dateCreated: '2026-03-09' }
         ]
       },
       {
         label: 'Configuration',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'client/configuration/' },
-          { label: 'JSON Platform Bundle', link: 'client/configuration/json' },
-          { label: 'Platform Preferences', link: 'client/configuration/preferences' },
-          { label: 'Remote Configuration', link: 'client/configuration/remote' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/configuration/', dateCreated: '2026-03-27' },
+          { label: 'JSON Platform Bundle', link: 'client/configuration/json', dateCreated: '2026-03-27' },
+          { label: 'Platform Preferences', link: 'client/configuration/preferences', dateCreated: '2026-03-27' },
+          { label: 'Remote Configuration', link: 'client/configuration/remote', dateCreated: '2026-03-27' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'MSBuild Permissions',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'permissions/' },
-          { label: 'Android', link: 'permissions/android' },
-          { label: 'iOS', link: 'permissions/ios' }
+          { label: 'Getting Started', link: 'permissions/', dateCreated: '2026-04-02' },
+          { label: 'Android', link: 'permissions/android', dateCreated: '2026-04-02' },
+          { label: 'iOS', link: 'permissions/ios', dateCreated: '2026-04-02' }
         ]
       },
       {
         label: 'App Device Bridge',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-30',
         items:[
-          { label: 'Getting Started', link: 'appdevicebridge/' },
-          { label: 'vs. Blazor Hybrid', link: 'appdevicebridge/vs-blazor-hybrid' },
-          { label: 'Hosting', link: 'appdevicebridge/hosting' },
-          { label: 'Updates', link: 'appdevicebridge/updates' },
-          { label: 'Security', link: 'appdevicebridge/security' },
-          { label: 'Typed Clients', link: 'appdevicebridge/clients' },
-          { label: 'Bridges', link: 'appdevicebridge/bridges' },
-          { label: 'Wearables', link: 'appdevicebridge/wearables' },
-          { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder' },
-          { label: 'Maps & Directions', link: 'appdevicebridge/maps' },
-          { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage' },
-          { label: 'Native Calls & Background', link: 'appdevicebridge/background' },
-          { label: 'Simulator', link: 'appdevicebridge/simulator' },
-          { label: 'Release Notes', link: 'appdevicebridge/release-notes' }
+          { label: 'Getting Started', link: 'appdevicebridge/', dateCreated: '2026-09-16' },
+          { label: 'vs. Blazor Hybrid', link: 'appdevicebridge/vs-blazor-hybrid', dateCreated: '2026-09-19' },
+          { label: 'Hosting', link: 'appdevicebridge/hosting', dateCreated: '2026-09-16' },
+          { label: 'Updates', link: 'appdevicebridge/updates', dateCreated: '2026-09-16' },
+          { label: 'Security', link: 'appdevicebridge/security', dateCreated: '2026-09-16' },
+          { label: 'Typed Clients', link: 'appdevicebridge/clients', dateCreated: '2026-09-16' },
+          { label: 'Bridges', link: 'appdevicebridge/bridges', dateCreated: '2026-09-16' },
+          { label: 'Wearables', link: 'appdevicebridge/wearables', dateCreated: '2026-09-18' },
+          { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder', dateCreated: '2026-09-24' },
+          { label: 'Maps & Directions', link: 'appdevicebridge/maps', dateCreated: '2026-09-22' },
+          { label: 'Printing', link: 'appdevicebridge/printing', dateCreated: '2026-10-03' },
+          { label: 'Settings, Files & Folders', link: 'appdevicebridge/storage', dateCreated: '2026-09-16' },
+          { label: 'Native Calls & Background', link: 'appdevicebridge/background', dateCreated: '2026-09-16' },
+          { label: 'Simulator', link: 'appdevicebridge/simulator', dateCreated: '2026-09-18' },
+          { label: 'Release Notes', link: 'appdevicebridge/release-notes', dateCreated: '2026-09-16' }
         ]
       },
     ]
@@ -676,251 +692,251 @@ export const sidebarTopics = [
     // Theming isn't a control, so the flattened catalogue below would never list it —
     // but it's the first thing you need before any control looks right.
     featuredInHomenav: [
-      { label: 'Theming', link: 'controls/theming/', note: 'Tokens, colour roles & theme packs' },
-      { label: 'Theme Composer', link: 'controls/theming/creator', note: 'Design a theme live, take the CSS or XAML' },
-      { label: 'Office Suite', link: 'controls/office-shell/', note: 'Word, Excel & PowerPoint-style editors' },
+      { label: 'Theming', link: 'controls/theming/', dateCreated: '2026-06-12', note: 'Tokens, colour roles & theme packs' },
+      { label: 'Theme Composer', link: 'controls/theming/creator', dateCreated: '2026-06-12', note: 'Design a theme live, take the CSS or XAML' },
+      { label: 'Office Suite', link: 'controls/office-shell/', dateCreated: '2026-09-28', note: 'Word, Excel & PowerPoint-style editors' },
     ],
     items:[
-      { label: 'Getting Started', link: 'controls/' },
+      { label: 'Getting Started', link: 'controls/', dateCreated: '2026-04-15' },
       {
         label: 'Theming',
         items:[
-          { label: 'Overview', link: 'controls/theming/' },
-          { label: 'Theme Packs', link: 'controls/theming/packs', badge: { text: 'New', variant: 'success' } },
-          { label: 'Theme Composer', link: 'controls/theming/creator', badge: { text: 'New', variant: 'success' } },
-          { label: 'Dark Mode', link: 'controls/theming/dark-mode', badge: { text: 'New', variant: 'success' } },
+          { label: 'Overview', link: 'controls/theming/', dateCreated: '2026-06-12' },
+          { label: 'Theme Packs', link: 'controls/theming/packs', dateCreated: '2026-08-13', dateUpdated: '2026-08-13' },
+          { label: 'Theme Composer', link: 'controls/theming/creator', dateCreated: '2026-06-12', dateUpdated: '2026-09-12' },
+          { label: 'Dark Mode', link: 'controls/theming/dark-mode', dateCreated: '2026-08-29', dateUpdated: '2026-08-29' },
         ],
       },
       {
         label: 'Barcodes & QR Codes',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/barcodes/' },
-          { label: '.NET MAUI Usage', link: 'controls/barcodes/maui' },
-          { label: 'Blazor Usage', link: 'controls/barcodes/blazor' },
-          { label: 'Headless Rendering', link: 'controls/barcodes/rendering' },
-          { label: 'Symbologies', link: 'controls/barcodes/symbologies' },
+          { label: 'Getting Started', link: 'controls/barcodes/', dateCreated: '2026-06-05' },
+          { label: '.NET MAUI Usage', link: 'controls/barcodes/maui', dateCreated: '2026-06-26' },
+          { label: 'Blazor Usage', link: 'controls/barcodes/blazor', dateCreated: '2026-06-26' },
+          { label: 'Headless Rendering', link: 'controls/barcodes/rendering', dateCreated: '2026-06-26' },
+          { label: 'Symbologies', link: 'controls/barcodes/symbologies', dateCreated: '2026-06-26' },
         ]
       },
       {
         label: 'CameraView',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/cameraview/' },
-          { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers' },
-          { label: 'Effects & Filters', link: 'controls/cameraview/effects' },
-          { label: 'Face Masks', link: 'controls/cameraview/face-masks' },
-          { label: 'AI Document Scanner', link: 'controls/cameraview/ai' },
-          { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize' },
-          { label: 'Blazor Usage', link: 'controls/cameraview/blazor' },
-          { label: 'Blazor Media Service', link: 'controls/cameraview/media-service-blazor' },
+          { label: 'Getting Started', link: 'controls/cameraview/', dateCreated: '2026-06-13' },
+          { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers', dateCreated: '2026-06-13' },
+          { label: 'Effects & Filters', link: 'controls/cameraview/effects', dateCreated: '2026-08-04' },
+          { label: 'Face Masks', link: 'controls/cameraview/face-masks', dateCreated: '2026-08-04' },
+          { label: 'AI Document Scanner', link: 'controls/cameraview/ai', dateCreated: '2026-06-30' },
+          { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize', dateCreated: '2026-08-04' },
+          { label: 'Blazor Usage', link: 'controls/cameraview/blazor', dateCreated: '2026-06-13' },
+          { label: 'Blazor Media Service', link: 'controls/cameraview/media-service-blazor', dateCreated: '2026-09-18' },
         ]
       },
       {
         label: 'MediaElement',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-12',
         items:[
-          { label: 'Getting Started', link: 'controls/mediaelement/' },
-          { label: 'Transport Bar', link: 'controls/mediaelement/transport-bar' },
-          { label: 'Background Playback & PiP', link: 'controls/mediaelement/background-playback' },
-          { label: 'Blazor Usage', link: 'controls/mediaelement/blazor' },
+          { label: 'Getting Started', link: 'controls/mediaelement/', dateCreated: '2026-08-12' },
+          { label: 'Transport Bar', link: 'controls/mediaelement/transport-bar', dateCreated: '2026-08-12' },
+          { label: 'Background Playback & PiP', link: 'controls/mediaelement/background-playback', dateCreated: '2026-08-12' },
+          { label: 'Blazor Usage', link: 'controls/mediaelement/blazor', dateCreated: '2026-08-12' },
         ]
       },
       {
         label: 'ChatView',
         jumpTo: true,
         items:[
-          { label: 'Overview', link: 'controls/chatview/' },
-          { label: 'Getting Started', link: 'controls/chatview/getting-started' },
-          { label: 'The Provider Interface', link: 'controls/chatview/the-provider' },
-          { label: 'Messages & Paging', link: 'controls/chatview/messages-paging' },
-          { label: 'Permissions', link: 'controls/chatview/permissions' },
-          { label: 'Reactions & Read Receipts', link: 'controls/chatview/reactions-receipts' },
-          { label: 'The Composer', link: 'controls/chatview/composer' },
-          { label: 'Markdown & Input Bar', link: 'controls/chatview/markdown-input' },
-          { label: 'Images & Attachments', link: 'controls/chatview/images-attachments' },
-          { label: 'Typing & Connection', link: 'controls/chatview/typing-connection' },
-          { label: 'Message Templates', link: 'controls/chatview/message-templates' },
-          { label: 'Custom Actions', link: 'controls/chatview/custom-actions' },
-          { label: 'Scenarios', link: 'controls/chatview/scenarios' },
-          { label: 'API Reference', link: 'controls/chatview/api-reference' },
+          { label: 'Overview', link: 'controls/chatview/', dateCreated: '2026-04-21' },
+          { label: 'Getting Started', link: 'controls/chatview/getting-started', dateCreated: '2026-05-04' },
+          { label: 'The Provider Interface', link: 'controls/chatview/the-provider', dateCreated: '2026-06-27' },
+          { label: 'Messages & Paging', link: 'controls/chatview/messages-paging', dateCreated: '2026-06-27' },
+          { label: 'Permissions', link: 'controls/chatview/permissions', dateCreated: '2026-06-27' },
+          { label: 'Reactions & Read Receipts', link: 'controls/chatview/reactions-receipts', dateCreated: '2026-06-27' },
+          { label: 'The Composer', link: 'controls/chatview/composer', dateCreated: '2026-08-09' },
+          { label: 'Markdown & Input Bar', link: 'controls/chatview/markdown-input', dateCreated: '2026-06-27' },
+          { label: 'Images & Attachments', link: 'controls/chatview/images-attachments', dateCreated: '2026-06-27' },
+          { label: 'Typing & Connection', link: 'controls/chatview/typing-connection', dateCreated: '2026-06-27' },
+          { label: 'Message Templates', link: 'controls/chatview/message-templates', dateCreated: '2026-05-04' },
+          { label: 'Custom Actions', link: 'controls/chatview/custom-actions', dateCreated: '2026-06-27' },
+          { label: 'Scenarios', link: 'controls/chatview/scenarios', dateCreated: '2026-05-04' },
+          { label: 'API Reference', link: 'controls/chatview/api-reference', dateCreated: '2026-05-04' },
         ]
       },
       {
         label: 'DataGrid',
         jumpTo: true,
         items:[
-          { label: 'Overview', link: 'controls/datagrid/' },
-          { label: 'Getting Started', link: 'controls/datagrid/getting-started' },
-          { label: 'Column Formatting', link: 'controls/datagrid/column-formatting', badge: { text: 'New', variant: 'success' } },
-          { label: 'Conditional Cell Styling', link: 'controls/datagrid/cell-styling', badge: { text: 'New', variant: 'success' } },
-          { label: 'Column Widths', link: 'controls/datagrid/column-widths' },
-          { label: 'Column Ordering', link: 'controls/datagrid/column-ordering' },
-          { label: 'Column Resizing', link: 'controls/datagrid/column-resizing' },
-          { label: 'Grouping & Summary Rows', link: 'controls/datagrid/grouping', badge: { text: 'New', variant: 'success' } },
-          { label: 'Frozen Header & Columns', link: 'controls/datagrid/frozen-columns' },
-          { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/detail-rows' },
-          { label: 'Async Detail & IsBusy', link: 'controls/datagrid/async-detail' },
-          { label: 'TreeDataGrid', link: 'controls/datagrid/tree-data-grid' },
+          { label: 'Overview', link: 'controls/datagrid/', dateCreated: '2026-06-17' },
+          { label: 'Getting Started', link: 'controls/datagrid/getting-started', dateCreated: '2026-08-24' },
+          { label: 'Column Formatting', link: 'controls/datagrid/column-formatting', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
+          { label: 'Conditional Cell Styling', link: 'controls/datagrid/cell-styling', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
+          { label: 'Column Widths', link: 'controls/datagrid/column-widths', dateCreated: '2026-08-24' },
+          { label: 'Column Ordering', link: 'controls/datagrid/column-ordering', dateCreated: '2026-08-24' },
+          { label: 'Column Resizing', link: 'controls/datagrid/column-resizing', dateCreated: '2026-08-24' },
+          { label: 'Grouping & Summary Rows', link: 'controls/datagrid/grouping', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+          { label: 'Frozen Header & Columns', link: 'controls/datagrid/frozen-columns', dateCreated: '2026-08-24' },
+          { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/detail-rows', dateCreated: '2026-08-24' },
+          { label: 'Async Detail & IsBusy', link: 'controls/datagrid/async-detail', dateCreated: '2026-08-24' },
+          { label: 'TreeDataGrid', link: 'controls/datagrid/tree-data-grid', dateCreated: '2026-08-24' },
         ]
       },
       {
         label: 'Gantt',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-07',
         items:[
-          { label: 'Overview', link: 'controls/gantt/' },
-          { label: 'Scheduling', link: 'controls/gantt/scheduling' },
+          { label: 'Overview', link: 'controls/gantt/', dateCreated: '2026-09-07' },
+          { label: 'Scheduling', link: 'controls/gantt/scheduling', dateCreated: '2026-09-07' },
         ]
       },
       {
         label: 'Kanban',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-16',
         items:[
-          { label: 'Overview', link: 'controls/kanban/' },
+          { label: 'Overview', link: 'controls/kanban/', dateCreated: '2026-09-15' },
         ]
       },
       {
         label: 'Floor Plan',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-07',
         items:[
-          { label: 'Overview', link: 'controls/floorplan/' },
+          { label: 'Overview', link: 'controls/floorplan/', dateCreated: '2026-09-07' },
         ]
       },
       {
         label: 'Diagram',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-09-07',
         items:[
-          { label: 'Overview', link: 'controls/diagram/' },
-          { label: 'Layouts', link: 'controls/diagram/layouts' },
-          { label: 'Editing & Undo', link: 'controls/diagram/editing' },
+          { label: 'Overview', link: 'controls/diagram/', dateCreated: '2026-09-07' },
+          { label: 'Layouts', link: 'controls/diagram/layouts', dateCreated: '2026-09-07' },
+          { label: 'Editing & Undo', link: 'controls/diagram/editing', dateCreated: '2026-09-07' },
         ]
       },
       {
         label: 'Office',
         items:[
-          { label: 'Spreadsheet', link: 'controls/spreadsheet/', jumpTo: true },
-          { label: 'Spreadsheet Formatting', link: 'controls/spreadsheet/formatting', badge: { text: 'New', variant: 'success' } },
-          { label: 'Spreadsheet Sort, Filter & Validation', link: 'controls/spreadsheet/data', badge: { text: 'New', variant: 'success' } },
-          { label: 'Spreadsheet Formulas', link: 'controls/spreadsheet/formulas', badge: { text: 'New', variant: 'success' } },
-          { label: 'Spreadsheet Charts', link: 'controls/spreadsheet/charts', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Viewer', link: 'controls/document-viewer/', jumpTo: true },
-          { label: 'Slide Viewer', link: 'controls/slide-viewer/', jumpTo: true },
-          { label: 'Presenting Mode', link: 'controls/slide-viewer/presenting', badge: { text: 'New', variant: 'success' } },
-          { label: 'Office Shell', link: 'controls/office-shell/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Editor', link: 'controls/document-editor/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Lists', link: 'controls/document-editor/lists', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Formatting & Editing', link: 'controls/document-editor/formatting', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Tables', link: 'controls/document-editor/tables', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document References & Links', link: 'controls/document-editor/references', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Comments & Track Changes', link: 'controls/document-editor/review', badge: { text: 'New', variant: 'success' } },
-          { label: 'Document Page Layout & Views', link: 'controls/document-editor/page-layout', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Editor', link: 'controls/slide-editor/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Objects, Groups & Tables', link: 'controls/slide-editor/objects', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slides, Layouts & Notes', link: 'controls/slide-editor/slides', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Shape Format & Text', link: 'controls/slide-editor/format', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Design', link: 'controls/slide-editor/design', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Transitions & Animations', link: 'controls/slide-editor/transitions-animations', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Charts, Icons & Media', link: 'controls/slide-editor/insert', badge: { text: 'New', variant: 'success' } },
-          { label: 'Slide Show & Presenter View', link: 'controls/slide-editor/presenting', badge: { text: 'New', variant: 'success' } },
-          { label: 'Notebook', link: 'controls/notebook/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Find', link: 'controls/office-find', badge: { text: 'New', variant: 'success' } },
+          { label: 'Spreadsheet', link: 'controls/spreadsheet/', dateCreated: '2026-08-24', jumpTo: true },
+          { label: 'Spreadsheet Formatting', link: 'controls/spreadsheet/formatting', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Spreadsheet Sort, Filter & Validation', link: 'controls/spreadsheet/data', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Spreadsheet Formulas', link: 'controls/spreadsheet/formulas', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Spreadsheet Charts', link: 'controls/spreadsheet/charts', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Document Viewer', link: 'controls/document-viewer/', dateCreated: '2026-08-24', jumpTo: true },
+          { label: 'Slide Viewer', link: 'controls/slide-viewer/', dateCreated: '2026-09-04', jumpTo: true },
+          { label: 'Presenting Mode', link: 'controls/slide-viewer/presenting', dateCreated: '2026-09-01', dateUpdated: '2026-09-04' },
+          { label: 'Office Shell', link: 'controls/office-shell/', dateCreated: '2026-09-28', jumpTo: true, dateUpdated: '2026-09-28' },
+          { label: 'Document Editor', link: 'controls/document-editor/', dateCreated: '2026-08-24', jumpTo: true, dateUpdated: '2026-09-28' },
+          { label: 'Document Objects & Highlighting', link: 'controls/document-editor/objects', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+          { label: 'Document Lists', link: 'controls/document-editor/lists', dateCreated: '2026-08-28', dateUpdated: '2026-08-28' },
+          { label: 'Document Formatting & Editing', link: 'controls/document-editor/formatting', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Document Tables', link: 'controls/document-editor/tables', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Document References & Links', link: 'controls/document-editor/references', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Document Comments & Track Changes', link: 'controls/document-editor/review', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Document Page Layout & Views', link: 'controls/document-editor/page-layout', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Slide Editor', link: 'controls/slide-editor/', dateCreated: '2026-08-24', jumpTo: true, dateUpdated: '2026-09-28' },
+          { label: 'Slide Objects, Groups & Tables', link: 'controls/slide-editor/objects', dateCreated: '2026-08-26', dateUpdated: '2026-09-23' },
+          { label: 'Slide Bullets & Numbering', link: 'controls/slide-editor/lists', dateCreated: '2026-08-28', dateUpdated: '2026-08-28' },
+          { label: 'Slides, Layouts & Notes', link: 'controls/slide-editor/slides', dateCreated: '2026-09-22', dateUpdated: '2026-09-23' },
+          { label: 'Slide Shape Format & Text', link: 'controls/slide-editor/format', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Slide Design', link: 'controls/slide-editor/design', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Slide Transitions & Animations', link: 'controls/slide-editor/transitions-animations', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Slide Charts, Icons & Media', link: 'controls/slide-editor/insert', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Slide Show & Presenter View', link: 'controls/slide-editor/presenting', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
+          { label: 'Notebook', link: 'controls/notebook/', dateCreated: '2026-09-01', jumpTo: true, dateUpdated: '2026-09-17' },
+          { label: 'Find', link: 'controls/office-find', dateCreated: '2026-08-30', dateUpdated: '2026-08-30' },
         ]
       },
       {
         label: 'Expander & Accordion',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-26',
         items:[
-          { label: 'Getting Started', link: 'controls/expander/' },
-          { label: 'Accordion', link: 'controls/expander/accordion' },
-          { label: 'Blazor Usage', link: 'controls/expander/blazor' },
+          { label: 'Getting Started', link: 'controls/expander/', dateCreated: '2026-08-26' },
+          { label: 'Accordion', link: 'controls/expander/accordion', dateCreated: '2026-08-26' },
+          { label: 'Blazor Usage', link: 'controls/expander/blazor', dateCreated: '2026-08-26' },
         ]
       },
       {
         label: 'Collections & Grids',
         items:[
-          { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', jumpTo: true },
-          { label: 'StaggeredGrid', link: 'controls/staggered-grid/', jumpTo: true },
-          { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', jumpTo: true },
-          { label: 'CarouselGallery', link: 'controls/carousel-gallery/', jumpTo: true },
-          { label: 'Carousel', link: 'controls/carousel/', jumpTo: true, platform: 'blazor' },
+          { label: 'VirtualizedGrid', link: 'controls/virtualized-grid/', dateCreated: '2026-05-13', jumpTo: true },
+          { label: 'StaggeredGrid', link: 'controls/staggered-grid/', dateCreated: '2026-05-13', jumpTo: true },
+          { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', dateCreated: '2026-06-05', jumpTo: true },
+          { label: 'CarouselGallery', link: 'controls/carousel-gallery/', dateCreated: '2026-05-13', jumpTo: true },
+          { label: 'Carousel', link: 'controls/carousel/', dateCreated: '2026-06-15', jumpTo: true, platform: 'blazor' },
         ]
       },
       {
         label: 'Desktop',
         items:[
-          { label: 'Tray Icon', link: 'controls/trayicon/', jumpTo: true, platform: 'maui' },
-          { label: 'Docking', link: 'controls/docking/', jumpTo: true },
-          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', jumpTo: true, platform: 'blazor' },
+          { label: 'Tray Icon', link: 'controls/trayicon/', dateCreated: '2026-06-01', jumpTo: true, platform: 'maui' },
+          { label: 'Docking', link: 'controls/docking/', dateCreated: '2026-06-07', jumpTo: true },
+          { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', dateCreated: '2026-06-07', jumpTo: true, platform: 'blazor' },
         ]
       },
       {
         label: 'ShinyButton',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/button/' },
-          { label: 'States & Commands', link: 'controls/button/states' },
-          { label: 'Blazor Usage', link: 'controls/button/blazor' },
+          { label: 'Getting Started', link: 'controls/button/', dateCreated: '2026-08-12' },
+          { label: 'States & Commands', link: 'controls/button/states', dateCreated: '2026-08-12' },
+          { label: 'Blazor Usage', link: 'controls/button/blazor', dateCreated: '2026-08-12' },
         ]
       },
       {
         label: 'Fab & FabMenu',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/fab/' },
-          { label: 'Fab', link: 'controls/fab/fab' },
-          { label: 'FabMenu', link: 'controls/fab/fabmenu' },
-          { label: 'Blazor Usage', link: 'controls/fab/blazor' },
+          { label: 'Getting Started', link: 'controls/fab/', dateCreated: '2026-04-16' },
+          { label: 'Fab', link: 'controls/fab/fab', dateCreated: '2026-04-22' },
+          { label: 'FabMenu', link: 'controls/fab/fabmenu', dateCreated: '2026-04-22' },
+          { label: 'Blazor Usage', link: 'controls/fab/blazor', dateCreated: '2026-04-22' },
         ]
       },
       {
         label: 'Services',
         items:[
-          { label: 'Dialog Service', link: 'controls/dialogs/', jumpTo: true },
-          { label: 'Feedback Service', link: 'controls/feedback/', jumpTo: true, platform: 'maui' },
-          { label: 'Media Service', link: 'controls/cameraview/media-service', jumpTo: true, platform: 'maui', badge: { text: 'New', variant: 'success' } },
-          { label: 'Media Service', link: 'controls/cameraview/media-service-blazor', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
+          { label: 'Dialog Service', link: 'controls/dialogs/', dateCreated: '2026-06-17', jumpTo: true },
+          { label: 'Feedback Service', link: 'controls/feedback/', dateCreated: '2026-05-03', jumpTo: true, platform: 'maui' },
+          { label: 'Media Service', link: 'controls/cameraview/media-service', dateCreated: '2026-09-02', jumpTo: true, platform: 'maui', dateUpdated: '2026-09-07' },
+          { label: 'Media Service', link: 'controls/cameraview/media-service-blazor', dateCreated: '2026-09-18', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-18' },
         ]
       },
       {
         label: 'Flyout',
         jumpTo: true,
         platform: 'maui',
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-26',
         items:[
-          { label: 'Getting Started', link: 'controls/flyout/' },
-          { label: 'Shell & App-Wide', link: 'controls/flyout/shell' },
-          { label: 'Properties & Events', link: 'controls/flyout/properties' },
+          { label: 'Getting Started', link: 'controls/flyout/', dateCreated: '2026-08-25' },
+          { label: 'Shell & App-Wide', link: 'controls/flyout/shell', dateCreated: '2026-08-25' },
+          { label: 'Properties & Events', link: 'controls/flyout/properties', dateCreated: '2026-08-25' },
         ]
       },
       {
         label: 'TabbedPage',
         jumpTo: true,
         platform: 'maui',
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-26',
         items:[
-          { label: 'Getting Started', link: 'controls/tabbedpage/' },
-          { label: 'Shell', link: 'controls/tabbedpage/shell' },
-          { label: 'Properties & Events', link: 'controls/tabbedpage/properties' },
+          { label: 'Getting Started', link: 'controls/tabbedpage/', dateCreated: '2026-08-25' },
+          { label: 'Shell', link: 'controls/tabbedpage/shell', dateCreated: '2026-08-25' },
+          { label: 'Properties & Events', link: 'controls/tabbedpage/properties', dateCreated: '2026-08-25' },
         ]
       },
       {
         label: 'NavigationPage',
         jumpTo: true,
         platform: 'maui',
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-26',
         items:[
-          { label: 'Getting Started', link: 'controls/navigationpage/' },
-          { label: 'Items & Overflow', link: 'controls/navigationpage/items' },
-          { label: 'Status Bar & Safe Area', link: 'controls/navigationpage/status-bar' },
-          { label: 'Properties & Events', link: 'controls/navigationpage/properties' },
+          { label: 'Getting Started', link: 'controls/navigationpage/', dateCreated: '2026-08-25' },
+          { label: 'Items & Overflow', link: 'controls/navigationpage/items', dateCreated: '2026-08-25' },
+          { label: 'Status Bar & Safe Area', link: 'controls/navigationpage/status-bar', dateCreated: '2026-09-07' },
+          { label: 'Properties & Events', link: 'controls/navigationpage/properties', dateCreated: '2026-08-25' },
         ]
       },
       {
@@ -928,219 +944,222 @@ export const sidebarTopics = [
         jumpTo: true,
         platform: 'maui',
         items:[
-          { label: 'Getting Started', link: 'controls/floatingpanel/' },
-          { label: 'Properties & Events', link: 'controls/floatingpanel/properties' },
-          { label: 'Examples', link: 'controls/floatingpanel/examples' },
+          { label: 'Getting Started', link: 'controls/floatingpanel/', dateCreated: '2026-04-25' },
+          { label: 'Properties & Events', link: 'controls/floatingpanel/properties', dateCreated: '2026-04-25' },
+          { label: 'Examples', link: 'controls/floatingpanel/examples', dateCreated: '2026-04-25' },
           {
             label: 'Derived Controls',
             items:[
-              { label: 'Overlay', link: 'controls/overlay/', jumpTo: true },
-              { label: 'SignaturePad', link: 'controls/signaturepad/', jumpTo: true },
-              { label: 'DurationPicker', link: 'controls/durationpicker/', jumpTo: true, platform: 'maui' },
-              { label: 'Sheet View', link: 'controls/sheetview/', jumpTo: true, platform: 'blazor' },
+              { label: 'Overlay', link: 'controls/overlay/', dateCreated: '2026-05-04', jumpTo: true },
+              { label: 'SignaturePad', link: 'controls/signaturepad/', dateCreated: '2026-04-30', jumpTo: true },
+              { label: 'DurationPicker', link: 'controls/durationpicker/', dateCreated: '2026-06-26', jumpTo: true, platform: 'maui' },
+              { label: 'Sheet View', link: 'controls/sheetview/', dateCreated: '2026-04-15', jumpTo: true, platform: 'blazor' },
             ]
           },
         ]
       },
-      { label: 'Quick Entry', link: 'controls/quick-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-      { label: 'File Drop', link: 'controls/file-drop/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-      { label: 'Keyboard Shortcuts', link: 'controls/keyboard-shortcuts/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-      { label: 'FrostedGlassView', link: 'controls/frostedglass/', jumpTo: true },
+      { label: 'Quick Entry', link: 'controls/quick-entry/', dateCreated: '2026-08-23', jumpTo: true, dateUpdated: '2026-08-23' },
+      { label: 'File Drop', link: 'controls/file-drop/', dateCreated: '2026-08-28', jumpTo: true, dateUpdated: '2026-08-28' },
+      { label: 'Keyboard Shortcuts', link: 'controls/keyboard-shortcuts/', dateCreated: '2026-10-02', jumpTo: true, dateUpdated: '2026-10-03' },
+      { label: 'FrostedGlassView', link: 'controls/frostedglass/', dateCreated: '2026-07-31', jumpTo: true },
       {
         label: 'Images',
         items:[
           {
             label: 'ShinyImage',
             jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
+            dateUpdated: '2026-08-26',
             items:[
-              { label: 'Getting Started', link: 'controls/shinyimage/' },
-              { label: 'Image Sources', link: 'controls/shinyimage/sources', badge: { text: 'New', variant: 'success' } },
-              { label: 'SVG', link: 'controls/shinyimage/svg', badge: { text: 'New', variant: 'success' } },
-              { label: 'Progress & Templates', link: 'controls/shinyimage/progress' },
-              { label: 'Caching & ImageService', link: 'controls/shinyimage/imageservice' },
-              { label: 'Blazor', link: 'controls/shinyimage/blazor' },
-              { label: 'Properties & Events', link: 'controls/shinyimage/properties' },
+              { label: 'Getting Started', link: 'controls/shinyimage/', dateCreated: '2026-08-13' },
+              { label: 'Image Sources', link: 'controls/shinyimage/sources', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+              { label: 'SVG', link: 'controls/shinyimage/svg', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+              { label: 'Progress & Templates', link: 'controls/shinyimage/progress', dateCreated: '2026-08-26' },
+              { label: 'Caching & ImageService', link: 'controls/shinyimage/imageservice', dateCreated: '2026-08-26' },
+              { label: 'Blazor', link: 'controls/shinyimage/blazor', dateCreated: '2026-08-26' },
+              { label: 'Properties & Events', link: 'controls/shinyimage/properties', dateCreated: '2026-08-26' },
             ]
           },
-          { label: 'ImageViewer', link: 'controls/imageviewer/', jumpTo: true },
-          { label: 'ZoomPanView', link: 'controls/zoompanview/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'FloatingToolbar', link: 'controls/floatingtoolbar/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'ImageViewer', link: 'controls/imageviewer/', dateCreated: '2026-04-15', jumpTo: true },
+          { label: 'ZoomPanView', link: 'controls/zoompanview/', dateCreated: '2026-09-09', jumpTo: true, dateUpdated: '2026-09-17' },
+          { label: 'FloatingToolbar', link: 'controls/floatingtoolbar/', dateCreated: '2026-09-09', jumpTo: true, dateUpdated: '2026-09-17' },
           {
             label: 'ImageEditor',
             jumpTo: true,
             items:[
-              { label: 'Getting Started', link: 'controls/imageeditor/' },
-              { label: 'Zoom & Pan', link: 'controls/imageeditor/zoom', badge: { text: 'New', variant: 'success' } },
-              { label: 'Shapes', link: 'controls/imageeditor/shapes', badge: { text: 'New', variant: 'success' } },
-              { label: 'Properties & Commands', link: 'controls/imageeditor/properties' },
-              { label: 'Save & Export', link: 'controls/imageeditor/save-export' },
+              { label: 'Getting Started', link: 'controls/imageeditor/', dateCreated: '2026-04-21' },
+              { label: 'Zoom & Pan', link: 'controls/imageeditor/zoom', dateCreated: '2026-08-09', dateUpdated: '2026-08-26' },
+              { label: 'Shapes', link: 'controls/imageeditor/shapes', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+              { label: 'Properties & Commands', link: 'controls/imageeditor/properties', dateCreated: '2026-04-22' },
+              { label: 'Save & Export', link: 'controls/imageeditor/save-export', dateCreated: '2026-04-22' },
             ]
           },
-          { label: 'MediaPickerButton', link: 'controls/media-picker-button/', jumpTo: true },
+          { label: 'MediaPickerButton', link: 'controls/media-picker-button/', dateCreated: '2026-07-12', jumpTo: true },
         ]
       },
       {
         label: 'Input Controls',
         items:[
-          { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', jumpTo: true },
-          { label: 'CountryPicker', link: 'controls/countrypicker/', jumpTo: true },
-          { label: 'AddressEntry', link: 'controls/addressentry/', jumpTo: true },
+          { label: 'AutoCompleteEntry', link: 'controls/autocomplete/', dateCreated: '2026-04-23', jumpTo: true },
+          { label: 'CountryPicker', link: 'controls/countrypicker/', dateCreated: '2026-04-23', jumpTo: true },
+          { label: 'AddressEntry', link: 'controls/addressentry/', dateCreated: '2026-04-23', jumpTo: true },
           {
             label: 'TextEntry',
             jumpTo: true,
             items: [
-              { label: 'Getting Started', link: 'controls/textentry/' },
-              { label: 'Keyboard Accessory', link: 'controls/textentry/keyboard-accessory', badge: { text: 'New', variant: 'success' } },
+              { label: 'Getting Started', link: 'controls/textentry/', dateCreated: '2026-05-04' },
+              { label: 'Keyboard Accessory', link: 'controls/textentry/keyboard-accessory', dateCreated: '2026-08-09', dateUpdated: '2026-08-09' },
             ]
           },
-          { label: 'Speech Add-ins', link: 'controls/speech-addins/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Captcha', link: 'controls/captcha/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
+          { label: 'Speech Add-ins', link: 'controls/speech-addins/', dateCreated: '2026-08-14', jumpTo: true, dateUpdated: '2026-08-14' },
+          { label: 'Captcha', link: 'controls/captcha/', dateCreated: '2026-08-28', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-07' },
           {
             label: 'Gamepad',
             jumpTo: true,
-            badge: { text: 'New', variant: 'success' },
+            dateUpdated: '2026-09-23',
             items: [
-              { label: 'Getting Started', link: 'controls/gamepad/' },
-              { label: 'Layouts & Customizing', link: 'controls/gamepad/customizing' },
+              { label: 'Getting Started', link: 'controls/gamepad/', dateCreated: '2026-09-22' },
+              { label: 'Layouts & Customizing', link: 'controls/gamepad/customizing', dateCreated: '2026-09-22' },
             ]
           },
         ]
       },
-      { label: 'ShinyFlexLayout', link: 'controls/flex-layout/', jumpTo: true, platform: 'maui', badge: { text: 'New', variant: 'success' } },
-      { label: 'YogaLayout', link: 'controls/yoga-layout/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+      { label: 'ShinyFlexLayout', link: 'controls/flex-layout/', dateCreated: '2026-09-25', jumpTo: true, platform: 'maui', dateUpdated: '2026-09-25' },
+      { label: 'YogaLayout', link: 'controls/yoga-layout/', dateCreated: '2026-09-25', jumpTo: true, dateUpdated: '2026-09-25' },
       {
         label: 'Layout',
         platform: 'blazor',
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-13',
         items:[
-          { label: 'Stacks & Grid', link: 'controls/layout/', jumpTo: true },
-          { label: 'AppLayout', link: 'controls/applayout/', jumpTo: true },
+          { label: 'Stacks & Grid', link: 'controls/layout/', dateCreated: '2026-08-13', jumpTo: true },
+          { label: 'AppLayout', link: 'controls/applayout/', dateCreated: '2026-08-13', jumpTo: true },
         ]
       },
       {
         label: 'Keyframe Animation',
         jumpTo: true,
         platform: 'maui',
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-07',
         items:[
-          { label: 'Getting Started', link: 'controls/keyframe/' },
-          { label: 'XAML Animations', link: 'controls/keyframe/xaml' },
-          { label: 'Easing Curves', link: 'controls/keyframe/easing' },
-          { label: 'Timelines & Playback', link: 'controls/keyframe/timelines' },
-          { label: 'Drawn Scenes', link: 'controls/keyframe/scenes' },
-          { label: 'Offscreen Export', link: 'controls/keyframe/export' },
+          { label: 'Getting Started', link: 'controls/keyframe/', dateCreated: '2026-08-07' },
+          { label: 'XAML Animations', link: 'controls/keyframe/xaml', dateCreated: '2026-08-07' },
+          { label: 'Easing Curves', link: 'controls/keyframe/easing', dateCreated: '2026-08-07' },
+          { label: 'Timelines & Playback', link: 'controls/keyframe/timelines', dateCreated: '2026-08-07' },
+          { label: 'Drawn Scenes', link: 'controls/keyframe/scenes', dateCreated: '2026-08-07' },
+          { label: 'Offscreen Export', link: 'controls/keyframe/export', dateCreated: '2026-08-07' },
         ]
       },
       {
         label: 'Motion Icons',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-12',
         items:[
-          { label: 'Getting Started', link: 'controls/motion-icons/' },
-          { label: 'Triggers', link: 'controls/motion-icons/triggers' },
-          { label: 'The Icon Set', link: 'controls/motion-icons/icons' },
-          { label: 'Presets', link: 'controls/motion-icons/presets' },
-          { label: 'Custom Artwork', link: 'controls/motion-icons/custom' },
+          { label: 'Getting Started', link: 'controls/motion-icons/', dateCreated: '2026-08-12' },
+          { label: 'Triggers', link: 'controls/motion-icons/triggers', dateCreated: '2026-08-12' },
+          { label: 'The Icon Set', link: 'controls/motion-icons/icons', dateCreated: '2026-08-12' },
+          { label: 'Presets', link: 'controls/motion-icons/presets', dateCreated: '2026-08-12' },
+          { label: 'Custom Artwork', link: 'controls/motion-icons/custom', dateCreated: '2026-08-12' },
         ]
       },
       {
         label: 'Mermaid Diagrams',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/mermaid-diagrams/' },
-          { label: 'Control Properties', link: 'controls/mermaid-diagrams/control' },
-          { label: 'Theming', link: 'controls/mermaid-diagrams/theming' },
-          { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor' },
+          { label: 'Getting Started', link: 'controls/mermaid-diagrams/', dateCreated: '2026-03-31' },
+          { label: 'Control Properties', link: 'controls/mermaid-diagrams/control', dateCreated: '2026-03-31' },
+          { label: 'Theming', link: 'controls/mermaid-diagrams/theming', dateCreated: '2026-03-31' },
+          { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor', dateCreated: '2026-04-22' },
         ]
       },
       {
         label: 'Scheduler',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/scheduler/' },
-          { label: 'Calendar View', link: 'controls/scheduler/calendar' },
-          { label: 'Agenda View', link: 'controls/scheduler/agenda' },
-          { label: 'Drag & Drop Editing', link: 'controls/scheduler/drag-drop' },
-          { label: 'Event List', link: 'controls/scheduler/event-list' },
-          { label: 'Custom Templates', link: 'controls/scheduler/templates' },
-          { label: 'Blazor Usage', link: 'controls/scheduler/blazor' },
+          { label: 'Getting Started', link: 'controls/scheduler/', dateCreated: '2026-03-31' },
+          { label: 'Calendar View', link: 'controls/scheduler/calendar', dateCreated: '2026-03-31' },
+          { label: 'Agenda View', link: 'controls/scheduler/agenda', dateCreated: '2026-03-31' },
+          { label: 'Drag & Drop Editing', link: 'controls/scheduler/drag-drop', dateCreated: '2026-08-05' },
+          { label: 'Event List', link: 'controls/scheduler/event-list', dateCreated: '2026-03-31' },
+          { label: 'Custom Templates', link: 'controls/scheduler/templates', dateCreated: '2026-03-31' },
+          { label: 'Blazor Usage', link: 'controls/scheduler/blazor', dateCreated: '2026-04-22' },
         ]
       },
       {
         label: 'TableView',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/tableview/' },
-          { label: 'Cell Types', link: 'controls/tableview/cells' },
-          { label: 'Sections & Dynamic Content', link: 'controls/tableview/sections' },
-          { label: 'Styling', link: 'controls/tableview/styling' },
-          { label: 'Advanced Features', link: 'controls/tableview/advanced' },
-          { label: 'Blazor Usage', link: 'controls/tableview/blazor' },
+          { label: 'Getting Started', link: 'controls/tableview/', dateCreated: '2026-02-18' },
+          { label: 'Cell Types', link: 'controls/tableview/cells', dateCreated: '2026-02-18' },
+          { label: 'Sections & Dynamic Content', link: 'controls/tableview/sections', dateCreated: '2026-02-18' },
+          { label: 'Styling', link: 'controls/tableview/styling', dateCreated: '2026-02-18' },
+          { label: 'Advanced Features', link: 'controls/tableview/advanced', dateCreated: '2026-02-18' },
+          { label: 'Blazor Usage', link: 'controls/tableview/blazor', dateCreated: '2026-04-22' },
         ]
       },
       {
         label: 'Toolbar & TabBar',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/toolbar-tabbar/' },
-          { label: 'ShinyToolbar', link: 'controls/toolbar-tabbar/toolbar', platform: 'blazor' },
-          { label: 'ShinyTabBar', link: 'controls/toolbar-tabbar/tabbar', platform: 'blazor' },
-          { label: 'Ribbon', link: 'controls/ribbon/', jumpTo: true },
+          { label: 'Getting Started', link: 'controls/toolbar-tabbar/', dateCreated: '2026-06-11' },
+          { label: 'ShinyToolbar', link: 'controls/toolbar-tabbar/toolbar', dateCreated: '2026-06-26', platform: 'blazor' },
+          { label: 'ShinyTabBar', link: 'controls/toolbar-tabbar/tabbar', dateCreated: '2026-06-26', platform: 'blazor' },
+          { label: 'Ribbon', link: 'controls/ribbon/', dateCreated: '2026-08-28', jumpTo: true },
         ]
       },
       {
         label: 'TreeView',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'controls/treeview/' },
-          { label: 'Blazor Usage', link: 'controls/treeview/blazor' },
+          { label: 'Getting Started', link: 'controls/treeview/', dateCreated: '2026-05-25' },
+          { label: 'Blazor Usage', link: 'controls/treeview/blazor', dateCreated: '2026-05-25' },
         ]
       },
       {
         label: 'Wizard & StateView',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-13',
         items:[
-          { label: 'StateView', link: 'controls/stateview/' },
-          { label: 'Wizard', link: 'controls/wizard/' },
-          { label: 'Timeline', link: 'controls/timeline/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
+          { label: 'StateView', link: 'controls/stateview/', dateCreated: '2026-08-13' },
+          { label: 'Wizard', link: 'controls/wizard/', dateCreated: '2026-08-13' },
+          { label: 'Timeline', link: 'controls/timeline/', dateCreated: '2026-09-01', jumpTo: true, dateUpdated: '2026-09-17' },
         ]
       },
       {
         label: 'Guidance',
         jumpTo: true,
-        badge: { text: 'New', variant: 'success' },
+        dateUpdated: '2026-08-14',
         items:[
-          { label: 'Walkthrough', link: 'controls/walkthrough/' },
-          { label: 'Tooltip', link: 'controls/tooltip/' },
+          { label: 'Walkthrough', link: 'controls/walkthrough/', dateCreated: '2026-08-14' },
+          { label: 'Tooltip', link: 'controls/tooltip/', dateCreated: '2026-08-14' },
         ]
       },
       {
         label: 'Other Controls',
         items:[
-          { label: 'ColorPicker', link: 'controls/colorpicker/', jumpTo: true },
-          { label: 'FontPicker', link: 'controls/fontpicker/', jumpTo: true },
-          { label: 'Slider', link: 'controls/slider/', jumpTo: true },
-          { label: 'RangeSlider', link: 'controls/rangeslider/', jumpTo: true },
-          { label: 'Markdown', link: 'controls/markdown/', jumpTo: true },
-          { label: 'SkeletonView', link: 'controls/skeleton/', jumpTo: true },
-          { label: 'Splash Screen', link: 'controls/splashscreen/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
-          { label: 'ButtonGroup', link: 'controls/button-group/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'TagEntry', link: 'controls/tag-entry/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'ChipGroup', link: 'controls/chip-group/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'PillView', link: 'controls/pillview/', jumpTo: true },
-          { label: 'BadgeView', link: 'controls/badge/', jumpTo: true },
-          { label: 'ProgressBar', link: 'controls/progressbar/', jumpTo: true },
-          { label: 'ProgressLine', link: 'controls/progressline/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'SecurityPin', link: 'controls/securitypin/', jumpTo: true },
-          { label: 'PasswordStrength', link: 'controls/passwordstrength/', jumpTo: true, badge: { text: 'New', variant: 'success' } },
-          { label: 'Toast', link: 'controls/toast/', jumpTo: true },
-          { label: 'Modal', link: 'controls/modal/', jumpTo: true, platform: 'blazor', badge: { text: 'New', variant: 'success' } },
+          { label: 'ColorPicker', link: 'controls/colorpicker/', dateCreated: '2026-04-22', jumpTo: true },
+          { label: 'FontPicker', link: 'controls/fontpicker/', dateCreated: '2026-04-25', jumpTo: true },
+          { label: 'Slider', link: 'controls/slider/', dateCreated: '2026-05-04', jumpTo: true },
+          { label: 'RangeSlider', link: 'controls/rangeslider/', dateCreated: '2026-07-07', jumpTo: true },
+          { label: 'Markdown', link: 'controls/markdown/', dateCreated: '2026-04-15', jumpTo: true },
+          { label: 'SkeletonView', link: 'controls/skeleton/', dateCreated: '2026-05-29', jumpTo: true },
+          { label: 'Splash Screen', link: 'controls/splashscreen/', dateCreated: '2026-08-02', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-07' },
+          { label: 'ButtonGroup', link: 'controls/button-group/', dateCreated: '2026-09-12', jumpTo: true, dateUpdated: '2026-09-12' },
+          { label: 'TagEntry', link: 'controls/tag-entry/', dateCreated: '2026-09-12', jumpTo: true, dateUpdated: '2026-09-12' },
+          { label: 'ChipGroup', link: 'controls/chip-group/', dateCreated: '2026-09-12', jumpTo: true, dateUpdated: '2026-09-12' },
+          { label: 'PillView', link: 'controls/pillview/', dateCreated: '2026-04-15', jumpTo: true },
+          { label: 'BadgeView', link: 'controls/badge/', dateCreated: '2026-05-29', jumpTo: true },
+          { label: 'ProgressBar', link: 'controls/progressbar/', dateCreated: '2026-05-04', jumpTo: true },
+          { label: 'ProgressLine', link: 'controls/progressline/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },
+          { label: 'Confetti', link: 'controls/confetti/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
+          { label: 'Marquee', link: 'controls/marquee/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
+          { label: 'Range Pickers', link: 'controls/range-pickers/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
+          { label: 'SecurityPin', link: 'controls/securitypin/', dateCreated: '2026-04-16', jumpTo: true },
+          { label: 'PasswordStrength', link: 'controls/passwordstrength/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },
+          { label: 'Toast', link: 'controls/toast/', dateCreated: '2026-05-03', jumpTo: true },
+          { label: 'Modal', link: 'controls/modal/', dateCreated: '2026-08-28', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-07' },
         ]
       },
       { label: 'Blazor Playground', link: 'https://shinyorg.github.io/controls/', attrs: { target: '_blank' } },
-      { label: 'Release Notes', link: 'controls/release-notes' },
+      { label: 'Release Notes', link: 'controls/release-notes', dateCreated: '2026-04-15' },
     ]
   },
   {
@@ -1153,119 +1172,119 @@ export const sidebarTopics = [
         label: 'Document DB',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'documentdb/' },
-          { label: 'What It Does', link: 'documentdb/overview' },
-          { label: 'Why DocumentDb', link: 'documentdb/comparison' },
-          { label: 'Migrating v12 → v13', link: 'documentdb/migrating-v12-v13' },
-          { label: 'AOT Setup', link: 'documentdb/aot' },
-          { label: 'CRUD Operations', link: 'documentdb/crud' },
-          { label: 'JSON Collections', link: 'documentdb/json-collections' },
-          { label: 'Typed Context', link: 'documentdb/context' },
-          { label: 'Bulk Export & Import', link: 'documentdb/backup' },
-          { label: 'Querying', link: 'documentdb/querying' },
-          { label: 'Projections & Streaming', link: 'documentdb/projections' },
-          { label: 'Aggregates', link: 'documentdb/aggregates' },
-          { label: 'Indexes & Transactions', link: 'documentdb/indexes' },
-          { label: 'Change Monitoring', link: 'documentdb/change-monitoring' },
-          { label: 'Write Interceptors', link: 'documentdb/interceptors' },
-          { label: 'Query Filters', link: 'documentdb/query-filters' },
-          { label: 'Multi-Tenancy', link: 'documentdb/multi-tenancy' },
-          { label: 'Soft Delete', link: 'documentdb/soft-delete' },
-          { label: 'Document Metadata', link: 'documentdb/metadata' },
-          { label: 'Transactional Outbox', link: 'documentdb/outbox' },
-          { label: 'Field-Level Encryption', link: 'documentdb/encryption' },
-          { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics' },
-          { label: 'AI Tools', link: 'documentdb/ai-tools' },
-          { label: 'MCP Server', link: 'documentdb/mcp' },
-          { label: 'REST & Live Queries', link: 'documentdb/rest-endpoints' },
+          { label: 'Getting Started', link: 'documentdb/', dateCreated: '2026-03-23' },
+          { label: 'What It Does', link: 'documentdb/overview', dateCreated: '2026-09-13' },
+          { label: 'Why DocumentDb', link: 'documentdb/comparison', dateCreated: '2026-06-14' },
+          { label: 'Migrating v12 → v13', link: 'documentdb/migrating-v12-v13', dateCreated: '2026-08-04' },
+          { label: 'AOT Setup', link: 'documentdb/aot', dateCreated: '2026-02-23' },
+          { label: 'CRUD Operations', link: 'documentdb/crud', dateCreated: '2026-02-23' },
+          { label: 'JSON Collections', link: 'documentdb/json-collections', dateCreated: '2026-07-27' },
+          { label: 'Typed Context', link: 'documentdb/context', dateCreated: '2026-06-29' },
+          { label: 'Bulk Export & Import', link: 'documentdb/backup', dateCreated: '2026-06-26' },
+          { label: 'Querying', link: 'documentdb/querying', dateCreated: '2026-02-23' },
+          { label: 'Projections & Streaming', link: 'documentdb/projections', dateCreated: '2026-02-23' },
+          { label: 'Aggregates', link: 'documentdb/aggregates', dateCreated: '2026-02-24' },
+          { label: 'Indexes & Transactions', link: 'documentdb/indexes', dateCreated: '2026-02-23' },
+          { label: 'Change Monitoring', link: 'documentdb/change-monitoring', dateCreated: '2026-05-31' },
+          { label: 'Write Interceptors', link: 'documentdb/interceptors', dateCreated: '2026-06-19' },
+          { label: 'Query Filters', link: 'documentdb/query-filters', dateCreated: '2026-06-01' },
+          { label: 'Multi-Tenancy', link: 'documentdb/multi-tenancy', dateCreated: '2026-08-04' },
+          { label: 'Soft Delete', link: 'documentdb/soft-delete', dateCreated: '2026-07-25' },
+          { label: 'Document Metadata', link: 'documentdb/metadata', dateCreated: '2026-09-21' },
+          { label: 'Transactional Outbox', link: 'documentdb/outbox', dateCreated: '2026-08-04' },
+          { label: 'Field-Level Encryption', link: 'documentdb/encryption', dateCreated: '2026-08-04' },
+          { label: 'Telemetry & Diagnostics', link: 'documentdb/diagnostics', dateCreated: '2026-06-12' },
+          { label: 'AI Tools', link: 'documentdb/ai-tools', dateCreated: '2026-04-30' },
+          { label: 'MCP Server', link: 'documentdb/mcp', dateCreated: '2026-08-04' },
+          { label: 'REST & Live Queries', link: 'documentdb/rest-endpoints', dateCreated: '2026-08-04' },
           { label: 'Blazor Playground', link: 'https://docdbmyadmin.acrhome.ca/', attrs: { target: '_blank' } },
           {
             label: 'Spatial, Vector & Temporal',
             collapsed: true,
             items: [
-              { label: 'Spatial', link: 'documentdb/spatial' },
-              { label: 'Reference Geo Data', link: 'documentdb/geo-reference' },
-              { label: 'Geofencing', link: 'documentdb/geofencing' },
-              { label: 'Vector / ANN Search', link: 'documentdb/vector' },
-              { label: 'VectorData Connector', link: 'documentdb/vectordata' },
-              { label: 'Full-Text Search', link: 'documentdb/full-text' },
-              { label: 'Computed Properties', link: 'documentdb/computed-columns' },
-              { label: 'Blobs', link: 'documentdb/blobs' },
-              { label: 'Temporal Support', link: 'documentdb/temporal' },
+              { label: 'Spatial', link: 'documentdb/spatial', dateCreated: '2026-05-03' },
+              { label: 'Reference Geo Data', link: 'documentdb/geo-reference', dateCreated: '2026-07-13' },
+              { label: 'Geofencing', link: 'documentdb/geofencing', dateCreated: '2026-08-15' },
+              { label: 'Vector / ANN Search', link: 'documentdb/vector', dateCreated: '2026-06-01' },
+              { label: 'VectorData Connector', link: 'documentdb/vectordata', dateCreated: '2026-08-04' },
+              { label: 'Full-Text Search', link: 'documentdb/full-text', dateCreated: '2026-06-24' },
+              { label: 'Computed Properties', link: 'documentdb/computed-columns', dateCreated: '2026-06-26' },
+              { label: 'Blobs', link: 'documentdb/blobs', dateCreated: '2026-07-21' },
+              { label: 'Temporal Support', link: 'documentdb/temporal', dateCreated: '2026-06-12' },
             ]
           },
           {
             label: 'Providers',
             collapsed: true,
             items: [
-              { label: 'Provider Reference', link: 'documentdb/providers' },
-              { label: 'SQLite', link: 'documentdb/sqlite' },
-              { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher' },
-              { label: 'PostgreSQL', link: 'documentdb/postgresql' },
-              { label: 'CockroachDB', link: 'documentdb/cockroachdb' },
-              { label: 'SQL Server', link: 'documentdb/sqlserver' },
-              { label: 'MySQL', link: 'documentdb/mysql' },
-              { label: 'MariaDB', link: 'documentdb/mariadb' },
-              { label: 'Oracle', link: 'documentdb/oracle' },
-              { label: 'DuckDB', link: 'documentdb/duckdb' },
-              { label: 'Azure Cosmos DB', link: 'documentdb/cosmosdb' },
-              { label: 'Azure Table Storage', link: 'documentdb/azure-table' },
-              { label: 'Amazon DynamoDB', link: 'documentdb/dynamodb' },
-              { label: 'MongoDB', link: 'documentdb/mongodb' },
-              { label: 'Amazon DocumentDB', link: 'documentdb/amazon-documentdb' },
-              { label: 'Redis', link: 'documentdb/redis' },
-              { label: 'RavenDB', link: 'documentdb/ravendb' },
-              { label: 'Google Firestore', link: 'documentdb/firestore' },
-              { label: 'Firestore Mobile (on-device)', link: 'documentdb/firestore-mobile' },
-              { label: 'LiteDB', link: 'documentdb/litedb' },
-              { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb' },
+              { label: 'Provider Reference', link: 'documentdb/providers', dateCreated: '2026-05-29' },
+              { label: 'SQLite', link: 'documentdb/sqlite', dateCreated: '2026-05-31' },
+              { label: 'SQLCipher (Encrypted)', link: 'documentdb/sqlcipher', dateCreated: '2026-03-26' },
+              { label: 'PostgreSQL', link: 'documentdb/postgresql', dateCreated: '2026-05-31' },
+              { label: 'CockroachDB', link: 'documentdb/cockroachdb', dateCreated: '2026-07-11' },
+              { label: 'SQL Server', link: 'documentdb/sqlserver', dateCreated: '2026-05-31' },
+              { label: 'MySQL', link: 'documentdb/mysql', dateCreated: '2026-05-31' },
+              { label: 'MariaDB', link: 'documentdb/mariadb', dateCreated: '2026-07-11' },
+              { label: 'Oracle', link: 'documentdb/oracle', dateCreated: '2026-06-10' },
+              { label: 'DuckDB', link: 'documentdb/duckdb', dateCreated: '2026-05-31' },
+              { label: 'Azure Cosmos DB', link: 'documentdb/cosmosdb', dateCreated: '2026-05-31' },
+              { label: 'Azure Table Storage', link: 'documentdb/azure-table', dateCreated: '2026-07-02' },
+              { label: 'Amazon DynamoDB', link: 'documentdb/dynamodb', dateCreated: '2026-07-02' },
+              { label: 'MongoDB', link: 'documentdb/mongodb', dateCreated: '2026-05-31' },
+              { label: 'Amazon DocumentDB', link: 'documentdb/amazon-documentdb', dateCreated: '2026-07-12' },
+              { label: 'Redis', link: 'documentdb/redis', dateCreated: '2026-07-12' },
+              { label: 'RavenDB', link: 'documentdb/ravendb', dateCreated: '2026-07-12' },
+              { label: 'Google Firestore', link: 'documentdb/firestore', dateCreated: '2026-07-12' },
+              { label: 'Firestore Mobile (on-device)', link: 'documentdb/firestore-mobile', dateCreated: '2026-07-16' },
+              { label: 'LiteDB', link: 'documentdb/litedb', dateCreated: '2026-05-31' },
+              { label: 'IndexedDB (Blazor WASM)', link: 'documentdb/indexeddb', dateCreated: '2026-05-06' },
             ]
           },
           {
             label: 'Admin UI',
             collapsed: true,
             items: [
-              { label: 'Overview', link: 'documentdb/admin/' },
-              { label: 'Connections', link: 'documentdb/admin/connections' },
-              { label: 'Browse & Edit', link: 'documentdb/admin/browse' },
-              { label: 'Structure & Indexes', link: 'documentdb/admin/structure' },
-              { label: 'Query Console', link: 'documentdb/admin/query-console' },
-              { label: 'History', link: 'documentdb/admin/history' },
-              { label: 'Geometry', link: 'documentdb/admin/geometry' },
-              { label: 'Full Text', link: 'documentdb/admin/full-text' },
-              { label: 'Vectors', link: 'documentdb/admin/vectors' },
-              { label: 'Blobs', link: 'documentdb/admin/blobs' },
-              { label: 'Encrypted Fields', link: 'documentdb/admin/encrypted-fields' },
-              { label: 'Outbox', link: 'documentdb/admin/outbox' },
-              { label: 'Generate Test Data', link: 'documentdb/admin/generate' },
-              { label: 'Import & Export', link: 'documentdb/admin/import-export' },
-              { label: 'AI Assistant', link: 'documentdb/admin/assistant' },
-              { label: 'Terminal UI', link: 'documentdb/admin/terminal' },
-              { label: 'Docker Desktop', link: 'documentdb/admin/docker-desktop' },
-              { label: 'Aspire AppHost', link: 'documentdb/admin/aspire' },
-              { label: 'Configuration & Security', link: 'documentdb/admin/configuration' },
-              { label: 'Demo Mode', link: 'documentdb/admin/demo-mode' },
+              { label: 'Overview', link: 'documentdb/admin/', dateCreated: '2026-07-27' },
+              { label: 'Connections', link: 'documentdb/admin/connections', dateCreated: '2026-08-01' },
+              { label: 'Browse & Edit', link: 'documentdb/admin/browse', dateCreated: '2026-08-01' },
+              { label: 'Structure & Indexes', link: 'documentdb/admin/structure', dateCreated: '2026-08-01' },
+              { label: 'Query Console', link: 'documentdb/admin/query-console', dateCreated: '2026-08-01' },
+              { label: 'History', link: 'documentdb/admin/history', dateCreated: '2026-08-01' },
+              { label: 'Geometry', link: 'documentdb/admin/geometry', dateCreated: '2026-08-01' },
+              { label: 'Full Text', link: 'documentdb/admin/full-text', dateCreated: '2026-08-01' },
+              { label: 'Vectors', link: 'documentdb/admin/vectors', dateCreated: '2026-08-01' },
+              { label: 'Blobs', link: 'documentdb/admin/blobs', dateCreated: '2026-08-01' },
+              { label: 'Encrypted Fields', link: 'documentdb/admin/encrypted-fields', dateCreated: '2026-08-04' },
+              { label: 'Outbox', link: 'documentdb/admin/outbox', dateCreated: '2026-08-04' },
+              { label: 'Generate Test Data', link: 'documentdb/admin/generate', dateCreated: '2026-08-01' },
+              { label: 'Import & Export', link: 'documentdb/admin/import-export', dateCreated: '2026-08-01' },
+              { label: 'AI Assistant', link: 'documentdb/admin/assistant', dateCreated: '2026-08-01' },
+              { label: 'Terminal UI', link: 'documentdb/admin/terminal', dateCreated: '2026-08-02' },
+              { label: 'Docker Desktop', link: 'documentdb/admin/docker-desktop', dateCreated: '2026-08-05' },
+              { label: 'Aspire AppHost', link: 'documentdb/admin/aspire', dateCreated: '2026-08-01' },
+              { label: 'Configuration & Security', link: 'documentdb/admin/configuration', dateCreated: '2026-08-01' },
+              { label: 'Demo Mode', link: 'documentdb/admin/demo-mode', dateCreated: '2026-08-01' },
             ]
           },
           {
             label: 'Integrations',
             items: [
-              { label: 'JSON Schema Validation', link: 'documentdb/validation' },
-              { label: 'OData Endpoints', link: 'documentdb/odata' },
-              { label: 'Offline Sync (Shiny.Data.Sync)', link: 'documentdb/data-sync' },
-              { label: 'Orleans Persistence', link: 'documentdb/orleans' },
-              { label: 'Orleans Streams', link: 'documentdb/orleans-streams' },
-              { label: 'Aspire', link: 'documentdb/aspire' },
+              { label: 'JSON Schema Validation', link: 'documentdb/validation', dateCreated: '2026-06-23' },
+              { label: 'OData Endpoints', link: 'documentdb/odata', dateCreated: '2026-06-23' },
+              { label: 'Offline Sync (Shiny.Data.Sync)', link: 'documentdb/data-sync', dateCreated: '2026-06-23' },
+              { label: 'Orleans Persistence', link: 'documentdb/orleans', dateCreated: '2026-06-13' },
+              { label: 'Orleans Streams', link: 'documentdb/orleans-streams', dateCreated: '2026-08-11' },
+              { label: 'Aspire', link: 'documentdb/aspire', dateCreated: '2026-06-23' },
             ]
           },
           {
             label: 'Reference & Support',
             collapsed: true,
             items: [
-              { label: 'Performance', link: 'documentdb/performance' },
-              { label: 'FAQ & Decision Trees', link: 'documentdb/faq' },
-              { label: 'Limitations', link: 'documentdb/limitations' },
-              { label: 'Release Notes', link: 'documentdb/release-notes' },
+              { label: 'Performance', link: 'documentdb/performance', dateCreated: '2026-05-29' },
+              { label: 'FAQ & Decision Trees', link: 'documentdb/faq', dateCreated: '2026-06-19' },
+              { label: 'Limitations', link: 'documentdb/limitations', dateCreated: '2026-05-29' },
+              { label: 'Release Notes', link: 'documentdb/release-notes', dateCreated: '2026-02-23' },
             ]
           }
         ]
@@ -1274,39 +1293,39 @@ export const sidebarTopics = [
         label: 'Spatial',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'spatial/' },
-          { label: 'Geometry Types', link: 'spatial/geometry' },
-          { label: 'Database Operations', link: 'spatial/database' },
-          { label: 'Querying', link: 'spatial/queries' },
-          { label: 'Algorithms & Serialization', link: 'spatial/algorithms' },
-          { label: 'Pre-built Databases', link: 'spatial/prebuilt' },
-          { label: 'Geofencing', link: 'spatial/geofencing' },
-          { label: 'Release Notes', link: 'spatial/release-notes' }
+          { label: 'Getting Started', link: 'spatial/', dateCreated: '2026-02-23' },
+          { label: 'Geometry Types', link: 'spatial/geometry', dateCreated: '2026-02-23' },
+          { label: 'Database Operations', link: 'spatial/database', dateCreated: '2026-02-23' },
+          { label: 'Querying', link: 'spatial/queries', dateCreated: '2026-02-23' },
+          { label: 'Algorithms & Serialization', link: 'spatial/algorithms', dateCreated: '2026-02-23' },
+          { label: 'Pre-built Databases', link: 'spatial/prebuilt', dateCreated: '2026-02-23' },
+          { label: 'Geofencing', link: 'spatial/geofencing', dateCreated: '2026-03-01' },
+          { label: 'Release Notes', link: 'spatial/release-notes', dateCreated: '2026-02-23' }
         ]
       },
       {
         label: 'Data Sync',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'client/datasync/' },
-          { label: 'Architecture', link: 'client/datasync/architecture' },
-          { label: 'Entity Registration', link: 'client/datasync/entity-registration' },
-          { label: 'Conflict Resolution', link: 'client/datasync/conflict-resolution' },
-          { label: 'Removal Strategies', link: 'client/datasync/removal-strategies' },
-          { label: 'Sync Interceptors', link: 'client/datasync/sync-interceptor' },
-          { label: 'Server API Contracts', link: 'client/datasync/server-contracts' },
-          { label: 'Platform Behavior', link: 'client/datasync/platform-behavior' },
-          { label: 'Custom Transports', link: 'client/datasync/custom-transports' },
-          { label: 'Release Notes', link: 'client/release-notes' }
+          { label: 'Getting Started', link: 'client/datasync/', dateCreated: '2026-05-02' },
+          { label: 'Architecture', link: 'client/datasync/architecture', dateCreated: '2026-06-09' },
+          { label: 'Entity Registration', link: 'client/datasync/entity-registration', dateCreated: '2026-05-02' },
+          { label: 'Conflict Resolution', link: 'client/datasync/conflict-resolution', dateCreated: '2026-06-09' },
+          { label: 'Removal Strategies', link: 'client/datasync/removal-strategies', dateCreated: '2026-05-02' },
+          { label: 'Sync Interceptors', link: 'client/datasync/sync-interceptor', dateCreated: '2026-05-02' },
+          { label: 'Server API Contracts', link: 'client/datasync/server-contracts', dateCreated: '2026-05-02' },
+          { label: 'Platform Behavior', link: 'client/datasync/platform-behavior', dateCreated: '2026-06-09' },
+          { label: 'Custom Transports', link: 'client/datasync/custom-transports', dateCreated: '2026-06-09' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06' }
         ]
       },
       {
         label: 'Stores',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'stores/' },
-          { label: 'Persistent Services', link: 'stores/persistent-services' },
-          { label: 'Release Notes', link: 'stores/release-notes' }
+          { label: 'Getting Started', link: 'stores/', dateCreated: '2025-07-03' },
+          { label: 'Persistent Services', link: 'stores/persistent-services', dateCreated: '2026-02-26' },
+          { label: 'Release Notes', link: 'stores/release-notes', dateCreated: '2026-02-26' }
         ]
       },
     ]
@@ -1321,131 +1340,131 @@ export const sidebarTopics = [
         label: 'HTTP Server',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'httpserver/' },
-          { label: 'FAQ', link: 'httpserver/faq' },
-          { label: 'Hosting & Lifecycle', link: 'httpserver/hosting' },
-          { label: 'Configuration', link: 'httpserver/configuration' },
+          { label: 'Getting Started', link: 'httpserver/', dateCreated: '2026-08-11' },
+          { label: 'FAQ', link: 'httpserver/faq', dateCreated: '2026-09-28' },
+          { label: 'Hosting & Lifecycle', link: 'httpserver/hosting', dateCreated: '2026-08-11' },
+          { label: 'Configuration', link: 'httpserver/configuration', dateCreated: '2026-08-11' },
           {
             label: 'Handling Requests',
             items:[
-              { label: 'Routing', link: 'httpserver/routing' },
-              { label: 'Middleware', link: 'httpserver/middleware' },
-              { label: 'Typed Endpoints', link: 'httpserver/endpoints' },
-              { label: 'Results & JSON', link: 'httpserver/results' },
-              { label: 'Serialization & Formats', link: 'httpserver/serialization' },
-              { label: 'JSON Patch', link: 'httpserver/json-patch' },
-              { label: 'Errors & Problem Details', link: 'httpserver/errors' },
-              { label: 'Sessions', link: 'httpserver/sessions' },
-              { label: 'Localization', link: 'httpserver/localization' },
-              { label: 'Request Timeouts', link: 'httpserver/timeouts' },
-              { label: 'Idempotency Keys', link: 'httpserver/idempotency' },
-              { label: 'OpenAPI', link: 'httpserver/openapi' },
-              { label: 'API Versioning', link: 'httpserver/api-versioning' }
+              { label: 'Routing', link: 'httpserver/routing', dateCreated: '2026-08-11' },
+              { label: 'Middleware', link: 'httpserver/middleware', dateCreated: '2026-08-11' },
+              { label: 'Typed Endpoints', link: 'httpserver/endpoints', dateCreated: '2026-08-11' },
+              { label: 'Results & JSON', link: 'httpserver/results', dateCreated: '2026-08-11' },
+              { label: 'Serialization & Formats', link: 'httpserver/serialization', dateCreated: '2026-08-11' },
+              { label: 'JSON Patch', link: 'httpserver/json-patch', dateCreated: '2026-09-28' },
+              { label: 'Errors & Problem Details', link: 'httpserver/errors', dateCreated: '2026-08-11' },
+              { label: 'Sessions', link: 'httpserver/sessions', dateCreated: '2026-08-11' },
+              { label: 'Localization', link: 'httpserver/localization', dateCreated: '2026-09-28' },
+              { label: 'Request Timeouts', link: 'httpserver/timeouts', dateCreated: '2026-08-23' },
+              { label: 'Idempotency Keys', link: 'httpserver/idempotency', dateCreated: '2026-09-28' },
+              { label: 'OpenAPI', link: 'httpserver/openapi', dateCreated: '2026-08-11' },
+              { label: 'API Versioning', link: 'httpserver/api-versioning', dateCreated: '2026-09-28' }
             ]
           },
           {
             label: 'Content',
             items:[
-              { label: 'Static Files', link: 'httpserver/static-files' },
-              { label: 'Blazor WebAssembly', link: 'httpserver/blazor' },
-              { label: 'Uploads & Downloads', link: 'httpserver/files' },
-              { label: 'File Browser', link: 'httpserver/file-browser' },
-              { label: 'WebDAV', link: 'httpserver/webdav' },
-              { label: 'Resumable Uploads (tus)', link: 'httpserver/tus' },
-              { label: 'CalDAV & CardDAV', link: 'httpserver/caldav' },
-              { label: 'Compression', link: 'httpserver/compression' },
-              { label: 'Content Digests', link: 'httpserver/content-digest' },
-              { label: 'Caching & Conditional Requests', link: 'httpserver/caching' }
+              { label: 'Static Files', link: 'httpserver/static-files', dateCreated: '2026-08-11' },
+              { label: 'Blazor WebAssembly', link: 'httpserver/blazor', dateCreated: '2026-08-11' },
+              { label: 'Uploads & Downloads', link: 'httpserver/files', dateCreated: '2026-08-11' },
+              { label: 'File Browser', link: 'httpserver/file-browser', dateCreated: '2026-08-11' },
+              { label: 'WebDAV', link: 'httpserver/webdav', dateCreated: '2026-08-11' },
+              { label: 'Resumable Uploads (tus)', link: 'httpserver/tus', dateCreated: '2026-09-28' },
+              { label: 'CalDAV & CardDAV', link: 'httpserver/caldav', dateCreated: '2026-09-28' },
+              { label: 'Compression', link: 'httpserver/compression', dateCreated: '2026-08-11' },
+              { label: 'Content Digests', link: 'httpserver/content-digest', dateCreated: '2026-09-28' },
+              { label: 'Caching & Conditional Requests', link: 'httpserver/caching', dateCreated: '2026-08-23' }
             ]
           },
           {
             label: 'Protocols & Realtime',
             items:[
-              { label: 'Protocols', link: 'httpserver/protocols' },
-              { label: 'WebSockets', link: 'httpserver/websockets' },
-              { label: 'Server-Sent Events', link: 'httpserver/sse' },
-              { label: 'Switchboard', link: 'httpserver/switchboard' },
-              { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc' }
+              { label: 'Protocols', link: 'httpserver/protocols', dateCreated: '2026-08-11' },
+              { label: 'WebSockets', link: 'httpserver/websockets', dateCreated: '2026-08-11' },
+              { label: 'Server-Sent Events', link: 'httpserver/sse', dateCreated: '2026-08-11' },
+              { label: 'Switchboard', link: 'httpserver/switchboard', dateCreated: '2026-09-29' },
+              { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc', dateCreated: '2026-08-11' }
             ]
           },
           {
             label: 'Security',
             items:[
-              { label: 'Authentication', link: 'httpserver/authentication' },
-              { label: 'Authorization', link: 'httpserver/authorization' },
-              { label: 'JWT', link: 'httpserver/jwt' },
-              { label: 'OAuth Loopback Sign-in', link: 'httpserver/oauth-loopback' },
-              { label: 'TLS & Certificates', link: 'httpserver/tls' },
-              { label: 'Automatic HTTPS (ACME)', link: 'httpserver/acme' },
-              { label: 'CORS', link: 'httpserver/cors' },
-              { label: 'Rate Limiting', link: 'httpserver/rate-limiting' },
-              { label: 'IP Filtering', link: 'httpserver/ip-filtering' },
-              { label: 'Host Filtering', link: 'httpserver/host-filtering' },
-              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery' },
-              { label: 'Webhooks', link: 'httpserver/webhooks' }
+              { label: 'Authentication', link: 'httpserver/authentication', dateCreated: '2026-08-11' },
+              { label: 'Authorization', link: 'httpserver/authorization', dateCreated: '2026-08-11' },
+              { label: 'JWT', link: 'httpserver/jwt', dateCreated: '2026-08-11' },
+              { label: 'OAuth Loopback Sign-in', link: 'httpserver/oauth-loopback', dateCreated: '2026-09-28' },
+              { label: 'TLS & Certificates', link: 'httpserver/tls', dateCreated: '2026-08-11' },
+              { label: 'Automatic HTTPS (ACME)', link: 'httpserver/acme', dateCreated: '2026-09-28' },
+              { label: 'CORS', link: 'httpserver/cors', dateCreated: '2026-08-11' },
+              { label: 'Rate Limiting', link: 'httpserver/rate-limiting', dateCreated: '2026-08-11' },
+              { label: 'IP Filtering', link: 'httpserver/ip-filtering', dateCreated: '2026-08-11' },
+              { label: 'Host Filtering', link: 'httpserver/host-filtering', dateCreated: '2026-09-28' },
+              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery', dateCreated: '2026-08-23' },
+              { label: 'Webhooks', link: 'httpserver/webhooks', dateCreated: '2026-09-28' }
             ]
           },
           {
             label: 'Connectivity',
             items:[
-              { label: 'Tunnelling', link: 'httpserver/tunneling' },
-              { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh' },
-              { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents' },
-              { label: 'Azure Relay', link: 'httpserver/azure-relay' },
-              { label: 'Discovery (mDNS)', link: 'httpserver/discovery' },
-              { label: 'Reverse Proxy', link: 'httpserver/proxy' },
-              { label: 'PROXY Protocol', link: 'httpserver/proxy-protocol' }
+              { label: 'Tunnelling', link: 'httpserver/tunneling', dateCreated: '2026-08-11' },
+              { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh', dateCreated: '2026-08-11' },
+              { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents', dateCreated: '2026-08-23' },
+              { label: 'Azure Relay', link: 'httpserver/azure-relay', dateCreated: '2026-08-11' },
+              { label: 'Discovery (mDNS)', link: 'httpserver/discovery', dateCreated: '2026-08-23' },
+              { label: 'Reverse Proxy', link: 'httpserver/proxy', dateCreated: '2026-08-23' },
+              { label: 'PROXY Protocol', link: 'httpserver/proxy-protocol', dateCreated: '2026-09-28' }
             ]
           },
           {
             label: 'Integrations',
             items:[
-              { label: 'Mobile', link: 'httpserver/maui' },
-              { label: 'tvOS', link: 'httpserver/tvos' },
-              { label: 'Shiny.Mediator', link: 'httpserver/mediator' },
-              { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb' },
-              { label: 'Model Context Protocol', link: 'httpserver/mcp' }
+              { label: 'Mobile', link: 'httpserver/maui', dateCreated: '2026-08-11' },
+              { label: 'tvOS', link: 'httpserver/tvos', dateCreated: '2026-09-05' },
+              { label: 'Shiny.Mediator', link: 'httpserver/mediator', dateCreated: '2026-08-11' },
+              { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb', dateCreated: '2026-08-11' },
+              { label: 'Model Context Protocol', link: 'httpserver/mcp', dateCreated: '2026-08-11' }
             ]
           },
           {
             label: 'Operations',
             items:[
-              { label: 'Health & Telemetry', link: 'httpserver/diagnostics' },
-              { label: 'W3C Access Logs', link: 'httpserver/logging' },
-              { label: 'Testing', link: 'httpserver/testing' },
-              { label: 'Command Line Tool', link: 'httpserver/cli' }
+              { label: 'Health & Telemetry', link: 'httpserver/diagnostics', dateCreated: '2026-08-23' },
+              { label: 'W3C Access Logs', link: 'httpserver/logging', dateCreated: '2026-08-23' },
+              { label: 'Testing', link: 'httpserver/testing', dateCreated: '2026-08-23' },
+              { label: 'Command Line Tool', link: 'httpserver/cli', dateCreated: '2026-08-20' }
             ]
           },
-          { label: 'Release Notes', link: 'httpserver/release-notes' }
+          { label: 'Release Notes', link: 'httpserver/release-notes', dateCreated: '2026-08-11' }
         ]
       },
       {
         label: 'Web Hosting',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'webhost/' },
-          { label: 'Release Notes', link: 'webhost/release-notes' }
+          { label: 'Getting Started', link: 'webhost/', dateCreated: '2025-07-03' },
+          { label: 'Release Notes', link: 'webhost/release-notes', dateCreated: '2026-02-26' }
         ]
       },
       {
         label: 'Blazor Hosting',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'blazorhost/' },
-          { label: 'Release Notes', link: 'blazorhost/release-notes' }
+          { label: 'Getting Started', link: 'blazorhost/', dateCreated: '2026-06-11' },
+          { label: 'Release Notes', link: 'blazorhost/release-notes', dateCreated: '2026-06-14' }
         ]
       },
       {
         label: 'Push (Server)',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'extensions-push/' },
-          { label: 'Sending', link: 'extensions-push/sending' },
-          { label: 'APNs', link: 'extensions-push/apns' },
-          { label: 'Live Activities', link: 'extensions-push/live-activities' },
-          { label: 'Persistence', link: 'extensions-push/persistence' },
-          { label: 'Metrics', link: 'extensions-push/metrics' },
-          { label: 'Release Notes', link: 'extensions-push/release-notes' }
+          { label: 'Getting Started', link: 'extensions-push/', dateCreated: '2026-06-20' },
+          { label: 'Sending', link: 'extensions-push/sending', dateCreated: '2026-06-20' },
+          { label: 'APNs', link: 'extensions-push/apns', dateCreated: '2026-06-20' },
+          { label: 'Live Activities', link: 'extensions-push/live-activities', dateCreated: '2026-07-31' },
+          { label: 'Persistence', link: 'extensions-push/persistence', dateCreated: '2026-06-20' },
+          { label: 'Metrics', link: 'extensions-push/metrics', dateCreated: '2026-06-20' },
+          { label: 'Release Notes', link: 'extensions-push/release-notes', dateCreated: '2026-06-20' }
         ]
       },
       {
@@ -1456,40 +1475,40 @@ export const sidebarTopics = [
             label: 'Orleans Database Providers',
             jumpTo: true,
             items:[
-              { label: 'Getting Started', link: 'aspire/orleans/' },
-              { label: 'Hosting (AppHost)', link: 'aspire/orleans/hosting' },
-              { label: 'Server (Silo)', link: 'aspire/orleans/server' },
-              { label: 'Client', link: 'aspire/orleans/client' },
-              { label: 'Release Notes', link: 'aspire/orleans/release-notes' }
+              { label: 'Getting Started', link: 'aspire/orleans/', dateCreated: '2026-02-25' },
+              { label: 'Hosting (AppHost)', link: 'aspire/orleans/hosting', dateCreated: '2026-02-25' },
+              { label: 'Server (Silo)', link: 'aspire/orleans/server', dateCreated: '2026-02-25' },
+              { label: 'Client', link: 'aspire/orleans/client', dateCreated: '2026-02-25' },
+              { label: 'Release Notes', link: 'aspire/orleans/release-notes', dateCreated: '2026-02-26' }
             ]
           },
           {
             label: 'Aspire Gluetun VPN',
             jumpTo: true,
             items:[
-              { label: 'Getting Started', link: 'aspire/gluetun/' },
-              { label: 'Configuration', link: 'aspire/gluetun/configuration' },
-              { label: 'Container Routing', link: 'aspire/gluetun/routing' },
-              { label: 'Release Notes', link: 'aspire/gluetun/release-notes' }
+              { label: 'Getting Started', link: 'aspire/gluetun/', dateCreated: '2026-02-26' },
+              { label: 'Configuration', link: 'aspire/gluetun/configuration', dateCreated: '2026-02-26' },
+              { label: 'Container Routing', link: 'aspire/gluetun/routing', dateCreated: '2026-02-26' },
+              { label: 'Release Notes', link: 'aspire/gluetun/release-notes', dateCreated: '2026-02-25' }
             ]
           },
           {
             label: 'Aspire Tunnelling',
             jumpTo: true,
             items:[
-              { label: 'Getting Started', link: 'aspire/tunnel/' },
-              { label: 'Providers', link: 'aspire/tunnel/providers' },
-              { label: 'The Shiny Relay', link: 'aspire/tunnel/relay' },
-              { label: 'Port Forwarding', link: 'aspire/tunnel/port-forward' },
-              { label: 'How It Works', link: 'aspire/tunnel/custom-providers' },
-              { label: 'Release Notes', link: 'aspire/tunnel/release-notes' }
+              { label: 'Getting Started', link: 'aspire/tunnel/', dateCreated: '2026-08-12' },
+              { label: 'Providers', link: 'aspire/tunnel/providers', dateCreated: '2026-08-12' },
+              { label: 'The Shiny Relay', link: 'aspire/tunnel/relay', dateCreated: '2026-08-12' },
+              { label: 'Port Forwarding', link: 'aspire/tunnel/port-forward', dateCreated: '2026-08-12' },
+              { label: 'How It Works', link: 'aspire/tunnel/custom-providers', dateCreated: '2026-08-12' },
+              { label: 'Release Notes', link: 'aspire/tunnel/release-notes', dateCreated: '2026-08-12' }
             ]
           },
           {
             label: 'DocumentDB',
             items:[
-              { label: 'Aspire', link: 'documentdb/aspire', attrs: { target: '_blank' } },
-              { label: 'Orleans', link: 'documentdb/orleans', attrs: { target: '_blank' } }
+              { label: 'Aspire', link: 'documentdb/aspire', dateCreated: '2026-06-23', attrs: { target: '_blank' } },
+              { label: 'Orleans', link: 'documentdb/orleans', dateCreated: '2026-06-13', attrs: { target: '_blank' } }
             ]
           }
         ]
@@ -1510,6 +1529,69 @@ export const sidebarTopics = [
     ],
   }
 ];
+
+/** How long after `dateUpdated` an item keeps its "New" pill. */
+export const NEW_BADGE_DAYS = 60;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Every library node (`jumpTo: true`) and everything beneath one — the only items allowed to be New.
+ * Inside a category group (e.g. Office) a plain page listed beside its library counts too, since
+ * that's how library feature pages like "Spreadsheet Formatting" are laid out. Top-level site pages
+ * (NuGets, Getting Help) and the category groups themselves never count.
+ */
+const libraryItems = new WeakSet();
+(function markLibraries(items, inLibrary, nested) {
+  const besideLibrary = nested && items.some((item) => item.jumpTo === true);
+  for (const item of items) {
+    const isLibrary = inLibrary || item.jumpTo === true || (besideLibrary && !item.items);
+    if (isLibrary) libraryItems.add(item);
+    if (item.items?.length) markLibraries(item.items, isLibrary, true);
+  }
+})(sidebarTopics.flatMap((topic) => topic.items || []), false, false);
+
+const parseDate = (value) => (value ? Date.parse(`${value}T00:00:00Z`) : NaN);
+
+/** A group's landing page: the first linked item, depth-first — same page its sidebar entry opens. */
+function firstLinked(item) {
+  if (item.link) return item;
+  for (const child of item.items || []) {
+    const found = firstLinked(child);
+    if (found) return found;
+  }
+  return undefined;
+}
+
+/** The most recent `dateUpdated` on the item or anything beneath it. */
+function latestUpdate(item) {
+  let latest = parseDate(item.dateUpdated);
+  for (const child of item.items || []) {
+    const childLatest = latestUpdate(child);
+    if (Number.isFinite(childLatest) && !(latest >= childLatest)) latest = childLatest;
+  }
+  return latest;
+}
+
+/**
+ * True when the later of the item's created / last-major-update dates is within the last
+ * `NEW_BADGE_DAYS` days (relative to build time). See the header comment for group rules.
+ */
+export function isNewItem(item, now = Date.now()) {
+  if (!item || !libraryItems.has(item)) return false;
+  const created = parseDate(item.dateCreated ?? (item.items ? firstLinked(item)?.dateCreated : undefined));
+  const updated = item.items ? latestUpdate(item) : parseDate(item.dateUpdated);
+  const recent = (t) => Number.isFinite(t) && now - t <= NEW_BADGE_DAYS * DAY_MS;
+  return recent(created) || recent(updated);
+}
+
+/** "Mar 4, 2026" from a `YYYY-MM-DD` string. */
+export function formatItemDate(value) {
+  const d = new Date(`${value}T00:00:00Z`);
+  return d.toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone: 'UTC' });
+}
+
+const NEW_BADGE = { text: 'New', variant: 'success' };
 
 /**
  * Returns a deep copy of the topics with all `jumpTo` properties removed,
@@ -1535,6 +1617,19 @@ export function cleanTopicsForStarlight(topics) {
   // Turn `platform` into a badge. Starlight's sidebar schema only carries one badge per entry,
   // so when the item already has one (usually "New") the platform rides along as a marker class
   // that our SidebarSublist override expands into a second pill.
+  // `dateUpdated` → "New" pill; `dateCreated` → hover tooltip on links (groups have no attrs).
+  const now = Date.now();
+  const applyDates = (nodes) =>
+    nodes.map(node => {
+      const next = node.items ? { ...node, items: applyDates(node.items) } : { ...node };
+      // Checked against the original node — `isNewItem` only recognises the raw tree's objects.
+      if (!next.badge && isNewItem(node, now)) next.badge = { ...NEW_BADGE };
+      if (next.dateCreated && next.link) {
+        next.attrs = { title: `Added ${formatItemDate(next.dateCreated)}`, ...(next.attrs || {}) };
+      }
+      return next;
+    });
+
   const applyPlatformBadges = (nodes) =>
     nodes.map(node => {
       const next = node.items ? { ...node, items: applyPlatformBadges(node.items) } : { ...node };
@@ -1547,13 +1642,15 @@ export function cleanTopicsForStarlight(topics) {
       return next;
     });
 
-  return JSON.parse(JSON.stringify(applyPlatformBadges(stripHomeNavOnly(topics)), (key, value) => {
+  return JSON.parse(JSON.stringify(applyPlatformBadges(stripHomeNavOnly(applyDates(topics))), (key, value) => {
     if (key === 'jumpTo') return undefined;
     if (key === 'expandInHomenav') return undefined;
     if (key === 'flattenInHomenav') return undefined;
     if (key === 'featuredInHomenav') return undefined;
     if (key === 'homeNavOnly') return undefined;
     if (key === 'platform') return undefined;
+    if (key === 'dateCreated') return undefined;
+    if (key === 'dateUpdated') return undefined;
     return value;
   }));
 }
