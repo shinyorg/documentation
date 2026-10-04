@@ -1,0 +1,126 @@
+---
+title: Pi Camera
+description: Raspberry Pi cameras through libcamera — snapshots, captures, sensor controls and a shared live MJPEG stream — for a Shiny.AppDeviceBridge app or a headless Pi
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.RpiCamera" />
+
+The Pi camera bridge drives Raspberry Pi cameras through libcamera: snapshots, captures into a file root, sensor controls and a shared live MJPEG stream.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.RpiCamera
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddRpiCameraBridge(),
+    webApp => { /* … */ }
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IRpiCameraBridge` | `AddRpiCameraBridgeClient()` | `RpiCameraBridge` |
+
+## Routes and events
+
+| Bridge | Routes | Events |
+| --- | --- | --- |
+| Pi camera | `GET rpicamera`, `GET rpicamera/snapshot`, `POST rpicamera/capture`, `GET rpicamera/stream` (MJPEG), `GET/PUT rpicamera/controls`, `DELETE rpicamera/streams` |  |
+
+## Details
+
+Raspberry Pi cameras through libcamera, with no
+`rpicam-apps` process to launch. Linux with the native shim only; everywhere else `GET rpicamera` says why there is no
+camera and the rest answer `501`.
+
+```csharp
+// A camera appliance is usually a headless Pi, running the bridge server with no MAUI. It chains in a MAUI app's bridge
+// builder the same way.
+services.AddShinyHttpServer(http => http.AddAppDeviceBridge(bridge => bridge
+    .Configure(o => o.AppId = "greenhouse")
+    .AddRpiCameraBridge(o =>
+    {
+        o.StreamWidth = 1280;
+        o.StreamHeight = 720;
+        o.Camera.NativeLibraryPath = "/opt/greenhouse/native";
+    })));
+
+await services.BuildServiceProvider().GetRequiredService<AppDeviceBridgeServer>().StartAsync();
+```
+
+- **The native shim.** `libshinyrpi_camera.so` links against libcamera's C++ ABI, so it's built against the libcamera the
+  device runs: on the Pi with `native/shinyrpi-camera/build.sh`, or with the arm64 `Dockerfile` beside it. A missing or
+  mismatched shim doesn't stop the app; the status carries the loader's message.
+- **Snapshots and captures.** `GET rpicamera/snapshot` answers `image/jpeg`; `POST rpicamera/capture` writes the JPEG into
+  a file root, where a transfer, a share or the files bridge picks it up. Frames are encoded on the device, from the
+  sensor's NV12 or YUV.
+- **One stream per camera.** `GET rpicamera/stream` is `multipart/x-mixed-replace` MJPEG that an `<img>` plays directly.
+  The camera is exclusive, so every viewer shares one session: the first viewer decides size, quality and frame rate
+  (capped by `MaxFps`), a slow viewer skips to the newest frame, and a snapshot during a stream comes from it. The
+  session closes when the last viewer leaves, `MaxStreamDuration` ends a viewer that never does, and
+  `DELETE rpicamera/streams` ends them all.
+- **Controls.** `GET rpicamera/controls` lists what the attached sensor accepts; `PUT` applies values to a running stream
+  and to every session opened after. A control the sensor lacks is a `400 unsupported_control`: a Camera Module 3 has
+  autofocus, a v2 doesn't.
+- **Busy.** Another process holding the camera (`rpicam-still`, say) is a `409 camera_unavailable`.
+
+```html
+<img src="_bridge/rpicamera/stream?fps=10" />
+```
+
+```ts
+const camera = new RpiCameraBridge();
+const photo = await camera.capture({ root: "data", path: "photos/now.jpg" });
+await camera.setControls({ values: [{ control: "Brightness", value: 0.2 }] });
+```
+
+## Into a stream
+
+A Bluetooth LE L2CAP channel has
+no HTTP to carry `multipart/x-mixed-replace`, so `ICameraService.StreamToAsync` writes the feed into any `System.IO.Stream`
+— an L2CAP channel above all, but a socket or a file works too — and a viewer reads it back with `ReadFramesAsync`. It
+isn't a bridge route: the app calls it on the `ICameraService` that `AddRpiCameraBridge()` registers. Linux with the
+native shim, like the rest; everywhere else it throws `CameraUnavailableException` before touching the stream.
+
+```csharp
+// On the Pi (Shiny.BluetoothLE.Hosting 5.6.5+): the ticket's PSM and token go to the phone over a route it already trusts,
+// such as a GATT command. The handler runs once the phone's channel presents the token.
+var ticket = await broker.Reserve("camera", TimeSpan.FromSeconds(30), (channel, ct) =>
+    camera.StreamToAsync(channel, new RpiCameraStreamSettings { MaxFps = 8 }, cancellationToken: ct));
+
+// On the phone (Shiny.BluetoothLE 5.6.5+, Shiny.AppDeviceBridge.RpiCamera.Client)
+await using var channel = await peripheral.OpenL2CapTicketChannel(psm, token);
+await foreach (var frame in channel.ReadFramesAsync())
+    preview.Source = ImageSource.FromStream(() => new MemoryStream(frame.Jpeg));
+```
+
+- **The format.** Every frame is a 28-byte little-endian header — payload length (u32), sequence (u32), width (u32),
+  height (u32), FourCC `MJPG` (u32), timestamp in milliseconds (i64) — then that many bytes of JPEG. The sequence is the
+  sensor's counter, so a gap is frames the device dropped and a widening one says to ask for less; the timestamp is the
+  device's monotonic clock, not wall time. `RpiCameraFrameStream` in `Shiny.AppDeviceBridge.RpiCamera.Client` holds the
+  format for either end: `ReadFramesAsync` yields `RpiCameraStreamFrame`s, `WriteFrameAsync` writes one, and
+  `WriteHeader` / `TryReadHeader` work with an `RpiCameraFrameHeader` directly.
+- **How it ends.** The stream closing between frames ends `ReadFramesAsync` quietly. Closing part way through a frame is an
+  `EndOfStreamException`, and a header claiming an empty frame or more than `MaxFrameBytes` (8 MB) is an
+  `InvalidDataException` — a reader sizes a buffer from it, so it isn't believed.
+- **Settings.** `RpiCameraStreamSettings`: `CameraId`, `Width` × `Height` (640 × 480), `Quality` (60), `MaxFps` (10),
+  `MaxDuration` (5 minutes) and `LimitedRangeInput`. Frames beyond `MaxFps` are dropped before they're encoded, which is
+  where a Pi's CPU goes; a pipeline already producing MJPEG passes its frames straight through. `MaxDuration` is always
+  there, because a viewer that walks out of range never says stop.
+- **Opened on connect.** The camera session opens when `StreamToAsync` starts and is released when it returns, so call it
+  once a viewer has actually connected. A slow destination backs up into the writes, and frames produced meanwhile are
+  skipped rather than queued. The session is its own, not the bridge's shared one: it isn't listed by `GET rpicamera`,
+  `DELETE rpicamera/streams` doesn't end it, and the camera is exclusive either way.
+- **Ending and progress.** It returns `RpiCameraStreamEnd.CameraStopped` or `MaxDurationReached`; cancelling throws
+  `OperationCanceledException`, and a viewer that went away is an `IOException`. The destination is never disposed. Pass
+  an `RpiCameraStreamStatistics` to read `FramesSent`, `FramesDropped` and `BytesSent` from another thread while it runs.
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).

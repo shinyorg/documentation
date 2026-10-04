@@ -1,0 +1,89 @@
+---
+title: Device Camera
+description: This device's own camera driven from a page anywhere — a live MJPEG viewfinder, photos and video filed into a file root — for a Shiny.AppDeviceBridge web app
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Camera" />
+
+The device camera bridge drives this device's own camera from a page anywhere: a live MJPEG viewfinder, photos and video filed into a file root, lens, zoom, torch and effects.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Camera
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddCameraBridge(),
+    webApp => { /* … */ }
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `ICameraBridge` | `AddCameraBridgeClient()` | `CameraBridge` |
+
+## Routes and events
+
+| Bridge | Routes | Events |
+| --- | --- | --- |
+| Device camera | `GET camera`, `POST camera/access`, `POST camera/open`, `POST camera/close`, `POST camera/photo`, `POST/DELETE camera/recording`, `PUT camera/settings`, `GET camera/preview` (MJPEG) | `camera.status` |
+
+## Details
+
+This device's own camera, driven from a page anywhere — the
+reason being a phone on a mount, framed and fired from a laptop across the room. Not the camera of the machine showing the
+page: that's `getUserMedia` (see [Camera, microphone and location in the page](/appdevicebridge/hosting/#camera-microphone-and-location-in-the-page)).
+Android, iOS, Mac Catalyst, macOS and Windows, through Shiny's `CameraView`; Linux has no camera and answers `501`.
+
+```csharp
+bridge.AddCameraBridge(o =>
+{
+    o.Root = "data";                 // captures are filed here…
+    o.Folder = "camera";             // …as camera/IMG_20260916-201502.jpg, camera/VID_….mov
+});
+```
+
+- **A camera screen, not a background service.** The camera runs on a view on screen — iOS won't run one in the
+  background at all — so `GET camera` says whether one is `live`, and until it is every command answers
+  `409 camera_not_open`. That's a normal state: show it as "open the camera on the device", not as an error.
+- **Opening it from afar.** `POST camera/open` (`202`) asks the device to show its camera. Unless something handles
+  `CameraBridgeSession.OpenRequested`, the bridge pushes its own `CameraBridgePage` over the web app — shutter, photo and
+  video, flip, torch, close. `POST camera/close` closes it. For a camera screen of your own, put a `CameraBridgeView` on
+  it, set `PresentWhenOpened = false` and navigate there from `OpenRequested`; the buttons on that screen and the
+  requests from a page run the same methods.
+- **Driving it.** `POST camera/photo` and `POST`/`DELETE camera/recording` capture at full resolution and file into the
+  file root, answering `{ file: { root, path }, kind, size, … }` for the files bridge. `PUT camera/settings` is a
+  patch — `videoMode`, `facing`, `cameraId`, `active`, `filter`, `torchOn`, `zoom` — so two viewers don't undo each
+  other; changing the camera mid-recording is a `422 camera_state`. Phones flip front and back; desktops list
+  `cameras` and set `choosesCamera`, since none of theirs is front or back.
+- **The viewfinder.** `GET camera/preview` is `multipart/x-mixed-replace` MJPEG an `<img>` plays: small (720 px) and 12
+  frames a second by default (`PreviewMaxEdge`, `PreviewFramesPerSecond`, `PreviewQuality`), because latency matters more
+  than smoothness when framing. The device encodes only while someone watches, and a slow viewer gets the newest frame.
+- **Everyone follows the device.** `camera.status` carries the whole status whenever anything changes — somebody picks
+  the phone up and switches to video, and every page's controls follow.
+- **Filing elsewhere.** Register an `ICameraCaptureStore` before `AddCameraBridge` to file captures through your own
+  storage.
+- **Platform setup:** `NSCameraUsageDescription` and `NSMicrophoneUsageDescription` on Apple platforms (plus the camera
+  and audio-input entitlements where sandboxed), `CAMERA` and `RECORD_AUDIO` on Android, the `webcam` and `microphone`
+  capabilities on Windows. `POST camera/access` prompts where the platform will.
+
+```html
+<img src="_bridge/camera/preview?t=1726517702" />   <!-- a new query each time it's shown -->
+```
+
+```ts
+const camera = new CameraBridge();
+camera.onStatus(status => render(status));
+await camera.open();
+const photo = await camera.takePhoto();              // { file: { root: "data", path: "camera/IMG_….jpg" }, … }
+await camera.updateSettings({ videoMode: true, zoom: 2 });
+```
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).

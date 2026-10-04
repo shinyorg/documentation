@@ -1,0 +1,111 @@
+---
+title: Tray Icon & Quick Entry
+description: System tray and menu bar icons, and a quick entry prompt summoned by a global hotkey, for a Shiny.AppDeviceBridge web app on the desktop
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Desktop" />
+
+The desktop package has two bridges: tray and menu bar icons with menus, badges, notifications and animation, and a quick entry prompt that opens over other applications from a global hotkey. Both hand what the user does back to the web app.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Desktop
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddTrayIconBridge().AddQuickEntryBridge(),
+    webApp => { /* … */ }
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `ITrayBridge` | `AddTrayBridgeClient()` | `TrayBridge` |
+| `IQuickEntryBridge` | `AddQuickEntryBridgeClient()` | `QuickEntryBridge` |
+
+## Routes and events
+
+| Bridge | Routes | Events |
+| --- | --- | --- |
+| Tray icon | `GET/POST/DELETE tray`, `GET/PUT/DELETE tray/{id}`, `PUT/DELETE tray/{id}/menu`, `POST tray/{id}/menu/show`, `POST tray/{id}/notification`, `PUT/DELETE tray/{id}/animation` | `tray.click`, `tray.menu` |
+| Quick entry | `GET quickentry`, `PUT quickentry/options`, `POST quickentry/{show,hide,toggle}`, `GET/PUT quickentry/prompt`, `POST quickentry/prompt/reset`, `POST quickentry/glow/{show,hide,pulse}` | `quickentry.submitted`, `quickentry.suggestion`, `quickentry.cancelled`, `quickentry.microphone`, `quickentry.opened`, `quickentry.closed` |
+
+## Tray icon
+
+The system tray on Windows, the menu bar on
+macOS, the status notifier area on Linux — desktop only, `501` elsewhere.
+- **Naming an icon:** use `PUT /_bridge/tray/main` rather than `POST /_bridge/tray`. The first call creates
+  the icon and later ones adopt it, so a page reload or an applied update doesn't stack up a second icon.
+  A `PUT` changes only the properties it sends; `""` clears `tooltip`, `title` or `badge`.
+- **Images:** either `{ "root": "data", "path": "icons/tray.png" }` — the same file roots the files bridge
+  takes, so the page can't point the tray at anything it couldn't already read — or `{ "data": "…" }` holding
+  base64, with or without a `data:` URI prefix, which is how a page ships an icon it drew itself. Set
+  `"templateImage": true` for a black-with-alpha image macOS and Linux tint for light and dark menu bars.
+- **Menus:** each entry is `Item`, `Check`, `Separator` or `Submenu`, and its `id` is what comes back on
+  `tray.menu`; omit it and one is assigned. Ids must be unique across the whole menu.
+- **Clicks reach the web app either way:** `tray.click` and `tray.menu` go out as events *and* as calls the
+  page handles when it is open and `background.js` handles when it is not — which is the case a tray menu
+  exists for. `tray.click` isn't raised on Linux, where the app indicator handles clicks itself and opens the
+  menu on its own (so `menu/show` is a no-op there).
+- **Lifetime:** icons outlive the page and are removed when the app shuts down, or by
+  `DELETE /_bridge/tray/{id}`. `MaxIcons` (4) caps how many exist at once.
+
+```ts
+await new TrayBridge().put("main", {
+    tooltip: "Field App",
+    templateImage: true,
+    icon: { root: "data", path: "icons/tray.png" },
+    menu: { items: [
+        { id: "open", label: "Open" },
+        { type: "Separator" },
+        { id: "sync", type: "Check", label: "Sync", checked: true }
+    ] }
+});
+```
+
+## Quick entry
+
+Shiny's quick entry prompt as a borderless,
+always-on-top window that opens over other applications, in the style of Spotlight or a desktop assistant. The page
+configures it, hears what's submitted and writes the answer back. Desktop only: macOS (AppKit and Catalyst), Windows and
+Linux; `501` elsewhere.
+
+```csharp
+bridge.AddQuickEntryBridge(
+    o => o.HotKey = "Ctrl+Alt+Space",                         // toggles the window from anywhere
+    quickEntry => quickEntry.ScreenGlow = ScreenGlowTrigger.WhileBusy
+);
+```
+
+- **Opening it:** the global hotkey, `POST quickentry/show` or `toggle`, or a tray click that calls one. `PUT
+  quickentry/options` changes the hotkey (`""` removes it), size, placement and dismissal while the app runs;
+  `hotKeyRegistered: false` in the status means another application already owns the combination.
+- **The prompt:** `PUT quickentry/prompt` sets the placeholder, suggestions (each with an optional `value` that comes
+  back when it's chosen), `isBusy` with `busyText`, and `response`, the text shown under the entry. Only what you send
+  changes; `""` clears the response and `[]` the suggestions. What you set survives a window that rebuilds its prompt.
+- **Answering:** `quickentry.submitted` goes out as an event *and* as a call the page handles when it's open and
+  `background.js` handles when it isn't, which is the usual case for a window summoned over other applications. Set
+  `isBusy`, do the work, then set `response`.
+- **The glow:** `glow/show`, `glow/hide` and `glow/pulse` drive the colour wash around the screen's edge; the
+  `glow` option lights it while the window is open or while the prompt is busy.
+- **Custom content:** if the app replaces the prompt through `QuickEntryOptions.ContentFactory`, the prompt routes
+  answer `409` and the window routes still work.
+
+```ts
+const quickEntry = new QuickEntryBridge();
+
+await quickEntry.setPrompt({ placeholder: "Ask Field App…", suggestions: [{ text: "Sync now", value: "sync" }] });
+quickEntry.onSubmitted(async ({ text, suggestion }) => {
+    await quickEntry.setPrompt({ isBusy: true, busyText: "Thinking…" });
+    await quickEntry.setPrompt({ isBusy: false, response: await answer(text, suggestion?.value) });
+});
+```
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).

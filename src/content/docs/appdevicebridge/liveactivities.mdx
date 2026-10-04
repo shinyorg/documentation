@@ -1,0 +1,135 @@
+---
+title: Live Activities
+description: iOS Live Activities and Android 16 Live Updates for a Shiny.AppDeviceBridge web app — start, update and end them from the page, and get their push tokens in the page or background.js
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.LiveActivities" />
+
+The live activities bridge lets the page put an ongoing status on the device: a delivery, a timer, a score. On iOS
+it's a **Live Activity** on the Lock Screen and in the Dynamic Island. On Android 16 it's a **Live Update**, a
+promoted ongoing notification that also shows as a status bar chip. It's built on
+[Shiny.Mobile.LiveActivities](/client/liveactivities/) 5.9. The page decides what an activity says; the app's
+widget decides how it looks.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, iPadOS 16.2+ | ActivityKit, rendered by a WidgetKit extension built into the app (see below) |
+| Android | a promoted ongoing notification on API 36+; an ordinary progress notification before that |
+| Mac Catalyst, macOS, Windows, Linux, iOS before 16.2 | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.LiveActivities
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddLiveActivitiesBridge(),
+    webApp => { /* … */ }
+);
+```
+
+`AddLiveActivitiesBridge()` registers Shiny's live activity service with the bridge's delegate, so there's nothing
+else to call. Its optional argument is Shiny's `LiveActivityOptions`, which names the Android notification channel
+(`o.ChannelName = "Deliveries"`). An app that already called `services.AddLiveActivities(…)` keeps its registration,
+and the bridge only adds its delegate.
+
+**iOS needs the widget extension.** ActivityKit draws an activity from a SwiftUI widget in the app bundle. Turn on
+Shiny's, and the iOS build compiles it into the app and adds `NSSupportsLiveActivities` to Info.plist:
+
+```xml
+<ShinyLiveActivityWidget Condition="$(TargetFramework.Contains('-ios'))">true</ShinyLiveActivityWidget>
+```
+
+Without it, starting an activity succeeds and nothing appears. The stock widget shows the title, body, short status
+and progress. To draw your own, see [the iOS widget extension](/client/liveactivities/widget/). On a device build the
+extension (`<bundle id>.LiveActivity`) needs a provisioning profile, which a wildcard development profile covers.
+
+## From the page
+
+```csharp
+// Program.cs (Blazor WebAssembly)
+builder.Services.AddWebAppHostClient().AddLiveActivitiesBridgeClient();
+```
+
+```csharp
+@inject ILiveActivitiesBridge Activities
+
+var activity = await Activities.StartAsync(new LiveActivityStartRequest(
+    new LiveActivityContent(Title: "Out for delivery", Body: "Order #4821", ShortStatus: "12 min", Progress: new LiveActivityProgress(Value: 0.5)),
+    Attributes: new Dictionary<string, string> { ["order"] = "4821" }
+));
+
+await Activities.UpdateAsync(activity.Id, new LiveActivityUpdateRequest(
+    new LiveActivityContent(Title: "Arriving now", ShortStatus: "1 min", Progress: new LiveActivityProgress(Value: 0.95)),
+    new LiveActivityAlert("Your order is here")
+));
+
+await Activities.EndAsync(activity.Id, new LiveActivityEndRequest(new LiveActivityContent(Title: "Delivered"), DateTimeOffset.Now.AddMinutes(5)));
+```
+
+```ts
+import { LiveActivitiesBridge } from "@shinyorg/appdevicebridge";
+
+const activities = new LiveActivitiesBridge();
+const { id } = await activities.start({ content: { title: "Out for delivery", shortStatus: "12 min", progress: { value: 0.5 } } });
+await activities.update(id, { content: { title: "Arriving now", progress: { value: 0.95 } }, alert: { title: "Your order is here" } });
+await activities.end(id, { content: { title: "Delivered" } });
+```
+
+| Route | |
+| --- | --- |
+| `GET /_bridge/liveactivities` | `{ access, pushToStartToken }` |
+| `POST /_bridge/liveactivities/access` | asks for notification permission on Android; on iOS, reports the Live Activities switch in Settings |
+| `GET /_bridge/liveactivities/activities` | the running activities, `[{ id, state, pushToken }]` |
+| `POST /_bridge/liveactivities/activities` | `{ content, attributes?, kind?, requestPushToken? }` starts one and returns it |
+| `PUT /_bridge/liveactivities/activities/{id}` | `{ content, alert? }` replaces what it says; silent unless `alert` is set |
+| `POST /_bridge/liveactivities/activities/{id}/end` | `{ content?, dismissAt? }`; with no body it keeps the last content |
+| `DELETE /_bridge/liveactivities/activities` | ends them all |
+
+- **Content** is `title`, `body`, `shortStatus` (a few characters, for the compact Dynamic Island and the Android
+  status bar chip), `progress` (`{ value }` from 0 to 1, `{ start, end }` for a timer the system advances itself,
+  or `{ indeterminate: true }`), `staleDate`, `relevanceScore` and `data`, strings for your own widget to read.
+- **Attributes** never change for the activity's lifetime. `kind` picks a layout when your widget has several.
+- **Errors:** `501 not_supported`, `404` for an id that isn't running, `400` for a body without `content` or a
+  progress value outside 0–1, and `502 live_activity_failed` when the system refuses — the user switched live
+  activities off, or the app has too many running.
+
+## Push tokens and background.js
+
+A server can update an activity, or start one with the app closed, through APNs. It needs the tokens iOS issues: one
+per activity (when `requestPushToken` is true, the default) and one push-to-start token per device (iOS 17.2+).
+They arrive as events and handler calls. A handler runs in the page if one is listening, and otherwise in
+`background.js`, so a token issued with no page open still reaches your server.
+
+```js
+// background.js
+appdevicebridge.on("liveactivities.token", async ({ activityId, token }) => {
+    await fetch("https://api.example.com/live-activity-tokens", { method: "POST", body: JSON.stringify({ activityId, token }) });
+});
+
+appdevicebridge.on("liveactivities.starttoken", async ({ token }) => {
+    await fetch("https://api.example.com/push-to-start", { method: "POST", body: JSON.stringify({ token }) });
+});
+```
+
+| Handler and event | Payload |
+| --- | --- |
+| `liveactivities.started` | `{ id, state, pushToken }`, from the page or a push-to-start notification |
+| `liveactivities.state` | `{ id, state, pushToken }` when one turns `Stale`, `Ended` or `Dismissed` |
+| `liveactivities.token` | `{ activityId, token }` |
+| `liveactivities.starttoken` | `{ token }` |
+
+The [Shiny Live Activities push docs](/client/liveactivities/push/) cover the APNs payloads. A push-to-start payload
+names the same `attributes` the page starts an activity with.
+
+## Security
+
+The live activities routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device
+by default. This bridge doesn't change the default policy, the host-name check or the launch session. See
+[Security](/appdevicebridge/security/).
