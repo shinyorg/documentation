@@ -1,0 +1,156 @@
+---
+title: Document Geofencing
+description: Unlimited polygon and proximity geofences stored as Shiny.DocumentDb documents, monitored by GPS, for a Shiny.AppDeviceBridge web app
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.DocumentGeofencing" />
+
+The document geofencing bridge puts [Shiny.DocumentDb geofencing](/documentdb/geofencing/) in front of the page. The
+regions are documents in your store: polygons with holes matched by containment, or points and shapes matched within a
+distance. There's no OS limit on how many, unlike the platform's region monitoring. Background GPS evaluates each
+reading against every region set and reports the device entering or leaving a region. A change arrives as a
+`documentgeofence.change` event while a page is open, and at background.js otherwise.
+
+The region sets are typed C# selectors and filters over your own documents, so the app registers them. The page starts
+and stops monitoring, asks where the device is, and hears changes. It never defines what is monitored.
+
+Android, iOS and Mac Catalyst. Everywhere else every route answers `501`. For a handful of circles that the page
+defines itself, use [Geofencing](/appdevicebridge/geofencing/), which runs on the OS's own region monitoring.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.DocumentGeofencing
+dotnet add package Shiny.DocumentDb.Sqlite    # or any provider with spatial queries
+```
+
+Register a document store with a spatial provider and each region type's geometry mapped, then the bridge with its
+region sets:
+
+```csharp
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={Path.Combine(FileSystem.AppDataDirectory, "app.db")}");
+    opts.JsonSerializerOptions = AppJsonContext.Default.Options;   // also how regions reach the page
+    opts.ConfigureDocument<Zone>(cfg => cfg.MapSpatialProperty(nameof(Zone.Boundary), z => z.Boundary));
+});
+
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddDocumentGeofenceBridge(cfg =>
+    {
+        cfg.MinimumDistance = Distance.FromMeters(250);
+        cfg.AddRegionSet<Zone>("zones", z => z.Id, z => z.Name, filter: z => z.Active)
+           .AddRegionSet<Store>("stores", s => s.Id, s => s.Name, withinMeters: 500);
+    }),
+    webApp => { /* … */ }
+);
+```
+
+`AddDocumentGeofenceBridge` takes the same `DocumentGeofenceConfig` as `AddDocumentGeofencing`, including the GPS reading
+filters (`MinimumDistance`, `MinimumTime`, `MaximumDistance`, `MaximumTime`). It registers Shiny.DocumentDb.Geofencing,
+so don't call `AddDocumentGeofencing` yourself as well. Shiny.DocumentDb.Geo's US states, Canadian provinces and cities
+work as region sets out of the box: call `opts.MapGeoReferenceData()` and seed them with `GeoReferenceSeeder` (see
+[Geo reference data](/documentdb/geo-reference/)).
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IDocumentGeofencesBridge` | `AddDocumentGeofencesBridgeClient()` | `DocumentGeofencesBridge` |
+
+### Platform setup
+
+The platform setup is Shiny.Gps' background GPS: see [GPS](/client/locations/gps/) and its
+[platform requests](/client/locations/platform-requests/).
+
+## From the page
+
+```ts
+import { DocumentGeofencesBridge } from "@shinyorg/appdevicebridge";
+
+const regions = new DocumentGeofencesBridge();
+const { access } = await regions.requestAccess();
+if (access !== "Available") return;
+
+await regions.onChange(c => console.log(c.entered ? "entered" : "left", c.regionSet, c.regionName, c.region));
+await regions.start();
+
+const here = await regions.getCurrent();    // one entry per set; regionId is null outside every region
+```
+
+`start` is a no-op while monitoring runs, and monitoring survives an app restart. `stop` forgets which regions the
+device was in. `getCurrent` resolves from the last GPS reading without raising changes, and is empty before the first
+reading.
+
+Changes reach background.js as the `documentgeofence` handler, with the same payload:
+
+```js
+appdevicebridge.on("documentgeofence", async ({ regionSet, regionId, regionName, entered, region }) => {
+    // …
+});
+```
+
+### The region document
+
+`region` on a change and on `getCurrent` is the region document itself, serialized with the store's
+`DocumentStoreOptions.JsonSerializerOptions`. It's written only through that options' type metadata, never by
+reflection, so it's `null` for a type the options don't know. It's also `null` on an exit from a region deleted since.
+When the region sets live in a keyed store, or you want different JSON, pass options of your own:
+
+```csharp
+bridge.AddDocumentGeofenceBridge(
+    cfg => cfg.AddRegionSet<Zone>("zones", z => z.Id),
+    o => o.RegionSerializerOptions = RegionJsonContext.Default.Options
+);
+```
+
+### Handling changes in C# too
+
+Shiny.DocumentDb.Geofencing has room for one delegate, and the bridge's `WebAppDocumentGeofenceDelegate` takes it. To
+act on a change natively as well, subclass it and keep the base call:
+
+```csharp
+public class MyGeofenceDelegate(IServiceProvider services, WebAppEventHub events, WebAppInvoker invoker, ILogger<MyGeofenceDelegate> logger)
+    : WebAppDocumentGeofenceDelegate(services, events, invoker)
+{
+    public override async Task OnRegionChanged(DocumentRegionChange change)
+    {
+        logger.LogInformation("{Verb} {Region}", change.Entered ? "Entered" : "Exited", change.RegionName);
+        await base.OnRegionChanged(change);
+    }
+}
+
+bridge.AddDocumentGeofenceBridge(cfg => /* … */, o => o.UseDelegate<MyGeofenceDelegate>());
+```
+
+### Sharing the GPS listener
+
+Monitoring runs on Shiny.Gps' single listener. If the app also registers the [GPS bridge](/appdevicebridge/gps/), the
+page drives that same listener: stopping it through `DELETE gps/listener` stops geofencing too, and starting a
+listener with other settings replaces geofencing's. Readings still reach both bridges' delegates.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `501` | `not_supported` | Not Android, iOS or Mac Catalyst |
+| `501` | `spatial_not_supported` | `start` against a store whose provider can't run spatial queries (LiteDB, IndexedDB, Azure Table, DynamoDB) |
+| `409` | `geofence_refused` | `start` without background location permission |
+
+## Requests
+
+<BridgeApi bridges={["DocumentGeofencesBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["DocumentGeofencesBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["DocumentGeofencesBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).

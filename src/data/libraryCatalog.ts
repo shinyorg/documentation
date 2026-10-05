@@ -379,7 +379,7 @@ export const categories: CategoryCopy[] = [
                     'Subscriptions, offers, free trials and pending purchases',
                     'ASP.NET Core webhooks for renewals, refunds and cancellations',
                 ],
-                packages: ['Shiny.Mobile.Pay', 'Shiny.Mobile.Pay.Server'],
+                packages: ['Shiny.Mobile.InAppPurchases', 'Shiny.Mobile.InAppPurchases.Server'],
                 frameworks: ['maui', 'aspnet'],
                 os: ['android', 'ios'],
             },

@@ -408,10 +408,10 @@ export const sidebarTopics = [
         label: 'In-App Purchases',
         jumpTo: true,
         items: [
-          { label: 'Getting Started', link: 'pay/', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' },
-          { label: 'Store Setup', link: 'pay/store-setup', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' },
-          { label: 'Server', link: 'pay/server', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' },
-          { label: 'Release Notes', link: 'pay/release-notes', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' }
+          { label: 'Getting Started', link: 'client/inapppurchases/', dateCreated: '2026-09-15', dateUpdated: '2026-10-04' },
+          { label: 'Store Setup', link: 'client/inapppurchases/store-setup', dateCreated: '2026-09-15', dateUpdated: '2026-10-04' },
+          { label: 'Server', link: 'client/inapppurchases/server', dateCreated: '2026-09-15', dateUpdated: '2026-10-04' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
       {
@@ -688,6 +688,7 @@ export const sidebarTopics = [
               { label: 'Contacts', link: 'appdevicebridge/contacts', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Device Camera', link: 'appdevicebridge/camera', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Discovery', link: 'appdevicebridge/discovery', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Document Geofencing', link: 'appdevicebridge/document-geofencing', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Folders', link: 'appdevicebridge/folders', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Geofencing', link: 'appdevicebridge/geofencing', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'GPS & Motion', link: 'appdevicebridge/gps', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
