@@ -1,0 +1,158 @@
+---
+title: In-App Purchases
+description: App Store and Google Play in-app purchases for a Shiny.AppDeviceBridge web app — products, the store's purchase sheet, entitlements, finishing and restores from the page, with purchase updates in the page or background.js
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.InAppPurchases" />
+
+The in-app purchases bridge lets the page sell consumables, non-consumables and auto-renewable subscriptions through
+the device's own store: the **App Store** (StoreKit 2) on iOS and **Google Play Billing** on Android. It's built on
+[Shiny.Mobile.InAppPurchases](/client/inapppurchases/) 5.9. The store's sheet takes the payment, so the page never
+sees card details. This is store purchasing, not Apple Pay or Google Pay.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, iPadOS 15+ | StoreKit 2 |
+| Android (API 26+) | Google Play Billing 9 |
+| Mac Catalyst, macOS, Windows, Linux | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.InAppPurchases
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddInAppPurchasesBridge(),
+    webApp => { /* … */ }
+);
+```
+
+`AddInAppPurchasesBridge()` registers Shiny's purchase manager with the bridge's delegate, so there's nothing else to
+call. An app that already calls `services.AddInAppPurchases<MyPurchaseDelegate>()` keeps its delegate, and Shiny runs
+both. The products themselves are configured in App Store Connect and the Play Console. See
+[Store Setup](/client/inapppurchases/store-setup/).
+
+## From the page
+
+```csharp
+// Program.cs (Blazor WebAssembly)
+builder.Services.AddWebAppHostClient().AddInAppPurchasesBridgeClient();
+```
+
+```csharp
+@inject IInAppPurchasesBridge Purchases
+
+var products = await Purchases.GetProductsAsync(new ProductsRequest(["coins_100", "pro_monthly"]));
+
+var result = await Purchases.PurchaseAsync(new PurchaseRequest("pro_monthly", AccountToken: user.Id));
+if (result is { Status: PurchaseResultStatus.Success, Purchase: { } purchase })
+{
+    await api.VerifyAndGrantAsync(purchase.VerificationData, purchase.ProductId);   // your server
+    await Purchases.FinishAsync(purchase.TransactionId, new FinishPurchaseRequest(Consume: false));
+}
+```
+
+```ts
+import { InAppPurchasesBridge } from "@shinyorg/appdevicebridge";
+
+const purchases = new InAppPurchasesBridge();
+const result = await purchases.purchase({ productId: "coins_100", accountToken: user.id });
+if (result.status === "Success" && result.purchase) {
+    await verifyAndGrant(result.purchase.verificationData, result.purchase.productId);   // your server
+    await purchases.finish(result.purchase.transactionId, { consume: true });
+}
+```
+
+Every route, its body and its response is listed under [Requests](#requests).
+
+- **Results, not errors:** a purchase ends `Success`, `Pending` (Ask to Buy or a slow payment method), `Cancelled`
+  or, on Google Play, `AlreadyOwned`. **Never grant a pending purchase.** It arrives as `purchases.updated` when it
+  resolves.
+- **Always send `accountToken`,** your user's id as a GUID. The stores echo it back as Apple's `appAccountToken` and
+  Google's `obfuscatedAccountId`, on the device and in their server notifications.
+- **Offers:** `subscriptionOffers` lists Google's base plans and offers, and Apple's introductory offer when the user
+  is eligible. Buy a Google offer by passing its `offerToken`. A Google upgrade or downgrade passes `replacement`
+  with the old product and its purchase token. Apple handles plan changes within a subscription group by itself.
+
+## Verify, grant, then finish
+
+A paid purchase is not finished by the bridge. Send `verificationData` (Apple's signed JWS, Google's purchase token) to
+your server. [Shiny.Mobile.InAppPurchases.Server](/client/inapppurchases/server/)'s `IPurchaseVerifier` takes it as
+it is. Store the entitlement, and only then call `POST purchases/transactions/{transactionId}/finish` with
+`{ consume }`. `consume: true` makes a consumable buyable again. Google Play refunds a purchase that isn't finished
+within three days.
+
+The page only names the purchase. The bridge finds it among the store's unfinished purchases and entitlements, so a
+page can't finish a purchase the store doesn't have. It answers `404 purchase_not_found` when there's no match, which
+usually means the purchase was finished already.
+
+At startup, read `GET purchases/unfinished` and run each purchase through the same path, so a crash between paying and
+finishing never loses one. `GET purchases/entitlements` is what the user owns now. `POST purchases/restore` syncs with
+the App Store, which may ask the user to sign in, so call it only from a "Restore Purchases" button.
+`POST purchases/manage` opens the store's subscription screen.
+
+## Purchase updates and background.js
+
+Purchases change outside a purchase call: Ask to Buy approvals, pending payments that complete, renewals, refunds
+(`state: "Revoked"`), purchases on another device and offer codes. Shiny listens from launch, and each change arrives
+as `purchases.updated`. It runs in the page if one is listening, and otherwise in `background.js`, so a purchase that
+completes with no page open is still verified and finished:
+
+```js
+// background.js
+appdevicebridge.on("purchases.updated", async purchase => {
+    if (purchase.state !== "Purchased" || purchase.isFinished)
+        return;
+
+    await fetch("https://api.example.com/purchases/verify", { method: "POST", body: JSON.stringify(purchase) });
+    await fetch(`/_bridge/purchases/transactions/${encodeURIComponent(purchase.transactionId)}/finish`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ consume: purchase.productId === "coins_100" })
+    });
+});
+```
+
+The same purchase can arrive more than once, until it's finished, so key on `transactionId`.
+
+## Errors
+
+| Status and code | When |
+| --- | --- |
+| `501 not_supported` | not iOS or Android |
+| `400` | a body without `productIds` or `productId`, a `quantity` below 1, an incomplete `replacement`, or a finish without a body |
+| `404 purchase_not_found` | finishing a transaction the store has no unfinished purchase or entitlement for |
+| `503 store_unavailable`, `503 network` | the store can't be reached |
+| `403 not_allowed` | payments are blocked: parental controls, MDM, an unsupported country |
+| `404 product_not_found` | the store doesn't know the product |
+| `409 product_unavailable`, `409 no_user_interface`, `409 invalid_state` | the product can't be bought now, no window can show the sheet, or the purchase can't be finished yet (a pending one) |
+| `400 developer_error` | the store rejected the request's arguments, such as an invalid offer |
+| `502 verification_failed`, `502 purchase_failed` | the store's signature didn't verify on the device, or any other store failure |
+
+The store's own error code, when there is one, is at the end of the message.
+
+## Requests
+
+<BridgeApi bridges={["InAppPurchasesBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["InAppPurchasesBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["InAppPurchasesBridge"]} show="types" />
+
+## Security
+
+The purchases routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge, so by default only callers
+on this device can reach them. This bridge doesn't change the default policy, the host-name check or the launch
+session. Every purchase still needs the user's confirmation in the store's sheet. Verify `verificationData` on your
+server before granting anything; never trust the device's word for it. See [Security](/appdevicebridge/security/).

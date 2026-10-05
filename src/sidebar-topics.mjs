@@ -694,6 +694,7 @@ export const sidebarTopics = [
               { label: 'GPS & Motion', link: 'appdevicebridge/gps', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Health', link: 'appdevicebridge/health', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'HTTP Transfers', link: 'appdevicebridge/http-transfers', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'In-App Purchases', link: 'appdevicebridge/inapppurchases', showNew: true, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Live Activities', link: 'appdevicebridge/liveactivities', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Maps & Directions', link: 'appdevicebridge/maps', showNew: false, dateCreated: '2026-09-22', dateUpdated: '2026-09-22' },
               { label: 'Notifications', link: 'appdevicebridge/notifications', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
