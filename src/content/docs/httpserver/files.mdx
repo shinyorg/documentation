@@ -74,9 +74,46 @@ var written = await ctx.Request.SaveBodyToAsync(path, ctx.RequestAborted);
 Never buffers. `ctx.Request.Body` is the stream itself, and `ctx.Request.BodyReader` is the
 `PipeReader` for zero-copy parsing.
 
-<Aside type="note">
-Whatever you use, the server-wide `Limits.MaxRequestBodySize` (30 MB by default) still applies. Raise
-it in [configuration](/httpserver/configuration/) for an upload endpoint.
+### Size limits
+
+Every request body is held to the server-wide `Limits.MaxRequestBodySize`, 30 MB by default and set in
+[configuration](/httpserver/configuration/). An upload endpoint doesn't need the whole server raised:
+give that route its own limit and keep the default small everywhere else.
+
+```csharp
+builder.Options.Limits.MaxRequestBodySize = 1024 * 1024;   // 1 MB for everything...
+
+app.MapPost("/images", Upload).WithRequestSizeLimit(500 * 1024 * 1024);   // ...except this
+app.MapPut("/backups/{name}", Restore).DisableRequestSizeLimit();         // no limit at all
+```
+
+On a generated endpoint, use the attributes:
+
+```csharp
+[Post("/images")]
+[RequestSizeLimit(500 * 1024 * 1024)]
+public Task<IActionResult> Upload(HttpContext ctx) => ...;
+
+[Put("/backups/{name}")]
+[DisableRequestSizeLimit]
+public Task<IActionResult> Restore(string name, HttpContext ctx) => ...;
+```
+
+A route's limit can be higher or lower than the server's. Routing applies it before authorization or the
+handler runs, and the body is checked as it is read. A `Content-Length` over the limit gets a 413 at the
+first read, before any of the body is accepted, and a chunked or HTTP/2 body without a length gets a 413
+as soon as it goes over. Middleware that runs before routing can also set `ctx.Request.MaxBodySize`
+itself. Once the body has started to be read, the limit can't change: `ctx.Request.IsMaxBodySizeReadOnly`
+turns true, and setting it throws.
+
+A client that sends `Expect: 100-continue` only gets the `100 Continue` when the handler starts reading
+the body. A request that is turned away first (unauthorized, unrouted, or with a declared length over
+the limit) never has its body sent.
+
+<Aside type="caution" title="HTTP/3">
+HTTP/3 receives the whole body before the request reaches routing, so it is always held to the
+server-wide `MaxRequestBodySize`; a route's own limit has no effect there. Raise the server-wide limit
+if large uploads need to work over HTTP/3.
 </Aside>
 
 ## Downloads
