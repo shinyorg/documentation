@@ -1376,102 +1376,104 @@ export const sidebarTopics = [
         label: 'HTTP Server',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'httpserver/', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-          { label: 'FAQ', link: 'httpserver/faq', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-          { label: 'Hosting & Lifecycle', link: 'httpserver/hosting', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-          { label: 'Configuration', link: 'httpserver/configuration', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+          { label: 'Getting Started', link: 'httpserver/', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+          { label: 'FAQ', link: 'httpserver/faq', dateCreated: '2026-09-28', dateUpdated: '2026-09-28', showNew: false },
+          { label: 'Hosting & Lifecycle', link: 'httpserver/hosting', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+          { label: 'Configuration', link: 'httpserver/configuration', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
           {
             label: 'Handling Requests',
             items:[
-              { label: 'Routing', link: 'httpserver/routing', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Middleware', link: 'httpserver/middleware', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Typed Endpoints', link: 'httpserver/endpoints', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Results & JSON', link: 'httpserver/results', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Serialization & Formats', link: 'httpserver/serialization', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'Routing', link: 'httpserver/routing', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Middleware', link: 'httpserver/middleware', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Typed Endpoints', link: 'httpserver/endpoints', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Results & JSON', link: 'httpserver/results', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Serialization & Formats', link: 'httpserver/serialization', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'JSON Patch', link: 'httpserver/json-patch', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'Errors & Problem Details', link: 'httpserver/errors', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Sessions', link: 'httpserver/sessions', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'Errors & Problem Details', link: 'httpserver/errors', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Sessions', link: 'httpserver/sessions', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Localization', link: 'httpserver/localization', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'Request Timeouts', link: 'httpserver/timeouts', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
+              { label: 'Request Timeouts', link: 'httpserver/timeouts', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
               { label: 'Idempotency Keys', link: 'httpserver/idempotency', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'OpenAPI', link: 'httpserver/openapi', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'OpenAPI', link: 'httpserver/openapi', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'API Versioning', link: 'httpserver/api-versioning', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' }
             ]
           },
           {
             label: 'Content',
             items:[
-              { label: 'Static Files', link: 'httpserver/static-files', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Blazor WebAssembly', link: 'httpserver/blazor', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Uploads & Downloads', link: 'httpserver/files', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'File Browser', link: 'httpserver/file-browser', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'WebDAV', link: 'httpserver/webdav', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'Static Files', link: 'httpserver/static-files', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Blazor WebAssembly', link: 'httpserver/blazor', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Uploads & Downloads', link: 'httpserver/files', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'File Browser', link: 'httpserver/file-browser', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'WebDAV', link: 'httpserver/webdav', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Resumable Uploads (tus)', link: 'httpserver/tus', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
               { label: 'CalDAV & CardDAV', link: 'httpserver/caldav', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'Compression', link: 'httpserver/compression', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'Compression', link: 'httpserver/compression', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Content Digests', link: 'httpserver/content-digest', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'Caching & Conditional Requests', link: 'httpserver/caching', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' }
+              { label: 'Caching & Conditional Requests', link: 'httpserver/caching', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false }
             ]
           },
           {
             label: 'Protocols & Realtime',
             items:[
-              { label: 'Protocols', link: 'httpserver/protocols', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'WebSockets', link: 'httpserver/websockets', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Server-Sent Events', link: 'httpserver/sse', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'Protocols', link: 'httpserver/protocols', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'WebSockets', link: 'httpserver/websockets', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Server-Sent Events', link: 'httpserver/sse', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Switchboard', link: 'httpserver/switchboard', dateCreated: '2026-09-29', dateUpdated: '2026-09-29' },
-              { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' }
+              { label: 'gRPC & gRPC-Web', link: 'httpserver/grpc', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false }
             ]
           },
           {
             label: 'Security',
             items:[
-              { label: 'Authentication', link: 'httpserver/authentication', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Authorization', link: 'httpserver/authorization', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'JWT', link: 'httpserver/jwt', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'Authentication', link: 'httpserver/authentication', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Authorization', link: 'httpserver/authorization', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'JWT', link: 'httpserver/jwt', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'OAuth Loopback Sign-in', link: 'httpserver/oauth-loopback', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'TLS & Certificates', link: 'httpserver/tls', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'TLS & Certificates', link: 'httpserver/tls', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Automatic HTTPS (ACME)', link: 'httpserver/acme', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'CORS', link: 'httpserver/cors', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Rate Limiting', link: 'httpserver/rate-limiting', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'IP Filtering', link: 'httpserver/ip-filtering', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
+              { label: 'CORS', link: 'httpserver/cors', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Rate Limiting', link: 'httpserver/rate-limiting', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'IP Filtering', link: 'httpserver/ip-filtering', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Host Filtering', link: 'httpserver/host-filtering', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
-              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
+              { label: 'Antiforgery & Headers', link: 'httpserver/antiforgery', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
               { label: 'Webhooks', link: 'httpserver/webhooks', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' }
             ]
           },
           {
             label: 'Connectivity',
             items:[
-              { label: 'Tunnelling', link: 'httpserver/tunneling', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
-              { label: 'Azure Relay', link: 'httpserver/azure-relay', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Discovery (mDNS)', link: 'httpserver/discovery', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
-              { label: 'Reverse Proxy', link: 'httpserver/proxy', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
+              { label: 'Tunnelling', link: 'httpserver/tunneling', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'SSH & Quick Tunnels', link: 'httpserver/ssh', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Cloudflare, ngrok & Tailscale', link: 'httpserver/tunnel-agents', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
+              { label: 'Azure Relay', link: 'httpserver/azure-relay', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Discovery (mDNS)', link: 'httpserver/discovery', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
+              { label: 'Reverse Proxy', link: 'httpserver/proxy', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
               { label: 'PROXY Protocol', link: 'httpserver/proxy-protocol', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' }
             ]
           },
           {
             label: 'Integrations',
+            showNew: false,
             items:[
-              { label: 'Mobile', link: 'httpserver/maui', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'tvOS', link: 'httpserver/tvos', dateCreated: '2026-09-05', dateUpdated: '2026-09-05' },
-              { label: 'Shiny.Mediator', link: 'httpserver/mediator', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
-              { label: 'Model Context Protocol', link: 'httpserver/mcp', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' }
+              { label: 'Mobile', link: 'httpserver/maui', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'tvOS', link: 'httpserver/tvos', dateCreated: '2026-09-05', dateUpdated: '2026-09-05', showNew: false },
+              { label: 'Shiny.Mediator', link: 'httpserver/mediator', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Shiny.DocumentDb', link: 'httpserver/documentdb', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
+              { label: 'Model Context Protocol', link: 'httpserver/mcp', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false }
             ]
           },
           {
             label: 'Operations',
+            showNew: false,
             items:[
-              { label: 'Health & Telemetry', link: 'httpserver/diagnostics', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
-              { label: 'W3C Access Logs', link: 'httpserver/logging', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
-              { label: 'Testing', link: 'httpserver/testing', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
-              { label: 'Command Line Tool', link: 'httpserver/cli', dateCreated: '2026-08-20', dateUpdated: '2026-08-20' }
+              { label: 'Health & Telemetry', link: 'httpserver/diagnostics', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
+              { label: 'W3C Access Logs', link: 'httpserver/logging', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
+              { label: 'Testing', link: 'httpserver/testing', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false },
+              { label: 'Command Line Tool', link: 'httpserver/cli', dateCreated: '2026-08-20', dateUpdated: '2026-08-20', showNew: false }
             ]
           },
-          { label: 'Release Notes', link: 'httpserver/release-notes', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' }
+          { label: 'Release Notes', link: 'httpserver/release-notes', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false }
         ]
       },
       {
