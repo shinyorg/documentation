@@ -127,6 +127,8 @@ Eddystone always comes through the BLE scan rather than CoreLocation.
 
 Eddystone is a plain BLE scan on every platform:
 
-- **iOS / Mac Catalyst / macOS** — `NSBluetoothAlwaysUsageDescription` in `Info.plist`
-- **Android** — `BLUETOOTH_SCAN` with `usesPermissionFlags="neverForLocation"`
-- **Windows** — the `bluetooth` capability for a packaged app
+| Platform | Details |
+| --- | --- |
+| **iOS / Mac Catalyst / macOS** | `NSBluetoothAlwaysUsageDescription` in `Info.plist` |
+| **Android** | `BLUETOOTH_SCAN` with `usesPermissionFlags="neverForLocation"` |
+| **Windows** | the `bluetooth` capability for a packaged app |

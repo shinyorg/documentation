@@ -129,10 +129,10 @@ distance derived from it is wrong by a constant factor no amount of filtering wi
 Even filtered and calibrated, expect metres of error at any real distance, and worse through a body
 or a wall. Design accordingly:
 
-- **Good:** "which of these beacons is closest?", "is the user in the `Immediate` bucket?",
-  "did they enter the region?"
-- **Bad:** "the user is 2.4 m from the display", anything that draws a position on a floor plan,
-  anything that switches state at a hard distance boundary
+| Approach | Examples |
+| --- | --- |
+| **Good** | "which of these beacons is closest?", "is the user in the `Immediate` bucket?", "did they enter the region?" |
+| **Bad** | "the user is 2.4 m from the display", anything that draws a position on a floor plan, anything that switches state at a hard distance boundary |
 
 If a value crosses a threshold and flips your UI back and forth, add hysteresis on your side — widen
 the band for leaving a state relative to entering it. Filtering reduces jitter; it does not remove it.

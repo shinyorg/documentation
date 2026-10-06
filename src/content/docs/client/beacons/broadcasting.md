@@ -102,7 +102,8 @@ hypothetical — it is the bug `AdvertiseBeacon` shipped with before 5.6.0.
 
 ## Permissions
 
-- **iOS / Mac Catalyst / macOS** — `NSBluetoothAlwaysUsageDescription` in `Info.plist`
-- **Android** — `android.permission.BLUETOOTH_ADVERTISE`
-- **Windows** — the `bluetooth` capability for a packaged app, and an adapter that supports the
-  peripheral role (`BluetoothAdapter.IsPeripheralRoleSupported`)
+| Platform | Details |
+| --- | --- |
+| **iOS / Mac Catalyst / macOS** | `NSBluetoothAlwaysUsageDescription` in `Info.plist` |
+| **Android** | `android.permission.BLUETOOTH_ADVERTISE` |
+| **Windows** | the `bluetooth` capability for a packaged app, and an adapter that supports the peripheral role (`BluetoothAdapter.IsPeripheralRoleSupported`) |

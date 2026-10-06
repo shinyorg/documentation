@@ -347,10 +347,12 @@ builder.Logging.AddDebug().SetMinimumLevel(LogLevel.Debug);
 
 Read the line as follows:
 
-- **The adapter isn't in the log at all** — it isn't advertising, is out of range, or BLE permissions were denied.
-- **It's in the log but not in your callback** — your `DeviceNameFilter` doesn't match the `Name` shown. Note that the filter is a case-insensitive *substring* match.
-- **`Name: (none)`** — the adapter advertises no name at all, so no name filter can match it. It is still surfaced to your callback with an empty `Name` as long as `DeviceNameFilter` is null; select it by `Id`.
-- **`Services: (none advertised)`** — normal for ELM327 clones, and harmless. The service is found after connecting.
+| Symptom | Cause / Fix |
+| --- | --- |
+| **The adapter isn't in the log at all** | it isn't advertising, is out of range, or BLE permissions were denied. |
+| **It's in the log but not in your callback** | your `DeviceNameFilter` doesn't match the `Name` shown. Note that the filter is a case-insensitive *substring* match. |
+| **`Name: (none)`** | the adapter advertises no name at all, so no name filter can match it. It is still surfaced to your callback with an empty `Name` as long as `DeviceNameFilter` is null; select it by `Id`. |
+| **`Services: (none advertised)`** | normal for ELM327 clones, and harmless. The service is found after connecting. |
 
 ### Connects, but every command times out
 

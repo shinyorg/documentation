@@ -5,9 +5,12 @@ title: Services, Characteristics, & Descriptors
 ## Overview
 
 GATT (Generic Attribute Profile) defines how BLE devices exchange data. The hierarchy is:
-- **Service** — A collection of related characteristics
-- **Characteristic** — A data value with read/write/notify properties
-- **Descriptor** — Metadata about a characteristic
+
+| Concept | Description |
+| --- | --- |
+| **Service** | A collection of related characteristics |
+| **Characteristic** | A data value with read/write/notify properties |
+| **Descriptor** | Metadata about a characteristic |
 
 In Shiny v4, all GATT operations are performed directly on `IPeripheral` using service and characteristic UUIDs — no need to dig through nested GATT objects.
 

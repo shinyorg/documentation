@@ -4,8 +4,10 @@ title: Audio Analysis
 
 Shiny.Music can inspect a track's audio **without playing it** — to draw a waveform or VU meter, or to locate a specific part of a song such as an intro, a chorus, or a guitar solo. There are two complementary APIs:
 
-- **`IMediaLibrary.AnalyzeLevelsAsync`** — decodes the track to PCM offline and measures its amplitude.
-- **`LyricsExtensions.GetInstrumentalGaps`** — derives the no-vocal stretches of a track from time-synced lyrics, with no audio decode at all.
+| Name | Description |
+| --- | --- |
+| **`IMediaLibrary.AnalyzeLevelsAsync`** | decodes the track to PCM offline and measures its amplitude. |
+| **`LyricsExtensions.GetInstrumentalGaps`** | derives the no-vocal stretches of a track from time-synced lyrics, with no audio decode at all. |
 
 They pair naturally: the lyric gaps give precise boundaries, and the audio energy tells you which gap is the loud solo versus the quiet intro.
 

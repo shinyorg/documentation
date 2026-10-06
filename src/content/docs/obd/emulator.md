@@ -74,11 +74,10 @@ configured one when you configured a non-zero one.
 [shinyorg/obd](https://github.com/shinyorg/obd/tree/main/samples/Sample.Maui) wraps the package in a
 full front-end and runs both roles at once:
 
-- **Client** — the Scan tab finds a real adapter and reads it, the way any app using this library would.
-  From the dashboard it opens onto, **All commands** issues every command in the library against that
-  adapter and shows what each one parsed back to.
-- **Adapter** — the Adapter, Drive, Values and Faults tabs drive the emulator, answering with whatever
-  values you set — or with a scenario driving them for you.
+| Component | Description |
+| --- | --- |
+| **Client** | the Scan tab finds a real adapter and reads it, the way any app using this library would. From the dashboard it opens onto, **All commands** issues every command in the library against that adapter and shows what each one parsed back to. |
+| **Adapter** | the Adapter, Drive, Values and Faults tabs drive the emulator, answering with whatever values you set — or with a scenario driving them for you. |
 
 ```bash
 git clone https://github.com/shinyorg/obd
@@ -358,12 +357,11 @@ The Faults tab holds the fault memory and the adapter's identity:
 
 Both roles need permissions the client-only case does not.
 
-- **Android** — `BLUETOOTH_ADVERTISE` for the GATT server, plus `INTERNET` and
-  `CHANGE_WIFI_MULTICAST_STATE` for the TCP listener and its mDNS record.
-- **iOS** — `NSBluetoothPeripheralUsageDescription`, and for mDNS both `NSLocalNetworkUsageDescription`
-  and an `NSBonjourServices` array listing `_obd._tcp`. Without the service listed, iOS 14+ blocks the
-  advertisement outright rather than prompting.
-- **Windows** — `bluetooth`, `privateNetworkClientServer` and `internetClientServer` capabilities.
+| Platform | Details |
+| --- | --- |
+| **Android** | `BLUETOOTH_ADVERTISE` for the GATT server, plus `INTERNET` and `CHANGE_WIFI_MULTICAST_STATE` for the TCP listener and its mDNS record. |
+| **iOS** | `NSBluetoothPeripheralUsageDescription`, and for mDNS both `NSLocalNetworkUsageDescription` and an `NSBonjourServices` array listing `_obd._tcp`. Without the service listed, iOS 14+ blocks the advertisement outright rather than prompting. |
+| **Windows** | `bluetooth`, `privateNetworkClientServer` and `internetClientServer` capabilities. |
 
 :::note[BLE peripheral mode is not universal]
 Not every device can advertise as a BLE peripheral. When it cannot, the Adapter tab says so and the
