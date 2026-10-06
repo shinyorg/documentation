@@ -1409,6 +1409,8 @@ export const sidebarTopics = [
               { label: 'Resumable Uploads (tus)', link: 'httpserver/tus', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
               { label: 'CalDAV & CardDAV', link: 'httpserver/caldav', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
               { label: 'NuGet Feed', link: 'httpserver/nuget', dateCreated: '2026-10-06', dateUpdated: '2026-10-06' },
+              { label: 'npm Registry', link: 'httpserver/npm', dateCreated: '2026-10-06', dateUpdated: '2026-10-06' },
+              { label: 'File Sync', link: 'httpserver/filesync', dateCreated: '2026-10-06', dateUpdated: '2026-10-06' },
               { label: 'Compression', link: 'httpserver/compression', dateCreated: '2026-08-11', dateUpdated: '2026-08-11', showNew: false },
               { label: 'Content Digests', link: 'httpserver/content-digest', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
               { label: 'Caching & Conditional Requests', link: 'httpserver/caching', dateCreated: '2026-08-23', dateUpdated: '2026-08-23', showNew: false }

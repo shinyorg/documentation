@@ -1,0 +1,142 @@
+---
+title: npm Registry
+description: A private npm registry — install, publish, dist-tags, deprecate, unpublish, owners, search and login for npm, pnpm and Yarn, with optional fall-through to registry.npmjs.org
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+`Shiny.Net.HttpServer.Npm` maps a private npm registry onto the server you already have. It speaks the
+registry API that npm, pnpm and Yarn use, so clients need nothing but a registry URL and a token. It
+needs no database and no Node.js, and it is trim and Native AOT clean.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.Npm
+```
+
+```csharp
+using Shiny.Net.HttpServer.Npm;
+
+app.MapNpmRegistry("/npm", o =>
+{
+    o.Store = new DiskNpmPackageStore(Path.Combine(dataDir, "npm"));
+    o.Tokens[builder.Configuration["Npm:Token"]!] = "ci";   // token → user name
+});
+```
+
+```ini
+# .npmrc: only your scope comes from here, everything else from npmjs.org
+@acme:registry=http://build-box:5000/npm/
+//build-box:5000/npm/:_authToken=${NPM_TOKEN}
+```
+
+```bash
+npm publish            # in a package named @acme/whatever
+npm install @acme/whatever
+```
+
+## One registry for everything
+
+Set `Upstream` and the registry answers for public packages too. Anything not published here is fetched
+from upstream. A package published here always wins over one of the same name upstream, so a public
+package cannot shadow a private one.
+
+```csharp
+o.Upstream = new Uri("https://registry.npmjs.org");
+```
+
+```ini
+registry=http://build-box:5000/npm/
+//build-box:5000/npm/:_authToken=${NPM_TOKEN}
+```
+
+npm rewrites `registry.npmjs.org` tarball links to the configured registry (its `replace-registry-host`
+setting), so tarball downloads for public packages come through here as well, and are passed on.
+`npm audit` requests are passed on too. Nothing from upstream is cached.
+
+## What works
+
+These were checked with the npm 11 CLI against this server:
+
+| Command | |
+| --- | --- |
+| `npm install`, `npm ci` | Full and abbreviated (`application/vnd.npm.install-v1+json`) metadata, `ETag` revalidation, tarballs |
+| `npm publish [--tag next]` | Checks the tarball against the client's `integrity` and `shasum`; republishing a version is refused (403) |
+| `npm view`, `npm search`, `npm ping`, `npm whoami` | |
+| `npm dist-tag add/rm/ls` | `latest` cannot be removed |
+| `npm deprecate` | Install shows the warning; an empty message removes it |
+| `npm unpublish pkg@1.2.3`, `npm unpublish pkg --force` | If the version tagged `latest` is unpublished, `latest` moves to the highest remaining release |
+| `npm owner add/rm/ls` | Only a maintainer can change a package, as on the public registry |
+| `npm login` | Only when `LoginAsync` is set (see below) |
+
+## Tokens and users
+
+`npm publish` and every other change need `Authorization: Bearer`, which is the `_authToken` in
+`.npmrc`. A token maps to a user name, and the first publisher of a package becomes its maintainer.
+After that, only maintainers can publish to it or change it, until `npm owner add` adds someone.
+
+```csharp
+o.Tokens["npm_..."] = "allan";
+o.ValidateTokenAsync = async ctx => await tokens.UserForAsync(ctx.Token);  // user name, or null to refuse
+o.RequireTokenForReads = true;                                             // a private registry: installs need a token too
+```
+
+Missing and invalid tokens get **401**, which npm reports as `E401`. A registry that accepts publishes but
+has no token configured **fails to map**. Set `ReadOnly = true` for a registry nobody publishes to.
+
+`npm login` (and `npm adduser`) works only if you supply `LoginAsync`. It receives the user name and
+password and returns a token, or null to refuse:
+
+```csharp
+o.LoginAsync = async ctx =>
+    await users.CheckAsync(ctx.UserName, ctx.Password) ? await tokens.IssueAsync(ctx.UserName) : null;
+```
+
+The token you return must also be accepted by `Tokens` or `ValidateTokenAsync`. Without `LoginAsync`,
+hand tokens out some other way.
+
+```csharp
+o.OnBeforePublishAsync = ctx =>
+{
+    if (!ctx.PackageName.StartsWith("@acme/", StringComparison.Ordinal))
+        ctx.Reject(detail: "Only @acme packages.");
+
+    return ValueTask.CompletedTask;
+};
+```
+
+<Aside>
+npm sends the tarball base64-encoded inside JSON, which is a third larger than the tarball. The
+server's [`Limits.MaxRequestBodySize`](/httpserver/configuration/) (30 MB by default) is checked before
+`MaxTarballSize` (100 MB by default). Raise both for large packages.
+</Aside>
+
+## Storage
+
+`DiskNpmPackageStore` keeps each package in its own directory, `{root}/{name}/` or
+`{root}/@scope/{name}/`. Each holds a `package.json` document beside the tarballs. Documents are written to
+a temporary file and moved into place. Implement `INpmPackageStore` to use blob storage or a database.
+The registry serializes writes to each package and checks revisions itself, so a store only has to read
+and write what it is given.
+
+## Securing it
+
+```csharp
+app.MapNpmRegistry("/npm", o => { ... })
+   .ForWrites(r => r.RequireRateLimiting("publish"))
+   .RequireIpFilter("office");
+```
+
+Reads are `GET`/`HEAD`. Writes are `PUT`/`POST`/`DELETE`, and `npm login` (a `PUT`) is among them. Every
+tarball link is absolute and built from the request's host. Behind a proxy that rewrites the host, set
+`PublicBaseUrl`.
+
+## Not included
+
+- **Caching:** nothing from upstream is cached; `Upstream` passes requests through.
+- **Web login:** npm's `--auth-type=web` flow is not supported. npm falls back to the legacy prompt.
+- **Two-factor authentication (OTP).**
+- **Organizations and teams:** access is per token, plus the maintainer list.
+- **Provenance and signatures**, and **download counts.**
+
+Tested with the npm 11 CLI and with raw protocol tests over HTTP/1.1 and HTTP/2. pnpm and Yarn use the
+same API but have not been run against it.

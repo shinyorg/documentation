@@ -1,0 +1,187 @@
+---
+title: File Sync
+description: Dropbox-style two-way folder sync — content-defined chunking so an edit moves only the changed bytes, a change feed with long-poll, conflicted copies, and a client that transfers in the background through Shiny.Net.Http
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+Dropbox and OneDrive don't upload a whole file again when you change it, and two packages here work
+the same way. `Shiny.Net.HttpServer.FileSync` is the server. `Shiny.Net.HttpServer.FileSync.Client`
+keeps a local folder in sync with it in both directions, and runs its transfers through
+[Shiny.Net.Http](/client/httptransfers/), so they continue in the background on iOS and Android.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.FileSync          # the server
+dotnet add package Shiny.Net.HttpServer.FileSync.Client   # the app
+```
+
+```csharp
+// server
+app.MapFileSync("/sync", o => o.Store = new DiskFileSyncStore(Path.Combine(dataDir, "sync")))
+   .RequireAuthorization();
+```
+
+```csharp
+// app (MAUI)
+builder.Services.AddFileSyncClient(o =>
+{
+    o.ServerUri = new("https://files.example.com/sync");
+    o.LocalPath = Path.Combine(FileSystem.AppDataDirectory, "Documents");
+    o.Headers["Authorization"] = "Bearer " + token;
+});
+
+// then, from a page or a background job:
+var result = await sync.SyncAsync();     // one pass
+await sync.RunAsync(cancellationToken);  // or keep the folder in sync until cancelled
+```
+
+## How only the changed bytes move
+
+Files are split into **content-defined chunks** with FastCDC, 64 KB–1 MB with a 256 KB average. Each
+chunk ends where a rolling hash of the bytes before it hits a pattern, so chunk boundaries depend on
+the content, not on fixed offsets. An insertion in the middle of a file changes only the chunk it
+lands in. With fixed-size blocks, every block after the insertion would change.
+
+The server stores each chunk once, keyed by its SHA-256. A file is a list of chunk hashes.
+
+- **Upload:** the client chunks the changed file and asks the server which chunks it lacks
+  (`POST chunks/missing`). It sends only those, grouped into packs of up to 8 MB, then commits the new
+  chunk list. Renaming or copying a file uploads nothing. Inserting into the middle of an 8 MB file
+  uploads a few hundred KB.
+- **Download:** the client fetches the new chunk list and takes every chunk it already holds from
+  local files (the old version of that file, or any other synced file). It downloads the rest as packs,
+  verifies every chunk's hash, assembles the file in a staging area, and moves it into place in one
+  step. A half-written file is never visible.
+
+`FileSyncResult.BytesTransferred` and `BytesReused` report how much of each pass crossed the network
+and how much didn't need to.
+
+## Background transfers
+
+Packs move through Shiny.Net.Http's `IHttpTransferManager`:
+
+- **iOS:** an `NSURLSession` background session.
+- **Android:** a foreground service.
+- **Everywhere else:** a managed loop that resumes downloads with `Range` (the server supports
+  `Range: bytes=N-` on packs).
+- **Uploads:** sent over **tus** by default (`UseTusUploads`), to the server's built-in
+  [tus endpoint](/httpserver/tus/), so a dropped upload resumes rather than restarting.
+
+`AddFileSyncClient` registers Shiny transfers itself when the app hasn't. If the app also uses
+Shiny.Net.Http for its own transfers, register those with its own delegate *before*
+`AddFileSyncClient`, and the sync client shares them.
+
+Transfer identifiers come from each pack's content. If the app is killed mid-transfer, the next pass
+finds the transfer still running, or finished, and waits on it or uses it instead of starting again.
+The whole design is safe to interrupt at any point, because everything is content-addressed and every
+commit names the revision it was based on.
+
+<Aside>
+Without a transfer manager (plain .NET on macOS or Linux, unless you call `AddHttpClientTransfers` and
+register an `IConnectivity`), or with `UseBackgroundTransfers = false`, packs go directly through
+`HttpClient` while the app is running. Outside a Shiny host, call `Start()` on
+`HttpClientHttpTransferManager` yourself. A MAUI app using `UseShiny()` does this automatically.
+</Aside>
+
+## Sync semantics
+
+Every change on the server gets the next number from one counter. That number is the version's
+**revision**, and also the cursor of the change feed. The client records, for each path, the revision
+and the local size and modified time it last agreed on, and judges each pass against that record:
+
+| Here | There | Result |
+| --- | --- | --- |
+| changed | unchanged | Upload, committed against the known revision |
+| unchanged | changed | Download |
+| deleted | unchanged | Delete on the server (leaves a tombstone) |
+| unchanged | deleted | Delete locally, and remove folders left empty |
+| changed | deleted | The edit wins: uploaded as a new file |
+| deleted | changed | The change wins: downloaded again |
+| changed | changed, same bytes | Adopted, nothing transferred |
+| changed | changed | **Conflict**: the server's version keeps the name, and the local edit becomes `name (conflicted copy {DeviceName} {date}).ext` and is uploaded too |
+
+Nothing is ever silently overwritten. A commit whose base revision is out of date gets a **409** with
+the current version, and the client turns that into the conflict above. The same happens if a local
+file changes while a download for it is being assembled: that path is left for the next pass.
+
+`RunAsync` runs a pass, then waits for whichever comes first:
+
+- a server **long-poll** (`GET changes/wait`, Dropbox's `longpoll`) reporting a change,
+- a `FileSystemWatcher` event on platforms that have one (not iOS),
+- `ScanInterval` (30 s).
+
+Failed passes back off, up to five minutes. The `Activity` event reports each path as it is synced, and
+`SyncCompleted` reports each pass.
+
+Paths compare without case, as on macOS and Windows, and names Windows would refuse are rejected
+everywhere. The client never syncs `.DS_Store`, `Thumbs.db`, `desktop.ini`, Office `~$` lock files,
+`*.tmp`, `*.partial`, or its own `.shinysync` state folder. Add your own rules with `Ignore`.
+
+## Per-user stores
+
+One store serves everyone. For one tree per account, as Dropbox does it, pick a store per request:
+
+```csharp
+var stores = new ConcurrentDictionary<string, DiskFileSyncStore>();
+
+app.MapFileSync("/sync", o => o.StoreSelector = ctx =>
+        stores.GetOrAdd(ctx.User!.Identity!.Name!, name => new DiskFileSyncStore(Path.Combine(root, name))))
+   .RequireAuthorization();
+```
+
+Chunks are never shared between stores. Otherwise one user could learn whether another holds a
+particular file by asking whether its chunks are missing.
+
+## Storage and garbage collection
+
+`DiskFileSyncStore` keeps chunks as files (`chunks/ab/abcdef…`) and the file tree as an append-only
+journal, `journal.jsonl`. Each commit is flushed to disk before the client is told it succeeded. When
+the journal is replayed, a line torn by a crash is ignored, and the journal is compacted when it has
+grown well past the live tree. Implement `IFileSyncStore` to keep chunks in blob storage or entries in
+a database. `CommitAsync` is the one place that must be atomic.
+
+Chunks of deleted files and replaced versions stay until you collect them:
+
+```csharp
+var sync = app.MapFileSync("/sync", o => { ... });
+// from a timer or a background job:
+var removed = await sync.CollectGarbageAsync();
+```
+
+Chunks younger than `GarbageGracePeriod` (1 day) are kept even when nothing refers to them, because
+they may belong to a commit that is still on its way.
+
+## Routes
+
+All routes are under the prefix:
+
+| Route | |
+| --- | --- |
+| `GET changes?cursor=&limit=` | What changed after a cursor, oldest first |
+| `GET changes/wait?cursor=&timeout=` | Long-poll until something changes |
+| `GET files/manifest?path=` | A file's current version and chunk list |
+| `PUT files/manifest?path=` | Commit a version: 409 when the base revision is stale, 422 listing missing chunks |
+| `DELETE files/manifest?path=&revision=` | Delete, leaving a tombstone |
+| `GET files/content?path=` | The whole file, for a browser or a script |
+| `POST chunks/missing` | Which of these chunks the server lacks |
+| `PUT chunks/pack` | Upload a pack in one request |
+| `GET chunks/pack?h=a,b,c` | Download chunks as a pack, resumable with `Range` |
+| `GET chunks/{hash}` | One chunk |
+| `uploads` | tus 1.0.0, for resumable pack uploads |
+
+The mount builder applies `RequireAuthorization`, CORS, rate limiting and IP filtering to all of them,
+tus routes included. `OnChangedAsync` runs after every commit or delete.
+
+## Not included
+
+- **Version history:** chunks of old versions are collectable, and there are no routes for listing
+  or restoring them.
+- **Folder entries:** empty folders are not synced.
+- **Sharing between accounts.**
+- **Selective sync.**
+- **A browser client.**
+
+The file hash in a commit is the client's own claim. Chunk hashes are verified on every upload and
+download. Tested end to end with two client folders against one server, over `HttpClient` and through
+Shiny.Net.Http's transfer manager with tus uploads, on HTTP/1.1. HTTP/2, HTTP/3 and tunnels carry it
+like any other route but have no end-to-end sync test yet.
