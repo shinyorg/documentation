@@ -696,7 +696,7 @@ export const sidebarTopics = [
               { label: 'HTTP Transfers', link: 'appdevicebridge/http-transfers', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'In-App Purchases', link: 'appdevicebridge/inapppurchases', showNew: true, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Live Activities', link: 'appdevicebridge/liveactivities', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
-              { label: 'Maps & Directions', link: 'appdevicebridge/maps', showNew: false, dateCreated: '2026-09-22', dateUpdated: '2026-09-22' },
+              { label: 'Maps & Directions', link: 'appdevicebridge/maps', showNew: false, dateCreated: '2026-09-22', dateUpdated: '2026-10-06' },
               { label: 'Notifications', link: 'appdevicebridge/notifications', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'OBD-II', link: 'appdevicebridge/obd', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Photos', link: 'appdevicebridge/photos', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
