@@ -1,0 +1,180 @@
+---
+title: NuGet Feed
+description: A private NuGet feed — the NuGet V3 protocol with push, unlist, relist and delete, so dotnet restore, dotnet nuget push, Visual Studio and Rider work against it unchanged
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+A private package feed is usually another service to run: a container, a database, sometimes a licence.
+`Shiny.Net.HttpServer.NuGet` maps one onto the server you already have. It speaks the
+[NuGet V3 server API](https://learn.microsoft.com/nuget/api/overview), the protocol `dotnet restore`,
+`dotnet nuget push`, `dotnet package search`, Visual Studio and Rider use, so clients need nothing but a
+package source URL.
+
+```bash
+dotnet add package Shiny.Net.HttpServer.NuGet
+```
+
+```csharp
+using Shiny.Net.HttpServer.NuGet;
+
+app.MapNuGetFeed("/nuget", o =>
+{
+    o.Store = new DiskNuGetPackageStore(Path.Combine(dataDir, "packages"));
+    o.ApiKeys.Add(builder.Configuration["NuGet:ApiKey"]!);
+});
+```
+
+```bash
+dotnet nuget add source http://build-box:5000/nuget/v3/index.json -n team --allow-insecure-connections
+dotnet nuget push bin/Release/My.Library.1.2.0.nupkg -s team -k <key>
+dotnet add package My.Library
+```
+
+The package source URL is always `{prefix}/v3/index.json`. Clients find every other route from there.
+
+<Aside type="caution">
+NuGet refuses plain HTTP sources unless `allowInsecureConnections="true"` is set on the source (or
+`--allow-insecure-connections` is passed when adding it). On anything beyond a LAN, serve the feed over
+[TLS](/httpserver/tls/) or with [automatic HTTPS](/httpserver/acme/) instead.
+</Aside>
+
+## What it serves
+
+| Resource | Route | Used by |
+| --- | --- | --- |
+| Service index | `GET {prefix}/v3/index.json` | Every client, first |
+| Package content | `GET {prefix}/v3/package/{id}/index.json`, `.../{id}/{version}/{id}.{version}.nupkg`, `.../{id}.nuspec` | Restore |
+| Registrations (metadata) | `GET {prefix}/v3/registration/{id}/index.json`, `.../{version}.json` | Package manager UI, `dotnet list package --outdated` |
+| Search | `GET {prefix}/v3/search?q=&skip=&take=&prerelease=&semVerLevel=&packageType=` | `dotnet package search`, the IDE browse tab |
+| Autocomplete | `GET {prefix}/v3/autocomplete?q=` or `?id=` | IDE id and version completion |
+| Push | `PUT {prefix}/api/v2/package` | `dotnet nuget push` |
+| Delete or unlist | `DELETE {prefix}/api/v2/package/{id}/{version}` | `dotnet nuget delete` |
+| Relist | `POST {prefix}/api/v2/package/{id}/{version}` | — (no client command sends it) |
+
+Version rules come from the official `NuGet.Versioning` package. `1.0` and `1.0.0` are the same version,
+ids compare without case, and build metadata is ignored. Prerelease versions appear in search only with
+`prerelease=true`. SemVer 2.0.0 packages (dotted prerelease labels or build metadata) appear only for
+clients that send `semVerLevel=2.0.0`, which every current client does.
+
+Search terms match against the id, title, description, summary, authors and tags. `field:value` narrows a
+term to `id`, `packageid` (exact), `tags`, `author`, `owner`, `title`, `description` or `summary`.
+Results put an exact id match first, then ids that start with the query, then everything else
+alphabetically. Download counts are always 0.
+
+## Storage
+
+`DiskNuGetPackageStore` lays packages out exactly as NuGet does for a hierarchical folder feed and the
+global packages folder:
+
+```
+packages/
+  my.library/
+    1.2.0/
+      my.library.1.2.0.nupkg
+      my.library.1.2.0.nupkg.sha512
+      my.library.nuspec
+```
+
+So the same directory is also a local package source on its own (`dotnet nuget add source ./packages`).
+You can seed it by copying a folder in, and back it up with anything that copies files. An unlisted
+version gets an empty `.unlisted` marker next to it. The directory is read once, on first use, and kept
+in memory; call `Reload()` after changing it by hand while the server is running.
+
+To keep packages somewhere else (blob storage, a database), implement `INuGetPackageStore`. It has seven
+members: get versions of one id, get everything (for search), add, open the `.nupkg`, open the `.nuspec`,
+set listed, and delete.
+
+## Pushing and API keys
+
+`dotnet nuget push -k <key>` sends the key as `X-NuGet-ApiKey`. A key in `ApiKeys` is compared in
+constant time. `ValidateApiKeyAsync` handles anything else, such as a lookup or a key scoped to certain
+ids:
+
+```csharp
+o.ValidateApiKeyAsync = async ctx =>
+    await keys.IsValidAsync(ctx.ApiKey, ctx.PackageId);   // PackageId is set for delete/relist
+```
+
+A missing or wrong key gets a **403**, as nuget.org answers. A 401 would send the client off to its
+credential providers. A feed that accepts pushes but has no key configured **fails to map**, because an
+open feed is almost never intended. Pick one of these instead:
+
+- `o.ReadOnly = true` serves the store without mapping push, delete or relist. Use it for a mirror, or a
+  folder filled some other way.
+- `o.RequireApiKey = false` hands write protection to authorization instead. For example, put Basic
+  credentials in `nuget.config` and call `.ForWrites(r => r.RequireAuthorization())`.
+
+A push is read to a temporary file and never buffered in memory. The server checks that the `.nupkg` is a
+zip with exactly one `.nuspec` at its root, that the id follows NuGet's rules, and that the version and
+every dependency range parse. Then it computes the SHA-512 NuGet records. A version that already exists
+gets **409**, unless `AllowOverwrite` is on (it is off by default: changing a version's bytes breaks
+every machine that already cached the old ones). Symbol packages (`.snupkg`) are refused, and
+`SymbolPackagePublish` is not advertised, so `dotnet nuget push` does not try to send them.
+
+```csharp
+o.OnBeforePushAsync = ctx =>
+{
+    if (!ctx.Package.Id.StartsWith("Contoso.", StringComparison.Ordinal))
+        ctx.Reject(StatusCodes.Status403Forbidden, "Only Contoso.* packages.");
+
+    return ValueTask.CompletedTask;
+};
+
+o.OnPackagePushedAsync = async ctx => await notify.PublishedAsync(ctx.Package.Id, ctx.Package.Version);
+```
+
+<Aside>
+`MaxPackageSize` defaults to 250 MB, nuget.org's limit, but the server's own
+[`Limits.MaxRequestBodySize`](/httpserver/configuration/) (30 MB by default) is checked first. Raise
+both if your packages are larger.
+</Aside>
+
+## Delete means unlist
+
+By default, `dotnet nuget delete` **unlists** the version, as nuget.org does. The version disappears from
+search and from new installs, but it still restores for any project that already pins it, so no build
+breaks. `POST` to the same URL relists it. Set `o.DeleteBehavior = NuGetDeleteBehavior.Delete` to remove
+the files for real.
+
+## Securing the feed
+
+The mount builder applies a policy to every route at once, or to the read or write half on its own:
+
+```csharp
+app.MapNuGetFeed("/nuget", o => { ... })
+   .ForReads(r => r.RequireAuthorization())        // a private feed
+   .ForWrites(r => r.RequireRateLimiting("push"))
+   .RequireIpFilter("office");
+```
+
+For a private feed, clients put Basic credentials in `nuget.config` (`<packageSourceCredentials>`), and
+NuGet sends them on every request to that source, push included.
+
+Every link in the protocol is absolute, and by default it is built from the request's scheme and host.
+Behind a reverse proxy, either honour [forwarded headers](/httpserver/proxy/) or set
+`o.PublicBaseUrl = "https://pkgs.example.com/nuget"`.
+
+## Options
+
+| Option | Default | |
+| --- | --- | --- |
+| `Store` | required | Where packages live |
+| `ApiKeys` | empty | Keys accepted in `X-NuGet-ApiKey` |
+| `ValidateApiKeyAsync` | null | Checks a key that is not in `ApiKeys` |
+| `RequireApiKey` | `true` | Whether push, delete and relist need a key |
+| `ReadOnly` | `false` | Do not map push, delete or relist |
+| `DeleteBehavior` | `Unlist` | `Unlist` or `Delete` |
+| `AllowOverwrite` | `false` | Let a push replace an existing version |
+| `MaxPackageSize` | 250 MB | Largest `.nupkg` accepted |
+| `PublicBaseUrl` | null | Absolute base for the links the feed hands out |
+| `OnBeforePushAsync` / `OnPackagePushedAsync` | null | Reject or react to a push |
+
+## Not included
+
+The feed has no catalog resource (used only by nuget.org's own mirroring), no symbol server, no
+download counts, no deprecation or vulnerability metadata, no package signing verification, and no V2
+(OData) API, so `nuget.exe` older than 3.x and the old Visual Studio 2013 client cannot use it. Embedded
+package icons are not served; `iconUrl` from the nuspec is passed through. It is tested with NuGet's own
+client libraries and the `dotnet` CLI over HTTP/1.1 and HTTP/2. HTTP/3 and the tunnel providers carry
+it like any other route but have no end-to-end test yet.
