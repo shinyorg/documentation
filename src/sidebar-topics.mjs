@@ -696,6 +696,7 @@ export const sidebarTopics = [
               { label: 'Bluetooth LE', link: 'appdevicebridge/bluetoothle', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Calendar', link: 'appdevicebridge/calendar', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Contacts', link: 'appdevicebridge/contacts', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Database', link: 'appdevicebridge/database', showNew: true, dateCreated: '2026-10-07', dateUpdated: '2026-10-07' },
               { label: 'Device Camera', link: 'appdevicebridge/camera', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Discovery', link: 'appdevicebridge/discovery', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Document Geofencing', link: 'appdevicebridge/document-geofencing', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },

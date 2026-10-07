@@ -1,0 +1,125 @@
+---
+title: Database
+description: A SQLite client on the device — schemas, scripts, an editable datasheet, table design, CSV and query history — for a Shiny.AppDeviceBridge web app, with database servers as drivers
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Database" />
+
+The database bridge is a database client on the device. It opens SQLite files in the app's
+[file roots](/appdevicebridge/storage/) where they are, so asking a 4 GB file for twenty rows costs twenty rows, not the
+file. A page gets the schema, runs scripts with cancel and query plans, pages through a sorted, filtered and editable
+datasheet, designs tables, moves CSV in and out, and keeps a query history. Other engines, such as PostgreSQL or
+SQL Server, plug in as drivers. The package ships only SQLite's.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Database
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddDatabaseBridge(o => o.StatementTimeout = TimeSpan.FromSeconds(10)),
+    webApp => { /* … */ }
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IDatabaseBridge` | `AddDatabaseBridgeClient()` | `DatabaseBridge` |
+
+| `DatabaseBridgeOptions` | Default | |
+| --- | --- | --- |
+| `StatementTimeout` | 30 seconds | How long one SQLite statement may run before it is interrupted. |
+| `MaxHistory` | 500 | How many queries the history keeps per database. |
+
+## Naming a database
+
+Every request names its database in one of two ways:
+
+- **A SQLite file:** `root` and `path`, exactly as the [files bridge](/appdevicebridge/storage/) names a file. The
+  page can only open files it could already read and write. `POST database/create` makes a new, empty database
+  (`409 exists` if something is already at the path).
+- **A server connection:** `connection` and an optional `database`, served by a driver the app registered.
+  `GET database/connections` lists them.
+
+A request that names neither or both answers `400`. An unknown root, or a connection no driver serves, answers `404`.
+A path with `.` or `..` segments answers `400 invalid_path`. A folder picked through Android's Storage Access Framework
+has no paths SQLite can open, so it answers `400`.
+
+## Details
+
+- **Errors are answers.** A statement that won't parse, a constraint refusing a value, or a file that isn't a
+  database comes back in the response's `error` with a `200`. Only a request the bridge can't route fails.
+- **Scripts:** `POST database/query` runs one statement or a whole script. Every result set comes back, with each
+  statement's row count and the line any error happened on. Each result set is capped at `maxRows`. `explain: true`
+  returns `EXPLAIN QUERY PLAN` as a tree and runs nothing. `schemaChanged` says whether to read the schema again.
+- **Cancel:** give a run a `runId` and `POST database/query/cancel` with it to stop the run. A statement that
+  passes `StatementTimeout` is interrupted too. Either way the answer has `cancelled: true`.
+- **The datasheet:** `rows`, `rows/count` and `rows/totals` page, sort, filter and search one table on the
+  device. Every column is checked against the schema, and every value is a parameter. Each row carries its key (SQLite's
+  `rowid`). `rows/insert`, `rows/update` and `rows/delete` write by that key and answer with the row as it now stands.
+  A delete is all or nothing. A BLOB is shown as its length and first bytes, and `value` reads one whole.
+- **Design:** `design/preview` turns a table design into the DDL that makes it, including SQLite's rebuild for
+  column changes, with notes on what it will do. Nothing runs until the page sends that script to `query`. `object`
+  drops or renames a table, view, index or trigger, or with `preview: true` says what it would run.
+- **CSV:** `import/preview` detects a CSV's delimiter, header and column kinds. `import` reads it into a new or
+  existing table in one transaction: a refused line leaves the table as it was and reports the line. `export` writes a
+  table view or one statement's answer as UTF-8 CSV with a byte-order mark to a file in a root. The CSV comes from
+  `csvRoot`/`csvPath` or from `csvText` the page already has.
+- **History:** every run is recorded per database, except `record: false` and Explain runs. A repeat of the last
+  statement is recorded once. `history`, `history/clear`, `saved` and `saved/save` read and keep it. It lives in the
+  app's data directory, outside every file root.
+- **Platforms:** every head (Android, iOS, Mac Catalyst, macOS, Windows and Linux). Microsoft.Data.Sqlite carries
+  SQLite's native library for each.
+
+## From the page
+
+```ts
+import { DatabaseBridge } from "@shinyorg/appdevicebridge";
+
+const db = new DatabaseBridge();
+const where = { root: "data", path: "shop.db" };
+
+const schema = await db.getSchema(where);
+const page = await db.getRows({ ...where, table: "orders", maxRows: 100, sort: [{ column: "total", descending: true }] });
+
+const runId = crypto.randomUUID();
+const result = await db.query({ ...where, sql: "SELECT city, count(*) FROM customers GROUP BY city", runId });
+if (result.error) console.warn(`line ${result.errorLine}: ${result.error}`);
+```
+
+## Other engines
+
+A driver implements `IDatabaseDriver` and serves the `DatabaseConnectionTarget`s it recognises. The bridge resolves
+each request, picks the first driver that serves it, and handles cancel, history and CSV itself. The driver keeps its
+connections and their secrets. The page only sees the id, name and engine from `GetConnectionsAsync`.
+
+```csharp
+bridge.AddDatabaseBridge();
+bridge.Services.AddDatabaseDriver<PostgresDriver>();
+```
+
+`RowView`, `SqlSpelling`, `QueryPlans`, `DatabaseCsv`, `TableDesigner.Wrong` and `TableDesigner.DesignOf` are public, so
+a driver writes its datasheet SQL and design checks the same way the SQLite driver does.
+
+## Requests
+
+<BridgeApi bridges={["DatabaseBridge"]} show="requests" />
+
+## Types
+
+<BridgeApi bridges={["DatabaseBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).
+
+The bridge can write: it is a database client, and `query` runs `UPDATE`, `DELETE` and DDL. It can't leave the file it
+opened. SQLite's authorizer runs while each statement is prepared and refuses `ATTACH`, which also covers `VACUUM INTO`,
+and `load_extension`. A query can't open a file outside the file roots or load native code. The query history is
+outside every root, so the page reaches it only through these routes.
