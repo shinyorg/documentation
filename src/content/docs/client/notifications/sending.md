@@ -76,7 +76,7 @@ await notifications.Cancel(CancelScope.Pending);          // Only pending (sched
 
 ## Badge Management
 
-Badge count management is platform-dependent.
+Badge count management is platform-dependent. iOS and Mac Catalyst set the app icon badge, and macOS sets the Dock tile badge. Android and Windows have no app-wide badge to set, so `TrySetBadge` returns `false` and `TryGetBadge` returns `(false, null)` there.
 
 ```csharp
 // Check if badges are supported and set
