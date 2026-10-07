@@ -320,6 +320,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'tvos', 'windows', 'linux', 'macos'],
             },
             {
+                label: 'Game Center',
+                tagline: 'Achievements, leaderboards and friends over Game Center and Play Games',
+                summary: 'One set of keys for Apple Game Center and Google Play Games Services, with progress queued on the device so an offline or signed-out player never loses an unlock.',
+                highlights: [
+                    'Unlock, increment and reveal achievements by logical key',
+                    'Durable offline queue with idempotent, absolute progress',
+                    'Global and friends-only leaderboards, plus the friends list',
+                    'iOS, Mac Catalyst, macOS and Android',
+                ],
+                packages: ['Shiny.GameCenter'],
+                frameworks: ['maui', 'dotnet'],
+                os: ['android', 'ios', 'macos'],
+            },
+            {
                 label: 'Printing',
                 tagline: 'Receipt printers over BLE, WiFi and the browser, plus OS-native printing',
                 summary: 'Build a receipt once as a PrintDocument and stream it as ESC/POS to a thermal printer over Bluetooth LE, TCP or the browser - or hand a PDF, image or HTML to AirPrint, Android, Windows or CUPS for any installed printer.',

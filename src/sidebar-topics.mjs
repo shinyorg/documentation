@@ -354,6 +354,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Game Center',
+        jumpTo: true,
+        dateUpdated: '2026-10-06',
+        items: [
+          { label: 'Getting Started', link: 'client/gamecenter/', dateCreated: '2026-10-06', dateUpdated: '2026-10-06' },
+          { label: 'Platform Setup', link: 'client/gamecenter/platform', dateCreated: '2026-10-06', dateUpdated: '2026-10-06' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
         label: 'Printing',
         jumpTo: true,
         dateUpdated: '2026-10-03',

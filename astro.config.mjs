@@ -50,7 +50,7 @@ const announcementConfig = {
     {
       id: 'client-v590',
       title: 'Shiny Client 5.9',
-      description: 'Easy Live Activities, Printing APIs for Device & BluetoothLE',
+      description: 'Easy Live Activities, Game Center, Printing APIs for Device & BluetoothLE',
       href: '/client/printing',
       cta: 'Live it up!',
     }, 

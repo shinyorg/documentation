@@ -1,0 +1,146 @@
+---
+title: Game Center
+description: Achievements, leaderboards and friends over Apple Game Center (iOS, Mac Catalyst, macOS) and Google Play Games Services (Android), with one set of keys and a durable offline queue
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+Unlock achievements, submit and load scores, and read the player's friends through **Apple Game Center**
+(GameKit) and **Google Play Games Services v2**, using one `IGameCenterManager`.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.GameCenter" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["android", "ios", "macos"]} />
+
+## Read this first
+
+**Progress calls do not fail.** `UnlockAsync`, `SetProgressAsync`, `IncrementAsync`, `RevealAsync` and
+`SubmitScoreAsync` save to a queue on the device first and then send. When the player is offline or
+signed out, the work waits, survives app restarts, and is sent on the next sign-in, when connectivity
+returns, or after the next call. Don't wrap these calls in retry logic.
+
+**Progress is counted in steps and only moves forward.** Apple counts progress as a percentage and Google
+counts it in steps. The library holds steps and sends an absolute value each time, so a retry after a
+crash can never count twice. A call that would not raise progress is skipped.
+
+**Increments made offline count from this device.** If another device has moved the same achievement
+further in the meantime, the service keeps the higher value, and this device's offline increments
+are absorbed rather than added. Known progress is refreshed from the service once per sign-in,
+before the first increment, which keeps that window small.
+
+## Setup
+
+```csharp
+using Shiny;
+
+builder.Services.AddGameCenter(opts =>
+{
+    opts.AddAchievement("first_win", appleId: "com.mygame.firstwin", googleId: "CgkIxxxxxxxxEAIQAQ");
+    opts.AddAchievement("play_100", appleId: "com.mygame.play100", googleId: "CgkIxxxxxxxxEAIQAg", totalSteps: 100);
+    opts.AddLeaderboard("high_score", appleId: "com.mygame.highscore", googleId: "CgkIxxxxxxxxEAIQAw");
+});
+```
+
+- **Keys.** Register each achievement and leaderboard once, under a logical key, with the id from each store. A key you
+  never registered is passed to the service unchanged, so a platform id also works as a key.
+- **Incremental achievements must be registered with `totalSteps`.** The value has to match the step count in the Play
+  Console. Apple needs it on the device to convert steps to a percentage.
+- **One-store achievements.** An achievement registered for only one store is skipped on the other.
+
+| Option | Default | |
+|---|---|---|
+| `SignInOnStartup` | `true` | Try a silent sign-in at launch so queued work is sent early |
+| `PresentSignInOnStartup` | `false` | Apple: show the Game Center sign-in sheet at launch (Apple's recommendation for games) |
+| `ShowCompletionBanner` | `true` | Apple: show the system banner when an achievement completes |
+| `MaxQueuedScores` | `100` | Unsent scores kept; when full, the oldest is dropped |
+
+See [Platform Setup](/client/gamecenter/platform) for the entitlement, manifest and console steps.
+
+## Achievements and scores
+
+```csharp
+public class GameOverViewModel(IGameCenterManager gameCenter)
+{
+    public async Task OnGameOver(int score, bool won)
+    {
+        await gameCenter.SubmitScoreAsync("high_score", score);
+        await gameCenter.IncrementAsync("play_100");
+        if (won)
+            await gameCenter.UnlockAsync("first_win");
+    }
+}
+```
+
+```csharp
+var achievements = await gameCenter.GetAchievementsAsync();
+foreach (var a in achievements)
+    Console.WriteLine($"{a.Title}: {a.CurrentSteps}/{a.TotalSteps} ({a.PercentComplete:0}%)");
+
+await gameCenter.ShowAchievementsAsync();
+await gameCenter.ShowLeaderboardAsync("high_score");
+```
+
+`GetAchievementsAsync` merges the service's progress with progress recorded on this device that hasn't been sent yet.
+`RevealAsync` is Google-only: Game Center has no reveal call, and a hidden Apple achievement appears once it has progress.
+
+## Signing in
+
+Play Games v2 signs the player in automatically at launch. Game Center signs in through a sheet that Apple shows only
+when asked. Watch `PlayerChanged`, or call `SignInAsync()` from a button:
+
+```csharp
+gameCenter.PlayerChanged += (_, player) => this.SignedIn = player != null;
+
+var player = await gameCenter.SignInAsync();   // null when the player declines
+```
+
+If the player cancels the Apple sheet repeatedly, Apple stops offering it, and the player has to sign in from Settings.
+Any progress recorded before a sign-in goes to whoever signs in first. Progress recorded while a player is signed in
+stays with that player if someone else signs in on the same device.
+
+## Friends and friends' scores
+
+```csharp
+var friends = await gameCenter.GetFriendsAsync();
+switch (friends.Status)
+{
+    case FriendsAccessStatus.Granted:           // friends.Friends is populated
+        break;
+    case FriendsAccessStatus.ConsentRequested:  // Google showed its consent dialog - call again when the player returns
+        break;
+    case FriendsAccessStatus.Denied:            // Apple: the player changes this in Settings
+    case FriendsAccessStatus.Restricted:        // parental controls / device management
+        break;
+}
+
+var top = await gameCenter.GetScoresAsync("high_score", LeaderboardScope.Friends, LeaderboardTimeScope.Week);
+```
+
+Both stores ask the player before a game can see their friends, and neither gives a game the full friends list, only
+the friends visible to it. Google returns at most 25 scores per call.
+
+## Errors
+
+Calls that need the service (`GetAchievementsAsync`, `GetScoresAsync`, `GetFriendsAsync`) throw `GameCenterException`.
+Its `ErrorCode` is one of:
+
+- `NotAuthenticated`
+- `Network`
+- `InvalidId`
+- `NotConfigured`
+- `Unavailable`
+- `NoUserInterface`
+- `Unknown`
+
+`NativeErrorCode` carries the raw platform code. Queued work rejected as `InvalidId` is dropped and logged as an error.
+Anything else stays queued.
+
+## Other services
+
+`IGameServicesProvider` is the platform half of the manager. Register your own implementation before calling
+`AddGameCenter()` (for Steam, or a test double). The manager keeps the key mapping, the queue and the de-duplication,
+so a provider only has to translate the calls.
