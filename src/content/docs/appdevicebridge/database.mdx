@@ -1,6 +1,6 @@
 ---
 title: Database
-description: A SQLite client on the device — schemas, scripts, an editable datasheet, table design, CSV and query history — for a Shiny.AppDeviceBridge web app, with database servers as drivers
+description: A database client on the device — SQLite files, SQL Server and PostgreSQL — with schemas, scripts, an editable datasheet, table design, CSV and query history, for a Shiny.AppDeviceBridge web app
 ---
 
 import NugetBadge from '/src/components/NugetBadge.astro';
@@ -11,8 +11,9 @@ import BridgeApi from '/src/components/BridgeApi.astro';
 The database bridge is a database client on the device. It opens SQLite files in the app's
 [file roots](/appdevicebridge/storage/) where they are, so asking a 4 GB file for twenty rows costs twenty rows, not the
 file. A page gets the schema, runs scripts with cancel and query plans, pages through a sorted, filtered and editable
-datasheet, designs tables, moves CSV in and out, and keeps a query history. Other engines, such as PostgreSQL or
-SQL Server, plug in as drivers. The package ships only SQLite's.
+datasheet, designs tables, moves CSV in and out, and keeps a query history. SQL Server and PostgreSQL come from two more
+packages, against connections the app keeps (see [Database servers](#database-servers)); any other engine plugs in as a
+driver.
 
 ## Install and register
 
@@ -44,7 +45,8 @@ Every request names its database in one of two ways:
   page can only open files it could already read and write. `POST database/create` makes a new, empty database
   (`409 exists` if something is already at the path).
 - **A server connection:** `connection` and an optional `database`, served by a driver the app registered.
-  `GET database/connections` lists them.
+  `GET database/connections` lists them, and `POST database/databases` with `{ connection }` lists the databases on
+  that connection's server that its login may open (`names`, or `error` saying why the server could not be asked).
 
 A request that names neither or both answers `400`. An unknown root, or a connection no driver serves, answers `404`.
 A path with `.` or `..` segments answers `400 invalid_path`. A folder picked through Android's Storage Access Framework
@@ -92,6 +94,66 @@ const result = await db.query({ ...where, sql: "SELECT city, count(*) FROM custo
 if (result.error) console.warn(`line ${result.errorLine}: ${result.error}`);
 ```
 
+## Database servers
+
+<NugetBadge name="Shiny.AppDeviceBridge.Database.SqlServer" />
+<NugetBadge name="Shiny.AppDeviceBridge.Database.PostgreSql" />
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Database.SqlServer    # Microsoft.Data.SqlClient
+dotnet add package Shiny.AppDeviceBridge.Database.PostgreSql   # Npgsql
+```
+
+The device is the client: a page can't open the TCP socket either protocol needs, so it names a saved connection and
+the device connects. Everything above works the same against a server - the schema, scripts, the datasheet, the
+designer (`ALTER TABLE` and `sp_rename` rather than SQLite's rebuild), CSV in and out, history.
+
+The connections are the app's. Implement `IDatabaseServerConnections`: `GetConnectionsAsync` lists what a page may name
+(id, name, engine, default database), and `GetLoginAsync(id)` hands over a `DatabaseServerLogin` - host, port, user,
+password, `DatabaseEncryption`, `TrustServerCertificate` - for one request. Keep the rows wherever the app keeps rows and
+the passwords in its keychain; a login is read when it's needed and never reaches the page. Throw `DatabaseRefusal` from
+`GetLoginAsync` for a connection that is saved but can't be used, and its message is the answer's `error`.
+`OpenedAsync` is called when a page reads a connection's schema, for a "last used" column.
+
+```csharp
+bridge.AddDatabaseBridge();
+bridge.Services.AddSingleton<IDatabaseServerConnections, MyConnectionStore>();
+bridge.Services.AddSqlServerDatabases();
+bridge.Services.AddPostgreSqlDatabases();
+```
+
+Both packages share one `ServerDatabaseDriver`, with a `ServerDialect` per engine. A connection whose engine has no
+package registered is not offered. The driver is registered as itself too, so the app's own connection form can test
+settings before it saves them:
+
+```csharp
+var result = await services.GetRequiredService<ServerDatabaseDriver>().TestAsync(login, ct);
+// result.Succeeded, result.ServerVersion, result.Error, result.ElapsedMs
+```
+
+`DatabaseServerLogin.Validate()` checks a form before that: one host (SQL Server's `host\instance` allowed), a port in
+range, a user name. Every value reaches the provider through its own connection string builder, so a password with a
+`;` in it stays a password.
+
+- **No statement timeout.** The work is on the server, so `StatementTimeout` doesn't apply; cancel does, and both
+  providers' cancel ends the statement on the server. Opening waits `DatabaseServerLogin.ConnectTimeoutSeconds` (15).
+- **The row cap cancels.** When a result passes `maxRows` the command is cancelled, because both providers read the rest
+  of a result off the wire before they let go of it. Anything later in that script doesn't run, and the messages say so.
+- **Scripts:** SQL Server's are split on `GO` lines the way sqlcmd splits them (`GO 3` repeats); PRINT output and each
+  statement's row count are messages. PostgreSQL's go as one batch, with notices as messages.
+- **Explain** is SQL Server's `SHOWPLAN_ALL` (switched off again before the connection goes back to the pool) and
+  PostgreSQL's `EXPLAIN (FORMAT JSON)` inside a transaction that is always rolled back, so neither runs the statement.
+- **Values cross as the server's own text** in the datasheet and are read back through the server's own parser, so a
+  `datetimeoffset` or `numeric(38,10)` round-trips exactly.
+- **Failures are worded for people.** A certificate the device doesn't trust, a host that isn't there, a port nothing
+  answers on and a timeout are recognised and named with the endpoint, because a trimmed release build strips the
+  runtime's own messages. What the server itself said is passed through.
+- **Encryption:** `Required` (the default) verifies the certificate unless `TrustServerCertificate`; `Optional`
+  encrypts when the server offers.
+- **Never set `InvariantGlobalization`** in an app that uses the SQL Server package: SqlClient refuses every connection
+  under it.
+- **Platforms:** every head. Both providers are managed code; SqlClient uses its managed network layer off Windows.
+
 ## Other engines
 
 A driver implements `IDatabaseDriver` and serves the `DatabaseConnectionTarget`s it recognises. The bridge resolves
@@ -100,8 +162,11 @@ connections and their secrets. The page only sees the id, name and engine from `
 
 ```csharp
 bridge.AddDatabaseBridge();
-bridge.Services.AddDatabaseDriver<PostgresDriver>();
+bridge.Services.AddDatabaseDriver<OracleDriver>();
 ```
+
+A server engine that speaks ADO.NET can instead be a `ServerDialect`, registered with
+`services.AddDatabaseServerDialect<T>()`, and reuse the server driver.
 
 `RowView`, `SqlSpelling`, `QueryPlans`, `DatabaseCsv`, `TableDesigner.Wrong` and `TableDesigner.DesignOf` are public, so
 a driver writes its datasheet SQL and design checks the same way the SQLite driver does.
@@ -123,3 +188,6 @@ The bridge can write: it is a database client, and `query` runs `UPDATE`, `DELET
 opened. SQLite's authorizer runs while each statement is prepared and refuses `ATTACH`, which also covers `VACUUM INTO`,
 and `load_extension`. A query can't open a file outside the file roots or load native code. The query history is
 outside every root, so the page reaches it only through these routes.
+
+A server connection is reached by its id alone. Its host, user and password stay in the app, and the login's own
+permissions on the server are what limit a query.
