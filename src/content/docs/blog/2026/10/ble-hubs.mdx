@@ -1,0 +1,281 @@
+---
+title: 'BluetoothLE between apps has never been easier - Enter BLE Hubs'
+description: 'Shiny.BluetoothLE.Hubs brings the SignalR hub model to Bluetooth LE. Describe the conversation as one C# interface. Request/response, streaming, cancellation, server-to-client events, groups and JSON serialization over the radio are generated and handled for you, so you never chunk, reassemble or correlate a byte yourself.'
+date: 2026-10-09
+authors:
+  - allanritchie
+tags:
+  - BluetoothLE
+  - Release
+  - MAUI
+  - AOT
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+**Shiny.BluetoothLE.Hubs** is a new library that brings the **SignalR hub model** to Bluetooth LE. One device hosts a
+hub. Nearby devices discover it, connect, and call it through a source-generated, strongly typed proxy. The host
+pushes events back to every client, to one client, to everyone else, or to a group. You don't need a server, a network
+or Wi-Fi, only phones in the same room.
+
+<NugetBadge name="Shiny.BluetoothLE.Hubs" showLabel={true} />
+<NugetBadge name="Shiny.BluetoothLE.Hubs.Host" showLabel={true} />
+<NugetBadge name="Shiny.BluetoothLE.Hubs.Client" showLabel={true} />
+
+It builds on [BluetoothLE](/client/ble/) on the client side and [BluetoothLE Hosting](/client/blehosting/) on the host
+side. It targets .NET 10, runs on iOS, Android and macOS, and is AOT- and trim-safe with no reflection.
+
+## Why BLE between apps is hard
+
+Getting two of your own apps to talk over Bluetooth LE looks simple. One phone is a peripheral with a GATT service and
+the other connects to it. In practice, you end up building a protocol stack inside the app:
+
+- **Tiny packets.** A write or notification carries `MTU - 3` bytes. That is 20 bytes at the BLE minimum and a few
+  hundred bytes after negotiation. Any real payload has to be **chunked** on one side and **reassembled** on the
+  other.
+- **No request/response.** GATT gives you writes, reads and notifications, not calls. To get an answer you have to
+  invent message ids, match replies to requests, and handle the reply that never arrives.
+- **Concurrency.** Two calls in flight at once means their frames must never interleave, and every reply must find
+  the right caller.
+- **Events.** A host that wants to tell clients "the board changed" needs its own message kinds, routing to the right
+  clients, and ordered delivery on the client.
+- **Serialization.** Every type needs a byte format on both sides, and in an AOT/trimmed app that format can't use
+  reflection.
+- **Lifecycle.** iOS peripherals can't disconnect a central. Android doesn't always report that a client went away.
+  Somebody has to decide what "disconnected" means and tell both sides why it happened.
+
+That is a lot of work before the app does anything useful.
+
+## The SignalR model, over the radio
+
+If you've used ASP.NET Core SignalR, you already know this library. Ours is close on purpose:
+
+| SignalR | BLE Hubs |
+|---|---|
+| `Hub<TClient>` | `BleHub<TContract>` |
+| `Clients.All` / `Others` / `Caller` / `Group(...)` | the same, with typed pushes |
+| `Groups.AddToGroupAsync` | the same |
+| `OnConnectedAsync` / `OnDisconnectedAsync` | the same, with a typed `HubDisconnect` reason |
+| `IHubContext<THub>` | the same, plus per-hub `Start()` / `Stop()` |
+| `Context.ConnectionId`, `Context.Abort()` | the same |
+| `IAsyncEnumerable<T>` streaming | the same, and cancellation reaches the hub |
+| A new hub instance in its own DI scope per call | the same |
+| `HubConnection` + `On<T>("Name", ...)` | a **generated** typed proxy with real C# events |
+
+The main difference is the contract. SignalR clients use strings: `connection.On<GameState>("StateChanged", ...)` and
+`InvokeAsync("MakeMove", 4)`. BLE Hubs uses **one interface** that both sides compile against, and a source generator
+writes the rest.
+
+## One interface is the whole conversation
+
+```csharp
+[BleHubClient]
+public interface IGameHub
+{
+    // client -> host: request / response
+    Task<JoinResult> Join(string playerName, string? avatarFile);
+    Task<MoveResult> MakeMove(int cell);
+    Task Rematch();
+
+    // client -> host: a stream, cancellable from the client
+    IAsyncEnumerable<int> Countdown(int from, CancellationToken cancellationToken);
+
+    // host -> clients: events
+    event Action<GameState> StateChanged;
+    event Action<string, string> Emote;
+}
+```
+
+- **Methods** are client → host calls. They return `Task`, `Task<T>` or `IAsyncEnumerable<T>`. A trailing
+  `CancellationToken` is passed through to the host and is never serialized.
+- **Events** are host → client pushes, declared as `Action` up to `Action<T1..T4>`.
+
+From that interface the generator emits:
+
+- the **client proxy** (`GameHubClient`), which implements `IGameHub`
+- the **hub dispatcher**, which switches on the method name, reads typed arguments and calls your method
+- **typed push methods**, so you write `Clients.All.StateChanged(state)` instead of `SendAsync("StateChanged", state)`
+- an `IHubContext<GameHub>.Clients` C# 14 extension property, for pushing from outside a hub
+
+Mistakes are compile errors, not runtime surprises. `SBH001` to `SBH006` cover a hub that doesn't match its contract,
+unsupported return types, overloads, unsupported event delegates and `ref`/`out` parameters.
+
+## The host
+
+```csharp
+public class GameHub(GameEngine engine) : BleHub<IGameHub>
+{
+    public override Task OnConnectedAsync()
+        => Groups.AddToGroupAsync(Context.ConnectionId, "lobby");
+
+    public async Task<MoveResult> MakeMove(int cell)
+    {
+        var error = engine.TryMove(engine.GetMark(Context.ConnectionId), cell);
+        if (error != null)
+            return new MoveResult(false, error);                     // the reply
+
+        await Clients.All.StateChanged(engine.Snapshot());           // the event, typed
+        await Clients.Group("spectators").Emote("host", "👀");
+        return new MoveResult(true, null);
+    }
+
+    public async IAsyncEnumerable<int> Countdown(int from, [EnumeratorCancellation] CancellationToken ct)
+    {
+        for (var i = from; i > 0; i--)
+        {
+            yield return i;
+            await Task.Delay(1000, ct);                              // the client's cancel arrives here
+        }
+    }
+
+    public override Task OnDisconnectedAsync(HubDisconnect disconnect)
+        => Clients.Others.Emote(Context.Client.Name ?? "?", disconnect.Reason == HubDisconnectReason.ClientTimeout
+            ? "📡 lost connection"
+            : "🚪 left");
+
+    // Join, Rematch... (SBH001 tells you if one is missing)
+}
+```
+
+```csharp
+builder.Services.AddBluetoothLeHosting();
+builder.Services.AddBleHub<GameHub>(ServiceUuid, CharacteristicUuid, o => o.MaxClients = 6);
+
+await host.Start();   // IBleHubHost: GATT service, advertising, L2CAP
+```
+
+To push from somewhere that isn't a hub, such as a timer or a background service, inject `IHubContext<GameHub>`:
+
+```csharp
+public class Ticker(IHubContext<GameHub> hub)
+{
+    public Task Tick(GameState state) => hub.Clients.All.StateChanged(state);
+}
+```
+
+## The client
+
+```csharp
+builder.Services.AddBluetoothLE();
+builder.Services.AddBleHubClient<IGameHub>(ServiceUuid, CharacteristicUuid);
+```
+
+```csharp
+public class GameViewModel(IBleHubClient<IGameHub> client)
+{
+    async Task Start()
+    {
+        // events are plain C# events
+        client.Hub.StateChanged += state => MainThread.BeginInvokeOnMainThread(() => Apply(state));
+        client.Disconnected += (_, d) => Show($"{d.Reason}: {d.Description}");
+
+        var host = await client.Discover().FirstAsync();
+        await client.Connect(host, new BleHubConnectOptions("Allan"));
+
+        // request / response is just a method call
+        var result = await client.Hub.MakeMove(4);
+
+        // streams are await foreach, and break cancels the host's method
+        await foreach (var n in client.Hub.Countdown(10, ct))
+            if (n == 3) break;
+    }
+}
+```
+
+That's all the code there is. You don't write chunking, message ids or byte arrays.
+
+## What's happening under the hood
+
+You never have to know any of this, but here is what the library does for you.
+
+### Request/response
+
+GATT has no calls, so BLE Hubs uses one characteristic per hub, with **Write** for client → host and **Notify** for
+host → client. Each call gets a message id, and the host's `Completion` (or `Error`) frame carries that id back.
+Several calls can be in flight at once and each reply finds its caller. Calls time out after `RequestTimeout` (30
+seconds by default). A host exception arrives as `BleHubRemoteException`, and a dropped link fails pending calls with
+`BleHubDisconnectedException`, which says why.
+
+We use notifications for replies rather than reads on purpose. With reads, the client can't tell when a reply is ready,
+can't tell which call a value belongs to, and is still capped by the MTU.
+
+### Eventing
+
+A push is its own frame kind, sent by name with its arguments. `Clients.All`, `Others`, `Caller`, `Client(id)`,
+`Group(name)`, `GroupExcept(...)` and the rest are resolved on the host. On the client, pushes go through a channel and
+are raised **one at a time, in the order the host sent them**, so a `StateChanged` never overtakes the previous one.
+
+### Messaging and JSON, without touching bytes
+
+Every argument, result, stream item and event value is serialized **on its own, with its static type**, through
+`IBleHubSerializer`. The default uses Shiny's AOT-friendly System.Text.Json, so you register a
+`JsonSerializerContext` once on both sides:
+
+```csharp
+[JsonSerializable(typeof(JoinResult))]
+[JsonSerializable(typeof(MoveResult))]
+[JsonSerializable(typeof(GameState))]
+[JsonSerializable(typeof(string))]
+[JsonSerializable(typeof(int))]
+public partial class GameJsonContext : JsonSerializerContext;
+
+Shiny.Json.AddContext(GameJsonContext.Default);
+```
+
+To use MessagePack, protobuf or something else, register your own `IBleHubSerializer`.
+
+The serialized message is then **framed** to fit the negotiated MTU. The client requests 512 bytes. Each frame carries a
+small header with the protocol version, kind, message id, sequence, first/last flags and, on the first frame, the total
+length. The receiver reassembles by message id, with limits on message size (256 KB by default), reassembly time and
+partial messages per client, so a broken or hostile peer can't exhaust memory. The host sends each message to a client
+as a whole, under a lock, so frames for one client never interleave.
+
+### Connections and disconnects
+
+- When a client connects, a **handshake** exchanges the protocol version, the client's name and properties, and the
+  file transfer channel. Mismatched versions are refused.
+- A client is registered, and `OnConnectedAsync` has run, **before** the handshake reply goes out, so the first call
+  always finds it.
+- Disconnects are **cooperative**, because iOS peripherals can't drop a central. The host sends a `Disconnect` frame
+  and the client library leaves.
+- Every departure comes with a typed `HubDisconnect` reason on both sides: `ClientDisconnect`, `ClientTimeout`,
+  `ServerDisconnect`, `ServerShutdown` or `ConnectionFailed`. The client says goodbye before it unsubscribes, so the
+  host can tell a player who left from one whose phone walked out of range.
+- A periodic sweep catches Android clients that disappear without an unsubscribe.
+
+### Files go around the hub, not through it
+
+GATT gives you a few KB/s, which is plenty for moves, commands and state but not for photos. File transfers use a
+separate **L2CAP** channel, a direct stream between the devices. The host advertises it in the handshake, so the client
+just calls:
+
+```csharp
+await client.UploadFile(path, "avatar.jpg");
+await client.DownloadFile("avatar.jpg", localPath);
+```
+
+```csharp
+builder.Services.ConfigureBleHubHost(o => o.EnableFileTransfers(Path.Combine(FileSystem.AppDataDirectory, "files")));
+```
+
+## More than one hub
+
+A device can host several hubs. Each hub is its own characteristic, and hubs that share a service UUID share one GATT
+service, so the 31-byte advertisement stays small. Several hub clients connected to the same host share one BLE
+connection. You can start and stop each hub on its own with `IHubContext<THub>.Start()` / `Stop(reason)`. A stopped hub
+disconnects its clients and refuses new ones, while the other hubs keep running.
+
+## Try it: Tic Tac Toe
+
+The repo's `samples/TicTacToe` is a .NET MAUI app for iOS and Android. One phone taps **Host a game** and plays X.
+The next phone to join plays O, and any phones after that join the `spectators` group. Moves are hub calls, board
+updates and emotes are pushes, and avatars travel over L2CAP. You need two physical devices, because simulators and
+emulators don't have usable Bluetooth.
+
+## Get started
+
+- [Getting Started](/blehubs/): packages, setup and platform permissions
+- [Contracts](/blehubs/contracts/): `[BleHubClient]`, serialization, generated code and diagnostics
+- [Hosting](/blehubs/hosting/): `BleHub<T>`, `IHubContext`, groups, start/stop
+- [Client](/blehubs/client/): discovery, calls, events and failures
+- [Files](/blehubs/files/): L2CAP transfers
+- [How It Works](/blehubs/how-it-works/): GATT layout, framing, limits and best practices

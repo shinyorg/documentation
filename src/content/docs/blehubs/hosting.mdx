@@ -33,9 +33,9 @@ public class GameHub(GameEngine engine) : BleHub<IGameHub>
     public override async Task OnConnectedAsync()
         => await this.Groups.AddToGroupAsync(this.Context.ConnectionId, "lobby");
 
-    public override async Task OnDisconnectedAsync(string? reason)
+    public override async Task OnDisconnectedAsync(HubDisconnect disconnect)
     {
-        engine.Leave(this.Context.ConnectionId);
+        engine.Leave(this.Context.ConnectionId);   // disconnect.Reason says why - see Disconnect Reasons below
         await this.Clients.All.StateChanged(engine.Snapshot());
     }
 
@@ -72,7 +72,7 @@ fields. Use singletons, or `Context.Items` for per-connection state.
 | Member | |
 |---|---|
 | `ConnectionId` | The caller's id |
-| `Client` | `Name`, `AppVersion`, `Properties`, `Mtu`, `ConnectedAt`, `Items` |
+| `Client` | `Name`, `AppVersion`, `Properties`, `Mtu`, `ConnectedAt`, `Items`, and `Peripheral`: the BLE central (`IPeripheral`), null for a client connected over another transport |
 | `Items` | Per-connection state, kept while the client is connected |
 | `ConnectionAborted` | Cancelled when the client goes away |
 | `Abort(reason)` | Asks the client to leave. Called from a hub method, it takes effect **after** that method's reply is sent |
@@ -94,6 +94,33 @@ Every target exposes the contract's events as methods (`Clients.Others.Emote("ho
 
 `Groups.AddToGroupAsync(connectionId, name)`, `RemoveFromGroupAsync`, and `GetMembers(name)`. When a client leaves,
 its memberships are removed automatically, after `OnDisconnectedAsync` has run.
+
+### Disconnect Reasons
+
+`OnDisconnectedAsync(HubDisconnect disconnect)` tells you why a client left. `disconnect.Reason` is a
+`HubDisconnectReason` you can switch on, `disconnect.Message` is the optional text passed to `Abort`, `Stop` or
+`Disconnect`, and `disconnect.Description` is the message or a default text for the reason.
+
+| `HubDisconnectReason` | When |
+|---|---|
+| `ClientDisconnect` | The client called `Disconnect()` or was disposed. It tells the host before it unsubscribes |
+| `ClientTimeout` | The link dropped: an unsubscribe with no goodbye first (iOS and Android report a vanished client this way), or the cleanup sweep |
+| `ServerDisconnect` | `Context.Abort(reason)` or `IHubContext.Disconnect(id, reason)` |
+| `ServerShutdown` | `IBleHubHost.Stop(reason)` or `IHubContext.Stop(reason)` |
+
+```csharp
+public override Task OnDisconnectedAsync(HubDisconnect disconnect)
+{
+    if (disconnect.Reason == HubDisconnectReason.ClientTimeout)
+        engine.HoldSeat(this.Context.ConnectionId);   // the link dropped - they may come back
+    else
+        engine.Leave(this.Context.ConnectionId);
+    return Task.CompletedTask;
+}
+```
+
+By default `OnDisconnectedAsync(HubDisconnect)` calls `OnDisconnectedAsync(string? reason)` with `Description`, so
+hubs that override the string version keep working. Override one or the other.
 
 ### Errors
 
@@ -118,7 +145,9 @@ public class Lobby(IHubContext<GameHub> hub)
 }
 ```
 
-`IHubContext<THub>` also has `Groups` and the `ClientConnected` / `ClientDisconnected` events.
+`IHubContext<THub>` also has `Groups` and the `ClientConnected` / `ClientDisconnected` events. `ClientDisconnected`
+raises `BleHubClientDisconnectedEventArgs(Client, Disconnect)`. `e.Disconnect` is the [`HubDisconnect`](#disconnect-reasons),
+and `e.Reason` is its `Description`.
 
 ## Starting & Stopping
 
@@ -127,8 +156,8 @@ public class Lobby(IHubContext<GameHub> hub)
 | `IBleHubHost.Start()` / `Stop(reason)` | Every registered hub |
 | `IHubContext<THub>.Start()` / `Stop(reason)` | Just that hub |
 
-- **Stopping a hub** tells its clients to disconnect (they receive the reason) and refuses new clients with "Hub is
-  not running".
+- **Stopping a hub** tells its clients to disconnect (they receive `ServerShutdown` and the reason) and refuses new
+  clients with "Hub is not running".
 - **Shared services**: hubs that share a service UUID live in one GATT service. It stays up while any of them is
   running, so stopping one hub never drops another hub's clients.
 - **Advertising** always lists exactly the services that have a running hub, and stops when none do.
