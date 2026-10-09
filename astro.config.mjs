@@ -41,13 +41,6 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
-      id: 'client-v580',
-      title: 'Shiny Client 5.8',
-      description: 'SIRI & Gemini Integration, GamePads, Location Updates, Resumable Uploads, & Watch Libraries!',
-      href: '/client/appfunctions',
-      cta: 'AWESOME!',
-    },
-    {
       id: 'client-v590',
       title: 'Shiny Client 5.9',
       description: 'Easy Live Activities, Game Center, Printing APIs for Device & BluetoothLE',
@@ -60,13 +53,6 @@ const announcementConfig = {
       description: 'Release updates without the AppStore on .NET!',
       href: '/appdevicebridge/',
       cta: 'WHAT??!',
-    },
-    {
-      id: 'controls-15',
-      title: 'Shiny Controls 1.5',
-      description: 'Diagrams, Floor Plans, Kanban, GamePads, & FULL Office!',
-      href: '/controls/',
-      cta: 'What!?!',
     },
     {
       id: 'controls-16',

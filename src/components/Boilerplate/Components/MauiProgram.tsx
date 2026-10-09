@@ -10,7 +10,8 @@ const MauiProgram = (props: Props) => {
   let src = `
   using Shiny;${Data.hasComponent('httpserver', props.components) ? `
   using System.Net;          // IPAddress
-  using Shiny.Net.HttpServer;` : ''}
+  using Shiny.Net.HttpServer;` : ''}${Data.hasComponent('blehubs-host', props.components) || Data.hasComponent('blehubs-client', props.components) ? `
+  using Shiny.BluetoothLE.Hubs;` : ''}
 
   namespace ShinyApp;
   
@@ -53,6 +54,25 @@ const MauiProgram = (props: Props) => {
   if (has('blehosting')) {
     src += `
       builder.Services.AddBluetoothLeHosting();`;
+  }
+  if (has('blehubs-host')) {
+    src += `
+
+      // Hubs share one service UUID - each hub needs its own characteristic UUID (full 128-bit)
+      builder.Services.AddBleHub<ShinyApp.Hubs.GameHub>(
+          "YOUR-SERVICE-UUID",
+          "YOUR-GAMEHUB-CHARACTERISTIC-UUID"
+      );
+      builder.Services.ConfigureBleHubHost(o => o.LocalName = "MyHub"); // advertised name - keep it short`;
+  }
+  if (has('blehubs-client')) {
+    src += `
+
+      // Registers the generated proxy - inject IBleHubClient<IGameHub>
+      builder.Services.AddBleHubClient<ShinyApp.Hubs.IGameHub>(
+          "YOUR-SERVICE-UUID",
+          "YOUR-GAMEHUB-CHARACTERISTIC-UUID"
+      );`;
   }
   if (has('beacons')) {
     src += `
