@@ -6,10 +6,14 @@ description: The GATT layout, wire protocol, limits and best practices behind Bl
 ## GATT Layout
 
 - Each hub is **one characteristic** with **Write** (client → host) and **Notify** (host → client).
-- Hubs that share a service UUID become characteristics of one GATT service. Calls are routed by characteristic, so
-  messages never carry a hub name.
-- The host advertises the service UUIDs of its running hubs, plus an optional local name. Clients scan by service
-  UUID.
+- Every hub is a characteristic of **one GATT service**, set with `server.ServiceUuid(...)` on the host and
+  `o.ServiceUuid` on each client (they must match). Calls are routed by
+  characteristic, so messages never carry a hub name.
+- The host advertises that one service UUID while any hub runs, plus an optional local name. Clients scan for it.
+- Why one: two 128-bit UUIDs take 37 bytes, more than a 31 byte advertisement. Android then refuses to advertise at
+  all, and iOS moves the extra UUID into an Apple-only overflow area that Android scanners can't see.
+- The cost: a scan can't tell which hubs a host is running. Joining a stopped hub is refused by the handshake, and a
+  host without your hub's characteristic (another app on the default UUID) fails when the characteristic is looked up.
 
 Why not reads for responses? A client can't tell when a response is ready to read, so it would have to poll. Reads are
 also ambiguous with several calls in flight, and they are still capped by the MTU. Correlated, chunked notifications
@@ -46,11 +50,11 @@ and up to 512. Every message (call, reply, stream item, push) is split into fram
 
 | | Default | Change with |
 |---|---|---|
-| Largest message | 256 KB | `ConfigureBleHubProtocol(o => o.MaxPayloadSize = …)` |
+| Largest message | 256 KB | `server.Protocol(o => o.MaxPayloadSize = …)` or a client's `o.Protocol(…)` |
 | Call timeout | 30s | `RequestTimeout` |
 | Partial message lifetime | 30s | `ReassemblyTimeout` |
 | Partial messages per client | 16 | `MaxPartialMessages` |
-| Clients per hub | 8 | `AddBleHub<T>(…, o => o.MaxClients = …)` |
+| Clients per hub | 8 | `server.AddHub<T>(…, o => o.MaxClients = …)` |
 
 Throughput over GATT is a few KB/s, which is plenty for game moves, commands and state. Use
 [file transfers](./files) for anything big.
@@ -61,8 +65,8 @@ Throughput over GATT is a few KB/s, which is plenty for game moves, commands and
   don't rename or reorder existing ones.
 - **Register every wire type** in a `JsonSerializerContext`. A missing registration fails at runtime, not at compile
   time.
-- **Keep `LocalName` short** (about 8 characters) and **share one service UUID** between hubs. The advertisement is
-  only 31 bytes.
+- **Keep `LocalName` short** (about 8 characters). The advertisement is only 31 bytes.
+- **Set your own `ServiceUuid`** on host and client, so other apps' hosts don't appear in your scans.
 - **Marshal hub events to the UI thread.**
 - **Never store state on the hub instance.** It is recreated for every call.
 - **Foreground only (for now).** When an iOS host is in the background, it advertises without its local name, and

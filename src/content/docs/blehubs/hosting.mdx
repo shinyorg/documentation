@@ -6,22 +6,29 @@ description: Implement BleHub<T>, push to clients and groups, react to connects 
 ## Registration
 
 ```csharp
-builder.Services.AddBluetoothLeHosting();
-
-builder.Services.AddBleHub<GameHub>(ServiceUuid, GameHubCharacteristicUuid, o =>
-{
-    o.MaxClients = 6;   // default 8, null = unlimited
-    o.ValidateClient = info => String.IsNullOrWhiteSpace(info.Name) ? "A player name is required" : null;
-});
-
-builder.Services.ConfigureBleHubHost(o =>
-{
-    o.LocalName = "TTT";   // advertised name - keep it short
-});
+builder.Services.AddBleHubServer(server => server
+    .ServiceUuid(ServiceUuid)          // optional - the one service every hub lives in; clients set the same
+    .Host(o => o.LocalName = "TTT")    // advertised name - keep it short
+    .AddHub<GameHub>(GameHubCharacteristicUuid, o =>
+    {
+        o.MaxClients = 6;   // default 8, null = unlimited
+        o.ValidateClient = info => String.IsNullOrWhiteSpace(info.Name) ? "A player name is required" : null;
+    })
+    .AddHub<ChatHub>(ChatHubCharacteristicUuid)
+);
 ```
 
+- **One call registers everything**: every hub, the host settings (`.Host(...)`, `BleHubHostOptions`) and the
+  app-wide protocol limits (`.Protocol(...)`). Call `AddBleHubServer` once, with at least one hub. A hub or
+  characteristic added twice, or a malformed UUID, throws at registration.
+- **The platform BLE hosting stack is registered for you** on Android, iOS and Mac Catalyst (`AddBluetoothLeHosting()`).
+  On plain `net10.0`, register an `IBleHostingManager` yourself.
+
 - Every hub needs **its own characteristic UUID**. Use full 128-bit UUIDs.
-- Hubs should **share one service UUID**. Each extra 128-bit UUID in the advertisement eats 18 of its 31 bytes.
+- Every hub lives in **one service**, set with `server.ServiceUuid(...)`, and that is the only UUID the host
+  advertises. Two 128-bit UUIDs don't fit in a 31 byte advertisement, so hubs don't get their own. The default
+  (`BleHubProtocolOptions.DefaultServiceUuid`) is shared by every app using this library: set your own so other apps'
+  hosts stay out of your scans.
 - `ValidateClient` sees the client's handshake (`Name`, `AppVersion`, `Properties`). Return a reason to refuse the
   client, or `null` to accept it.
 
@@ -181,9 +188,10 @@ and `e.Reason` is its `Description`.
 
 - **Stopping a hub** tells its clients to disconnect (they receive `ServerShutdown` and the reason) and refuses new
   clients with "Hub is not running".
-- **Shared services**: hubs that share a service UUID live in one GATT service. It stays up while any of them is
-  running, so stopping one hub never drops another hub's clients.
-- **Advertising** always lists exactly the services that have a running hub, and stops when none do.
+- **One service**: every hub's characteristic lives in one GATT service. It stays up while any hub is running, so
+  stopping one hub never drops another hub's clients.
+- **Advertising** starts with the first running hub and stops with the last. Starting or stopping a hub beside another
+  doesn't touch it.
 - **Renaming the host**: `IBleHubHost.Rename("TTT 2")` sets `LocalName`, re-advertises under the new name while hubs
   are running, and tells every connected client (their `HostName` updates and `HostRenamed` is raised). While stopped,
   it just sets the name the next `Start` uses.

@@ -6,9 +6,17 @@ description: Discover BluetoothLE hub hosts, connect, call hub methods, consume 
 ## Registration
 
 ```csharp
-builder.Services.AddBluetoothLE();
-builder.Services.AddBleHubClient<IGameHub>(ServiceUuid, GameHubCharacteristicUuid);
+builder.Services.AddBleHubClient<IGameHub>(GameHubCharacteristicUuid, o => o.ServiceUuid = ServiceUuid);   // optional - must match the host
 ```
+
+The client scans for and connects to `BleHubClientOptions.ServiceUuid`, the one service every hub lives in (see
+[How It Works](./how-it-works)). Set the same UUID the host uses; both default to
+`BleHubProtocolOptions.DefaultServiceUuid`.
+
+On Android, iOS and Mac Catalyst the platform BLE stack is registered for you (`AddBluetoothLE()`). On Apple it turns
+off iOS's background alerts (connect, disconnect and notification alerts while the app isn't in the foreground),
+because hubs are used in the foreground. To use your own `AppleBleConfiguration`, call `AddBluetoothLE(config)` before
+`AddBleHubClient`: the first registration wins. On plain `net10.0`, register an `IBleManager` yourself.
 
 This registers the **generated proxy** (`GameHubClient` for `IGameHub`) as a singleton. Inject whichever shape you
 prefer:
@@ -28,7 +36,7 @@ public partial class JoinViewModel(IBleHubClient<IGameHub> client) : ObservableO
     public ObservableCollection<BleHubHostInfo> Hosts { get; } = new();
 
     public void OnAppearing() => this.scan = client
-        .Discover()   // scans for the hub's service UUID - dispose to stop
+        .Discover()   // scans for the service UUID - dispose to stop
         .Subscribe(host => MainThread.BeginInvokeOnMainThread(() =>
         {
             if (!this.Hosts.Any(x => x.Id == host.Id))
@@ -145,7 +153,8 @@ await foreach (var n in client.Hub.Countdown(10, cts.Token))
 - **Cancellation**: cancelling a call's `CancellationToken` stops waiting and cancels the hub method on the host.
 
 ```csharp
-builder.Services.ConfigureBleHubProtocol(o => o.RequestTimeout = TimeSpan.FromSeconds(10));
+// protocol limits are app-wide - set them on any client registration (or the server's .Protocol)
+builder.Services.AddBleHubClient<IGameHub>(GameHubCharacteristicUuid, o => o.Protocol(p => p.RequestTimeout = TimeSpan.FromSeconds(10)));
 ```
 
 ## Events (pushes)
@@ -173,6 +182,9 @@ Register a client per hub contract. Connecting each to the same host shares **on
 counted, so disconnecting one hub client leaves the others connected.
 
 ```csharp
-builder.Services.AddBleHubClient<IGameHub>(ServiceUuid, GameHubCharacteristicUuid);
-builder.Services.AddBleHubClient<IChatHub>(ServiceUuid, ChatHubCharacteristicUuid);
+builder.Services.AddBleHubClient<IGameHub>(GameHubCharacteristicUuid, o => o.ServiceUuid = ServiceUuid);
+builder.Services.AddBleHubClient<IChatHub>(ChatHubCharacteristicUuid, o => o.ServiceUuid = ServiceUuid);
 ```
+
+A scan only sees the host's service UUID, not which hubs it is running. If a host runs a hub only on demand, joining
+it while it is stopped is refused by the handshake (`BleHubException`, "Host refused…"), so handle that.
