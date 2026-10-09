@@ -122,6 +122,28 @@ public override Task OnDisconnectedAsync(HubDisconnect disconnect)
 By default `OnDisconnectedAsync(HubDisconnect)` calls `OnDisconnectedAsync(string? reason)` with `Description`, so
 hubs that override the string version keep working. Override one or the other.
 
+### Renaming
+
+A connected client can change its name with `client.Rename(name)`, without reconnecting. The host runs `ValidateClient`
+with the new name (and the client's original `AppVersion` and `Properties`), then the hub's `OnRenamedAsync`:
+
+```csharp
+public override Task OnRenamedAsync(string? previousName)
+{
+    if (engine.IsTaken(this.Context.Client.Name))
+        throw new InvalidOperationException("That name is taken");   // refused - the client keeps its old name
+
+    return this.Clients.Others.PlayerRenamed(previousName, this.Context.Client.Name);
+}
+```
+
+- `Context.Client.Name` already has the new name. Throwing puts the old one back, and the client gets a
+  `BleHubRemoteException` (of type `BleHubRemoteException.RenameRefused`) with your message.
+- A client's renames run one at a time.
+- **Other clients aren't told automatically.** Push it yourself, as above, if they need to know.
+- `IHubContext<THub>.ClientRenamed` is raised after a rename is accepted, with
+  `BleHubClientRenamedEventArgs(Client, PreviousName)`.
+
 ### Errors
 
 An exception thrown by a hub method is sent back to the caller as a `BleHubRemoteException` (with `RemoteErrorType` and
@@ -145,7 +167,7 @@ public class Lobby(IHubContext<GameHub> hub)
 }
 ```
 
-`IHubContext<THub>` also has `Groups` and the `ClientConnected` / `ClientDisconnected` events. `ClientDisconnected`
+`IHubContext<THub>` also has `Groups` and the `ClientConnected` / `ClientDisconnected` / [`ClientRenamed`](#renaming) events. `ClientDisconnected`
 raises `BleHubClientDisconnectedEventArgs(Client, Disconnect)`. `e.Disconnect` is the [`HubDisconnect`](#disconnect-reasons),
 and `e.Reason` is its `Description`.
 
@@ -155,12 +177,16 @@ and `e.Reason` is its `Description`.
 |---|---|
 | `IBleHubHost.Start()` / `Stop(reason)` | Every registered hub |
 | `IHubContext<THub>.Start()` / `Stop(reason)` | Just that hub |
+| `IBleHubHost.Rename(localName)` | Changes the host's name without stopping anything |
 
 - **Stopping a hub** tells its clients to disconnect (they receive `ServerShutdown` and the reason) and refuses new
   clients with "Hub is not running".
 - **Shared services**: hubs that share a service UUID live in one GATT service. It stays up while any of them is
   running, so stopping one hub never drops another hub's clients.
 - **Advertising** always lists exactly the services that have a running hub, and stops when none do.
+- **Renaming the host**: `IBleHubHost.Rename("TTT 2")` sets `LocalName`, re-advertises under the new name while hubs
+  are running, and tells every connected client (their `HostName` updates and `HostRenamed` is raised). While stopped,
+  it just sets the name the next `Start` uses.
 - **Shared resources**: BLE access, the [file server](./files) and the cleanup sweep start with the first running hub
   and stop with the last.
 
