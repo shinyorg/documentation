@@ -111,14 +111,19 @@ public class WatchViewModel(IWearableManager wearables)
         // live — needs IsReachable; throws WearableException(NotReachable) otherwise
         if (status.IsReachable)
         {
-            var reply = await wearables.SendMessage("workout/start", Encoding.UTF8.GetBytes("""{"kind":"run"}"""));
+            // key/values go as a JSON object, and the reply comes back as key/values
+            var reply = await wearables.SendMessage("workout/start", new Dictionary<string, object?> { ["kind"] = "run", ["km"] = 5 });
+            var accepted = reply["accepted"].GetBoolean();
+
+            // plain text goes as UTF-8, and the reply comes back as text
+            string pong = await wearables.SendMessage("ping", "hello");
         }
 
         // latest state — delivered when the watch can take it
-        await wearables.UpdateContext(Encoding.UTF8.GetBytes("""{"plan":"5k"}"""));
+        await wearables.UpdateContext(new Dictionary<string, object?> { ["plan"] = "5k" });
 
         // queued, in order
-        var id = await wearables.Transfer("log", Encoding.UTF8.GetBytes("[1,2,3]"));
+        var id = await wearables.Transfer("log", new Dictionary<string, object?> { ["laps"] = new[] { 1, 2, 3 } });
 
         // queued file — leave it in place until OnTransferCompleted reports the id
         var fileId = await wearables.TransferFile("maps/offline", "/path/to/city.bin", new Dictionary<string, string> { ["zoom"] = "14" });
@@ -130,6 +135,17 @@ public class WatchViewModel(IWearableManager wearables)
     }
 }
 ```
+
+### Payloads
+
+Underneath, every payload is bytes, and the `byte[]` overloads are there for binary data. You rarely need them: `SendMessage`, `UpdateContext` and `Transfer` also take
+
+- **key/values** — any `IReadOnlyDictionary<string, TValue>` (`Dictionary<string, object?>`, `Dictionary<string, string>`, …), sent as a JSON object. This is how structured data goes; you never build a JSON string.
+- **a `string`** — plain text, sent as UTF-8.
+
+The key/value `SendMessage` returns `IReadOnlyDictionary<string, JsonElement>` — empty when the companion replied with nothing, and a `JsonException` if the reply is not a JSON object; the text one returns the reply as a `string`. Received messages, context and transfers read the same way with `GetString()` and `GetValues()`, and `WearableData.FromString` / `WearableData.FromValues` build a delegate's reply.
+
+Values can be `null`, strings, booleans, numbers, `DateTime`, `DateTimeOffset`, `TimeSpan`, `Guid`, `Uri`, enums (written by name), `byte[]` (base64), `JsonElement`, nested dictionaries with string keys, and lists or arrays of these. Anything else throws `NotSupportedException` — break it into a nested dictionary or list. No reflection is used, so it is trim and AOT safe.
 
 Paths are app-defined: `sync`, `workout/start`. Leading and trailing slashes are trimmed; whitespace, `?` and `#` are rejected. Keep messages small — about 64 KB on iOS, 100 KB on Wear OS.
 
@@ -147,10 +163,21 @@ Everything the watch sends goes to your `IWearableDelegate`, in the foreground o
 public class MyWearableDelegate : WearableDelegate
 {
     // what you return is the reply the watch gets
-    public override Task<byte[]?> OnMessageReceived(WearableMessage message)
-        => Task.FromResult<byte[]?>(message.Path == "ping" ? Encoding.UTF8.GetBytes("pong") : null);
+    public override Task<byte[]?> OnMessageReceived(WearableMessage message) => message.Path switch
+    {
+        "ping" => Task.FromResult<byte[]?>(WearableData.FromString("pong")),
+        "workout/start" => Task.FromResult<byte[]?>(WearableData.FromValues(new Dictionary<string, object?>
+        {
+            ["accepted"] = message.GetValues()["kind"].GetString() == "run"
+        })),
+        _ => Task.FromResult<byte[]?>(null)
+    };
 
-    public override Task OnContextReceived(WearableContext context) => Task.CompletedTask;
+    public override Task OnContextReceived(WearableContext context)
+    {
+        var plan = context.GetValues()["plan"].GetString(); // or context.GetString()
+        return Task.CompletedTask;
+    }
 
     public override Task OnTransferReceived(WearableTransfer transfer) => Task.CompletedTask;
 
