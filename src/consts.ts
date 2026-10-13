@@ -3,7 +3,7 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
-export const DEFAULT_VERSION: string = "5.9.0";
+export const DEFAULT_VERSION: string = "6.1.1";
 /** Recognition IQ (shinyorg/recogintelligence) — Face / Voice / Document Intelligence ship together. */
 export const RECOGNITION_VERSION: string = "1.0.0-beta-0006";
 
@@ -77,11 +77,11 @@ export const ShinyCategories: ShinyCategory[] = [
     { id: 'server',        title: 'Server & Cloud',              span: 12, color: '#14B8A6', tint: '#CCFBF1', tintDark: '#0C3B36' },
 ];
 
-export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'serialization', 'blazorhost', 'gps', 'ble', 'jobs', 'push', 'datasync', 'screenrecorder', 'controls', 'diagram', 'floorplan', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk', 'addressentry', 'applayout', 'autocomplete', 'badge', 'button', 'captcha', 'carousel', 'carousel-gallery', 'colorpicker', 'countrypicker', 'datagrid', 'dialogs', 'expander', 'fab', 'file-drop', 'frostedglass', 'layout', 'media-picker-button', 'modal', 'motion-icons', 'overlay', 'parallax-collection-view', 'passwordstrength', 'progressbar', 'progressline', 'quick-entry', 'rangeslider', 'ribbon', 'securitypin', 'sheetview', 'shinyimage', 'signaturepad', 'skeleton', 'slider', 'splashscreen', 'staggered-grid', 'stateview', 'textentry', 'toast', 'toolbar-tabbar', 'tooltip', 'treeview', 'virtualized-grid', 'walkthrough', 'wizard', 'office', 'spreadsheet', 'document-viewer', 'document-editor', 'slide-editor', 'mediaelement', 'speechaddins', 'theme-aurora', 'theme-material', 'theme-ocean', 'theme-terminal', 'httptransfers', 'documentdb-ai', 'button-group', 'chip-group', 'floatingtoolbar', 'gantt', 'kanban', 'tag-entry', 'timeline', 'zoompanview', 'notebook', 'gamepad', 'gamepad-controls', 'appdevicebridge'];
+export const BLAZOR_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'documentdb', 'documentdb-indexeddb', 'reflector', 'di', 'serialization', 'gps', 'ble', 'jobs', 'push', 'datasync', 'screenrecorder', 'controls', 'diagram', 'floorplan', 'tableview', 'scheduler', 'floatingpanel', 'pillview', 'imageviewer', 'imageeditor', 'chatview', 'markdown', 'mermaiddiagrams', 'barcodes', 'cameraview', 'camera-ai', 'aiconversation', 'docking', 'osk', 'addressentry', 'applayout', 'autocomplete', 'badge', 'button', 'captcha', 'carousel', 'carousel-gallery', 'colorpicker', 'countrypicker', 'datagrid', 'dialogs', 'expander', 'fab', 'file-drop', 'frostedglass', 'layout', 'media-picker-button', 'modal', 'motion-icons', 'overlay', 'parallax-collection-view', 'passwordstrength', 'progressbar', 'progressline', 'quick-entry', 'rangeslider', 'ribbon', 'securitypin', 'sheetview', 'shinyimage', 'signaturepad', 'skeleton', 'slider', 'splashscreen', 'staggered-grid', 'stateview', 'textentry', 'toast', 'toolbar-tabbar', 'tooltip', 'treeview', 'virtualized-grid', 'walkthrough', 'wizard', 'office', 'spreadsheet', 'document-viewer', 'document-editor', 'slide-editor', 'mediaelement', 'speechaddins', 'theme-aurora', 'theme-material', 'theme-ocean', 'theme-terminal', 'httptransfers', 'documentdb-ai', 'button-group', 'chip-group', 'floatingtoolbar', 'gantt', 'kanban', 'tag-entry', 'timeline', 'zoompanview', 'notebook', 'gamepad', 'gamepad-controls', 'appdevicebridge'];
 export const LINUX_COMPATIBLE_IDS = ['ble', 'blehosting', 'notifications', 'discovery', 'wifi', 'screenrecorder', 'mediator', 'stores', 'localization', 'documentdb', 'reflector', 'di', 'serialization', 'httpserver', 'documentdb-ai', 'gamepad'];
-export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'serialization', 'extensions-push', 'documentdb', 'documentdb-sqlcipher', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost', 'documentdb-ai', 'appdevicebridge'];
-export const ASPNET_ONLY_IDS = ['extensions-push', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost'];
-export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'blazorhost', 'applayout', 'captcha', 'carousel', 'layout', 'modal', 'sheetview', 'splashscreen', 'toolbar-tabbar', 'osk'];
+export const ASPNET_COMPATIBLE_IDS = ['mediator', 'stores', 'localization', 'serialization', 'extensions-push', 'documentdb', 'documentdb-sqlcipher', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'reflector', 'di', 'webhost', 'aspnet-webdav', 'aspnet-caldav', 'aspnet-tus', 'aspnet-filesync', 'aspnet-nuget', 'aspnet-npm', 'aspnet-documentdb', 'aspnet-jsonpatch', 'aspnet-webhooks', 'aspnet-idempotency', 'aspnet-contentdigest', 'aspnet-acme', 'aspnet-discovery', 'aspnet-ssh', 'aspnet-tunnels', 'documentdb-ai', 'appdevicebridge'];
+export const ASPNET_ONLY_IDS = ['extensions-push', 'documentdb-sqlserver', 'documentdb-mysql', 'documentdb-postgresql', 'documentdb-cosmosdb', 'documentdb-mongodb', 'documentdb-litedb', 'documentdb-duckdb', 'documentdb-oracle', 'documentdb-mariadb', 'documentdb-cockroachdb', 'documentdb-azuretable', 'documentdb-dynamodb', 'documentdb-amazondocumentdb', 'documentdb-redis', 'documentdb-ravendb', 'documentdb-firestore', 'webhost', 'aspnet-webdav', 'aspnet-caldav', 'aspnet-tus', 'aspnet-filesync', 'aspnet-nuget', 'aspnet-npm', 'aspnet-documentdb', 'aspnet-jsonpatch', 'aspnet-webhooks', 'aspnet-idempotency', 'aspnet-contentdigest', 'aspnet-acme', 'aspnet-discovery', 'aspnet-ssh', 'aspnet-tunnels'];
+export const BLAZOR_ONLY_IDS = ['documentdb-indexeddb', 'applayout', 'captcha', 'carousel', 'layout', 'modal', 'sheetview', 'splashscreen', 'toolbar-tabbar', 'osk'];
 
 export type AndroidConfig = {
     usesJobs?: boolean;
@@ -126,7 +126,6 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "ble",
         "nuget": "Shiny.BluetoothLE",
-        "blazorNuget": "Shiny.BluetoothLE.Blazor",
         "linuxNuget": "Shiny.BluetoothLE.Linux",
         "macOsSupported": true,
         "description": "Bluetooth LE",
@@ -149,7 +148,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "macOsSupported": true,
         "description": "Bluetooth LE Hubs - Host",
         "category": "hardware",
-        "version": "1.0.0"
+        "version": "1.3.0"
     },
     {
         "id": "blehubs-client",
@@ -157,7 +156,22 @@ export const ShinyComponents: ShinyComponent[] = [
         "macOsSupported": true,
         "description": "Bluetooth LE Hubs - Client",
         "category": "hardware",
-        "version": "1.0.0"
+        "version": "1.3.0"
+    },
+    {
+        // Not on nuget.org yet - shinyorg/universalhubs
+        "id": "universalhubs-host",
+        "nuget": "Shiny.UniversalHubs.Host",
+        "description": "Universal Hubs - Host (BLE + Wi-Fi)",
+        "category": "hardware",
+        "version": "1.0.0-beta.1"
+    },
+    {
+        "id": "universalhubs-client",
+        "nuget": "Shiny.UniversalHubs.Client",
+        "description": "Universal Hubs - Client (BLE + Wi-Fi)",
+        "category": "hardware",
+        "version": "1.0.0-beta.1"
     },
     {
         // iBeacon ranging/monitoring + Eddystone. Apple routes iBeacon through CoreLocation (location
@@ -175,11 +189,11 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Obd.Ble",
         "description": "OBD Bluetooth LE",
         "category": "hardware",
-        "version": "1.3.2-beta-0001",
+        "version": "1.4.0",
         "additionalNugets": [
-            { "nuget": "Shiny.Obd", "version": "1.3.2-beta-0001" },
-            { "nuget": "Shiny.Obd.Wifi", "version": "1.3.2-beta-0001" },
-            { "nuget": "Shiny.Obd.Serial", "version": "1.3.2-beta-0001" }
+            { "nuget": "Shiny.Obd", "version": "1.4.0" },
+            { "nuget": "Shiny.Obd.Wifi", "version": "1.4.0" },
+            { "nuget": "Shiny.Obd.Serial", "version": "1.4.0" }
         ]
     },
     {
@@ -191,8 +205,8 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "gps",
-        "nuget": "Shiny.Locations",
-        "blazorNuget": "Shiny.Locations.Blazor",
+        "nuget": "Shiny.Gps",
+        "blazorNuget": "Shiny.Gps",
         "description": "GPS",
         "category": "hardware",
         "foregroundService": true,
@@ -200,9 +214,18 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "geofencing",
-        "nuget": "Shiny.Locations",
+        "nuget": "Shiny.Geofencing",
         "description": "Geofencing",
         "category": "hardware",
+        "version": DEFAULT_VERSION
+    },
+    {
+        // Rides on Shiny.Gps - it owns the GPS listener, so it implies the gps platform setup (see IMPLIED_COMPONENTS)
+        "id": "region-geofencing",
+        "nuget": "Shiny.Geofencing.Regions",
+        "description": "Region Geofencing (unlimited polygon, radius & geocoder regions)",
+        "category": "hardware",
+        "foregroundService": true,
         "version": DEFAULT_VERSION
     },
     {
@@ -216,7 +239,6 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "httptransfers",
         "nuget": "Shiny.Net.Http",
-        "blazorNuget": "Shiny.Net.Http.Blazor",
         "description": "HTTP file uploads and downloads",
         "category": "background",
         "foregroundService": true,
@@ -242,11 +264,10 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         // Android promotes a media-projection foreground service for the duration of a capture.
-        // Blazor and Linux ship their own real implementation, so they replace the base package
-        // rather than adding to it.
+        // The net10.0 build picks the Blazor recorder at runtime; Linux is its own package so its D-Bus
+        // dependency stays out of WebAssembly apps.
         "id": "screenrecorder",
         "nuget": "Shiny.ScreenRecorder",
-        "blazorNuget": "Shiny.ScreenRecorder.Blazor",
         "linuxNuget": "Shiny.ScreenRecorder.Linux",
         "macOsSupported": true,
         "foregroundService": true,
@@ -263,12 +284,9 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": DEFAULT_VERSION
     },
     {
-        // Like ScreenRecorder, Blazor and Linux ship their own implementation under the same
-        // AddGamepads() name, so they replace the base package rather than adding to it.
+        // Like ScreenRecorder, one package everywhere - net10.0 picks the browser or evdev backend.
         "id": "gamepad",
         "nuget": "Shiny.Gamepad",
-        "blazorNuget": "Shiny.Gamepad.Blazor",
-        "linuxNuget": "Shiny.Gamepad.Linux",
         "macOsSupported": true,
         "description": "Gamepads",
         "category": "hardware",
@@ -295,7 +313,6 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "push",
         "nuget": "Shiny.Push",
-        "blazorNuget": "Shiny.Push.Blazor",
         "macOsSupported": true,
         "description": "Push Notifications (Native)",
         "category": "background",
@@ -308,7 +325,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Push Notifications - Firebase (iOS)",
         "category": "background",
         "androidIntent": "Shiny.ShinyPushIntents.NotificationClickAction",
-        "version": "5.2.1"
+        "version": "6.0.0"
     },
     {
         "id": "pushazure",
@@ -391,7 +408,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Maui.Shell",
         "description": "MAUI Shell Navigation",
         "category": "mauiapp",
-        "version": "7.0.1"
+        "version": "7.0.3"
     },
     {
         "id": "controls",
@@ -1286,10 +1303,9 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "stores",
         "nuget": "Shiny.Extensions.Stores",
-        "blazorNuget": "Shiny.Extensions.Stores.Web",
         "description": "Key/Value Stores",
         "category": "storage",
-        "version": "5.3.1"
+        "version": "6.0.0"
     },
     {
         "id": "localization",
@@ -1449,14 +1465,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
         "category": "foundation",
-        "version": "5.3.1"
+        "version": "6.0.0"
     },
     {
         "id": "di",
         "nuget": "Shiny.Extensions.DependencyInjection",
         "description": "Dependency Injection",
         "category": "foundation",
-        "version": "5.3.1"
+        "version": "6.0.0"
     },
     {
         // One package everywhere - the mode lists below are what gate where it shows up.
@@ -1465,22 +1481,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "macOsSupported": true,
         "description": "AOT-safe JSON Serialization",
         "category": "foundation",
-        "version": "5.3.1"
-    },
-    {
-        "id": "spatial",
-        "nuget": "Shiny.Spatial",
-        "description": "Spatial Database",
-        "category": "storage",
-        "version": "2.0.0"
-    },
-    {
-        "id": "spatial-geofencing",
-        "nuget": "Shiny.Spatial.Geofencing",
-        "description": "Spatial Geofencing",
-        "category": "hardware",
-        "foregroundService": true,
-        "version": "2.0.0"
+        "version": "6.0.0"
     },
     {
         "id": "contactstore",
@@ -1598,24 +1599,121 @@ export const ShinyComponents: ShinyComponent[] = [
     {
         "id": "datasync",
         "nuget": "Shiny.Data.Sync",
-        "blazorNuget": "Shiny.Data.Sync.Blazor",
         "description": "Data Sync",
         "category": "storage",
         "version": DEFAULT_VERSION
     },
     {
-        "id": "mauihost",
-        "nuget": "Shiny.Extensions.MauiHosting",
-        "description": "MAUI Hosting",
-        "category": "mauiapp",
-        "version": "5.3.1"
-    },
-    {
         "id": "webhost",
-        "nuget": "Shiny.Extensions.WebHosting",
+        "nuget": "Shiny.AspNet.WebHosting",
         "description": "Web Hosting",
         "category": "server",
-        "version": "5.3.1"
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-webdav",
+        "nuget": "Shiny.AspNet.WebDav",
+        "description": "WebDAV Server",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-caldav",
+        "nuget": "Shiny.AspNet.CalDav",
+        "description": "CalDAV & CardDAV Server",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-tus",
+        "nuget": "Shiny.AspNet.Tus",
+        "description": "Resumable Uploads (tus)",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-filesync",
+        "nuget": "Shiny.AspNet.FileSync",
+        "description": "File Sync",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-nuget",
+        "nuget": "Shiny.AspNet.NuGet",
+        "description": "Private NuGet Feed",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-npm",
+        "nuget": "Shiny.AspNet.Npm",
+        "description": "Private npm Registry",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-documentdb",
+        "nuget": "Shiny.AspNet.DocumentDb",
+        "description": "DocumentDb REST + SSE Endpoints",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-jsonpatch",
+        "nuget": "Shiny.AspNet.JsonPatch",
+        "description": "JSON Patch",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-webhooks",
+        "nuget": "Shiny.AspNet.Webhooks",
+        "description": "Webhook Verification & Signing",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-idempotency",
+        "nuget": "Shiny.AspNet.Idempotency",
+        "description": "Idempotency Keys",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-contentdigest",
+        "nuget": "Shiny.AspNet.ContentDigest",
+        "description": "Content Digest",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-acme",
+        "nuget": "Shiny.AspNet.Acme",
+        "description": "Automatic TLS (ACME)",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-discovery",
+        "nuget": "Shiny.AspNet.Discovery",
+        "description": "mDNS Discovery",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-ssh",
+        "nuget": "Shiny.AspNet.Ssh",
+        "description": "SSH & Quick Tunnels",
+        "category": "server",
+        "version": "1.0.0"
+    },
+    {
+        "id": "aspnet-tunnels",
+        "nuget": "Shiny.AspNet.Tunnels",
+        "description": "Cloudflare, ngrok & Tailscale Tunnels",
+        "category": "server",
+        "version": "1.0.0"
     },
     {
         // The SERVER side that sends push - not Shiny.Push, which is the on-device client.
@@ -1631,14 +1729,6 @@ export const ShinyComponents: ShinyComponent[] = [
         ]
     },
     {
-        "id": "blazorhost",
-        "nuget": "Shiny.Extensions.BlazorHosting",
-        "blazorNuget": "Shiny.Extensions.BlazorHosting",
-        "description": "Blazor App Support (device/browser info, culture & time-zone changes)",
-        "category": "server",
-        "version": "5.3.1"
-    },
-    {
         // Runs anywhere .NET runs, which is the point of it — including inside a MAUI app, where
         // ASP.NET Core cannot. No aspnetNuget: this is the alternative to ASP.NET Core, not an
         // add-on for it. No blazorNuget either — a WASM app in the browser cannot listen on a
@@ -1649,7 +1739,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "macOsSupported": true,
         "description": "HTTP Server (HTTP/1.1, HTTP/2 & HTTP/3, WebSockets, SSE, tunnelling)",
         "category": "server",
-        "version": "2.1.0"
+        "version": "2.2.0"
     },
     {
         // Three sides of one system: the MAUI app hosts the web app + bridges (WebView package),
@@ -1660,7 +1750,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "aspnetNuget": "Shiny.AppDeviceBridge.AspNetCore",
         "description": "App Device Bridge (web app host + native bridges)",
         "category": "server",
-        "version": "1.2.0"
+        "version": "2.0.0-beta.1"
     }
 ];
 
@@ -1668,6 +1758,9 @@ export const ShinyComponents: ShinyComponent[] = [
 const IMPLIED_COMPONENTS: Record<string, string[]> = {
     'blehubs-host': ['blehosting'],
     'blehubs-client': ['ble'],
+    'universalhubs-host': ['blehosting'],
+    'universalhubs-client': ['ble'],
+    'region-geofencing': ['gps'],
 };
 
 export const Data = {    
@@ -1696,7 +1789,7 @@ export const Data = {
     },
 
     usesHosting(compos: ShinyComponent[]): boolean {
-        const hostingIds = ['ble', 'blehubs-host', 'blehubs-client', 'wearables', 'gamepad', 'gamepad-controls', 'blehosting', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'spatial-geofencing', 'httptransfers', 'notifications', 'notifications-ai', 'push', 'liveactivities', 'appfunctions', 'appfunctions-ai', 'screenrecorder', 'datasync', 'calendarstore', 'calendarstore-ai'];
+        const hostingIds = ['ble', 'blehubs-host', 'blehubs-client', 'universalhubs-host', 'universalhubs-client', 'region-geofencing', 'wearables', 'gamepad', 'gamepad-controls', 'blehosting', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'httptransfers', 'notifications', 'notifications-ai', 'push', 'liveactivities', 'appfunctions', 'appfunctions-ai', 'screenrecorder', 'datasync', 'calendarstore', 'calendarstore-ai'];
         return compos.some(x => hostingIds.includes(x.id));
     },
 
@@ -1709,7 +1802,7 @@ export const Data = {
     },
 
     hasPlatformConfig(compos: ShinyComponent[]): boolean {
-        const ids = ['ble', 'blehosting', 'blehubs-host', 'blehubs-client', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'spatial-geofencing', 'httptransfers', 'notifications', 'notifications-ai', 'discovery', 'wifi', 'screenrecorder', 'push', 'liveactivities', 'contactstore', 'contactstore-ai', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence', 'httpserver'];
+        const ids = ['ble', 'blehosting', 'blehubs-host', 'blehubs-client', 'universalhubs-host', 'universalhubs-client', 'region-geofencing', 'beacons', 'obd', 'jobs', 'gps', 'geofencing', 'locations-ai', 'httptransfers', 'notifications', 'notifications-ai', 'discovery', 'wifi', 'screenrecorder', 'push', 'liveactivities', 'contactstore', 'contactstore-ai', 'calendarstore', 'calendarstore-ai', 'health', 'health-ai', 'music', 'speech', 'aiconversation', 'faceintelligence', 'voiceintelligence', 'documentintelligence', 'httpserver'];
         return compos.some(x => ids.includes(x.id));
     }
 };

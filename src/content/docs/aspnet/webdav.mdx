@@ -1,0 +1,287 @@
+---
+title: WebDAV
+description: A directory served as an RFC 4918 class 1 & 2 WebDAV mount on ASP.NET Core — browsable and writable from Finder, Windows Explorer and any WebDAV client
+---
+
+import { Aside } from '@astrojs/starlight/components';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+`Shiny.AspNet.WebDav` maps a WebDAV (RFC 4918, compliance classes 1 and 2) mount onto the ASP.NET Core
+app you already have. It is the protocol every desktop operating system already has a client for: point
+Finder or Windows Explorer at the URL and the directory appears as a drive, with no client code at all.
+It is trim and Native AOT clean.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="aspnet" /> |
+| Downloads | <NugetDownloads name="Shiny.AspNet.WebDav" /> |
+
+<PlatformSupport frameworks={["aspnet"]} />
+
+```bash
+dotnet add package Shiny.AspNet.WebDav
+```
+
+```csharp
+using Shiny.AspNet.WebDav;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddAuthentication(/* … */);
+builder.Services.AddAuthorization();
+
+var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+
+app.MapWebDav("/dav", o =>
+{
+    o.RootPath = Path.Combine(app.Environment.ContentRootPath, "share");
+    o.AllowWrite = true;
+    o.AllowDelete = true;
+})
+.RequireAuthorization();
+
+app.Run();
+```
+
+Mount it from the client side with **Finder → Go → Connect to Server** (`https://server/dav`),
+**Explorer → Map network drive**, `gio mount davs://…` on Linux, or any of the client libraries.
+
+<Aside type="tip">
+Calendars and contacts are WebDAV too. [`Shiny.AspNet.CalDav`](/aspnet/caldav/) builds CalDAV and
+CardDAV on this package, so iOS and macOS Calendar and Contacts, Thunderbird and DAVx⁵ can subscribe to
+an app's own events and contacts and sync them.
+</Aside>
+
+## What it implements
+
+Compliance classes **1 and 2**: every method RFC 4918 defines, over one directory.
+
+| Method | Notes |
+| --- | --- |
+| `OPTIONS` | Answers `DAV: 1, 2`, `MS-Author-Via: DAV` and an `Allow` built from the options |
+| `PROPFIND` | `Depth: 0`/`1`, `allprop`, `propname` and named `prop` requests, answered 207 |
+| `PROPPATCH` | Sets and removes dead properties, atomically |
+| `MKCOL` | Creates a collection |
+| `GET` / `HEAD` | The file's bytes through ASP.NET's stream result, with byte ranges and conditional GETs |
+| `PUT` | Writes a file |
+| `DELETE` | Removes a file, or a collection's whole subtree |
+| `COPY` / `MOVE` | `Destination`, `Overwrite`, and `Depth` on a `COPY` |
+| `LOCK` / `UNLOCK` | Exclusive and shared write locks, including on an unmapped URL |
+
+Alongside them: the `If` header — both lock tokens and entity tags, tagged and untagged lists — plus
+`lockdiscovery`, `supportedlock` and RFC 4331 quota properties.
+
+The non-standard verbs are ordinary endpoints: each one is mapped with `MapMethods` on a
+`{**path}` catch-all inside a route group, so the mount shows up in the endpoint data source like
+anything else, and routing, authorization, CORS and rate limiting all see it.
+
+## The file manager
+
+`GET` on a collection is not something WebDAV defines. This serves a file manager, so the first thing
+anyone does with a new mount — open it in a browser to see whether it works — does rather more than
+that:
+
+- the listing, with sizes and modification times, a breadcrumb back to the mount root and a link to
+  the parent collection
+- **upload**, by drag and drop or from the file picker, one `PUT` per file with a progress bar.
+  Dropping a folder walks it and makes the collections as it goes
+- **new folder** (`MKCOL`), **rename** (`MOVE`, with `Overwrite: F` so a rename onto a name that is
+  taken is refused rather than silently replacing it) and **delete** (`DELETE`)
+- **download**, on a button beside each file, while the name itself opens what it points at — an
+  image or a PDF is worth looking at
+
+Every one of those is the mount's own verb, so the page can do exactly what the options allow and no
+more: a read-only mount renders the listing with no buttons at all, `AllowWrite` adds uploading and
+new folders, `AllowDelete` adds deleting, and renaming needs both. Nothing is fetched from anywhere —
+the page is one self-contained response with no scripts, styles or fonts from outside — and the
+listing is rendered server-side, so a browser with no scripting still gets every link.
+
+The links are absolute, which means `https://server/dav` browses just as well as
+`https://server/dav/`. Turn the whole page off with `DirectoryBrowsing = false`, and a browser `GET`
+on a collection answers 405.
+
+## Options
+
+| Property | Default | Notes |
+| --- | --- | --- |
+| `RootPath` | required | Everything is resolved inside it; nothing outside it is reachable. Not needed with `FileSystem` |
+| `FileSystem` | `null` | What to serve when it is not one directory — see [below](#serving-something-that-is-not-a-directory) |
+| `AllowWrite` | `false` | `PUT`, `MKCOL`, `PROPPATCH`, `COPY`, `LOCK` |
+| `AllowDelete` | `false` | `DELETE`. `MOVE` needs this **and** `AllowWrite` |
+| `EnableLocking` | `true` | Class 2. See below — this one is not really optional |
+| `DefaultLockTimeout` | 5 min | When the client asked for no particular duration |
+| `MaxLockTimeout` | 1 hour | The longest this will grant, whatever was asked for |
+| `MaxUploadBytes` | 64 MB | Counted as the body streams, not taken from `Content-Length`. Replaces Kestrel's `MaxRequestBodySize` for the mount's `PUT`s |
+| `MaxXmlBodyBytes` | 1 MB | `PROPFIND`, `PROPPATCH` and `LOCK` bodies |
+| `AllowInfiniteDepth` | `false` | See below |
+| `MaxPropFindResults` | 50 000 | Past this a `PROPFIND` answers 507 |
+| `DirectoryBrowsing` | `true` | The [file manager](#the-file-manager) a browser `GET` on a collection gets |
+| `ServeHiddenFiles` | `false` | A content directory routinely holds a `.env` or a database journal |
+| `Filter` | `null` | Return false to hide an entry **and** refuse every operation on it |
+| `ContentTypeProvider` | `FileExtensionContentTypeProvider` | The same table `UseStaticFiles` uses. Add to its `Mappings` for an extension it does not know |
+| `DefaultContentType` | `application/octet-stream` | For an extension the provider does not recognise. Downloads only |
+| `DisplayName` | `null` | The root collection's `displayname` |
+| `PropertyStore` | in memory | Where dead properties live |
+
+## Serving something that is not a directory
+
+`RootPath` is a directory on disk, served through `PhysicalWebDavFileSystem`. When what a mount
+should show is not one directory — a view over several roots, blob storage, a database of documents
+that is not files at all — implement `IWebDavFileSystem` and assign it to `FileSystem` instead:
+
+```csharp
+app.MapWebDav("/dav", o =>
+{
+    o.FileSystem = new BlobWebDavFileSystem(containerClient);
+    o.AllowWrite = true;
+    o.AllowDelete = true;
+})
+.RequireAuthorization();
+```
+
+The mount keeps the protocol — hrefs, depths, locks, the `If` header, the multistatus XML — and every
+option above still applies on top: hidden files, `Filter`, the write and delete switches, the limits.
+The file system only answers what is there. Nine members:
+
+| Member | Notes |
+| --- | --- |
+| `GetEntry(path)` | What is at a path, or null. Must answer for the root, `""` |
+| `GetChildren(path)` | A collection's members, in any order — the mount sorts them |
+| `OpenReadAsync` | A seekable stream serves ranges |
+| `WriteAsync` | Create or replace. The stream throws a 413 past `MaxUploadBytes`; let it propagate |
+| `CreateDirectoryAsync`, `DeleteAsync` | |
+| `MoveAsync`, `CopyAsync` | The destination never exists — an overwrite has already deleted it |
+| `GetQuota(path)` | RFC 4331 figures, or null to leave them out |
+
+Paths are relative to the mount, `/`-separated, and already checked: decoded, free of `.` and `..`,
+and past the hidden-file rule and `Filter`. Anything only the file system can know — a link that
+leads out of whatever it treats as its root — is its own to refuse.
+
+A `WebDavEntry`'s `Name` is the segment it is addressed by, and `DisplayName` is what a client is
+shown when that differs — a folder at `@Work` shown as "Work". `ETag`, `ContentType`, `IsHidden` and
+`IsLink` are optional; an unset `ETag` is built from the length and modification time.
+
+To refuse something, throw `WebDavException` with the status the client should see. The mount also
+answers `UnauthorizedAccessException` with 403, `FileNotFoundException` and
+`DirectoryNotFoundException` with 404, and any other `IOException` with 409 — the ones `System.IO`
+throws, so a file system over files rarely has to translate anything. `GetEntry` and `GetChildren`
+are synchronous on purpose: an `If` header is evaluated synchronously, and a `PROPFIND` asks once per
+resource it describes.
+
+## Leave locking on
+
+`EnableLocking` defaults to on because class 2 is not really optional in practice. Finder and the
+Windows redirector both mount a class 1 server **read-only**, whatever `AllowWrite` says — the
+`DAV: 1, 2` header is what they check, and they check it once, at mount time.
+
+Two details that follow from real clients rather than from the specification's happy path:
+
+- A `LOCK` on a URL that does not exist yet **creates an empty file** to hold the lock (RFC 4918
+  §7.3) and answers 201. This is exactly what a Mac does when you save a new document; a server that
+  answers 404 here cannot be written to from Finder at all.
+- Locks live in memory and belong to the mount, so they do not survive a restart — and they are not
+  shared between instances. Behind a load balancer, pin a client to one instance (sticky sessions) or
+  run the mount on one.
+
+## Depth: infinity
+
+`AllowInfiniteDepth` is off. A `PROPFIND` with `Depth: infinity` walks a whole subtree into one
+response, and RFC 4918 anticipates a server declining: the refusal is a 403 carrying
+`<DAV:propfind-finite-depth/>`, which tells the client to ask again with a depth it can bound. Every
+client that matters does.
+
+Worth knowing, because the interaction surprises people: RFC 4918 makes a **missing** `Depth` on a
+`PROPFIND` mean infinity, so a client that omits the header gets that same refusal. Clients send it.
+
+`DELETE`, `MOVE` and `COPY` are unaffected — those are recursive by definition, and are gated by
+`AllowWrite` and `AllowDelete` instead.
+
+## Dead properties
+
+A `PROPPATCH` that sets something outside the `DAV:` namespace is storing a *dead property* — opaque
+XML the server keeps and hands back. There is nowhere on a file system to put those, so they go to an
+`IWebDavPropertyStore`, which is in-memory by default. Windows Explorer sets its own file-attribute
+properties on every write and macOS keeps some metadata this way, so losing them across a restart is
+untidy rather than fatal. Implement the interface and assign `PropertyStore` to keep them.
+
+Properties in the `DAV:` namespace are computed, not stored, and a `PROPPATCH` naming one answers 403
+— and, because RFC 4918 makes a `PROPPATCH` atomic, everything else in the same request answers 424
+and nothing is written.
+
+## Authorization and other conventions
+
+`MapWebDav` returns a `WebDavMountBuilder`, which is an `IEndpointConventionBuilder` over the mount's
+route group. ASP.NET's own extensions apply to every verb at once, so a verb added in a later version
+cannot quietly arrive unprotected:
+
+```csharp
+// everything behind a policy
+app.MapWebDav("/dav", …).RequireAuthorization("files");
+
+// reads open, anything that changes something behind a policy
+app.MapWebDav("/dav", …).RequireAuthorizationForChanges("editors");
+
+// anything else ASP.NET offers
+app.MapWebDav("/dav", …)
+    .RequireCors("desktop")
+    .RequireRateLimiting("dav")
+    .RequireHost("files.example.com");
+```
+
+`RequireAuthorizationForChanges` counts locking as a change: a lock reserves the right to write, and
+one taken anonymously is a way to stop everyone else writing.
+
+`ReadRoutes`, `WriteRoutes`, `DeleteRoutes` and `LockRoutes` expose the per-verb endpoint builders for
+anything you want to attach to one group of verbs only, and `Group` is the underlying
+`RouteGroupBuilder`.
+
+The mount is excluded from OpenAPI descriptions. It is one protocol behind a dozen routes, and
+RFC 4918 already documents it.
+
+## Route groups and path bases
+
+A mount can live inside a route group or behind `UsePathBase`; the hrefs it reports include both:
+
+```csharp
+app.MapGroup("/api").MapWebDav("/dav", o => o.RootPath = sharePath);   // hrefs start /api/dav/
+```
+
+The mount's URL is taken from the matched endpoint's route pattern and the request's `PathBase` on
+the first request it serves, because a client resolves every member href against it — one that is
+short by a segment breaks the whole mount.
+
+## The defaults, and why
+
+**Read-only until told otherwise.** `AllowWrite` and `AllowDelete` are both off. A `DELETE` here
+takes a collection's whole subtree — the protocol requires it, because a client that drags a folder to
+the trash expects what is in it to go too — which is one more reason the permission is opt-in.
+
+**Uploads are bounded and atomic.** `MaxUploadBytes` is counted as the body streams rather than
+trusting `Content-Length`, and the bytes go to a staging file that is moved into place, so a refused
+or interrupted upload leaves the previous file intact.
+
+**The XML parser is hardened.** No DTD, no resolver, no entity expansion — a WebDAV body arrives from
+the network, and an XML parser that resolves entities is the shortest route from "accepts XML" to
+"reads /etc/passwd".
+
+**Containment is checked after decoding**, again after resolving links, and again on the
+`Destination` of a `COPY` or `MOVE` — which is decoded segment by segment, so an encoded `%2F` stays
+part of a name instead of becoming a separator.
+
+**It is AOT- and trim-clean.** The XML is read and written with `XmlReader`/`XmlWriter`, endpoints are
+mapped with `RequestDelegate`s, and nothing reflects over anything.
+
+<Aside type="danger">
+This exposes a directory over the network, and WebDAV clients send Basic credentials on **every**
+request. Serve it over HTTPS and put authentication in front of it. `Filter` is the way to narrow it
+further: an app that only means to share one folder should return false for everything else rather
+than trusting the root path to stay tidy.
+</Aside>
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-aspnet" />

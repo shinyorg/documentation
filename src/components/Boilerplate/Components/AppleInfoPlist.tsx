@@ -67,7 +67,7 @@ const AppleInfoPlist = (props: Props) => {
         </array>
         `;
   }
-  const usesLocationKeys = has('gps') || has('geofencing') || has('spatial-geofencing');
+  const usesLocationKeys = has('gps') || has('geofencing');
   if (usesLocationKeys) {
     addKey('NSLocationAlwaysUsageDescription');
     addKey('NSLocationAlwaysAndWhenInUseUsageDescription');
@@ -88,7 +88,8 @@ const AppleInfoPlist = (props: Props) => {
         </dict>
         `;
   }
-  if (has('ble') || has('obd') || has('beacons')) {
+  // iOS 13+ asks for NSBluetoothAlwaysUsageDescription when advertising (hosting) as well as scanning
+  if (has('ble') || has('blehosting') || has('obd') || has('beacons')) {
     addKey('NSBluetoothAlwaysUsageDescription');
   }
   if (has('blehosting') || has('ble') || has('obd')) {
@@ -96,7 +97,8 @@ const AppleInfoPlist = (props: Props) => {
   }
   // iOS 14+ gates anything touching the local network, and that includes *serving* on it.  Emitted
   // once even when both are selected - a duplicate key makes the whole plist invalid.
-  if (has('discovery') || has('httpserver')) {
+  const usesUniversalHubs = has('universalhubs-host') || has('universalhubs-client');
+  if (has('discovery') || has('httpserver') || usesUniversalHubs) {
     addKey('NSLocalNetworkUsageDescription');
   }
   // iOS 13+ and macOS 14+ return a PLACEHOLDER SSID ("Wi-Fi"/"WLAN") rather than failing when
@@ -106,16 +108,28 @@ const AppleInfoPlist = (props: Props) => {
   if (has('wifi') && !usesLocationKeys && !has('beacons')) {
     addKey('NSLocationWhenInUseUsageDescription');
   }
-  if (has('discovery')) {
+  if (has('discovery') || usesUniversalHubs) {
     // Browsing silently returns NOTHING if the service type is missing from NSBonjourServices - there
     // is no error.  List every type you browse for AND every type you publish.
     src += `
         <key>NSBonjourServices</key>
         <array>
-            <!-- Replace these with every service type your app browses for or publishes -->
+            <!-- Replace these with every service type your app browses for or publishes -->${has('discovery') ? `
             <string>_myapp._tcp</string>
-            <string>_http._tcp</string>
+            <string>_http._tcp</string>` : ''}${usesUniversalHubs ? `
+            <!-- every Universal Hubs hub's mDNS service type, on the host AND the client -->
+            <string>_mychat._tcp</string>` : ''}
         </array>
+        `;
+  }
+  if (has('universalhubs-client')) {
+    // hubs on the local network are plain HTTP to a private address
+    src += `
+        <key>NSAppTransportSecurity</key>
+        <dict>
+            <key>NSAllowsLocalNetworking</key>
+            <true/>
+        </dict>
         `;
   }
   if (has('speech') || has('aiconversation')) {
@@ -147,7 +161,7 @@ const AppleInfoPlist = (props: Props) => {
   if (has('faceintelligence') || has('documentintelligence')) {
     addKey('NSCameraUsageDescription');
   }
-  if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('spatial-geofencing') || has('ble') || has('blehosting')) {
+  if (has('jobs') || Data.usesPush(props.components) || has('gps') || has('geofencing') || has('ble') || has('blehosting')) {
     src += `
         <key>UIBackgroundModes</key>
         <array>
@@ -157,7 +171,7 @@ const AppleInfoPlist = (props: Props) => {
             <string>remote-notification</string>
             `;
     }
-    if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
+    if (has('gps') || has('geofencing')) {
       src += `
             <string>location</string>
             `;

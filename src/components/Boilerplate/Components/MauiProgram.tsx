@@ -10,8 +10,9 @@ const MauiProgram = (props: Props) => {
   let src = `
   using Shiny;${Data.hasComponent('httpserver', props.components) ? `
   using System.Net;          // IPAddress
-  using Shiny.Net.HttpServer;` : ''}${Data.hasComponent('blehubs-host', props.components) || Data.hasComponent('blehubs-client', props.components) ? `
-  using Shiny.BluetoothLE.Hubs;` : ''}
+  using Shiny.Net.HttpServer;` : ''}${['blehubs-host', 'blehubs-client', 'universalhubs-host', 'universalhubs-client'].some(id => Data.hasComponent(id, props.components)) ? `
+  using Shiny.BluetoothLE.Hubs;` : ''}${Data.hasComponent('universalhubs-host', props.components) || Data.hasComponent('universalhubs-client', props.components) ? `
+  using Shiny.UniversalHubs;` : ''}
 
   namespace ShinyApp;
   
@@ -74,6 +75,26 @@ const MauiProgram = (props: Props) => {
           "YOUR-GAMEHUB-CHARACTERISTIC-UUID"
       );`;
   }
+  if (has('universalhubs-host')) {
+    src += `
+
+      // One hub served over BLE (GATT) and Wi-Fi (Switchboard + mDNS) at once - clients use the same
+      // characteristic UUID & mDNS service type. Derive ChatHub from UniversalHub<IChatHub>.
+      builder.Services.AddUniversalServer(server => server
+          .ServiceUuid("YOUR-SERVICE-UUID")   // optional
+          .AddHub<ShinyApp.Hubs.ChatHub>("YOUR-CHATHUB-CHARACTERISTIC-UUID", "_mychat._tcp")
+      );`;
+  }
+  if (has('universalhubs-client')) {
+    src += `
+
+      // Inject IUniversalHubClient<IChatHub> - connects over Wi-Fi when it can, BLE otherwise
+      builder.Services.AddUniversalHubClient<ShinyApp.Hubs.IChatHub>(
+          "YOUR-CHATHUB-CHARACTERISTIC-UUID",
+          "_mychat._tcp",
+          o => o.ServiceUuid = "YOUR-SERVICE-UUID"
+      );`;
+  }
   if (has('beacons')) {
     src += `
       // Foreground ranging - "which beacons are near me and how far?"
@@ -94,7 +115,8 @@ const MauiProgram = (props: Props) => {
           DeviceNameFilter = "OBD"
       });`;
   }
-  if (has('gps')) {
+  // region geofencing implies the gps platform setup, but it owns the GPS listener - no AddGps of your own
+  if (props.components.some(c => c.id === 'gps')) {
     src += `
       builder.Services.AddGps<ShinyApp.Delegates.YourGpsDelegate>();`;
   }
@@ -102,12 +124,16 @@ const MauiProgram = (props: Props) => {
     src += `
       builder.Services.AddGeofencing<ShinyApp.Delegates.YourGeofenceDelegate>();`;
   }
-  if (has('spatial-geofencing')) {
+  if (has('region-geofencing')) {
     src += `
-      builder.Services.AddSpatialGps<ShinyApp.Delegates.YourSpatialGeofenceDelegate>(config =>
+
+      // Owns the GPS listener - don't also start IGpsManager with a different request.
+      // Then inject IRegionGeofenceManager: RequestAccess() and Start()
+      builder.Services.AddRegionGeofencing<ShinyApp.Delegates.MyRegionDelegate>(cfg =>
       {
-          config.MinimumDistance = Distance.FromMeters(300);
-          config.MinimumTime = TimeSpan.FromMinutes(1);
+          cfg.AddGeocoderRegionSet("cities", GeocoderRegionLevel.Locality);
+          // documents (Shiny.Geofencing.Regions.DocumentDb), North American states & cities, or your own IRegionSource
+          // https://shinylib.net/client/locations/region-geofencing/
       });`;
   }
   if (has('httptransfers')) {
@@ -495,12 +521,6 @@ ${has('notifications') ? '' : `
           // opts.SetMessageStore<MyMessageStore>(addAiLookupTool: true); // optional
       });`;
   }
-  if (has('spatial')) {
-    src += `
-
-      // Shiny.Spatial has no DI registration - open a database where you need it:
-      // using var db = new SpatialDatabase(Path.Combine(FileSystem.AppDataDirectory, "spatial.db"));`;
-  }
   if (has('appdevicebridge')) {
     src += `
 
@@ -520,10 +540,6 @@ ${has('notifications') ? '' : `
   if (has('di')) {
     src += `
       builder.Services.AddGeneratedServices();`;
-  }
-  if (has('mauihost')) {
-    src += `
-      builder.AddInfrastructureModules(new YourModule());`;
   }
   // Reflector is attribute-based only, no builder registration needed
   src += `

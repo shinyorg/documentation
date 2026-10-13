@@ -1,0 +1,127 @@
+---
+title: App Store
+description: Check the store for a newer version of the running app, deep-link to its store and review pages, and request the native in-app review prompt
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+`IAppStore` looks up the latest published version of the running app in the store it ships through, deep-links into the store or review page, and requests the platform's in-app review prompt. Each platform is implemented natively - no MAUI or Essentials - so it works in MAUI, native, Linux desktop and console apps alike.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.AppStore" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "linux"]} />
+
+## Setup
+
+```bash
+dotnet add package Shiny.AppStore
+```
+
+```csharp
+using Shiny;
+
+// everything but Windows is detected from the running app
+builder.Services.AddAppStore();
+
+// or with identifiers
+builder.Services.AddAppStore(opts =>
+{
+    opts.AppleAppId = "1234567890";         // numeric App Store ID (needed for deep links before GetCurrent has run)
+    opts.WindowsProductId = "9NBLGGH4NNS1"; // Microsoft Store Product ID (required on Windows)
+    opts.LinuxAppId = "org.example.MyApp";  // AppStream / Flatpak ID when not running from a Flatpak or Snap
+    opts.CountryCode = "us";
+});
+```
+
+`IAppStore` needs Shiny's `IPlatform`, which `UseShiny()` (MAUI) or the native hosting registers. A plain .NET host calls `services.AddShinyCoreServices()` itself.
+
+## Usage
+
+```csharp
+using Shiny.AppStore;
+
+public class UpdateChecker(IAppStore store)
+{
+    public async Task CheckForUpdates(CancellationToken ct = default)
+    {
+        var result = await store.GetCurrent(ct);
+        if (result?.NeedsUpdate == true)
+        {
+            // result.StoreVersion, result.CurrentVersion, result.ReleaseNotes, etc.
+            await store.OpenStore();
+        }
+    }
+
+    public Task PromptForReview() => store.RequestReview();   // or OpenReviewPage()
+}
+```
+
+## AppStoreOptions
+
+| Option | Notes |
+|--------|-------|
+| `AppleAppId` | Numeric App Store ID. If not set, populated automatically after the first successful `GetCurrent` call (read from the iTunes lookup's `trackId`) |
+| `AppleBundleId` | Defaults to the running bundle's `CFBundleIdentifier` |
+| `AndroidPackageName` | Defaults to the running app's package name (applicationId) |
+| `WindowsProductId` | Required on Windows — distinct from the package family name; configure explicitly |
+| `LinuxAppId` | AppStream component / Flatpak application ID. Auto-detected from `FLATPAK_ID` / `SNAP_NAME` when the app runs from a sandbox; set it explicitly otherwise |
+| `CountryCode` | Two-letter region code for store lookups (default `"us"`) |
+
+## AppStoreResult
+
+```csharp
+public record AppStoreResult(
+    Version StoreVersion,
+    Version CurrentVersion,
+    bool NeedsUpdate,
+    string StoreUrl,
+    string? ReleaseNotes = null,
+    DateTimeOffset? ReleasedAt = null,
+    double? AverageRating = null,
+    long? RatingCount = null,
+    string? MinimumOsVersion = null
+);
+```
+
+`CurrentVersion` is `IPlatform.AppVersion` - the bundle short version on Apple, the package version name on Android, the package version on Windows.
+
+| Platform | Lookup | Fields populated | In-app review |
+|----------|--------|------------------|---------------|
+| iOS / Mac Catalyst | iTunes Search API | All fields including ratings, release date, release notes, minimum OS | StoreKit `AppStore.RequestReview` (16+), `SKStoreReviewController` below |
+| macOS (AppKit) | iTunes Search API scoped to `entity=macSoftware` | Same as iOS. Deep links use the `macappstore://` scheme | `AppStore.RequestReview` against the key window (macOS 14+) |
+| Android | Google Play HTML scrape | Version + `NeedsUpdate`. Ratings/notes/dates aren't reliably exposed in the page HTML | Play in-app review flow |
+| Windows | Microsoft Store DisplayCatalog | Version, release notes (from `ProductDescription`), and `ReleasedAt` where available | `StoreContext.RequestRateAndReviewAppAsync` |
+| Linux | `flatpak remote-info` against the installed origin, or `snap info` for the tracked channel | Version, `NeedsUpdate`, store URL, `ReleasedAt`, and the Flatpak commit subject as `ReleaseNotes` | Opens the software centre page - Linux has no in-app prompt |
+| Other plain .NET | Not supported | Returns `null`; the open/review calls return `false` | — |
+
+## Linux
+
+The Linux store covers the two packaging formats that publish an updatable version to a store. Anything
+else — a tarball, a distro package, `dotnet run` — has no store to ask, and `GetCurrent()` returns `null`.
+
+| Format | Installed version | Published version |
+|--------|-------------------|-------------------|
+| Flatpak | `flatpak info <id>` | `flatpak remote-info <origin> <id>`, against the remote the app was installed from |
+| Snap | `snap list <name>` | `snap info <name>`, reading the channel the install tracks |
+
+`OpenStore()` and `OpenReviewPage()` both hand `appstream://<LinuxAppId>` to `xdg-open`, which GNOME
+Software, Plasma Discover and the Snap Store all handle — software centres show reviews on the app's own
+page, so there's no separate review destination. `RequestReview()` falls back to `OpenReviewPage()`; no
+Linux software centre offers an in-app prompt.
+
+Inside a Flatpak sandbox the `flatpak` CLI lives on the host, so commands are forwarded with
+`flatpak-spawn --host`. Every command failure is treated as "can't tell" and surfaces as `null` or `false`
+rather than an exception.
+
+:::note
+`AppStoreOptions.LinuxAppId` is auto-detected from `FLATPAK_ID` or `SNAP_NAME` when the app runs from a
+sandbox. Set it explicitly for anything else — a developer build outside a sandbox has nothing to detect.
+:::
+
+:::caution
+Android version detection works by parsing the Play Store HTML. Google changes the page structure periodically — keep an eye out for `GetCurrent` returning `null` on Android and report it on the GitHub repo if it stops matching.
+:::

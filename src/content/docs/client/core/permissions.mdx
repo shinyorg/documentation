@@ -31,6 +31,55 @@ bg.Assert(allowRestricted: true);
 
 Modules throw `PermissionException(module, badStatus)` when they cannot continue, with a message like `GPS had status of Denied`. Throw it from your own code to follow the same convention.
 
+## MAUI Permission Checks
+
+`Shiny.Hosting.Maui` ships `ShinyPermissions`, a set of MAUI [`Permissions.BasePermission`](https://learn.microsoft.com/dotnet/maui/platform-integration/appmodel/permissions) checks for the Shiny modules. Each asks the operating system for exactly what that module's `RequestAccess` asks for, and none of them needs the module referenced, so a permissions or onboarding screen can ask for everything up front.
+
+```csharp
+using Shiny;
+
+var ble = await new ShinyPermissions.BluetoothLE().RequestAsync();
+var gps = await new ShinyPermissions.GpsBackground().CheckStatusAsync();
+
+// the MAUI static form works too
+var push = await Microsoft.Maui.ApplicationModel.Permissions.RequestAsync<ShinyPermissions.Push>();
+```
+
+:::caution[Windows]
+Shiny.Core has its own `Shiny.Permissions` class on Windows, so with `using Shiny;` an unqualified `Permissions.RequestAsync<...>()` does not compile there. Use the instance form above, or write out `Microsoft.Maui.ApplicationModel.Permissions`.
+:::
+
+| Check | Android | iOS / Mac Catalyst / macOS | Windows |
+|-------|---------|----------------------------|---------|
+| `BluetoothLE` | `BLUETOOTH_SCAN` + `BLUETOOTH_CONNECT` (12+), or `BLUETOOTH` / `BLUETOOTH_ADMIN` / `ACCESS_FINE_LOCATION` below, then the adapter must be on | Central authorization and power state | LE radio on |
+| `BluetoothLEHosting` | `BLUETOOTH_ADVERTISE` + `BLUETOOTH_CONNECT` (12+), then the adapter | Peripheral authorization and power state | Peripheral role supported, radio on |
+| `Beacons` (ranging) | Same as `BluetoothLE` | When-in-use location | Same as `BluetoothLE` |
+| `BeaconMonitoring` | `BluetoothLE` + connected-device foreground service (14+) + `POST_NOTIFICATIONS` (13+) | "Always" location (not macOS) | Same as `BluetoothLE` |
+| `Gps` | Coarse + fine location | When-in-use | `location` |
+| `GpsBackground` | Coarse + fine, then background location as its own step (10+) | When-in-use, then "always" | Not supported |
+| `GpsRealtime` | Coarse + fine + foreground service + `POST_NOTIFICATIONS` + location foreground service | "Always" | Not supported |
+| `Geofencing` | Coarse + fine, then background location | "Always" | `location` |
+| `MotionActivity` | `ACTIVITY_RECOGNITION` (10+) | CoreMotion (not macOS) | Not supported |
+| `Notifications` | `POST_NOTIFICATIONS` (13+), and notifications switched on for the app | Alert, badge and sound | The app's toast setting |
+| `TimeSensitiveNotifications` | `Notifications` + exact alarms (12+) - requesting opens Settings and waits for the user | Same as `Notifications` | Same as `Notifications` |
+| `Push` | `POST_NOTIFICATIONS` (13+) | Alert, badge and sound | The app's toast setting |
+| `HttpTransfers` / `DataSync` | Foreground service + `POST_NOTIFICATIONS` | Granted | Granted |
+| `Jobs` | Granted | `processing` background mode and `BGTaskSchedulerPermittedIdentifiers` declared, Background App Refresh on | Not supported |
+| `Wifi` | Fine location + `NEARBY_WIFI_DEVICES` (13+) | When-in-use location | `wiFiControl` |
+| `Contacts` | `READ_CONTACTS` + `WRITE_CONTACTS` | Contacts store | Not supported |
+| `Calendar` | `READ_CALENDAR` + `WRITE_CALENDAR` | Full event access (iOS 17 / macOS 14+) | Appointment store |
+| `ScreenRecorder` | Foreground service + `POST_NOTIFICATIONS` (the capture consent is asked for each recording) | ReplayKit available; on macOS screen capture access, which applies after a relaunch | Capture supported |
+
+How results map:
+
+- **`Limited`** - a partial grant: approximate location, when-in-use where "always" was needed, a limited contact selection (iOS 18), write-only calendar access, notifications denied for a foreground service, or no exact alarms.
+- **`Restricted`** - blocked by the device, such as iOS parental controls.
+- **`Disabled`** - the service or radio is switched off.
+- **`FeatureNotSupportedException`** - the platform or device cannot do it. The plain `net10.0` build (Linux GTK) has no checks.
+- **`PermissionException`** (MAUI's) - an entry is missing from `AndroidManifest.xml`, Info.plist, or a packaged app's `Package.appxmanifest`.
+
+On Android the Shiny host must be running (`UseShiny()`), because requests go through [`AndroidPlatform`](/client/core/platform#android--androidplatform). Pair `ScreenRecorder` with MAUI's `Permissions.Microphone` to record audio. Live Activities, Game Center, Wearables and Network Discovery have no check here.
+
 ## Declaring Permissions
 
 `AccessState.NotSetup` usually means the manifest is missing an entry. Rather than editing `AndroidManifest.xml` and Info.plist by hand, [MSBuild Permissions](/permissions/) generates both from one list in your project file.

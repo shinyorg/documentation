@@ -1,0 +1,101 @@
+---
+title: Connecting Clients
+description: Discover hosts over Bluetooth LE and mDNS at once, connect over Wi-Fi or BLE, and resume short Wi-Fi drops.
+---
+
+## Registration
+
+```csharp
+builder.Services.AddUniversalHubClient<IGameHub>(
+    GameCharacteristicUuid,
+    "_mygame._tcp",                     // the hub's mDNS service type - the same as the host's AddHub
+    o => o.ServiceUuid = ServiceUuid);  // the host's BLE service, if it set one
+```
+
+Resolve `IUniversalHubClient<IGameHub>`. It is an [`IBleHubClient<IGameHub>`](/blehubs/client), so the generated
+proxy (`client.Hub`), events, `Status`, `Disconnected`, `Rename` and file methods are all there, and they work the same on
+either transport. `IBleHubClient<IGameHub>` and `IGameHub` resolve to the same connection.
+
+| Option | Default | |
+|---|---|---|
+| `ServiceUuid` | BluetoothLE Hubs' default | The host's BLE service. Must match the host's `ServiceUuid` |
+| `ServiceType` | set from the registration | The mDNS service type to browse. Must match the hub's |
+| `HttpConnectTimeout` | 6 seconds | How long one Wi-Fi address gets to answer before the next address (or BLE) is tried |
+| `AutomaticReconnect` | `true` | Resume the Wi-Fi line after a short drop instead of disconnecting |
+| `HttpMessageHandlerFactory` | `null` | The HTTP stack for Wi-Fi connections. Tests swap in an in-memory handler |
+
+## Discovery
+
+`DiscoverAll()` watches for hosts over BLE and mDNS at once. A host seen both ways is one `HubHostInfo`, raised again
+whenever either side changes. Dispose the subscription to stop.
+
+```csharp
+public class JoinViewModel(IUniversalHubClient<IGameHub> client)
+{
+    IDisposable Scan() => client
+        .DiscoverAll()
+        .Subscribe(host =>
+        {
+            // host.Key: stable across both transports
+            // host.Name, host.HostId, host.Rssi (when seen over BLE)
+            // host.Transports: Ble, Http or both - None means it has gone
+        });
+}
+```
+
+- **Merging.** BLE results and mDNS results are merged by the host's name, because Apple hosts can't put a host id in
+  a BLE advertisement. Give hosts distinct names (`BleHubHostOptions.LocalName`).
+- **Filtering.** mDNS hosts are only listed when they're running your hub and speak the same protocol version.
+- **Missing transports.** A transport that can't scan (Bluetooth off, no Wi-Fi) is skipped, and the other keeps going.
+  Pass `DiscoverAll(HubTransports.Http)` to browse only one way.
+- **BLE only.** `Discover()` and `Connect(BleHubHostInfo)` still give plain BluetoothLE Hubs behavior.
+
+## Connecting
+
+```csharp
+await client.Connect(host, new HubConnectOptions("Allan") { Prefer = HubTransports.Http });
+
+// client.Transport is Http or Ble (None while disconnected)
+await client.Hub.MakeMove(4);
+```
+
+`HubConnectOptions` carries what the client tells the host about itself (`Name`, `AppVersion`, `Properties`) and
+which transports it may use:
+
+- **`Prefer`** (Wi-Fi by default) is tried first when the host is reachable both ways. The other transport is the
+  fallback.
+- **`Allowed`** limits which transports may be used at all.
+- **Refusals aren't retried.** A host that refuses the client (full, `ValidateClient`, hub not running) is not tried
+  again on the other transport.
+- **No migration.** The transport is chosen at connect. A connection doesn't move between Wi-Fi and BLE mid-session.
+
+## Resume
+
+A short Wi-Fi drop is resumed. The line keeps its id and groups, and missed pushes are replayed. The hub sees no
+disconnect, and neither does the client. Turn this off with `UniversalHubClientOptions.AutomaticReconnect = false`.
+
+A drop that outlasts the resume window ends in `Disconnected` with `ClientTimeout`. See
+[disconnect reasons](./hosting#disconnect-reasons).
+
+## Connecting by Address
+
+A host you have the address of, rather than one you discovered (a tunnel's public URL, a typed address, a QR code),
+is reached over HTTP only:
+
+```csharp
+await client.Connect(HubHostInfo.FromUrl(new Uri("https://abc.a.pinggy.link")));
+await client.Connect(HubHostInfo.FromUrl(new Uri("http://192.168.1.20:5000"), endpoint: "/hubs"));
+```
+
+`endpoint` is the host's `AddUniversalServer` endpoint, `/hubs` unless it was changed.
+
+## Files
+
+`UploadFile`, `UploadStream` and `DownloadFile` work on either transport: L2CAP over BLE, plain HTTP over Wi-Fi.
+`CanTransferFiles` says whether the host has file transfers turned on.
+
+```csharp
+var result = await client.UploadFile(avatarPath, "avatar-allan.jpg", progress);
+```
+
+See [BluetoothLE Hubs file transfers](/blehubs/files) for the host's file settings, which both transports share.

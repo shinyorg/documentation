@@ -1,0 +1,172 @@
+---
+title: Discovery (mDNS / Bonjour)
+description: Advertise an ASP.NET Core app on the local network on the port Kestrel actually bound, and find the servers other machines advertise
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Binding a port solves being **reachable**. It does not solve being **found**.
+
+The address is assigned by whatever network the machine joined, the port may be one the OS picked, and
+the ways out of that are: configuration, a QR code, someone typing an IP address, or this. mDNS/DNS-SD
+(Bonjour, Zeroconf) is what every printer, speaker and NAS on the link already uses. It needs no server,
+no account and no internet. Built on [Shiny.Net.Discovery](/client/discovery/); trim- and AOT-clean.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="aspnet" /> |
+| Downloads | <NugetDownloads name="Shiny.AspNet.Discovery" /> |
+
+<PlatformSupport frameworks={["aspnet"]} />
+
+```bash
+dotnet add package Shiny.AspNet.Discovery
+```
+
+## Advertising
+
+```csharp
+using Shiny.AspNet.Discovery;
+
+var builder = WebApplication.CreateBuilder(args);
+builder.WebHost.UseUrls("http://0.0.0.0:0");   // any port: the advertisement carries the one bound
+
+builder.Services.AddServerAdvertisement(o =>
+{
+    o.ServiceType = "_myapp._tcp";
+    o.TxtRecords["role"] = "controller";
+});
+
+var app = builder.Build();
+app.MapGet("/", () => "found me");
+app.Run();
+```
+
+The advertisement follows the app:
+
+- **published on `ApplicationStarted`**, not when hosted services start — those run before Kestrel binds.
+  The port is read back from the server's bound addresses (`IServerAddressesFeature`), so port `0` and
+  any other OS-assigned port are advertised correctly,
+- **withdrawn with a goodbye packet on `ApplicationStopping`** — before Kestrel drains, so peers stop
+  being sent here first and drop the record immediately rather than waiting out the TTL,
+- **re-announced when the machine changes network**, which is when a stale advertisement is worst.
+
+Bind to an address peers can reach (`0.0.0.0`, `[::]` or a LAN address). An app listening only on
+`localhost` is advertised, found, and then refuses the connection.
+
+### Which address is advertised
+
+DNS-SD publishes one port per record. When Kestrel is bound to several addresses, a cleartext `http`
+endpoint is preferred — the one a peer on the link can call without trusting a certificate — and an
+`https` one is used otherwise. Set `Scheme = "https"` (or `"http"`) to choose. The scheme goes out as the
+`scheme` TXT record, so the [locator](#finding) builds the right URL. Unix sockets and named pipes have no
+port and are skipped; a server with nothing to advertise (TestServer, say) logs a warning rather than
+publishing silently nothing.
+
+### When the responder will not take the registration
+
+The moment the advertiser publishes is the moment a responder is least likely to answer: the app has
+just started, often at boot, and the mDNS stack is coming up at its own pace. One refused registration
+would otherwise leave the hard kind of failure — an app running perfectly, answering everything,
+findable by nobody, and looking completely healthy from the inside.
+
+Publishing is retried on a bounded backoff, and when the attempts are spent it is logged at **`Error`**
+with the exception — not `Warning`, because most alerting pages on the first and only files the second.
+
+Start and stop are also applied in the order the app actually moved in. The mDNS work has to come off
+the host's lifetime thread — it talks to a responder, it is slow, and it may be retrying — and once it is
+off, a publish and a withdrawal close together are free to land in either order. A publication applied
+on top of the withdrawal that followed it would leave a record for an app that is gone.
+
+| `ServerAdvertisementOptions` | Default | Notes |
+| --- | --- | --- |
+| `ServiceType` | `_http._tcp` | See below |
+| `InstanceName` | the machine name | What the user already calls this machine |
+| `Path` | `/` | Published as the conventional `path` TXT record |
+| `Scheme` | `null` | `"http"` or `"https"`; null prefers cleartext |
+| `TxtRecords` | `path`, `scheme` | Whatever a peer needs to decide it cares |
+| `PublishAttempts` | `3` | `1` for a single attempt |
+| `PublishRetryDelay` | 1 second | Doubles per attempt |
+| `MaxPublishRetryDelay` | 15 seconds | Ceiling for the doubling |
+
+<Aside type="tip" title="Use a private service type">
+Browsing `_http._tcp` on a busy network turns up printers, routers and NAS boxes, and telling yours
+apart from those means filtering on a TXT record anyway. `_myapp._tcp` is one line and finds only
+you. Custom types are 1–15 characters, letters, digits and hyphens (RFC 6763 §7).
+</Aside>
+
+Read the final name back from `IServerAdvertiser.Publication`. When the link already has a service with
+that name the responder renames it — typically by appending ` (2)` — and the publication carries what it
+settled on.
+
+Without registering it in the container — with your own `IMdnsManager`, say:
+
+```csharp
+await app.StartAsync();
+await using var advertisement = await app.AdvertiseAsync(mdns, o => o.ServiceType = "_myapp._tcp");
+```
+
+`AdvertiseAsync` can be called before `StartAsync` too; it publishes once the app has started.
+
+## Finding
+
+```csharp
+builder.Services.AddServerLocator();
+
+var locator = app.Services.GetRequiredService<IServerLocator>();
+
+// one shot — "connect to my other instance"
+var found = await locator.FindFirstAsync("_myapp._tcp", TimeSpan.FromSeconds(5));
+using var client = new HttpClient { BaseAddress = found!.BaseAddress };
+
+// everything that answers inside the window
+var all = await locator.FindAllAsync("_myapp._tcp", TimeSpan.FromSeconds(3));
+
+// or keep a live view: never completes on its own
+await foreach (var change in locator.WatchAsync("_myapp._tcp", ct))
+{
+    if (change.Found) peers[change.Server.InstanceName] = change.Server;
+    else peers.Remove(change.Server.InstanceName);
+}
+```
+
+`AddServerLocator` needs no server of its own, so a worker or console app can use it too.
+
+A `DiscoveredServer` is already a URL a client can call: the base address is built from the service's
+`scheme` and `path` TXT records and its first IPv4 address. `BaseAddressFor(address)` builds the same URL
+through any of its other addresses.
+
+Filtering on a TXT record is how an app picks its own instance out of a crowded link:
+
+```csharp
+var controller = await locator.FindFirstAsync(
+    "_myapp._tcp",
+    TimeSpan.FromSeconds(5),
+    x => x.TxtRecords.TryGetValue("role", out var role) && role == "controller"
+);
+```
+
+An instance that has not resolved to an address and port yet is skipped rather than handed over with
+no URL. Finding nothing is an answer — `null`, or an empty list — not a failure.
+
+### It doesn't find itself
+
+An app that advertises and browses at once — every peer-to-peer app — hears its own advertisement back
+through its own responder. The locator leaves out anything a `ServerAdvertiser` has live on the same
+`IMdnsManager`. Both registrations share the one responder in the container (an `IMdnsManager` you
+registered yourself is used rather than replaced), so the app's own server never shows up in its own list.
+The match is the service type plus the instance name the responder settled on, which mDNS keeps unique on
+the link, so a peer is never mistaken for it.
+
+## Requirements
+
+On a plain `net10.0` app the responder is managed code that binds **UDP 5353** — the firewall has to allow
+it, and in a container the network has to carry multicast (host networking, or a macvlan/ipvlan network;
+Docker's default bridge does not).
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-aspnet" />

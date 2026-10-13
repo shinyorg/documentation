@@ -1,0 +1,210 @@
+---
+title: SSH & Quick Tunnels
+description: ssh -R in library form for ASP.NET Core, and a zero-account public HTTPS address for a Kestrel app
+---
+
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+import AiSkill from '/src/components/AiSkill.astro';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="aspnet" /> |
+| Downloads | <NugetDownloads name="Shiny.AspNet.Ssh" /> |
+
+<PlatformSupport frameworks={["aspnet"]} />
+
+```bash
+dotnet add package Shiny.AspNet.Ssh
+```
+
+`ssh -R`, in library form, over SSH.NET. Pure managed code — nothing to install, unlike the
+[cloudflared/ngrok/Tailscale agents](/aspnet/tunnel-agents/).
+
+The app opens an ordinary **outbound** SSH connection and asks the server to forward a remote port
+back down it, to the address Kestrel is listening on. Nothing has to connect *to* the machine running
+the app, which is what makes it work from behind NAT or a firewall that allows no inbound traffic.
+
+## Quick tunnels
+
+The zero-ceremony version: no account, nothing installed, no infrastructure.
+
+```csharp
+builder.Services.AddQuickTunnel(autoStart: builder.Environment.IsDevelopment());
+
+var app = builder.Build();
+var tunnel = app.Services.GetRequiredService<QuickTunnel>();
+tunnel.PropertyChanged += (_, e) =>
+{
+    if (e.PropertyName == nameof(QuickTunnel.PublicUrl))
+        app.Logger.LogInformation("Public at {Url}", tunnel.PublicUrl);
+};
+```
+
+| Host | What it gives you | What it needs |
+| --- | --- | --- |
+| `QuickTunnelHost.Pinggy` (default) | `pinggy.io` — a fresh `*.pinggy-free.link` address, reported in about two seconds | Nothing. It wants a key but not a registered one, so `UseEphemeralKey` generates one in memory |
+| `QuickTunnelHost.Sish` | The public `sish` at `tuns.sh` — derives the subdomain from your key, so the same key gets the same address | A key **enrolled at pico.sh**. An unknown key is refused outright |
+| `QuickTunnelHost.LocalhostRun` | `localhost.run` — forwards fine, but cannot report its own address here (see below) | A localhost.run account with a custom domain, set as `PublicUrl` |
+| `QuickTunnelHost.Serveo` | `serveo.net` — same idea, longest-running | A key, and patience: it is frequently unreachable for days |
+
+Anonymous pinggy tunnels expire after 60 minutes. Pass an access token as the `subdomain` argument to
+lift that — pinggy carries the token in the SSH username, so that argument is where it goes.
+
+`Sish` is the one to use when the URL is shared with someone else for longer than a session, since the
+address follows the key rather than changing every run.
+
+`autoStart` defaults to **off**: putting an app on the public internet through someone else's server
+should be a decision, not a side effect of adding a package. Leave it off and call
+`QuickTunnel.StartAsync()` when it is wanted — from an admin endpoint, a CLI flag, or only in
+Development as above.
+
+<Aside type="caution" title="localhost.run cannot report its address to this library">
+It never confirms the SSH session request that carries the assigned URL. The `ssh` binary does not
+wait for that confirmation and prints the address anyway; SSH.NET does wait, and there is no
+supported way around it. So `localhost.run` works only when you already know where it answers:
+
+```csharp
+builder.Services.AddQuickTunnel(
+    QuickTunnelHost.LocalhostRun,
+    configure: o => o.PublicUrl = "https://my-app.example.com"   // your custom domain
+);
+```
+
+Without a `PublicUrl`, `StartAsync` returns `null`, `State` goes to `Failed`, and `LastError` says
+so. It does not invent an address.
+</Aside>
+
+`QuickTunnel` is `INotifyPropertyChanged` with `PublicUrl`, `State`
+(`Stopped`/`Connecting`/`Connected`/`Reconnecting`/`Failed`) and `LastError`.
+
+<Aside type="danger" title="Watch PublicUrl, don't read it once">
+A free tunnel assigns a **different address on every reconnect**. Anything that captured the URL once
+would be holding a dead link after the first network blip. `PublicUrl` is cleared the instant the
+connection drops rather than left stale. Events fire on a **background thread**.
+</Aside>
+
+## A host you own
+
+A VPS with a stable hostname, your own TLS, and `permitlisten` restricting the key to one port:
+
+```csharp
+builder.Services.AddSshTunnel(o =>
+{
+    o.Host = "tunnel.example.com";
+    o.Username = "tunnel";
+    o.PrivateKeyPath = keyPath;
+    o.RemoteBindAddress = "0.0.0.0";
+    o.RemotePort = 8080;
+    o.PublicUrl = "https://app-1.example.com";
+    o.HostKeyFingerprints.Add("SHA256:47DEQpj8HBSa+…");
+});
+```
+
+`autoStart` is **on** by default here: the tunnel opens once Kestrel is listening and closes when the
+app stops. Pass `autoStart: false`, resolve `SshTunnel`, and call `StartAsync`/`StopAsync` to control
+it yourself. `SshTunnel` exposes `PublicUrl`, `RemotePort`, `IsConnected`, and the
+`ConnectivityChanged` / `PublicUrlChanged` events.
+
+Without DI, after `app.StartAsync()`:
+
+```csharp
+await using var tunnel = new SshTunnel(app.Services.GetRequiredService<IServer>(), options, loggerFactory);
+var url = await tunnel.StartAsync();
+```
+
+### Options
+
+| Option | Default | Notes |
+| --- | --- | --- |
+| `Host` / `Port` / `Username` | — / 22 / — | |
+| `PrivateKeyPath` / `PrivateKey` / `PrivateKeyPassPhrase` | `null` | `PrivateKey` is bytes, for a key kept in Key Vault, a Kubernetes secret or user secrets |
+| `Password` | `null` | Prefer a key |
+| `RemoteBindAddress` | `localhost` | `0.0.0.0` exposes it directly and needs `GatewayPorts` on the server |
+| `RemotePort` | `0` | Zero asks the server to allocate one; read it back from `SshTunnel.RemotePort` |
+| `PublicUrl` | `null` | The address the world will use, when you know it up front |
+| `CaptureUrlFromSession` | `false` | See below |
+| `UrlPattern` / `UrlCaptureTimeout` | first `https://` / 15s | |
+| `HostKeyFingerprints` / `AcceptAnyHostKey` | empty / `false` | See below |
+| `ConnectTimeout` | 30 seconds | |
+| `KeepAliveInterval` | 30 seconds | NAT mappings are dropped after a minute or two of silence |
+| `AutoReconnect` / `ReconnectDelay` / `MaxReconnectDelay` | `true` / 2s / 2m | Backoff doubles |
+| `LocalPort` / `LocalHost` | `0` / `127.0.0.1` | Zero reads the port off Kestrel — see below |
+
+`RemoteBindAddress = "localhost"` keeps the forwarded port private to the server, which is right when
+a reverse proxy on that box terminates TLS and forwards to it. Hosted tunnels want `localhost` with
+`RemotePort` 80.
+
+### Host keys are checked
+
+<Aside type="caution">
+SSH.NET trusts any host key by default. This package does not: connecting without either a pinned
+SHA-256 fingerprint or an explicit `AcceptAnyHostKey` **fails**, with a message telling you how to
+find the fingerprint:
+
+```bash
+ssh-keyscan -p 22 tunnel.example.com | ssh-keygen -lf -
+```
+
+An unverified host key means anything between this machine and the server can pose as the server —
+and a tunnel exists precisely to carry traffic across networks you do not control. `AcceptAnyHostKey`
+is reasonable while you are finding the fingerprint to pin, and not reasonable in something you ship.
+</Aside>
+
+### Reading an assigned URL
+
+`CaptureUrlFromSession` reads the address a hosted tunnel assigns, which these providers print on the
+session channel and nowhere else. It is off by default, because a server you own has no such banner
+and opening a shell channel on it is pointless — the quick-tunnel presets turn it on for you.
+
+`UrlPattern` picks the URL out of that output. **Give it a pattern that only the tunnel address can
+satisfy.** The built-in default takes the first `https://` it sees, which is fine for a provider that
+prints one line and wrong for every provider that greets you first: they open with links to their own
+documentation, dashboard and social media. Each quick-tunnel preset ships a pattern anchored to its
+own domain — copy that approach for a provider of your own:
+
+```csharp
+o.UrlPattern = new Regex(@"https://[a-z0-9-]+\.tunnel\.example\.com", RegexOptions.IgnoreCase);
+```
+
+`UrlCaptureTimeout` (15s) bounds the whole capture. If nothing matches in that window, `PublicUrl`
+stays **null** and a warning is logged. It is not filled in with a guess: for a hosted tunnel,
+`http://{host}:{port}` is a link to the provider's own front page.
+
+## How it plugs into Kestrel
+
+There is no listener of its own — Kestrel is the listener. SSH.NET forwards to a host and port, so the
+forward is pointed at the first **`http://`** address Kestrel bound, read after it started. That
+means `http://127.0.0.1:0`, `--urls` and `ASPNETCORE_URLS` all just work: the real port is read off
+the running server, not off configuration. Wildcard and `localhost` bindings are reached over
+`127.0.0.1`.
+
+The registrations start the tunnel from `IHostedLifecycleService.StartedAsync`. That detail matters:
+with `WebApplication`, services added to `builder.Services` start **before** Kestrel, so a plain
+hosted service would find nothing to forward to. Shutdown closes the tunnel in `StoppingAsync`, before
+Kestrel stops answering behind it.
+
+<Aside type="note" title="It needs an http:// binding">
+The tunnel terminates TLS at its public edge and forwards plain HTTP. An app that only listens on
+`https://` has nothing to forward to, and starting the tunnel fails with a message saying so. Add an
+`http://127.0.0.1:0` binding alongside it, or set `LocalPort` to forward somewhere specific.
+</Aside>
+
+Forwarded requests arrive as ordinary **loopback** connections:
+
+- `HttpContext.Connection.RemoteIpAddress` is the forward's loopback end, not the caller — SSH does
+  not carry the original address.
+- `Request.Scheme` is `http` even when the public edge is HTTPS, so `UseHttpsRedirection` will
+  redirect tunnelled requests. If the tunnel (or a proxy behind it) sends `X-Forwarded-*` headers,
+  use `UseForwardedHeaders` with the loopback address as a known proxy.
+
+## Before you open one
+
+A quick tunnel hands a public HTTPS address to anyone who learns it. Put authentication and rate
+limiting in front of the app first.
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-aspnet" />

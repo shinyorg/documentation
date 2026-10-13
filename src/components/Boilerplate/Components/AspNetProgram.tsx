@@ -204,6 +204,53 @@ builder.Services.AddGeneratedServices();`;
     src += `
 builder.AddInfrastructureModules(new YourModule());`;
   }
+  if (has('aspnet-jsonpatch')) {
+    src += `
+builder.Services.AddProblemDetails();
+builder.Services.AddJsonPatch();   // full problem bodies for unhandled JsonPatchExceptions`;
+  }
+  if (has('aspnet-idempotency')) {
+    src += `
+builder.Services.AddIdempotency();`;
+  }
+  if (has('aspnet-contentdigest')) {
+    src += `
+builder.Services.AddContentDigest();`;
+  }
+  if (has('aspnet-acme')) {
+    src += `
+
+builder.WebHost.UseUrls("http://*:80", "https://*:443");   // HTTP-01 is always port 80
+builder.Services.AddAcme(o =>
+{
+    o.Domains = ["example.com", "www.example.com"];
+    o.Email = "ops@example.com";
+    o.AcceptTermsOfService = true;
+    o.DirectoryUrl = AcmeDirectories.LetsEncryptStaging;   // until it works, then remove this line
+});`;
+  }
+  if (has('aspnet-discovery')) {
+    src += `
+
+// Advertises this app over mDNS / DNS-SD on the local network
+builder.Services.AddServerAdvertisement(o =>
+{
+    o.ServiceType = "_myapp._tcp";
+    o.TxtRecords["role"] = "controller";
+});`;
+  }
+  if (has('aspnet-ssh')) {
+    src += `
+
+// Zero-account public URL over SSH - see https://shinylib.net/aspnet/ssh/
+builder.Services.AddQuickTunnel(autoStart: builder.Environment.IsDevelopment());`;
+  }
+  if (has('aspnet-tunnels')) {
+    src += `
+
+// Supervises the cloudflared agent - or AddNgrokTunnel() / AddTailscaleFunnel()
+builder.Services.AddCloudflareTunnel();`;
+  }
   // Reflector is attribute-based only, no builder registration needed
 
   src += `
@@ -213,6 +260,114 @@ var app = builder.Build();
 
   if (has('webhost')) {
     src += `app.UseInfrastructureModules();
+`;
+  }
+  if (has('aspnet-jsonpatch')) {
+    src += `app.UseExceptionHandler();
+`;
+  }
+  if (has('aspnet-acme')) {
+    src += `app.UseHttpsRedirection();
+`;
+  }
+  if (has('aspnet-idempotency')) {
+    src += `app.UseIdempotency();   // after UseAuthentication / UseAuthorization
+`;
+  }
+  if (has('aspnet-contentdigest')) {
+    src += `app.UseContentDigest();   // after routing; before UseRequestDecompression / UseResponseCompression
+`;
+  }
+
+  const dataDir = has('aspnet-webdav') || has('aspnet-caldav') || has('aspnet-tus') || has('aspnet-filesync') || has('aspnet-nuget') || has('aspnet-npm');
+  if (dataDir) {
+    src += `
+var dataDir = Path.Combine(app.Environment.ContentRootPath, "App_Data");
+`;
+  }
+  if (has('aspnet-webdav')) {
+    src += `
+app.MapWebDav("/dav", o =>
+{
+    o.RootPath = Path.Combine(dataDir, "share");
+    o.AllowWrite = true;
+    o.AllowDelete = true;
+})
+.RequireAuthorization();
+`;
+  }
+  if (has('aspnet-caldav')) {
+    src += `
+app.MapCalDav("/caldav", o =>
+{
+    o.CalendarStore = new FileCalendarStore(Path.Combine(dataDir, "calendars"));
+    o.AddressBookStore = new FileAddressBookStore(Path.Combine(dataDir, "contacts"));
+})
+.RequireAuthorization();
+`;
+  }
+  if (has('aspnet-tus')) {
+    src += `
+app.MapTus("/files", o =>
+{
+    o.Store = new DiskTusStore(Path.Combine(dataDir, "uploads"));
+    o.OnUploadCompleteAsync = async ctx =>
+    {
+        await using var file = await ctx.OpenReadAsync();
+        // move it somewhere permanent, record it, process it...
+    };
+})
+.RequireAuthorization();
+`;
+  }
+  if (has('aspnet-filesync')) {
+    src += `
+app.MapFileSync("/sync", o => o.Store = new DiskFileSyncStore(Path.Combine(dataDir, "sync")))
+   .RequireAuthorization();
+`;
+  }
+  if (has('aspnet-nuget')) {
+    src += `
+app.MapNuGetFeed("/nuget", o =>
+{
+    o.Store = new DiskNuGetPackageStore(Path.Combine(dataDir, "packages"));
+    o.ApiKeys.Add(builder.Configuration["NuGet:ApiKey"]!);
+});
+`;
+  }
+  if (has('aspnet-npm')) {
+    src += `
+app.MapNpmRegistry("/npm", o =>
+{
+    o.Store = new DiskNpmPackageStore(Path.Combine(dataDir, "npm"));
+    o.Tokens[builder.Configuration["Npm:Token"]!] = "ci";   // token → user name
+});
+`;
+  }
+  if (has('aspnet-documentdb')) {
+    src += `
+// REST + live SSE endpoints for a document type - needs a document store registered (Shiny.DocumentDb)
+app.MapDocuments<Order>("/orders", o =>
+{
+    o.Operations = DocumentEndpoints.All;
+    o.TypeInfo = AppJson.Default.Order;
+});
+`;
+  }
+  if (has('aspnet-webhooks')) {
+    src += `
+app.MapWebhook("/hooks/github", WebhookSignature.GitHub(builder.Configuration["GitHub:WebhookSecret"]!), async (WebhookContext ctx) =>
+{
+    // ctx.EventType, ctx.ReadFromJson(...)
+});
+`;
+  }
+  if (has('aspnet-jsonpatch')) {
+    src += `
+app.MapPatch("/api/notes/{id:int}", (int id, JsonPatchDocument patch) =>
+{
+    // patch.ApplyTo(...) - see https://shinylib.net/aspnet/json-patch/
+});
 `;
   }
   if (has('appdevicebridge')) {

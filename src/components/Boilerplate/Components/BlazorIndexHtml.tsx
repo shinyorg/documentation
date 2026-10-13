@@ -13,9 +13,6 @@ const BlazorIndexHtml = (props: Props) => {
   if (has('mediator')) {
     scripts.push(`<script src="_content/Shiny.Mediator.Blazor/Mediator.js"></script>`);
   }
-  if (has('blazorhost')) {
-    scripts.push(`<script src="_content/Shiny.Extensions.BlazorHosting/shiny-appsupport.js"></script>`);
-  }
 
   const src = `<!-- Add to your index.html (or _Host.cshtml for server-side) before _framework/blazor.webassembly.js -->
 ${scripts.join('\n')}`;

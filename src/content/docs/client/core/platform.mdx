@@ -1,9 +1,9 @@
 ---
 title: Platform
-description: IPlatform directories and main-thread marshalling, plus the Android and Apple platform helpers in Shiny.Core
+description: IPlatform directories, main-thread marshalling, device and app info, culture and time-zone change events, plus the Android and Apple platform helpers in Shiny.Core
 ---
 
-`IPlatform` is the small cross-platform surface every Shiny module uses to find a place for files and to get onto the UI thread. Inject it anywhere:
+`IPlatform` is the small cross-platform surface every Shiny module uses to find a place for files and to get onto the UI thread, and that apps use to ask what they are running on. Everything is implemented natively per platform - no MAUI or Essentials - so it works the same in a MAUI app, a native app, a Linux desktop or a console. Inject it anywhere:
 
 ```csharp
 public interface IPlatform
@@ -12,8 +12,114 @@ public interface IPlatform
     DirectoryInfo AppData { get; }
     DirectoryInfo Cache { get; }
     DirectoryInfo Public { get; }
+
+    Version AppVersion { get; }
+    string DeviceManufacturer { get; }
+    string DeviceModel { get; }
+    Version? PlatformVersion { get; }
+    string Platform { get; }
+    DeviceIdiom DeviceIdiom { get; }
+
+    CultureInfo CurrentCulture { get; }
+    event EventHandler<CultureInfo>? CultureChanged;
+    TimeZoneInfo CurrentTimeZone { get; }
+    event EventHandler<TimeZoneInfo>? TimeZoneChanged;
+
+    void OpenAppSettings();
 }
 ```
+
+## Device and App Info
+
+| Platform | `AppVersion` | `DeviceManufacturer` / `DeviceModel` | `PlatformVersion` | `Platform` | `DeviceIdiom` |
+|----------|--------------|--------------------------------------|-------------------|------------|---------------|
+| Android | Package `versionName` | `Build.MANUFACTURER` / `Build.MODEL` | `Build.VERSION.RELEASE` | `Android` | `UiModeManager` (TV, Car, Watch, Desk), else `Tablet` from 600dp smallest width, else `Phone` |
+| iOS / tvOS | `CFBundleShortVersionString` | `Apple` / hardware identifier (`iPhone16,1`; the simulated model on a simulator) | `UIDevice.SystemVersion` | `iOS` / `tvOS` | `UIDevice.UserInterfaceIdiom` |
+| Mac Catalyst | `CFBundleShortVersionString` | `Apple` / `hw.model` (`Mac15,3`) | `UIDevice.SystemVersion` | `MacCatalyst` | `Desktop` |
+| macOS (AppKit) | `CFBundleShortVersionString` | `Apple` / `hw.model` | `NSProcessInfo.OperatingSystemVersion` | `macOS` | `Desktop` |
+| Windows | Package version, or the entry assembly's when unpackaged | `EasClientDeviceInformation` system manufacturer / product name | `Environment.OSVersion` | `Windows` | `AnalyticsInfo` device family |
+| Linux | Entry assembly version | DMI `sys_vendor` / `product_name`, or the device-tree model on a Raspberry Pi | `Environment.OSVersion` | `Linux` | `Desktop` |
+| Blazor WebAssembly | Entry assembly version | `Unknown` | `null` | `Browser` | `Unknown` |
+
+`DeviceIdiom` is `Shiny.DeviceIdiom` - `Unknown`, `Phone`, `Tablet`, `Desktop`, `TV`, `Watch` or `Car`.
+
+### Blazor WebAssembly
+
+Plain `net10.0` has no hosting layer to register `IPlatform`, so a Blazor app does it itself:
+
+```csharp
+using Shiny.Infrastructure;
+
+builder.Services.AddShinyCoreServices();   // IPlatform (NetPlatform) and the key/value stores
+```
+
+The browser-only extras live on the concrete `NetPlatform` - inject it directly:
+
+| Member | Notes |
+|--------|-------|
+| `UserAgent` | `navigator.userAgent`, read once through the runtime's own JavaScript interop (no script file). `null` outside a browser, including Blazor Server |
+| `UserAgentVersion` | A best-effort browser version parsed from the user agent - Edge, Opera, Firefox, Chrome, then Safari, most specific first - or `null` |
+
+`OpenAppSettings()` opens the app's own page in the system settings on Android, iOS, Mac Catalyst and packaged Windows apps, and the system settings themselves elsewhere (System Settings on macOS, GNOME Settings or Plasma System Settings on Linux). It does nothing in the browser.
+
+## Culture and Time Zone
+
+`CurrentCulture` and `CurrentTimeZone` always read the live value. `CultureChanged` and `TimeZoneChanged` start their native listener with the first subscriber and stop it with the last, so an app that never subscribes pays nothing. They are raised only when the value actually changes, on whatever thread the OS reports it - marshal with `InvokeOnMainThread` before touching UI.
+
+| Platform | Culture | Time zone |
+|----------|---------|-----------|
+| Android | `ACTION_LOCALE_CHANGED` broadcast | `ACTION_TIMEZONE_CHANGED` broadcast |
+| iOS / tvOS / Mac Catalyst / macOS | `NSCurrentLocaleDidChangeNotification` | `NSSystemTimeZoneDidChangeNotification` |
+| Windows | `SystemEvents.UserPreferenceChanged` (Locale) | `SystemEvents.TimeChanged` |
+| Linux | 30-second poll - a Linux locale switch only applies at the next login | `/etc/localtime` file watch, falling back to a 30-second poll |
+| Blazor WebAssembly / other plain .NET | 30-second poll | 30-second poll |
+
+## Screen
+
+`IScreenInfo` is registered next to `IPlatform` by every host. It reports the main display and locks the app's orientation, natively and without MAUI.
+
+```csharp
+public class VideoPage(IScreenInfo screen)
+{
+    public async Task EnterFullScreen()
+    {
+        var m = screen.Metrics;   // ScreenMetrics(Width, Height, Density, Orientation, RefreshRate)
+        Console.WriteLine($"{m.WidthIndependent}x{m.HeightIndependent} @ {m.RefreshRate}Hz");
+
+        screen.OrientationChanged += (_, orientation) => { /* off the UI thread - marshal first */ };
+
+        var locked = await screen.SetOrientation(DeviceOrientation.Landscape);
+        // ...
+        await screen.ResetOrientation();
+    }
+}
+```
+
+`Width` and `Height` are physical pixels as the display is currently oriented, and `WidthIndependent` / `HeightIndependent` divide them by `Density`. `MetricsChanged` and `OrientationChanged` start watching with the first subscriber and stop with the last, and are raised only when something actually changed. The orientation enum is `Shiny.DeviceOrientation` (`Unknown`, `Portrait`, `Landscape`) - named so it does not clash with MAUI's `DisplayOrientation` or Android's `ScreenOrientation`.
+
+| Platform | Metrics | Changes | `SetOrientation` |
+|----------|---------|---------|------------------|
+| Android | Default display's real size, density and refresh rate | `DisplayManager` listener | The current Activity's requested orientation (sensor portrait / landscape) |
+| iOS | `UIScreen.MainScreen` | Device rotation, re-read once the interface has turned, and screen mode changes | iOS 16+ through `RequestGeometryUpdate` - see below |
+| Mac Catalyst / tvOS | `UIScreen.MainScreen` | Screen mode changes | Not supported (returns `false`) |
+| macOS | `NSScreen.MainScreen` | Screen parameter and window screen changes | Not supported |
+| Windows | Primary monitor's current mode and system DPI | `SystemEvents.DisplaySettingsChanged` | Auto-rotation preference - only devices that rotate honour it |
+| Blazor WebAssembly | `window.screen` × `devicePixelRatio`, Screen Orientation API | `resize` and orientation `change` | `screen.orientation.lock()` - only for a full-screen page or installed app |
+| Linux / other plain .NET | `ScreenMetrics.Empty` | Never | Not supported |
+
+:::caution[Holding an orientation on iOS]
+UIKit asks the **app delegate** which orientations a window may take. Without this, `SetOrientation` turns the device once and the next tilt turns it back:
+
+```csharp
+[Export("application:supportedInterfaceOrientationsForWindow:")]
+public UIInterfaceOrientationMask GetSupportedInterfaceOrientations(UIApplication application, UIWindow? forWindow)
+    => Shiny.IosOrientationLock.Supported;
+```
+
+UIKit also ignores a change made while a navigation transition is animating - call `SetOrientation` once a page has appeared.
+:::
+
+On Blazor WebAssembly the browser viewport (`window.innerWidth` / `innerHeight`) is on the concrete `BrowserScreenInfo` (namespace `Shiny.Infrastructure`) as `ViewportWidth` / `ViewportHeight`. Its JS module loads on first use - `UseShiny()` loads it up front - and `Metrics` is `ScreenMetrics.Empty` until then.
 
 ## Directories
 
@@ -41,7 +147,7 @@ var result = await platform.InvokeOnMainThreadAsync(() => ReadSomeUiState());
 await platform.InvokeTaskOnMainThread(async () => await ShowDialogAsync(), cancellationToken);
 ```
 
-Windows and plain .NET have no toolkit-independent main thread, so `WindowsPlatform.MainThreadHandler` and `NetPlatform.MainThreadHandler` are static hooks for the hosting layer to set. `UseShiny()` sets the Windows hook to the WinUI dispatcher. A GTK or other desktop head should set the `NetPlatform` hook to its own main loop:
+Windows and plain .NET have no toolkit-independent main thread, so `WindowsPlatform.MainThreadHandler` and `NetPlatform.MainThreadHandler` are static hooks for the hosting layer to set. `UseShiny()` sets the Windows hook to the WinUI dispatcher, and in a MAUI app on a non-platform backend such as Linux GTK it sets the `NetPlatform` hook to that backend's MAUI dispatcher. A GTK or other desktop head without MAUI should set the `NetPlatform` hook to its own main loop:
 
 ```csharp
 NetPlatform.MainThreadHandler = action => GLib.Idle.Add(() => { action(); return false; });

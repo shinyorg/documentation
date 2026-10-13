@@ -1,20 +1,22 @@
 ---
-title: Startup Service
+title: App Startup Installer
+description: Install the app into the operating system's launch-at-login list on Windows, macOS and Linux, or as a systemd service
 ---
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 
-<PlatformSupport frameworks={["maui"]} />
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["windows", "macos", "linux"]} />
 
-`IStartupService` installs the running app into the operating system's startup list: launch at login on
+`IAppStartupInstaller` installs the running app into the operating system's startup list: launch at login on
 Windows and macOS, and on Linux either launch at login for a GUI app or a systemd service for headless code.
-It's safe to call from cross-platform code. Mobile reports `NotSupported` rather than throwing.
+It's safe to call from cross-platform code. Mobile reports `NotSupported` rather than throwing. It ships in
+`Shiny.Core`, so it works the same in a MAUI app, a native app, or a plain .NET worker.
 
 ## Registration
 
 ```csharp
 using Shiny;
 
-builder.AddStartupService(opts =>
+builder.Services.AddAppStartupInstaller(opts =>
 {
     opts.Identifier = "my-app";            // Windows Run value / Linux .desktop file or systemd unit name
     opts.DisplayName = "My App";           // Linux desktop entry Name / systemd Description
@@ -22,17 +24,10 @@ builder.AddStartupService(opts =>
 });
 ```
 
-An `IServiceCollection` overload exists too, for an AppKit app with no `MauiAppBuilder` or a plain
-Generic Host worker:
-
-```csharp
-services.AddStartupService(opts => opts.Identifier = "my-app");
-```
-
 ## Usage
 
 ```csharp
-public class StartupToggle(IStartupService startup)
+public class StartupToggle(IAppStartupInstaller startup)
 {
     public async Task Toggle(bool enable)
     {
@@ -43,7 +38,7 @@ public class StartupToggle(IStartupService startup)
             ? await startup.Register()
             : await startup.Unregister();
 
-        if (state is StartupServiceState.RequiresApproval or StartupServiceState.DisabledByUser)
+        if (state is AppStartupState.RequiresApproval or AppStartupState.DisabledByUser)
             await startup.OpenSettings();   // the user has the final say in the OS UI
     }
 }
@@ -75,7 +70,7 @@ state (or a fresh `GetState`) and never cache it, because the user can switch th
 
 ## Linux: GUI app or service
 
-On Linux, `StartupServiceOptions.LinuxMode` sets whether the process starts as a **GUI app** at login or
+On Linux, `AppStartupOptions.LinuxMode` sets whether the process starts as a **GUI app** at login or
 as a **general service**:
 
 | `LinuxStartupMode` | Kind | Unit / entry | Starts |
@@ -111,7 +106,7 @@ RestartSec=5
 WantedBy=graphical-session.target    # default.target / multi-user.target for the service modes
 ```
 
-`WorkingDirectory` defaults to `AppContext.BaseDirectory` (override with `StartupServiceOptions.WorkingDirectory`),
+`WorkingDirectory` defaults to `AppContext.BaseDirectory` (override with `AppStartupOptions.WorkingDirectory`),
 and `DOTNET_ROOT` is carried into the unit when it's set, so a framework-dependent app on a private runtime
 install still starts.
 
@@ -142,13 +137,13 @@ don't use them for a GUI app.
 
 ### Installing a worker as a service
 
-Because `AddStartupService` works on plain `IServiceCollection`, a Generic Host worker can install itself:
+Because `AddAppStartupInstaller` works on plain `IServiceCollection`, a Generic Host worker can install itself:
 
 ```csharp
 var builder = Host.CreateApplicationBuilder(args);
 builder.Services.AddSystemd();               // optional: Microsoft.Extensions.Hosting.Systemd
 builder.Services.AddHostedService<Worker>();
-builder.Services.AddStartupService(opts =>
+builder.Services.AddAppStartupInstaller(opts =>
 {
     opts.Identifier = "my-worker";
     opts.DisplayName = "My Worker";
@@ -160,7 +155,7 @@ var host = builder.Build();
 // sudo ./my-worker --install
 if (args.Contains("--install"))
 {
-    var state = await host.Services.GetRequiredService<IStartupService>().Register();
+    var state = await host.Services.GetRequiredService<IAppStartupInstaller>().Register();
     Console.WriteLine($"Service: {state}");
     return;
 }

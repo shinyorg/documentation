@@ -1,0 +1,244 @@
+---
+title: Region Geofencing
+description: GPS-driven geofencing over unlimited polygon, radius or reverse-geocoded regions, with a Shiny.DocumentDb SQLite provider
+---
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+## Getting Started
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Geofencing.Regions" /> |
+| Downloads (DocumentDb) | <NugetDownloads name="Shiny.Geofencing.Regions.DocumentDb" /> |
+
+<PlatformSupport os={["android", "ios"]} />
+
+[Platform geofencing](/client/locations/geofencing) is cheap on battery but capped (20 regions on iOS, 60 on
+Android) and circles only. Region geofencing removes both limits: it runs background GPS through
+[`Shiny.Gps`](/client/locations/gps) and, for each reading that gets past the distance/time filters, asks a **region
+source** which region the device is in. Each region *set* (states, cities, delivery zones) keeps track of its own
+current region, so a device can be in one region of every set at once. Enter and exit events go to your delegate.
+
+| | Platform Geofencing | Region Geofencing |
+|---|---|---|
+| **Max regions** | 20 (iOS) / 60 (Android) | Unlimited |
+| **Region shapes** | Circles | Polygons (with holes), points by proximity, or address levels |
+| **Data source** | Registered one by one | A region source - SQLite documents, the geocoder, or your own |
+| **Detection** | OS callbacks | Background GPS + a query per reading |
+| **Battery** | Very efficient | Tunable with the reading filters |
+
+| Package | What it contains |
+|---|---|
+| `Shiny.Geofencing.Regions` | The monitor, the `IRegionSource` contract, and the built-in **geocoder** source |
+| `Shiny.Geofencing.Regions.DocumentDb` | The [Shiny.DocumentDb](/documentdb/) **SQLite** source, plus a seeder for US states, Canadian provinces, and US & Canadian cities |
+
+:::note[Replaces Shiny.Spatial.Geofencing and Shiny.DocumentDb.Geofencing]
+This package replaces both `Shiny.Spatial.Geofencing` and `Shiny.DocumentDb.Geofencing`, and the
+`Shiny.DocumentDb.Geo` reference dataset now ships inside `Shiny.Geofencing.Regions.DocumentDb`. See
+[Migrating](#migrating-from-shinydocumentdbgeofencing) below.
+:::
+
+## Setup
+
+<Steps>
+1. Install the packages
+
+   ```bash
+   dotnet add package Shiny.Geofencing.Regions
+   dotnet add package Shiny.Geofencing.Regions.DocumentDb   # only for document regions
+   ```
+
+2. Add the background GPS permissions. They are the same as [GPS](/client/locations/gps#setup) in realtime
+   background mode: location *always* usage strings and the `location` background mode on iOS, and fine, background and
+   foreground-service location permissions on Android.
+
+3. Implement the delegate. It is a singleton and runs on a background thread, including while the app is backgrounded.
+
+   ```csharp
+   using Shiny.Locations;
+
+   public class MyRegionDelegate : IRegionGeofenceDelegate
+   {
+       public Task OnRegionChanged(RegionChange change)
+       {
+           // change.Region is the region object itself - the document, or the Placemark for geocoder sets
+           Console.WriteLine($"{(change.Entered ? "Entered" : "Exited")} {change.RegionSet}: {change.RegionName}");
+           return Task.CompletedTask;
+       }
+   }
+   ```
+
+4. Register it in `MauiProgram.cs`
+
+   ```csharp
+   builder.Services.AddRegionGeofencing<MyRegionDelegate>(cfg =>
+   {
+       cfg.MinimumDistance = Distance.FromMeters(300);   // default
+       cfg.MinimumTime = TimeSpan.FromMinutes(1);        // default
+
+       cfg.AddGeocoderRegionSet("cities", GeocoderRegionLevel.Locality);
+   });
+   ```
+
+5. Start monitoring
+
+   ```csharp
+   // inject IRegionGeofenceManager
+   var access = await regions.RequestAccess();
+   if (access == AccessState.Available)
+       await regions.Start();
+   ```
+</Steps>
+
+`Start()` is idempotent, and monitoring survives app restarts. After the OS relaunches the app, the listener is restored
+from the last known region in each set, so entries are not raised again. `Stop()` also forgets the current regions.
+
+`GetCurrent()` resolves the device's current region in every set from the last GPS reading. It raises no events and
+changes no state.
+
+:::caution[It owns the GPS listener]
+Region geofencing starts the `IGpsManager` listener with `RegionGeofenceConfig.GpsRequest` and registers its own
+`IGpsDelegate`. Don't also start the GPS listener yourself with a different request in the same app.
+:::
+
+## Reading Filters
+
+Each GPS reading is filtered before any region query runs, which is what keeps the processing cost down:
+
+| Property | Default | Meaning |
+|---|---|---|
+| `MinimumDistance` | 300m | Readings closer than this to the last evaluated one are skipped |
+| `MinimumTime` | 1 minute | Readings sooner than this after the last evaluated one are skipped |
+| `MaximumDistance` | unset | Safety net - always evaluate once the device has moved this far |
+| `MaximumTime` | unset | Safety net - always evaluate once this much time has passed |
+| `GpsRequest` | Realtime background | The listener configuration |
+
+## Document Regions (SQLite)
+
+`Shiny.Geofencing.Regions.DocumentDb` monitors any document type with a mapped geometry in a
+[Shiny.DocumentDb](/documentdb/) SQLite store. Polygons are matched by **containment**. Points can only match by
+**proximity**, because a GPS reading never falls *inside* a point, so give them a radius with `withinMeters`. When
+regions overlap, the nearest one wins.
+
+```csharp
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={dbPath}");
+    opts.ConfigureDocument<Zone>(cfg => cfg.MapSpatialProperty(nameof(Zone.Boundary), z => z.Boundary));
+    opts.ConfigureDocument<Store>(cfg => cfg.MapSpatialProperty(nameof(Store.Location), s => s.Location));
+});
+
+builder.Services.AddRegionGeofencing<MyRegionDelegate>(cfg => cfg
+    .AddDocumentRegionSet<Zone>("zones", z => z.Id, z => z.Name, filter: z => z.Active)
+    .AddDocumentRegionSet<Store>("stores", s => s.Id, s => s.Name, withinMeters: 500)
+);
+```
+
+- `idSelector` must return the id the store keys the document by. When an exit comes after an app restart, the
+  region is read back by that id so the event can still describe it.
+- `filter` narrows which documents are monitored. `storeName` selects a keyed store instead of the default one.
+
+### US & Canadian Regions
+
+The package ships a small embedded dataset of US states, Canadian provinces, and US & Canadian cities. Seed it into
+the store and monitor it like any other document set:
+
+```csharp
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={dbPath}");
+    opts.MapNorthAmericaData();               // maps GeoRegion.Boundary and GeoCity.Location
+});
+builder.Services.AddNorthAmericaSeeder();     // seeds once, idempotent
+
+builder.Services.AddRegionGeofencing<MyRegionDelegate>(cfg => cfg
+    .AddNorthAmericanRegions()                // states & provinces by containment - set "regions"
+    .AddNorthAmericanCities(withinMeters: 25_000, filter: c => c.Population >= 250_000)  // set "cities"
+);
+```
+
+Region ids are `{Country}-{Abbreviation}` (`US-CO`, `CA-ON`), and city ids are `{Country}-{Region}-{slug}`
+(`US-CO-denver`). The boundaries are deliberately coarse: good enough for "which state am I in", not for cartography.
+`NorthAmericaData.Regions` and `NorthAmericaData.Cities` expose the raw data if you want to read it directly.
+
+## Geocoder Regions
+
+`AddGeocoderRegionSet` resolves regions by reverse geocoding each evaluated reading through
+[`IGeocoder`](/client/locations/geocoding). There's no data to seed, but **every evaluated reading needs network
+access**. `AddRegionGeofencing` registers the geocoder for you if it isn't already registered.
+
+```csharp
+builder.Services.AddRegionGeofencing<MyRegionDelegate>(cfg => cfg
+    .AddGeocoderRegionSet("countries", GeocoderRegionLevel.Country)
+    .AddGeocoderRegionSet("states", GeocoderRegionLevel.AdministrativeArea)
+    .AddGeocoderRegionSet("cities", GeocoderRegionLevel.Locality)
+    .AddGeocoderRegionSet("postal", p => p.PostalCode)       // or pick the region yourself
+);
+```
+
+| Level | Region id | Name |
+|---|---|---|
+| `Country` | `US` | Country name |
+| `AdministrativeArea` | `US-Colorado` | State / province |
+| `SubAdministrativeArea` | `US-Colorado-Denver County` | County |
+| `Locality` | `US-Colorado-Denver` | City / town |
+| `SubLocality` | `US-Colorado-Denver-LoDo` | Neighbourhood |
+| `PostalCode` | `US-80202` | Postal code |
+
+- The region object is the `Placemark` (`change.RegionAs<Placemark>()`).
+- If any part of an id is missing (no locality out in the countryside, say), the device is *outside* that set.
+- A failed lookup (no connection, a throttled request) leaves the set's current region unchanged, so going offline
+  never produces a false exit.
+- All geocoder sets evaluating the same reading share one lookup, so three sets cost one request.
+- A geocoder can't look regions up by id. An exit that comes after an app restart carries only `RegionId`, with
+  `Region` and `RegionName` null.
+- Geocoders are rate limited: Apple throttles heavy use, and Nominatim (the fallback) allows one request a second.
+  Keep `MinimumTime` at its default or higher.
+
+## Custom Region Sources
+
+Any data can back a set. Implement `IRegionSource` and register it with `AddRegionSet`:
+
+```csharp
+public class MyZoneSource(IMyZoneApi api) : IRegionSource
+{
+    public async Task<RegionMatch?> FindRegion(Position position, CancellationToken ct = default)
+    {
+        var zone = await api.FindZone(position.Latitude, position.Longitude, ct);
+        return zone == null ? null : new RegionMatch(zone.Id, zone.Name, zone);
+    }
+
+    public async Task<RegionMatch?> GetRegion(string regionId, CancellationToken ct = default)
+    {
+        var zone = await api.GetZone(regionId, ct);
+        return zone == null ? null : new RegionMatch(zone.Id, zone.Name, zone);
+    }
+}
+
+cfg.AddRegionSet("zones", sp => new MyZoneSource(sp.GetRequiredService<IMyZoneApi>()));
+```
+
+When `FindRegion` throws, the error is logged and that set keeps its current region. The other sets are still
+evaluated.
+
+## Migrating from Shiny.DocumentDb.Geofencing
+
+| Shiny.DocumentDb.Geofencing / .Geo | Shiny.Geofencing.Regions(.DocumentDb) |
+|---|---|
+| `AddDocumentGeofencing<T>(cfg => ...)` | `AddRegionGeofencing<T>(cfg => ...)` |
+| `cfg.AddRegionSet<T>(...)` | `cfg.AddDocumentRegionSet<T>(...)` |
+| `cfg.StoreName` | `storeName:` on each `AddDocumentRegionSet` |
+| `IDocumentGeofenceManager` / `IDocumentGeofenceDelegate` | `IRegionGeofenceManager` / `IRegionGeofenceDelegate` |
+| `DocumentRegionChange` / `DocumentCurrentRegion` | `RegionChange` / `CurrentRegion` (`Position` is a `Shiny.Locations.Position`) |
+| `Shiny.DocumentDb.Geo` - `GeoDataSets`, `GeoReferenceSeeder` | `Shiny.Locations.NorthAmerica` - `NorthAmericaData`, `NorthAmericaSeeder` |
+| `MapGeoReferenceData()` / `AddGeoReferenceSeeder()` | `MapNorthAmericaData()` / `AddNorthAmericaSeeder()` |
+
+The current-region state is stored under new keys, so the first reading after upgrading raises fresh entries. The
+dataset seeder also runs once more under its new name. It upserts, so it doesn't create duplicates.
+
+<AiSkill skillName="shiny-locations" />

@@ -78,7 +78,7 @@ const LegacyLibBuilder = (props: Props) => {
   const isMaui = mode === 'maui';
   const showPlatformConfig = hasPlatformConfig(components);
   const hasMediator = props.componentName === 'mediator';
-  const hasBlazorScripts = hasMediator || props.componentName === 'blazorhost';
+  const hasBlazorScripts = hasMediator;
 
   const renderTabs = () => {
     if (mode === 'blazor') {

@@ -27,7 +27,7 @@ const AppBuilder = () => {
   const isMaui = mode === 'maui';
   const showPlatformConfig = hasPlatformConfig(components);
   const hasMediator = Data.hasComponent('mediator', components);
-  const hasBlazorScripts = hasMediator || Data.hasComponent('blazorhost', components);
+  const hasBlazorScripts = hasMediator;
 
   const visible = ShinyComponents.filter(c => !c.hideFromAppBuilder);
   const availableComponents = isMaui

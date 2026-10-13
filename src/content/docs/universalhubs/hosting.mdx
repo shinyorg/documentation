@@ -1,0 +1,190 @@
+---
+title: Hosting
+description: Serve a hub over Bluetooth LE and Wi-Fi at once with AddUniversalServer, UniversalHub<T> and IUniversalHubHost.
+---
+
+## The Universal Server
+
+A **universal server** serves its hubs over BLE (GATT) and HTTP (a Switchboard, advertised over mDNS) at once. Set up
+both sides in one call, and add each hub inside it along with the mDNS service type it's advertised under:
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .ServiceUuid(ServiceUuid)                                                   // optional - the one BLE service; clients use the same
+    .Ble(o => o.EnableFileTransfers(filesDir))                                  // BleHubHostOptions - L2CAP and HTTP both use it
+    .Http(o => o.AuthorizeFile = req => req.FileName.StartsWith("avatar-"))    // UniversalHubHostOptions
+    .HttpServer(http => http.Options.Port = 8080)                               // optional - the HttpServer itself
+    .AddHub<GameHub>(GameCharacteristicUuid, "_mygame._tcp", o => o.MaxClients = 6)
+    .AddHub<ChatHub>(ChatCharacteristicUuid, "_mychat._tcp"));
+```
+
+| Builder method | What it sets |
+|---|---|
+| `ServiceUuid(uuid)` | The one BLE service every hub is a characteristic in. BluetoothLE Hubs' default unless set. Clients must use the same one |
+| `Ble(o => ...)` | [`BleHubHostOptions`](/blehubs/hosting): `LocalName` (also the mDNS instance name), file transfers, the client sweep |
+| `Protocol(o => ...)` | BluetoothLE Hubs protocol limits: payload size, timeouts |
+| `Http(o => ...)` | `UniversalHubHostOptions`: `HostId`, `Advertise`, `ManageHttpServer`, `AuthorizeFile` |
+| `HttpServer(http => ...)` | The [HttpServer](/httpserver/) itself: address, port, TLS, middleware, your own routes, tunnels |
+| `Endpoint` | The HTTP base path, `/hubs` by default |
+| `AddHub<THub>(characteristicUuid, mdnsServiceType, o => ...)` | One hub, with `MaxClients`, `ValidateClient` and `AllowTunnel` |
+
+- **One BLE service.** Every hub is a characteristic inside one service, and it's the only UUID a host advertises,
+  because two 128-bit UUIDs don't fit in a BLE advertisement. A BLE scan therefore can't tell which hubs a host is
+  running: joining one that's stopped is refused at the handshake. mDNS has no such limit, since each advertisement
+  lists its running hubs.
+- **mDNS service type** (`_mygame._tcp`): set per hub. It's what the hub is advertised under and what its clients
+  browse for. Hubs that share a type share one advertisement; each distinct type gets its own. iOS hosts list every
+  type in `NSBonjourServices`.
+- **Endpoint.** Hubs are served at `{Endpoint}/{characteristicUuid}` and files at `{Endpoint}/files`. mDNS advertises
+  it, so clients need no setting.
+- **The HttpServer** binds every interface on a free port, and mDNS tells clients which port. If you already
+  registered the server with `AddShinyHttpServer`, its address and port are left alone.
+- **`MaxClients` and `ValidateClient`** are counted and checked across both transports.
+- **Registration rules.** `AddUniversalServer` can only be called once, needs at least one hub, and refuses the same
+  hub twice. It doesn't start anything: `IUniversalHubHost` starts and stops both transports.
+
+### UniversalHubHostOptions
+
+| Option | Default | |
+|---|---|---|
+| `HostId` | a new id each app start | Identifies the host across transports, so a client that sees it over BLE and Wi-Fi shows it once. Persist one for a stable id |
+| `Advertise` | `true` | Advertise the hubs over mDNS while Wi-Fi hosting runs |
+| `ManageHttpServer` | `true` | Start and stop the HttpServer with Wi-Fi hosting. Turn off when the app runs the server for other things too |
+| `AuthorizeFile` | `null` | Gate for Wi-Fi file transfers. Return `false` to refuse (403) |
+
+Wi-Fi files otherwise follow the same `EnableFileTransfers` settings as L2CAP: the directory, whether uploads and
+downloads are allowed, overwrite and `MaxUploadSize`. The L2CAP `Authorize` hook takes an L2CAP request, so set
+`AuthorizeFile` for Wi-Fi as well.
+
+## UniversalHub&lt;T&gt;
+
+Derive the hub from `UniversalHub<TContract>`. It is a [`BleHub<T>`](/blehubs/hosting), so `Context`, `Clients`,
+`Groups` and `Context.Abort()` work as usual. Its lifecycle hooks get a `HubConnection`, which gives one connection id
+for both transports and says which transport the client is on:
+
+```csharp
+public class GameHub : UniversalHub<IGameHub>
+{
+    public override Task OnConnectedAsync(HubConnection connection)
+    {
+        // connection.Id: the peripheral UUID over BLE, sb:{lineId} over Wi-Fi
+        // connection.Transport: HubTransports.Ble or HubTransports.Http
+        // connection.Client: name, app version, properties
+        return Task.CompletedTask;
+    }
+
+    public override Task OnDisconnectedAsync(HubConnection connection, HubDisconnect disconnect)
+    {
+        // disconnect.Reason: ClientDisconnect, ClientTimeout, ServerDisconnect, ServerShutdown or ConnectionFailed
+        // disconnect.Message: the text given to Context.Abort, Disconnect or Stop, if any
+        return Task.CompletedTask;
+    }
+
+    public Task MakeMove(int cell)
+    {
+        // this.Connection is the caller, with its transport
+        return Task.CompletedTask;
+    }
+}
+```
+
+`HubConnection` also carries what each transport knows about the client. Each property is null when it doesn't apply:
+
+| Property | |
+|---|---|
+| `Properties` | Your own `string` → `object` state for the connection, the same bag on both transports. The client's handshake values are separate, in `Client.Properties` |
+| `Ble` | The BLE central (`Shiny.BluetoothLE.Hosting.IPeripheral`). Null over HTTP |
+| `Http` | The Switchboard `CallerContext`: the line id, `User`, the line's own `Items`, and `HttpContext` for the request being handled. Null over BLE, and in `OnDisconnectedAsync`, because the line's requests are over by then |
+
+`connection.Id` is the same id that `Context.ConnectionId`, `Clients.Client(id)` and `Groups` use, and
+`HubConnection.GetTransport(id)` maps any connection id to its transport. A plain `BleHub<T>` still works, but its
+hooks can't tell the transports apart.
+
+## Starting and Stopping
+
+`IUniversalHubHost` starts and stops both transports:
+
+```csharp
+public class Lobby(IUniversalHubHost host)
+{
+    // BLE, Wi-Fi or both - whichever this device can do right now
+    public Task<HubTransports> Open() => host.Start(HubTransports.All);
+    public Task Close() => host.Stop("The host ended the game");
+}
+```
+
+- A transport that can't start (Bluetooth off, no network) is skipped as long as another one starts. The result says
+  which did, and `Start` throws when none could.
+- `Stop` tells connected clients why, with `ServerShutdown`.
+- `RunningTransports` and `ListenUrls` describe what's running. `FileTransferred` is raised for files moved over HTTP;
+  L2CAP transfers raise `IBleHubHost.FileTransferred`.
+
+### One Hub at a Time
+
+`Start` / `Stop` run every hub. `StartHub<THub>()` / `StopHub<THub>()` run one, on both transports, so an always-on
+hub can sit beside one that only runs on demand:
+
+```csharp
+await host.StartHub<ChatHub>();                 // at app start, and left running
+await host.StartHub<GameHub>();                 // when the player taps Host
+await host.StopHub<GameHub>("Game over");       // its clients get ServerShutdown; the chat carries on
+var over = host.GetRunningTransports<ChatHub>();
+```
+
+- **The HTTP server** starts with the first hub hosted over HTTP and stops with the last.
+- **mDNS** only advertises the hubs that are running.
+- **BLE** advertises the one service UUID while any hub runs, so a BLE scan still lists a host that is only running
+  the always-on hub. Joining the stopped one is refused at the handshake.
+
+## Tunnels (the Internet)
+
+A [tunnel](/httpserver/tunneling) exposes the whole HTTP server to the internet, so each hub opts in:
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .HttpServer(http => http.AddQuickTunnel())             // Shiny.Net.HttpServer.Ssh - start it from a button
+    .AddHub<GameHub>(GameCharacteristicUuid, "_mygame._tcp")    // not reachable through the tunnel
+    .AddHub<ChatHub>(ChatCharacteristicUuid, "_mychat._tcp", o => o.AllowTunnel = true));
+```
+
+- **Hubs that don't allow it** answer 404 through a tunnel. Their LAN and BLE clients aren't affected.
+- **File routes** are open through a tunnel when any hub allows it. The file token still ties each request to a
+  client.
+- **Reaching it.** The tunnel's public URL has no mDNS, so a remote client
+  [connects by address](./client#connecting-by-address).
+
+:::caution
+Put authentication in front of anything you share on the internet.
+:::
+
+## Disconnect Reasons
+
+Every disconnect carries a `HubDisconnect`: a `HubDisconnectReason` you can switch on, plus an optional message. It
+means the same thing on both transports, and the host and the client see the same value:
+
+| Reason | BLE | HTTP |
+|---|---|---|
+| `ClientDisconnect` | the client called `Disconnect()` | the client closed its line |
+| `ClientTimeout` | an unsubscribe without a goodbye, or the client sweep | the line dropped and its resume window ran out |
+| `ServerDisconnect` | `Context.Abort` / `IHubContext.Disconnect` | the same |
+| `ServerShutdown` | `IUniversalHubHost.Stop`, `StopHub`, `IHubContext.Stop` | the same |
+| `ConnectionFailed` | the link failed | the line faulted |
+
+- **Host:** `UniversalHub.OnDisconnectedAsync(connection, disconnect)` and `IHubContext.ClientDisconnected` carry it.
+- **Client:** `Disconnected`, `StatusChanged` (`e.Disconnect`) and `BleHubDisconnectedException.Disconnect` carry it.
+- **Short drops:** a brief HTTP drop that resumes isn't a disconnect at all.
+
+## Lower-Level Registration
+
+`AddUniversalServer` is built from BluetoothLE Hubs' `AddBleHubServer` plus the HttpServer's `AddUniversalHubs`, and
+you can register them yourself. Each hub must be added to both:
+
+```csharp
+builder.Services.AddBleHubServer(ble => ble.AddHub<ChatHub>(ChatCharacteristicUuid));
+builder.Services.AddShinyHttpServer(http =>
+{
+    http.Options.Address = IPAddress.Any;   // reachable from other devices
+    http.Options.Port = 0;                  // any free port - mDNS publishes it
+    http.AddUniversalHubs().AddHub<ChatHub>("_mychat._tcp", allowTunnel: false);
+}, autoStart: false);                       // IUniversalHubHost starts and stops it
+```

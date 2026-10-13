@@ -150,7 +150,7 @@ const ProjectFile = (props: Props) => {
             ['BluetoothLE', ['ble', 'blehosting', 'beacons', 'obd']],
             ['LocationBackground', ['gps']],
             ['Location', ['locations-ai']],
-            ['Geofencing', ['geofencing', 'spatial-geofencing']],
+            ['Geofencing', ['geofencing']],
             ['Push', ['push', 'pushfirebase', 'pushazure']],
             ['Microphone', ['speech', 'voiceintelligence']],
             ['Contacts', ['contactstore', 'contactstore-ai']],

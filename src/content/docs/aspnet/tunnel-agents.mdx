@@ -1,0 +1,142 @@
+---
+title: Cloudflare, ngrok & Tailscale
+description: Publishing an ASP.NET Core app by supervising the vendor's own tunnel agent
+---
+
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import { Aside } from '@astrojs/starlight/components';
+import AiSkill from '/src/components/AiSkill.astro';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="aspnet" /> |
+| Downloads | <NugetDownloads name="Shiny.AspNet.Tunnels" /> |
+
+<PlatformSupport frameworks={["aspnet"]} os={["macos", "windows", "linux"]} />
+
+```bash
+dotnet add package Shiny.AspNet.Tunnels
+```
+
+```csharp
+builder.Services.AddCloudflareTunnel();      // AddNgrokTunnel() / AddTailscaleFunnel()
+
+var app = builder.Build();
+app.Run();
+// info: cloudflared is publishing this app at https://raw-fresh-mint-42.trycloudflare.com
+```
+
+The vendor ships a binary, the binary dials out, and it forwards what arrives to the port Kestrel is
+**already listening on**. Everything about the tunnel lives in the agent; this package supervises it
+and tells you the URL it produced. Resolve `ITunnelAgent` to read `PublicUrl` and `IsRunning`.
+
+For a tunnel with no binary to install, see [SSH & Quick Tunnels](/aspnet/ssh/).
+
+## How it finds the port
+
+The agent is started once Kestrel has bound, and is pointed at the first **`http://`** address Kestrel
+reports — so `http://127.0.0.1:0`, `--urls` and `ASPNETCORE_URLS` all work without telling the tunnel
+anything. Wildcard and `localhost` bindings are reached over `127.0.0.1`. Set `Port` (and `LocalHost`)
+on the options to forward somewhere else instead.
+
+The registration uses `IHostedLifecycleService.StartedAsync` rather than a plain hosted service: with
+`WebApplication`, services added to `builder.Services` start **before** Kestrel, so the port would not
+exist yet. On shutdown the agent is killed in `StoppingAsync`, before Kestrel stops answering behind
+it.
+
+<Aside type="note" title="It needs an http:// binding">
+Every agent here terminates TLS at its edge and forwards plain HTTP. An app that only listens on
+`https://` has nothing to forward to, and starting the agent fails with a message saying so — add an
+`http://127.0.0.1:0` binding alongside it.
+</Aside>
+
+Without DI, after `app.StartAsync()`:
+
+```csharp
+await using var tunnel = new CloudflareTunnel(new CloudflareTunnelOptions());
+var url = await tunnel.StartAsync(app.Services.GetRequiredService<IServer>());
+```
+
+## Cloudflare
+
+```csharp
+builder.Services.AddCloudflareTunnel(o =>
+{
+    o.Token = "…";                         // omit for a quick tunnel
+    o.Hostname = "app.example.com";
+});
+```
+
+With no token this is a **quick tunnel**: nothing to sign up for, a random `trycloudflare.com`
+hostname, TLS terminated by Cloudflare, gone when the process ends. Excellent for showing someone a
+work-in-progress app for ten minutes; not something to build on, because the hostname is new every
+run and Cloudflare rate-limits them.
+
+With a token it runs a named tunnel, whose hostname is the one configured in the dashboard — a named
+tunnel never prints a URL, so `Hostname` is what gets reported back.
+
+The agent is started with `--no-autoupdate`, which is not tidiness: cloudflared restarts itself to
+apply an update, and a tunnel that silently re-dials mid-session is worse than one that stays old.
+
+## ngrok
+
+```csharp
+builder.Services.AddNgrokTunnel(o => { o.Domain = "app.ngrok.app"; o.Region = "eu"; });
+```
+
+`AuthToken` is optional — the usual case on a developer machine is whatever `ngrok config` already
+stored. The agent is started with structured logs on stdout rather than its terminal dashboard,
+because the dashboard redraws in place and there is nothing in it to parse.
+
+## Tailscale
+
+```csharp
+builder.Services.AddTailscaleFunnel(o => o.TailnetOnly = true);
+```
+
+Needs the machine already on a tailnet, with Funnel enabled for the node in the admin console. In
+exchange the hostname is stable, it is yours, and the certificate is issued automatically.
+
+`TailnetOnly` runs `tailscale serve` instead of `tailscale funnel`: the URL works for machines on
+your tailnet and for nobody else, which is usually the whole requirement and the safer default for an
+internal tool.
+
+## Failures
+
+| What happened | What you get |
+| --- | --- |
+| The binary is not installed | `TunnelAgentException` naming what to install and that `ExecutablePath` exists |
+| Bad credentials, port in use, anything fatal | `TunnelAgentException` with the exit code — immediately, not after the timeout |
+| The agent runs but never announces | `TunnelAgentException` after `StartTimeout` (30s) |
+| The app only listens on `https://` | `InvalidOperationException` asking for an `http://` binding |
+
+With the hosted registration these fail app startup, which is deliberate: an app that was asked to be
+public and silently is not is the harder bug to find.
+
+Disposing kills the **whole process tree**: cloudflared and ngrok both spawn helpers, and killing
+only the parent leaves the tunnel up and the port claimed.
+
+<Aside type="danger" title="A tunnel is the public internet">
+Whatever these publish is reachable by anyone with the URL. Put authentication and rate limiting in
+front of the app before you start one, not after. Requests arrive from loopback with `Request.Scheme`
+of `http`, so `UseHttpsRedirection` will redirect them — configure `UseForwardedHeaders` if the agent
+sends `X-Forwarded-*` headers.
+</Aside>
+
+## Writing your own
+
+`ProcessTunnelAgent` is the base: give it an executable name, the arguments for a port, and a method
+that recognises the URL in a line of the agent's output. Register it with
+`services.AddTunnelAgent(sp => new MyAgent(...))`. The shared machinery — finding the binary, starting
+it, watching both streams, failing fast on an early exit, killing the tree on the way out — is already
+there.
+
+Anchor the pattern to that provider's tunnel domain, never "the first `https://` in the output":
+every one of these prints a welcome banner full of links to its own site before announcing your
+address.
+
+## AI Coding Assistant
+
+<AiSkill skillName="shiny-aspnet" />

@@ -19,7 +19,6 @@ export const VERSIONS = {
     shinyStores: '5.3.0',
     shinyReflector: '5.3.0',
     shinyDI: '5.3.0',
-    shinySpatial: '2.0.0',
     shinyContactStore: '5.8.0-beta-0005',
     shinyCalendar: '5.8.0-beta-0005',
     shinySpeech: '3.0.0-beta-0030',
@@ -32,9 +31,7 @@ export const VERSIONS = {
     shinyObd: '1.2.1-beta-0001',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
     shinyRecognition: '1.0.0-beta-0006',
-    shinyMauiHosting: '5.3.0',
     shinyWebHosting: '5.3.0',
-    shinyBlazorHosting: '5.3.0',
 
     // MAUI tooling
     devflow: '0.1.0-preview.12.26368.2',
@@ -435,9 +432,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'roomsharp', label: 'RoomSharp', type: 'bool', defaultValue: false, category: 'storage',
         version: VERSIONS.roomsharp,
         description: 'SQLite source generated ORM by Safwan Abdulghani https://roomsharp.dev/' },
-    { id: 'geospatialdb', label: 'Geospatial DB', type: 'bool', defaultValue: false, category: 'storage',
-        version: VERSIONS.shinySpatial,
-        description: 'Geospatial database & geofencing https://shinylib.net/spatial/' },
 
     // AI
     { id: 'aihealth', label: 'Health AI Tools', type: 'bool', defaultValue: false, category: 'ai',
@@ -727,9 +721,6 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'di', label: 'Shiny DI', type: 'bool', defaultValue: false, category: 'extensions',
         version: VERSIONS.shinyDI,
         description: 'Attribute-driven, source-generated DI registration https://shinylib.net/extensions/di/' },
-    { id: 'blazorhost', label: 'Blazor App Support', type: 'bool', defaultValue: false, category: 'extensions',
-        version: VERSIONS.shinyBlazorHosting,
-        description: 'Device/browser info + culture & time-zone change notifications for Blazor WASM (Shiny.Extensions.BlazorHosting)' },
 
     // Services
     { id: 'shinymediator', label: 'Shiny Mediator', type: 'bool', defaultValue: true, category: 'services',

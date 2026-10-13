@@ -36,7 +36,6 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyblazor', paramId: 'reflector' },
     ],
     di: [{ kind: 'shinyblazor', paramId: 'di' }],
-    blazorhost: [{ kind: 'shinyblazor', paramId: 'blazorhost' }],
 
     // Devices / sensors
     ble: [
@@ -110,7 +109,6 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     ],
 
     // Storage
-    spatial: [{ kind: 'shinyapp', paramId: 'geospatialdb' }],
     documentdb: [
         { kind: 'shinyapp', paramId: 'documentdb' },
         { kind: 'shinyaspnet', paramId: 'documentdb', value: 'sqlite' },

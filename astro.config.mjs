@@ -41,14 +41,14 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
-      id: 'client-v590',
-      title: 'Shiny Client 5.9',
-      description: 'Easy Live Activities, Game Center, Printing APIs for Device & BluetoothLE',
+      id: 'client-v6',
+      title: 'Shiny Client v6',
+      description: 'Easy Live Activities, Game Center, Printing, Geospatial Geofencing, App Store APIs & BLE',
       href: '/client/printing',
       cta: 'Live it up!',
     }, 
     {
-      id: 'appdevicebridge-10',
+      id: 'appdevicebridge-0',
       title: 'App Device Bridge',
       description: 'Release updates without the AppStore on .NET!',
       href: '/appdevicebridge/',
@@ -95,7 +95,14 @@ const announcementConfig = {
       description: 'Tiny Orleans for your .NET apps!',
       href: '/actors/',
       cta: 'Teach Me!',
-    }    
+    },
+    {
+      id: 'unihub-10',
+      title: 'UniHub 1.0',
+      description: 'Universal Hubs - SignalR Styled Hub BLE or HTTP - Why not both!?',
+      href: '/unihub/',
+      cta: 'YES PLEASE!',
+    }       
   ],
 };
 
@@ -132,7 +139,8 @@ export default defineConfig({
       '/blehosting/gatt': '/client/blehosting/gatt',
       '/blehosting/l2cap': '/client/blehosting/l2cap',
       '/blehosting/release-notes': '/client/release-notes',
-      '/blehosting/source-generator': '/client/blehosting/source-generator',
+      '/blehosting/source-generator': '/client/blehosting/gatt',
+      '/client/blehosting/source-generator': '/client/blehosting/gatt',
       '/calendarstore/': '/client/calendarstore/',
       '/calendarstore/ai-tools': '/client/calendarstore/ai-tools',
       '/calendarstore/permissions': '/client/calendarstore/permissions',
@@ -229,6 +237,10 @@ export default defineConfig({
       '/wifi/platform': '/client/wifi/platform',
       '/wifi/release-notes': '/client/release-notes',
 
+      // AppDeviceBridge 2.0: the app support page became App & Device
+      '/appdevicebridge/app-support/': '/appdevicebridge/app/',
+      '/appdevicebridge/document-geofencing/': '/appdevicebridge/region-geofencing/',
+
       // Blog post redirects (flat → date-based)
       '/blog/v3/': '/blog/2023/09/v3/',
       '/blog/v32/': '/blog/2023/12/v32/',
@@ -242,7 +254,6 @@ export default defineConfig({
       '/blog/shiny-maui-tableview/': '/blog/2026/02/shiny-maui-tableview/',
       '/blog/shiny-sqlitedocumentdb/': '/blog/2026/02/shiny-sqlitedocumentdb/',
       '/blog/shiny-music/': '/blog/2026/03/shiny-music/',
-      '/blog/shiny-spatial/': '/blog/2026/03/shiny-spatial/',
       '/blog/sqlitedocumentdb-v2/': '/blog/2026/03/sqlitedocumentdb-v2/',
       '/blog/documentdb-v3/': '/blog/2026/03/documentdb-v3/',
       '/blog/client-v4/': '/blog/2026/03/client-v4/',
@@ -254,7 +265,6 @@ export default defineConfig({
       '/extensions/sqlite-document-db/': '/documentdb/',
       '/release-notes/client/': '/client/release-notes/',
       '/release-notes/mediator/': '/mediator/release-notes/',
-      '/release-notes/spatial/': '/spatial/release-notes/',
       '/release-notes/sqlite-documentdb/': '/documentdb/release-notes/',
       '/maui/controls/': '/controls/',
       '/maui/controls/release-notes/': '/controls/release-notes/',
@@ -347,10 +357,10 @@ export default defineConfig({
       '/extensions/localizegen/': '/localizegen/',
       '/extensions/localizegen/usage': '/localizegen/usage',
       '/extensions/localizegen/release-notes': '/localizegen/release-notes',
-      '/extensions/webhost/': '/webhost/',
-      '/extensions/webhost/release-notes': '/webhost/release-notes',
-      '/extensions/mauihost/': '/mauihost/',
-      '/extensions/mauihost/release-notes': '/mauihost/release-notes',
+      '/extensions/webhost/': '/aspnet/webhosting/',
+      '/extensions/webhost/release-notes': '/aspnet/release-notes/',
+      '/webhost/': '/aspnet/webhosting/',
+      '/webhost/release-notes': '/aspnet/release-notes/',
 
       // Data → flat redirects
       '/data/documentdb/': '/documentdb/',
@@ -362,14 +372,6 @@ export default defineConfig({
       '/data/documentdb/indexes': '/documentdb/indexes',
       '/data/documentdb/sqlcipher': '/documentdb/sqlcipher',
       '/data/documentdb/release-notes': '/documentdb/release-notes',
-      '/data/spatial/': '/spatial/',
-      '/data/spatial/geometry': '/spatial/geometry',
-      '/data/spatial/database': '/spatial/database',
-      '/data/spatial/queries': '/spatial/queries',
-      '/data/spatial/algorithms': '/spatial/algorithms',
-      '/data/spatial/prebuilt': '/spatial/prebuilt',
-      '/data/spatial/geofencing': '/spatial/geofencing',
-      '/data/spatial/release-notes': '/spatial/release-notes',
 
 
       // Legacy redirects (pre-flat paths)

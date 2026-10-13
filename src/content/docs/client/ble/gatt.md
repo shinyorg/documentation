@@ -149,7 +149,7 @@ if (ch.CanNotifyOrIndicate()) { /* notifications supported */ }
 
 A blob write chunks a stream, but nothing on the far side knows where it ends. When a command, reply or event can be longer than one GATT operation — a JSON command, a certificate, a scan result — and the peripheral needs it whole, use the message helpers. Each message is split to `peripheral.Mtu` with a one-byte header per fragment and put back together on the far side.
 
-The peripheral must speak the same format — a [Shiny BluetoothLE Hosting](../blehosting/gatt#messages-longer-than-one-operation) service using `[RequestResponseCharacteristic(Framed = true)]`, or `NotifyMessage` and a `BleMessageReassembler`.
+The peripheral must speak the same format — a [Shiny BluetoothLE Hosting](../blehosting/gatt#messages-longer-than-one-operation) service using `NotifyMessage` and a `BleMessageReassembler`.
 
 ```csharp
 using Shiny.BluetoothLE;

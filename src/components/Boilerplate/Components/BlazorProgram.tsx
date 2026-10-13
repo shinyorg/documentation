@@ -24,7 +24,7 @@ const BlazorProgram = (props: Props) => {
   if (has('gps')) usings.add('Shiny');
   if (has('push')) {
     usings.add('Shiny');
-    usings.add('Shiny.Push.Blazor');
+    usings.add('Shiny.Push');
   }
   if (has('datasync')) {
     usings.add('Shiny');
@@ -38,9 +38,6 @@ const BlazorProgram = (props: Props) => {
   if (has('documentdb-indexeddb')) {
     usings.add('Shiny.DocumentDb');
     usings.add('Shiny.DocumentDb.IndexedDb');
-  }
-  if (has('blazorhost')) {
-    usings.add('Shiny');
   }
   const usesBlazorControls = props.components.some(c => c.blazorNuget === 'Shiny.Blazor.Controls');
   if (usesBlazorControls) usings.add('Shiny.Blazor.Controls');
@@ -112,12 +109,6 @@ public class Program
   if (has('di')) {
     src += `
         builder.Services.AddGeneratedServices();`;
-  }
-  if (has('blazorhost')) {
-    src += `
-        // Device/browser info + culture & time-zone change notifications (IAppSupport).
-        // Requires the shiny-appsupport.js script in wwwroot/index.html (see the index.html tab).
-        builder.Services.AddAppSupport(ThisAssembly.AssemblyVersion);`;
   }
   if (has('ble')) {
     src += `

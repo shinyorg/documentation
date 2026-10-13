@@ -8,7 +8,7 @@ L2CAP Connection-Oriented Channels (CoC) let a BLE peripheral publish a PSM that
 
 `IBleHostingManager.OpenL2Cap` publishes a PSM and invokes your callback for every accepted central connection. The PSM stays alive until you dispose the returned `L2CapInstance`. Centrals connect to it using [Shiny.BluetoothLE's L2CAP API](../ble/l2cap).
 
-`[L2CapService]` from the [source generator](./source-generator) wraps all of this — it owns the listener lifetime, runs one handler per accepted central, disposes each channel when the handler returns, and can publish the assigned PSM as a GATT read characteristic so centrals can actually discover it.
+A central has no in-band way to learn the PSM, so publish it yourself — typically as a GATT read characteristic holding the PSM as little-endian bytes.
 
 ## Opening an L2CAP Listener
 
@@ -248,29 +248,45 @@ services.AddL2CapTicketBroker(opts =>
 Reserve a ticket when a central asks for a transfer, and send it the PSM and token:
 
 ```csharp
+using Shiny;
 using Shiny.BluetoothLE;
 using Shiny.BluetoothLE.Hosting;
 
-[BleService("7a5e0000-5c2d-4f5e-9b1a-3c6d2e8f1a00")]
-public partial class CameraService(L2CapTicketBroker broker, ICamera camera)
+public class CameraService(IBleHostingManager manager, L2CapTicketBroker broker, ICamera camera) : IShinyStartupTask
 {
-    [RequestResponseCharacteristic("7a5e0001-5c2d-4f5e-9b1a-3c6d2e8f1a00", Name = "Capture", Framed = true)]
-    async Task<byte[]> RequestCapture(CameraServiceContext context, CancellationToken cancellationToken)
+    public async void Start()
     {
-        if (!context.IsAuthorized) // your own property on the per-central context
-            return Replies.NotAuthorized();
-
-        var ticket = await broker.Reserve(
-            label: "capture",
-            lifetime: TimeSpan.FromSeconds(30),
-            handler: async (stream, ct) =>
+        await manager.AddService("7a5e0000-5c2d-4f5e-9b1a-3c6d2e8f1a00", primary: true, sb =>
+        {
+            sb.AddCharacteristic("7a5e0001-5c2d-4f5e-9b1a-3c6d2e8f1a00", cb =>
             {
-                await using var jpeg = await camera.Capture(ct);
-                await jpeg.CopyToAsync(stream, ct);
-            }
-        );
+                cb.SetNotification();
+                cb.SetWrite(async request =>
+                {
+                    if (request.IsReplyNeeded)
+                        request.Respond(GattState.Success);
 
-        return Replies.Ticket(ticket.Psm, ticket.Token);
+                    if (!IsAuthorized(request.Peripheral)) // your own check
+                    {
+                        await request.Characteristic.NotifyMessage(Replies.NotAuthorized(), request.Peripheral);
+                        return;
+                    }
+
+                    var ticket = await broker.Reserve(
+                        label: "capture",
+                        lifetime: TimeSpan.FromSeconds(30),
+                        handler: async (stream, ct) =>
+                        {
+                            await using var jpeg = await camera.Capture(ct);
+                            await jpeg.CopyToAsync(stream, ct);
+                        }
+                    );
+
+                    // Replies is your own encoding of the reply
+                    await request.Characteristic.NotifyMessage(Replies.Ticket(ticket.Psm, ticket.Token), request.Peripheral);
+                }, WriteOptions.Write);
+            });
+        });
     }
 }
 ```

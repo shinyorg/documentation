@@ -1,0 +1,85 @@
+---
+title: How It Works
+description: The Wi-Fi wire protocol, mDNS discovery and file routes behind Universal Hubs.
+---
+
+Universal Hubs adds a second transport to [BluetoothLE Hubs](/blehubs/how-it-works). The hub logic (dispatch,
+`Clients`, groups, ordering, `MaxClients`) stays in BluetoothLE Hubs, and Universal Hubs carries calls through its
+transport seams:
+
+- **Host:** each hub's `IHubContext<THub>.TransportEndpoint` accepts clients from another transport, so BLE and Wi-Fi
+  clients are registered in the same hub.
+- **Client:** `BleHubClient.ConnectExternal` runs the same generated proxy over a Switchboard line instead of GATT.
+
+## Wire Protocol
+
+Each hub is one [Switchboard](/httpserver/switchboard) at `{Endpoint}/{characteristicUuid}`, `/hubs/...` by default.
+The hub's own methods are not Switchboard methods. Reserved methods carry them by name, exactly like the BLE frames do:
+
+| Call | Arguments | Returns |
+|---|---|---|
+| `hub.handshake` | `{protocol, name, appVersion, properties}` | `{accepted, reason, hostName, hostId, fileToken}` |
+| `hub.invoke` | `method`, `[args...]` | `{"result": value}`, `{}` for `Task`, or `{"error": {type, message}}` |
+| `hub.stream` | `method`, `[args...]` | a stream of `{"item": value}`, possibly ending with one `{"error": ...}` |
+| `hub.push` (host → client) | `event`, `[args...]` | – |
+
+- **Values.** Each value is the exact JSON that `IBleHubSerializer` produced. It's re-framed between BLE's argument
+  format and a JSON array, and never re-serialized. A serializer that doesn't produce JSON fails with an explanatory
+  error.
+- **Errors** travel in envelopes, not as Switchboard errors, so the remote exception type and message survive as
+  `BleHubRemoteException`, the same as over BLE.
+- **Handshake.** It is the first call on a line. The host refuses other protocol versions, any handshake while the hub
+  isn't running over Wi-Fi, and whatever the hub's own rules refuse.
+- **Disconnect.** A host-initiated disconnect is a Switchboard hang-up that carries
+  `{"reason": <HubDisconnectReason>, "message": ...}`, so the client reads the exact reason. `Context.Abort` hangs up
+  after the reply has been sent.
+- **Resume.** Switchboard's resume window means a dropped line that comes back keeps its connection id, so the hub
+  sees nothing. `OnDisconnectedAsync` runs only when the line is gone for good.
+- **Versioning.** `UniversalHubProtocol.Version` (currently 2) covers the reserved method names, envelopes, handshake
+  records, TXT keys and file routes. The handshake refuses a mismatch.
+
+## Discovery
+
+**mDNS** advertises one instance per service type per host, named after the host's `LocalName`. Hubs that share a
+type share one advertisement. Its TXT record carries:
+
+| Key | |
+|---|---|
+| `proto` | The protocol version |
+| `hostId` | `UniversalHubHostOptions.HostId` |
+| `name` | The host's name |
+| `path` | The endpoint (base path) |
+| `hubs` | The running hubs' characteristic UUIDs, comma separated |
+
+A TXT record fits about six hubs.
+
+**BLE** advertises the one service UUID while any hub runs, so a BLE result says "a hub host", not which hubs.
+
+**The client** merges the two by name, and fills in `hostId` from TXT and from the handshake reply.
+
+## Files
+
+Files are plain HTTP, not Switchboard:
+
+- `PUT` / `GET {Endpoint}/files/{name}`, with the `X-Hub-File-Token` header set to the token from the handshake.
+- They follow `BleHubHostOptions.EnableFileTransfers` (the directory, uploads and downloads allowed, overwrite,
+  `MaxUploadSize`) plus `UniversalHubHostOptions.AuthorizeFile`.
+
+| Status | Meaning |
+|---|---|
+| 400 | A bad name or path traversal |
+| 401 | A missing or unknown file token |
+| 403 | Refused by the host's rules |
+| 404 | The file is missing, or file transfers are off |
+| 409 | The file exists and overwrite is off |
+| 411 | An upload without a length |
+| 413 | An upload larger than `MaxUploadSize` |
+
+## Best Practices
+
+- **Set your own service UUID and mDNS service types**, so other apps' hosts stay out of your scans.
+- **Give hosts distinct names.** Discovery merges BLE and mDNS results by name.
+- **Persist `HostId`** if clients should recognize a host across app restarts.
+- **Keep BLE as the fallback.** Plane, hotel and public Wi-Fi usually block device-to-device traffic.
+- **Test on real devices**, both ways round (an iOS host with an Android client, and the reverse), on Wi-Fi and with
+  Wi-Fi off.

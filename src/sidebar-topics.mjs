@@ -61,11 +61,12 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'client/core/', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
-          { label: 'Platform', link: 'client/core/platform', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
+          { label: 'Platform', link: 'client/core/platform', dateCreated: '2026-09-11', dateUpdated: '2026-10-12' },
           { label: 'Lifecycle Hooks', link: 'client/core/lifecycle', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Startup Tasks', link: 'client/core/startup', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
+          { label: 'App Startup Installer', link: 'client/core/app-startup-installer', dateCreated: '2026-09-19', dateUpdated: '2026-10-10' },
           { label: 'Device Monitoring', link: 'client/core/device-monitoring', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
-          { label: 'Access & Permissions', link: 'client/core/permissions', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
+          { label: 'Access & Permissions', link: 'client/core/permissions', dateCreated: '2026-09-11', dateUpdated: '2026-10-11' },
           { label: 'Android Foreground Service', link: 'client/core/android-foreground', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Utilities', link: 'client/core/utilities', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
@@ -233,7 +234,6 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'client/blehosting/', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'GATT Service', link: 'client/blehosting/gatt', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
-          { label: 'Source Generator', link: 'client/blehosting/source-generator', dateCreated: '2026-08-11', dateUpdated: '2026-08-11' },
           { label: 'L2CAP', link: 'client/blehosting/l2cap', dateCreated: '2026-05-29', dateUpdated: '2026-05-29' },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
@@ -250,6 +250,18 @@ export const sidebarTopics = [
           { label: 'File Transfers', link: 'blehubs/files', dateCreated: '2026-10-02', dateUpdated: '2026-10-02' },
           { label: 'How It Works', link: 'blehubs/how-it-works', dateCreated: '2026-10-02', dateUpdated: '2026-10-02' },
           { label: 'Release Notes', link: 'blehubs/release-notes', dateCreated: '2026-10-02', dateUpdated: '2026-10-02' }
+        ]
+      },
+      {
+        label: 'Universal Hubs',
+        jumpTo: true,
+        dateUpdated: '2026-10-12',
+        items: [
+          { label: 'Getting Started', link: 'universalhubs/', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'Hosting', link: 'universalhubs/hosting', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'Connecting Clients', link: 'universalhubs/client', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'How It Works', link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'Release Notes', link: 'universalhubs/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
         ]
       },
       {
@@ -291,6 +303,7 @@ export const sidebarTopics = [
           { label: 'GPS', link: 'client/locations/gps', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Platform GPS Requests', link: 'client/locations/platform-requests', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
           { label: 'Geofencing', link: 'client/locations/geofencing', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
+          { label: 'Region Geofencing', link: 'client/locations/region-geofencing', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
           { label: 'Reverse Geocoding', link: 'client/locations/geocoding', dateCreated: '2026-09-26', dateUpdated: '2026-10-04' },
           { label: 'Motion Activity', link: 'client/locations/motionactivity', dateCreated: '2026-04-23', dateUpdated: '2026-04-23' },
           { label: 'AI Tools', link: 'client/locations/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
@@ -412,6 +425,15 @@ export const sidebarTopics = [
           { label: 'AI Tools', link: 'health/ai-tools', dateCreated: '2026-06-15', dateUpdated: '2026-06-15' },
           { label: 'Platform Notes', link: 'health/platform-notes', dateCreated: '2026-04-23', dateUpdated: '2026-04-23' },
           { label: 'Release Notes', link: 'health/release-notes', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' }
+        ]
+      },
+      {
+        label: 'App Store',
+        jumpTo: true,
+        dateUpdated: '2026-10-10',
+        items: [
+          { label: 'Getting Started', link: 'client/appstore/', dateCreated: '2026-05-29', dateUpdated: '2026-10-10' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
       {
@@ -643,18 +665,6 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'MAUI Hosting',
-        jumpTo: true,
-        items:[
-          { label: 'Getting Started', link: 'mauihost/', dateCreated: '2026-03-09', dateUpdated: '2026-03-09' },
-          { label: 'App Support', link: 'mauihost/appsupport', dateCreated: '2026-05-29', dateUpdated: '2026-05-29' },
-          { label: 'App Store', link: 'mauihost/appstore', dateCreated: '2026-05-29', dateUpdated: '2026-05-29' },
-          { label: 'Startup Service', link: 'mauihost/startup', dateCreated: '2026-09-19', dateUpdated: '2026-09-19' },
-          { label: 'Desktop Backends', link: 'mauihost/desktop', dateCreated: '2026-09-08', dateUpdated: '2026-09-08' },
-          { label: 'Release Notes', link: 'mauihost/release-notes', dateCreated: '2026-03-09', dateUpdated: '2026-03-09' }
-        ]
-      },
-      {
         label: 'Configuration',
         jumpTo: true,
         items: [
@@ -691,7 +701,7 @@ export const sidebarTopics = [
             items: [
               { label: 'Overview', link: 'appdevicebridge/bridges', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
               { label: 'App Links', link: 'appdevicebridge/app-links', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
-              { label: 'App Support', link: 'appdevicebridge/app-support', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'App & Device', link: 'appdevicebridge/app', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
               { label: 'Beacons', link: 'appdevicebridge/beacons', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Bluetooth LE', link: 'appdevicebridge/bluetoothle', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Calendar', link: 'appdevicebridge/calendar', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
@@ -699,7 +709,6 @@ export const sidebarTopics = [
               { label: 'Database', link: 'appdevicebridge/database', showNew: true, dateCreated: '2026-10-07', dateUpdated: '2026-10-07' },
               { label: 'Device Camera', link: 'appdevicebridge/camera', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Discovery', link: 'appdevicebridge/discovery', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
-              { label: 'Document Geofencing', link: 'appdevicebridge/document-geofencing', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Folders', link: 'appdevicebridge/folders', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Geofencing', link: 'appdevicebridge/geofencing', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'GPS & Motion', link: 'appdevicebridge/gps', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
@@ -714,8 +723,9 @@ export const sidebarTopics = [
               { label: 'Pi Camera', link: 'appdevicebridge/rpicamera', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Printing', link: 'appdevicebridge/printing', showNew: false, dateCreated: '2026-10-03', dateUpdated: '2026-10-03' },
               { label: 'Push', link: 'appdevicebridge/push', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Region Geofencing', link: 'appdevicebridge/region-geofencing', showNew: true, dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
               { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder', showNew: false, dateCreated: '2026-09-24', dateUpdated: '2026-09-24' },
-              { label: 'Sensors', link: 'appdevicebridge/sensors', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Sensors', link: 'appdevicebridge/sensors', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
               { label: 'Speech', link: 'appdevicebridge/speech', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Tray Icon & Quick Entry', link: 'appdevicebridge/desktop', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Wearables', link: 'appdevicebridge/wearables', showNew: false, dateCreated: '2026-09-18', dateUpdated: '2026-09-18' },
@@ -1250,8 +1260,6 @@ export const sidebarTopics = [
             collapsed: true,
             items: [
               { label: 'Spatial', link: 'documentdb/spatial', dateCreated: '2026-05-03', dateUpdated: '2026-05-03' },
-              { label: 'Reference Geo Data', link: 'documentdb/geo-reference', dateCreated: '2026-07-13', dateUpdated: '2026-07-13' },
-              { label: 'Geofencing', link: 'documentdb/geofencing', dateCreated: '2026-08-15', dateUpdated: '2026-08-15' },
               { label: 'Vector / ANN Search', link: 'documentdb/vector', dateCreated: '2026-06-01', dateUpdated: '2026-06-01' },
               { label: 'VectorData Connector', link: 'documentdb/vectordata', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
               { label: 'Full-Text Search', link: 'documentdb/full-text', dateCreated: '2026-06-24', dateUpdated: '2026-06-24' },
@@ -1334,20 +1342,6 @@ export const sidebarTopics = [
               { label: 'Release Notes', link: 'documentdb/release-notes', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
             ]
           }
-        ]
-      },
-      {
-        label: 'Spatial',
-        jumpTo: true,
-        items:[
-          { label: 'Getting Started', link: 'spatial/', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
-          { label: 'Geometry Types', link: 'spatial/geometry', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
-          { label: 'Database Operations', link: 'spatial/database', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
-          { label: 'Querying', link: 'spatial/queries', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
-          { label: 'Algorithms & Serialization', link: 'spatial/algorithms', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
-          { label: 'Pre-built Databases', link: 'spatial/prebuilt', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' },
-          { label: 'Geofencing', link: 'spatial/geofencing', dateCreated: '2026-03-01', dateUpdated: '2026-03-01' },
-          { label: 'Release Notes', link: 'spatial/release-notes', dateCreated: '2026-02-23', dateUpdated: '2026-02-23' }
         ]
       },
       {
@@ -1491,19 +1485,42 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'Web Hosting',
+        label: 'ASP.NET Extensions',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'webhost/', dateCreated: '2025-07-03', dateUpdated: '2025-07-03' },
-          { label: 'Release Notes', link: 'webhost/release-notes', dateCreated: '2026-02-26', dateUpdated: '2026-02-26' }
-        ]
-      },
-      {
-        label: 'Blazor Hosting',
-        jumpTo: true,
-        items:[
-          { label: 'Getting Started', link: 'blazorhost/', dateCreated: '2026-06-11', dateUpdated: '2026-06-11' },
-          { label: 'Release Notes', link: 'blazorhost/release-notes', dateCreated: '2026-06-14', dateUpdated: '2026-06-14' }
+          { label: 'Getting Started', link: 'aspnet/', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'Web Hosting (Modules)', link: 'aspnet/webhosting', dateCreated: '2025-07-03', dateUpdated: '2026-10-12' },
+          {
+            label: 'Content',
+            items: [
+              { label: 'WebDAV', link: 'aspnet/webdav', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'CalDAV & CardDAV', link: 'aspnet/caldav', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'Resumable Uploads (tus)', link: 'aspnet/tus', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'File Sync', link: 'aspnet/filesync', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'NuGet Feed', link: 'aspnet/nuget', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'npm Registry', link: 'aspnet/npm', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'DocumentDb Endpoints', link: 'aspnet/documentdb', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
+            ]
+          },
+          {
+            label: 'Middleware',
+            items: [
+              { label: 'JSON Patch', link: 'aspnet/json-patch', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'Webhooks', link: 'aspnet/webhooks', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'Idempotency Keys', link: 'aspnet/idempotency', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'Content Digest', link: 'aspnet/content-digest', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
+            ]
+          },
+          {
+            label: 'Hosting & Networking',
+            items: [
+              { label: 'Automatic TLS (ACME)', link: 'aspnet/acme', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'mDNS Discovery', link: 'aspnet/discovery', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'SSH & Quick Tunnels', link: 'aspnet/ssh', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+              { label: 'Cloudflare, ngrok & Tailscale', link: 'aspnet/tunnel-agents', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
+            ]
+          },
+          { label: 'Release Notes', link: 'aspnet/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
         ]
       },
       {

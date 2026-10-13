@@ -1,0 +1,119 @@
+---
+title: App & Device
+description: Device info, orientation, the screen, settings, the app store, launch at login, battery and connectivity — plus the browser, maps, sharing, haptics, keep-awake and the clipboard — for a Shiny.AppDeviceBridge web app
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+Two bridges give the page the device and the app around it:
+
+- **`/_bridge/app`**, in `Shiny.AppDeviceBridge` itself, over Shiny.Core: device info, orientation, the screen, the app's
+  settings, app store lookups and reviews (Shiny.AppStore), launching at login, battery and connectivity. No MAUI, so it
+  runs on a headless device too.
+- **`/_bridge/device`**, in `Shiny.AppDeviceBridge.Maui`, over .NET MAUI Essentials: the browser, maps, the share sheet,
+  haptics and vibration, keeping the screen awake, and the clipboard.
+
+The same Maui package adds the [sensors bridge](/appdevicebridge/sensors/).
+
+## Install and register
+
+<NugetBadge name="Shiny.AppDeviceBridge.Maui" />
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Maui
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge
+        .AddAppBridge()
+        .AddDeviceBridge(),
+    webApp => { /* … */ }
+);
+```
+
+`AddAppBridge` takes the app store's identifiers and the launch-at-login options. The store endpoints answer `501` until
+you pass the first:
+
+```csharp
+bridge.AddAppBridge(
+    store => store.AppleAppId = "123456789",          // Shiny.AppStore's AppStoreOptions
+    startup => startup.Arguments.Add("--autostart")   // Shiny.Core's AppStartupOptions
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IAppBridge` | `AddAppBridgeClient()` | `AppBridge` |
+| `IDeviceBridge` | `AddDeviceBridgeClient()` | `DeviceBridge` |
+
+Both clients are in `Shiny.AppDeviceBridge.Client`, which every page already references.
+
+## The app bridge
+
+Device info, culture and time zone come from Shiny's `IPlatform`; the screen and orientation from `IScreenInfo`. Both are
+registered by every Shiny host, and `AddAppBridge` registers Shiny's core services itself where no host has.
+
+`GET app/screen` is the main display in physical pixels, with its density, orientation and refresh rate; `app.screen`
+fires when any of it changes, and `app.orientation` when the app turns between portrait and landscape.
+`POST app/orientation` locks the orientation and answers `{ "success": false }` where the platform cannot (iOS before 16,
+Mac Catalyst, macOS, Linux). On iOS, holding the lock needs Shiny's `IosOrientationLock` in the app delegate.
+
+Battery and connectivity come from Shiny.Core's `IBattery` and `IConnectivity`, which `UseAppDeviceBridge` registers.
+`app.battery` carries the charge, state, power source and energy saver in one event. Every head has both; the Linux
+(GTK4) head reads the battery from sysfs (`/sys/class/power_supply`). A host without MAUI calls `services.AddBattery()`
+and `services.AddConnectivity()` itself — plain .NET has a battery on Linux only, so elsewhere `GET app/battery` answers
+`501`.
+
+The store endpoints go through Shiny.AppStore's `IAppStore`: the Apple App Store and Mac App Store, Google Play, the
+Microsoft Store (which needs `WindowsProductId`), and Flatpak or Snap on Linux. `GET app/store` answers `404` when the
+store has no listing. `POST app/store/review` asks for the platform's in-app review prompt, which the OS may decline to
+show; `POST app/store/review-page` opens the store's review page instead.
+
+### Launch at login
+
+`GET /_bridge/app/startup` says whether the app launches when the user logs in, through Shiny.Core's
+`IAppStartupInstaller`. Windows writes it under `HKCU\…\CurrentVersion\Run` (unpackaged apps only — the OS virtualizes
+that key for MSIX), macOS 13+ submits the running bundle to `SMAppService`, and Linux writes
+`~/.config/autostart/{Identifier}.desktop` or a systemd unit. Mobile has no such list, so it answers
+`{ "supported": false, "state": "NotSupported" }` and the rest return `501`. `state` is read back from the OS every time
+rather than remembered, because the user can turn a registered app off in Task Manager, System Settings or Login Items
+without the app hearing about it — which is also why `Enabled` is not the only success: `DisabledByUser`,
+`DisabledByPolicy` and `RequiresApproval` mean the user has to finish the job in the OS, and `POST app/startup/settings`
+opens the screen where they do. The OS refusing a registration answers `409 startup_failed`.
+
+## The device bridge
+
+Everything here comes from .NET MAUI Essentials, so each head's own build decides what works. A feature a backend lacks
+returns `501` on its own, and the rest keep working.
+
+`POST device/browser` opens an `http` or `https` page in an in-app browser sheet, or the default browser with
+`"launchMode": "External"`; `mailto` and `tel` go to the app that handles them. Other schemes answer `400`.
+`POST device/map` opens the maps app at a location, with directions when `navigationMode` is set.
+
+Files are shared by the same `{ root, path }` as the files bridge, at most 20 at once:
+
+```ts
+await new DeviceBridge().share({ files: [{ root: "data", path: "photos/cat.jpg" }] });
+```
+
+`vibrate` is capped at 5 seconds, and on Android needs `VIBRATE` in the manifest. `PUT device/keep-awake` answers `501`
+where the screen cannot be kept on, rather than succeeding without doing it. The clipboard holds text, at most 1 MB.
+
+## Requests
+
+<BridgeApi bridges={["AppBridge", "DeviceBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["AppBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["AppBridge", "DeviceBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).

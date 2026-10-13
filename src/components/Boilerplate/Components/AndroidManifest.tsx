@@ -54,13 +54,13 @@ const AndroidManifest = (props: Props) => {
     src += addP( 'BLUETOOTH_ADVERTISE');
   }
   
-  if (has('gps') || has('geofencing') || has('spatial-geofencing')) {
+  if (has('gps') || has('geofencing')) {
     src += addP('ACCESS_BACKGROUND_LOCATION');
     src += addF("location.gps");
     src += addF("location.network");
   }
 
-  if (has('ble') || has('obd') || has('gps') || has('geofencing') || has('spatial-geofencing')) {
+  if (has('ble') || has('obd') || has('gps') || has('geofencing')) {
     src += addP('ACCESS_COARSE_LOCATION');
     src += addP('ACCESS_FINE_LOCATION');
   }
@@ -172,6 +172,13 @@ const AndroidManifest = (props: Props) => {
            that is required.  No CHANGE_WIFI_MULTICAST_STATE and no WifiManager.MulticastLock needed. -->`;
   }
 
+  if (has('universalhubs-host') || has('universalhubs-client')) {
+    src += `
+      <!-- Universal Hubs - the Wi-Fi side (mDNS + HTTP); the BLE permissions are above -->`;
+    if (!has('wifi')) src += addP('ACCESS_WIFI_STATE');
+    src += addP('CHANGE_WIFI_MULTICAST_STATE');
+  }
+
   if (has('wifi')) {
     src += addP('ACCESS_WIFI_STATE');
     src += addP('CHANGE_WIFI_STATE');
@@ -222,7 +229,7 @@ const AndroidManifest = (props: Props) => {
     src += addP('READ_EXTERNAL_STORAGE', 32);
   }
 
-  if (has('notifications') || has('liveactivities') || Data.usesPush(props.components) || has('gps') || has('spatial-geofencing') || has('ble') || has('beacons') || has('httptransfers')) {
+  if (has('notifications') || has('liveactivities') || Data.usesPush(props.components) || has('gps') || has('ble') || has('beacons') || has('httptransfers')) {
     src += addP('POST_NOTIFICATIONS');
   }
   if (has('liveactivities')) {
@@ -231,14 +238,14 @@ const AndroidManifest = (props: Props) => {
            bar chip and always-on display. Android 8-15 degrades to an ordinary ongoing notification
            with a determinate progress bar. Nothing extra to declare beyond POST_NOTIFICATIONS. -->`;
   }
-  if (has('gps') || has('spatial-geofencing') || has('ble') || has('beacons') || has('httptransfers')) {
+  if (has('gps') || has('ble') || has('beacons') || has('httptransfers')) {
     src += addP('FOREGROUND_SERVICE');
   }
   if (has('beacons')) {
     // Beacon region monitoring is a BLE scan, not a location activity - Android 14 requires the matching type
     src += addP('FOREGROUND_SERVICE_CONNECTED_DEVICE');
   }
-  if (has('gps') || has('spatial-geofencing')) {
+  if (has('gps')) {
     src += addP('FOREGROUND_SERVICE_LOCATION');
   }
   if (has('httptransfers')) {
@@ -247,6 +254,10 @@ const AndroidManifest = (props: Props) => {
 
   src += `
   </manifest>`;
+  // Universal Hubs clients talk plain HTTP to a private address on the local network
+  if (has('universalhubs-client')) {
+    src = src.replace('android:supportsRtl="true">', 'android:supportsRtl="true" android:usesCleartextTraffic="true">');
+  }
   src = src.replace('{{APP_NODES}}', appNodes);
   return (<Syntax source={src} language="xml" />);
 };

@@ -5,6 +5,8 @@ export interface CatalogPackage {
     family: string;
     /** Docs page that references the package, when there is one */
     doc?: string;
+    /** Documented but not on nuget.org yet - always shown, marked as coming soon */
+    upcoming?: boolean;
 }
 
 interface NugetInfo {
@@ -88,14 +90,15 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
 
     const loaded = Object.keys(status).length;
     const done = loaded >= packages.length;
-    const missingCount = Object.values(status).filter(s => s === 'missing').length;
+    const upcomingIds = useMemo(() => new Set(packages.filter(p => p.upcoming).map(p => p.id)), [packages]);
+    const missingCount = Object.entries(status).filter(([id, s]) => s === 'missing' && !upcomingIds.has(id)).length;
     const total = Object.values(info).reduce((sum, i) => sum + (i.downloads ?? 0), 0);
 
     const rows = useMemo(() => {
         const f = filter.trim().toLowerCase();
         let list = packages.filter(p =>
             (!f || p.id.toLowerCase().includes(f) || p.family.toLowerCase().includes(f)) &&
-            !(hideMissing && status[p.id] === 'missing')
+            !(hideMissing && status[p.id] === 'missing' && !p.upcoming)
         );
         if (sort === 'downloads') {
             list = [...list].sort((a, b) => (info[b.id]?.downloads ?? -1) - (info[a.id]?.downloads ?? -1));
@@ -106,7 +109,9 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
     const renderVersion = (p: CatalogPackage) => {
         const s = status[p.id];
         if (!s || s === 'loading') return <span className="nuget-catalog__muted">…</span>;
-        if (s === 'missing') return <span className="nuget-catalog__muted">not published</span>;
+        if (s === 'missing') return p.upcoming
+            ? <span className="nuget-catalog__pill">coming soon</span>
+            : <span className="nuget-catalog__muted">not published</span>;
         if (s === 'error') return <span className="nuget-catalog__muted">unavailable</span>;
         const i = info[p.id];
         return (

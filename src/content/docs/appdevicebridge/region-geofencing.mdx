@@ -1,0 +1,115 @@
+---
+title: Region Geofencing
+description: Unlimited polygon, proximity and reverse-geocoded geofence regions for a Shiny.AppDeviceBridge web app, monitored by background GPS and backed by Shiny.Geofencing.Regions
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.RegionGeofencing" />
+
+The region geofencing bridge monitors **region sets** with background GPS, with no OS limit on how many regions: which
+state or province the device is in, which delivery zone, which store it is near. It's backed by
+[Shiny.Geofencing.Regions](/client/locations/region-geofencing/). Each set tracks the one region the device is in, and
+entering or leaving one reaches the page as `regiongeofence.change` while it is open and background.js otherwise.
+
+The sets are registered in C#. The page starts and stops monitoring and reads where the device is, but never defines
+what is monitored.
+
+Android, iOS and Mac Catalyst. Everywhere else every route answers `501`.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.RegionGeofencing
+```
+
+A set comes from reverse geocoding, from documents, or from your own `IRegionSource`:
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddRegionGeofenceBridge(cfg => cfg
+        // through the platform geocoder: no data to ship, but every reading needs the network
+        .AddGeocoderRegionSet("states", GeocoderRegionLevel.AdministrativeArea)
+
+        // documents in a Shiny.DocumentDb SQLite store (Shiny.Geofencing.Regions.DocumentDb)
+        .AddDocumentRegionSet<Zone>("zones", z => z.Id, z => z.Name, filter: z => z.Active)    // polygons: containment
+        .AddDocumentRegionSet<Store>("stores", s => s.Id, s => s.Name, withinMeters: 500)     // points: proximity
+
+        // anything else
+        .AddRegionSet("custom", sp => new MyRegionSource(sp.GetRequiredService<IMyApi>()))
+    ),
+    webApp => { /* … */ }
+);
+```
+
+Document sets need `Shiny.Geofencing.Regions.DocumentDb` and a SQLite document store you register, with each region
+type's geometry mapped (`cfg.MapSpatialProperty`). It also carries US states, Canadian provinces and their cities:
+
+```csharp
+builder.Services.AddDocumentStore(opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider($"Data Source={path}");
+    opts.JsonSerializerOptions = GeoJsonContext.Default.Options;
+    opts.MapNorthAmericaData();
+});
+builder.Services.AddNorthAmericaSeeder();   // once, when the app first starts
+
+bridge.AddRegionGeofenceBridge(
+    cfg => cfg
+        .AddNorthAmericanRegions()                         // "regions": ids like US-CO, CA-ON
+        .AddNorthAmericanCities(withinMeters: 25_000),     // "cities": ids like US-CO-denver
+    o => o.RegionSerializerOptions = GeoJsonContext.Default.Options
+);
+```
+
+Don't also call `AddRegionGeofencing` — the bridge registers it, with `WebAppRegionGeofenceDelegate` as the delegate.
+To handle changes in C# as well, subclass that delegate, call the base `OnRegionChanged`, and pass
+`o => o.UseDelegate<MyDelegate>()`.
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IRegionGeofencesBridge` | `AddRegionGeofencesBridgeClient()` | `RegionGeofencesBridge` |
+
+## From the page
+
+```ts
+import { RegionGeofencesBridge } from "@shinyorg/appdevicebridge";
+
+const regions = new RegionGeofencesBridge();
+const { access } = await regions.requestAccess();
+if (access !== "Available") return;
+
+await regions.onChange(c => console.log(c.entered ? "entered" : "left", c.regionSet, c.regionName ?? c.regionId));
+await regions.start();
+
+const here = await regions.getCurrent();    // one entry per set, from the last GPS reading
+```
+
+Moving straight from one region to another in the same set raises the exit first, then the entry. `start` answers `409`
+(`geofence_refused`) without background location. `stop` forgets which regions the device was in, so the next start
+enters them again.
+
+Each change and each `current` entry carries `region`: a geocoder set's placemark, or the region object written through
+`RegionSerializerOptions` — usually the document store's own `JsonSerializerOptions`. A type with no metadata there is
+left out (`null`) rather than reflected over, and so is an exit from a region the source can no longer describe.
+
+Monitoring runs Shiny.Gps' one listener. The [GPS bridge](/appdevicebridge/gps/) drives that same listener, so a page
+that stops it through `/_bridge/gps/listener` stops region geofencing too.
+
+## Requests
+
+<BridgeApi bridges={["RegionGeofencesBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["RegionGeofencesBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["RegionGeofencesBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).
