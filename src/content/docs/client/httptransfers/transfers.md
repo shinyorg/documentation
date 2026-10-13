@@ -72,7 +72,10 @@ await manager.Queue(request);
 ### TransferHttpContent Helpers
 
 ```csharp
-// JSON content
+// JSON content - source-generated metadata keeps it trim/AOT safe
+var content = TransferHttpContent.FromJson(new Payload("test", 42), AppJsonContext.Default.Payload);
+
+// or by reflection, for apps that are not trimmed ([RequiresUnreferencedCode])
 var content = TransferHttpContent.FromJson(new { name = "test", value = 42 });
 
 // Form data

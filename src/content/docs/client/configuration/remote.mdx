@@ -6,63 +6,76 @@ import NugetBadge from '../../../../components/NugetBadge.tsx';
 
 <NugetBadge name="Shiny.Extensions.Configuration" />
 
-The Remote Configuration provider allows you to fetch configuration from an HTTP endpoint and cache it locally. This is useful for feature flags, A/B testing, or any scenario where you need server-driven configuration.
+The Remote Configuration provider fetches configuration from an HTTP endpoint and caches it in a local JSON file. This is useful for feature flags, A/B testing, or any scenario where you need server-driven configuration.
 
-## Setup (MAUI)
+## How it works
 
-The easiest way to add remote configuration in a MAUI app is with the `MauiAppBuilder` extension:
+1. The cached file is added as a JSON configuration source, so the last configuration the app received is available straight away - including offline.
+2. The remote endpoint is called. Its response must be a JSON object, and it is written over the cached file.
+3. The cached file is watched for changes, so the new values are reloaded into configuration once it is written.
+
+A load is skipped when the last one finished less than 30 seconds earlier.
+
+## Setup (iOS & Android)
+
+On iOS and Android, add the remote source to your `IConfigurationBuilder` (in MAUI, `builder.Configuration`):
 
 ```csharp
-builder.AddRemoteConfigurationMaui("https://myserver.com/config");
+builder.Configuration.AddRemote("https://myserver.com/config");
 ```
 
-This will:
-- Fetch configuration from the specified URI
-- Cache it locally as `remotesettings.json` in the app's data directory
-- Register `IRemoteConfigurationProvider` in the DI container
-
-### Custom File Name
-
-You can specify a custom local cache file name:
+This caches the configuration as `remotesettings.json` in the app's local data folder and fetches the remote configuration in the background, so app startup never waits on the network. To use a different cache file name:
 
 ```csharp
-builder.AddRemoteConfigurationMaui(
+builder.Configuration.AddRemote(
     "https://myserver.com/config",
     configurationFileName: "myconfig.json"
 );
 ```
 
-### Custom Data Retrieval
+## Setup (any platform)
 
-If your server requires custom headers, authentication, or returns a non-standard format, you can supply a custom data retrieval function:
+On every platform, including Windows, macOS, Linux and plain .NET, you can choose where the cache file lives:
 
 ```csharp
-builder.AddRemoteConfigurationMaui(
+builder.Configuration.AddRemoteWithCacheFile(
+    "https://myserver.com/config",
+    Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+        "remotesettings.json"
+    ),
+    waitForRemoteLoad: false
+);
+```
+
+`waitForRemoteLoad` defaults to `true`, which makes building the configuration wait for the remote call to finish. Set it to `false` to fetch in the background, as the iOS & Android overload does.
+
+:::note
+This used to be an `AddRemote(configurationFilePath, configurationUri, ...)` overload. On iOS and Android it took the same two strings as `AddRemote(configurationUri, configurationFileName)` with a different meaning, so the call did not compile there. It is removed on iOS and Android and obsolete elsewhere - switch to `AddRemoteWithCacheFile`, which takes the URI first.
+:::
+
+## Custom Data Retrieval
+
+If your server requires custom headers, authentication, or returns a non-standard format, you can supply a custom data retrieval function. It returns the configuration as a `JsonNode` - parse a response body with `JsonNode.Parse`, or turn a typed object into one with `JsonSerializer.SerializeToNode(obj, MyJsonContext.Default.MyType)`, which stays trim and AOT safe:
+
+```csharp
+builder.Configuration.AddRemote(
     "https://myserver.com/config",
     getData: async (remoteConfig, cancellationToken) =>
     {
         using var httpClient = new HttpClient();
         httpClient.DefaultRequestHeaders.Add("X-Api-Key", "my-key");
         var response = await httpClient.GetStringAsync(remoteConfig.Uri, cancellationToken);
-        return response;
+        return JsonNode.Parse(response)!;
     }
 );
 ```
 
-## Setup (IConfigurationBuilder)
-
-You can also add remote configuration directly to an `IConfigurationBuilder`:
-
-```csharp
-builder.Configuration.AddRemoteMaui(
-    "https://myserver.com/config",
-    configurationFileName: "remotesettings.json"
-);
-```
+`remoteConfig` is a `RemoteConfig` record with the endpoint (`Uri`), the configuration loaded so far (`CurrentConfiguration`, e.g. to read an API key), the cache file path (`ConfigurationFilePath`) and `WaitForLoadOnStartup`.
 
 ## IRemoteConfigurationProvider
 
-When registered via the MAUI extension, `IRemoteConfigurationProvider` is available in the DI container. It extends `IConfigurationProvider` and adds:
+`IRemoteConfigurationProvider` extends `IConfigurationProvider` and adds:
 
 ```csharp
 public interface IRemoteConfigurationProvider : IConfigurationProvider
@@ -72,41 +85,42 @@ public interface IRemoteConfigurationProvider : IConfigurationProvider
 }
 ```
 
-### Refreshing Configuration
-
-You can manually refresh the remote configuration at any time:
+Get it from the built configuration with `GetRemoteConfigurationProvider()`. It is **not** registered in the DI container for you; to inject it, register it yourself:
 
 ```csharp
-public class MyService
+// MAUI: builder.Configuration is already a built configuration
+builder.Services.AddSingleton(builder.Configuration.GetRemoteConfigurationProvider());
+
+// anywhere else, from the IConfigurationRoot
+var configuration = configurationBuilder.Build();
+var remote = configuration.GetRemoteConfigurationProvider();
+```
+
+### Refreshing Configuration
+
+You can refresh the remote configuration at any time:
+
+```csharp
+public class MyService(IRemoteConfigurationProvider remoteConfig)
 {
-    readonly IRemoteConfigurationProvider remoteConfig;
-
-    public MyService(IRemoteConfigurationProvider remoteConfig)
-    {
-        this.remoteConfig = remoteConfig;
-    }
-
     public async Task RefreshConfig()
     {
         await remoteConfig.LoadAsync();
-        // Configuration is now updated
-        // IOptionsMonitor<T> will fire change notifications
+        // the cache file is rewritten and reloaded; remoteConfig.LastLoaded is updated
     }
 }
 ```
 
 ## Reactive Updates
 
-Combine remote configuration with `IOptionsMonitor<T>` to react to configuration changes:
+Combine remote configuration with `IOptionsMonitor<T>` to react when the reloaded file changes your settings:
 
 ```csharp
-services.Configure<FeatureFlags>(config.GetSection("FeatureFlags"));
+builder.Services.Configure<FeatureFlags>(builder.Configuration.GetSection("FeatureFlags"));
 
 public class MyViewModel
 {
-    public MyViewModel(
-        IOptionsMonitor<FeatureFlags> options,
-        IRemoteConfigurationProvider remoteConfig)
+    public MyViewModel(IOptionsMonitor<FeatureFlags> options)
     {
         options.OnChange(flags =>
         {

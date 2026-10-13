@@ -106,19 +106,26 @@ Then inject `IGpsManager` into your component just like on MAUI:
 ```
 
 The first call to `RequestAccess` will trigger the browser's permission prompt.
-A working sample lives at [`samples/Sample.Blazor/Pages/Gps.razor`](https://github.com/shinyorg/shiny/blob/master/samples/Sample.Blazor/Pages/Gps.razor).
+A working sample lives at [`samples/Sample.Blazor/Pages/Gps.razor`](https://github.com/shinyorg/shiny/blob/v6/samples/Sample.Blazor/Pages/Gps.razor).
 
 ## Starting/Stopping the GPS Service
 
 ```csharp
 IGpsManager gpsManager; // injected, resolved, etc
-await gpsManager.StartListener(new GpsRequest
-{
-    UseBackground = true
-});
+var request = GpsRequest.Background; // or GpsRequest.Foreground, GpsRequest.Realtime(true)
 
-gpsManager.StopListening();
+var access = await gpsManager.RequestAccess(request);
+if (access == AccessState.Available)
+    await gpsManager.StartListener(request);
+
+await gpsManager.StopListener();
 ```
+
+`StartListener` throws if a listener is already running. Check `gpsManager.CurrentListener == null` (or the `IsListening()` extension) first.
+
+### Surviving a process restart
+
+A listener started with `GpsBackgroundMode.Standard` or `Realtime` is saved to Shiny's settings store. When the OS ends the process and the app starts again, Shiny restarts that listener at startup if the request has `AutoRestart` set (the default), and `CurrentListener` returns it again. `StopListener()` clears it. Foreground-only listeners (`GpsBackgroundMode.None`) are not saved, so they end with the process. If the restart fails, for example because Android won't allow a `Realtime` foreground service to start from the background, the saved listener is cleared and a warning is logged.
 
 
 ## Observing in the background
@@ -126,18 +133,19 @@ gpsManager.StopListening();
 First, create the delegate that implements IGpsDelegate
 
 ```csharp
-public partial class MyGpsDelegate : Shiny.Locations.IGpsDelegate 
+public partial class MyGpsDelegate : Shiny.Locations.IGpsDelegate
 {
-    public MyGpsDelegate() 
+    public MyGpsDelegate()
     {
         // like all other shiny delegates, dependency injection works here
         // treat this as a singleton
     }
 
 
-    public Task OnReading(IGpsReading reading)
+    public Task OnReading(GpsReading reading)
     {
         // do something with the reading
+        return Task.CompletedTask;
     }
 }
 ```
@@ -151,15 +159,15 @@ setup below
 
 ```csharp
 #if ANDROID
-public partial class MyGpsDelegate : Shiny.IAndroidForegroundServiceDelegate 
+public partial class MyGpsDelegate : Shiny.IAndroidForegroundServiceDelegate
 {
-    public void ConfigureNotification(AndroidX.Core.App.NotificationCompat.Builder builder)
+    public void Configure(AndroidX.Core.App.NotificationCompat.Builder builder)
     {
-            builder
-                .SetContentTitle("MyApp")
-                .SetContentText("My App is following you!! images")
-                .SetSmallIcon(Resource.Mipmap.youricon);
-    }    
+        builder
+            .SetContentTitle("MyApp")
+            .SetContentText("My App is following you!!")
+            .SetSmallIcon(Resource.Mipmap.youricon);
+    }
 }
 #endif
 ```
@@ -167,21 +175,22 @@ public partial class MyGpsDelegate : Shiny.IAndroidForegroundServiceDelegate
 Next, let's register that with your app builder/hosting/service collection
 
 ```csharp
-services.UseGps<MyGpsDelegate>();
+services.AddGps<MyGpsDelegate>();
 ```
 
-Lastly, last start it up
+Lastly, start it up with a background request. On Android, `Realtime` runs the foreground service whose notification you configured above.
 ```csharp
 IGpsManager gpsManager; // injected, resolved, etc
-await gpsManager.StartListener(new GpsRequest
-{
-    UseBackground = true
-});
+var request = GpsRequest.Realtime(true);
+
+var access = await gpsManager.RequestAccess(request);
+if (access == AccessState.Available)
+    await gpsManager.StartListener(request);
 ```
 
 ## Stationary Detection
 
-All GPS providers automatically detect when the user is stationary and set `GpsReading.IsStationary` on each reading before it reaches your delegate or observable stream.
+All GPS providers automatically detect when the user is stationary and set `GpsReading.IsStationary` on each reading before it reaches your delegate or the `GpsReadingReceived` event.
 
 - **iOS 18+** uses native `CLLocationUpdater` stationary detection provided by the OS.
 - **iOS legacy** and **Android** use a distance + time threshold algorithm: if the user moves less than a configurable number of meters within a configurable number of seconds, they are marked stationary.
@@ -238,9 +247,10 @@ public class MyGpsDelegate : GpsDelegate
     }
 
     
-    protected override async Task OnGpsReading(GpsReading reading)
+    protected override Task OnGpsReading(GpsReading reading)
     {
-        
+        // do something with the filtered reading
+        return Task.CompletedTask;
     }
 }
 ```
@@ -264,9 +274,10 @@ public class MyGpsDelegate : GpsDelegate
     }
 
     
-    protected override async Task OnGpsReading(GpsReading reading)
+    protected override Task OnGpsReading(GpsReading reading)
     {
-        
+        // do something with the filtered reading
+        return Task.CompletedTask;
     }
 }
 ```
@@ -277,5 +288,5 @@ public class MyGpsDelegate : GpsDelegate
 
 ## Samples
 
-* [Main Samples](https://github.com/shinyorg/shiny/tree/master/samples/Sample.Maui/Gps)
+* [Main Samples](https://github.com/shinyorg/shiny/tree/v6/samples/Sample.Shared.Maui/Pages/Locations)
 * [GPS Sync](https://github.com/aritchie/ShinyGpsSync)

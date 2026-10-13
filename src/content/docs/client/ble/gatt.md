@@ -85,6 +85,13 @@ On iOS, tvOS, Mac Catalyst and macOS a write without response goes through CoreB
 the peripheral's send buffer is full, the write waits for CoreBluetooth to report it is ready before sending.
 Back-to-back writes are paced for you rather than dropped - await each one in turn, with no delay of your own.
 
+That wait happens in a queue of its own for each peripheral, outside the queue every other GATT operation goes
+through, so a peripheral that stops draining its buffer holds up only its own writes without response - reads,
+notifications and writes with response keep working. A write completes as soon as its value is handed to
+CoreBluetooth. Disposing the subscription (or cancelling the token passed to `WriteCharacteristicAsync`) before
+then cancels it. If CoreBluetooth does not report it is ready within 5 seconds, the write fails with a
+`BleException`. For a shorter limit, dispose or cancel the write yourself.
+
 ### BLOB Writes
 
 For writing data larger than a single GATT operation, use blob writes, which automatically chunk the

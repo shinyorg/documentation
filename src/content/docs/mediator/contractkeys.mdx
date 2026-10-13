@@ -43,9 +43,17 @@ public class CustomContractKeyProvider : IContractKeyProvider
         return "Custom Key"; // careful to make sure this doesn't conflict here
     }
 }
+```
+
+Register it with `SetContractKeyProvider`. It replaces the default whether you call it inside the
+`AddShinyMediator` configurator or afterwards:
+
+```csharp
+services.AddShinyMediator(x => x.SetContractKeyProvider<CustomContractKeyProvider>());
+```
 
 :::danger
-Our `DefaultContractKeyProvider` uses reflection to build out a key if `IContractKey` is not implemented.  It does do a good job ensuring the key built is unique for the contract.  You key provider will need to also ensure appropriate uniqueness
+Our `DefaultContractKeyProvider` resolves keys in this order: `IContractKey` on the contract, then any registered `IContractKeySource` (see [Generated Keys](#generated-keys-for-every-contract-aot--trimming) below), then reflection over the public properties. The reflection key is unique for the contract. Your own key provider will need to guarantee that uniqueness too.
 :::
 
 ### Source Generated Contract Keys
@@ -76,43 +84,20 @@ public partial class MyRequest : Shiny.Mediator.IRequest<MyResult>
 * If the value of a property in the key is null, that portion of the key is replaced with blank
 :::
 
-```csharp
-public class CustomContractKeyProvider : IContractKeyProvider
-{
-    public string GetContractKey(object message)
-    {
-        return "Custom Key"; // careful to make sure this doesn't conflict here
-    }
-}
+### Generated Keys for Every Contract (AOT & Trimming)
 
-:::danger
-Our `DefaultContractKeyProvider` uses reflection (currently) to build out a key if `IContractKey` is not implemented.  It does do a good job ensuring the key built is unique for the contract.  You key provider will need to also ensure appropriate uniqueness
-:::
+The reflection fallback isn't trim-safe. Instead of annotating every contract, opt in to generated keys
+in your app project:
 
-### Source Generated Contract Keys
-
-Implementing code is so "old school".  We wanted to make it easy to implement contract keys without having to write a ton of code.  Source generators to the rescue!  In our sample shown below, it essentially generates
-all of the `IContractKey` logic, checks for null, ToStings values with format strings, etc saving you time!
-
-```csharp
-
-[Shiny.Mediator.ContractKey("MyRequest_{IntValue}_{Timestamp:MMM_dd_yyyy}_{FullIntValue}")]
-public partial class MyRequest : Shiny.Mediator.IRequest<MyResult> 
-{
-    public double NotUsed { get; set; }  // not used because it is not used within the key
-    public int? IntValue { get; set; }
-    public int FullIntValue { get; set; }
-
-    public DateTime Timestamp { get; set;}
-}
+```xml
+<PropertyGroup>
+    <ShinyMediatorGenerateContractKeys>true</ShinyMediatorGenerateContractKeys>
+</PropertyGroup>
 ```
 
-1. Make the class (or record) partial or the source generator will error
-2. Mark your class/record with the `[ContractKey]` attribute
-3. Optional: specify the format of the key.  Leaving the format blank will assume you want to use all properties within the class
-
-
-:::note
-* String formats are supported just like string literals
-* If the value of a property in the key is null, that portion of the key is replaced with blank
-:::
+The source generator writes a reflection-free `IContractKeySource` for every contract in the project, plus
+every contract your `[MediatorSingleton]` / `[MediatorScoped]` handlers use. `AddMediatorRegistry()`
+registers it. Keys keep the reflection format (`Full.TypeName_Prop_value...`), so existing cache and
+offline entries still match. The reflection fallback is then switched off and trimmed away. See
+[Source Generation → Contract Keys](/mediator/sourcegeneration#reflection-free-keys-for-every-contract-opt-in)
+for the MSBuild properties and what's covered.

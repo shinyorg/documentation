@@ -84,6 +84,29 @@ ChannelAction.Create("open", "View", ChannelActionType.OpenApp);
 ChannelAction.Create("ack", "OK", ChannelActionType.None);
 ```
 
+### Requiring an unlock
+
+An action runs straight from the lock screen by default. For an action with a real-world effect, such as "Close Garage" or "Disarm", set `RequiresUnlock`. The user has to unlock the device before the action reaches your `INotificationDelegate`, and the app is not brought to the foreground. It combines with any action type.
+
+```csharp
+var channel = Channel.Create("garage",
+    ChannelAction.Create("close", "Close Garage", ChannelActionType.None, requiresUnlock: true),
+    ChannelAction.Create("ignore", "Ignore")
+);
+notifications.AddChannel(channel);
+```
+
+| Platform | Behavior |
+|----------|----------|
+| iOS / Mac Catalyst / macOS | `UNNotificationActionOptions.AuthenticationRequired` |
+| Android 12+ (API 31) | `NotificationCompat.Action.Builder.setAuthenticationRequired(true)` |
+| Android 11 and below | Not supported - the action runs without prompting |
+| Windows / Linux | Ignored |
+
+:::caution
+On Android 11 and below the action still runs from a locked device. If it must never run while the device is locked, check for that in your delegate.
+:::
+
 ## Managing Channels
 
 ```csharp

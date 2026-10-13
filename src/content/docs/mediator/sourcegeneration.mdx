@@ -17,7 +17,7 @@ properties.
   <LinkCard title="Handler & Middleware Registration" href="#handler--middleware-registration" description="Auto-register handlers with a single attribute." />
   <LinkCard title="Executers" href="#executers-request--stream-request" description="Reflection-free request & stream dispatch." />
   <LinkCard title="JSON Serialization" href="#json-serialization" description="AOT-strict JsonTypeInfo wiring for your contracts." />
-  <LinkCard title="Contract Keys" href="#contract-keys" description="Generate cache keys from a format string." />
+  <LinkCard title="Contract Keys" href="#contract-keys" description="Generate cache keys from a format string, or reflection-free keys for every contract." />
   <LinkCard title="HTTP Contracts" href="#http-contracts" description="Generate typed clients from OpenAPI." />
   <LinkCard title="Handler Attributes" href="#attribute-usage-handler-methods" description="Read method attributes without reflection." />
   <LinkCard title="ASP.NET Endpoints" href="#aspnet-endpoint-creation" description="Map handlers to minimal-API endpoints." />
@@ -90,6 +90,12 @@ reflection; v5+ solves it with source generation instead — far more performant
 
 The generator produces strongly-typed executers for your requests and stream requests, dispatching
 with `is` type tests rather than `MakeGenericType`.
+
+:::caution[Native AOT]
+Handlers registered by hand (not through `[MediatorSingleton]` / `[MediatorScoped]`) fall back to the
+built-in local executer, which closes a generic wrapper over the request type at runtime. For Native
+AOT, register your handlers with the attributes so the generated executer dispatches them.
+:::
 
 :::tip
 There are **no attributes** to apply here. Executers are produced automatically from the
@@ -218,6 +224,41 @@ type must be `partial`.
 The format string is optional — omit it and a key is composed from all properties. See
 [Contract Keys](/mediator/contractkeys) for how the caching, offline, and stream-replay middleware
 use these keys.
+
+### Reflection-free keys for every contract (opt-in)
+
+Contracts without `IContractKey` or `[ContractKey]` are keyed by reflection over their public
+properties. That isn't trim-safe: a trimmed app gets an `IL2026` warning from
+`DefaultContractKeyProvider`. To drop the reflection, turn on generated keys:
+
+```xml
+<PropertyGroup>
+    <ShinyMediatorGenerateContractKeys>true</ShinyMediatorGenerateContractKeys>
+</PropertyGroup>
+```
+
+The generator emits an internal `GeneratedContractKeySource` (an `IContractKeySource`) covering every
+request, stream request, command, and event declared in the project, plus any contract a
+`[MediatorSingleton]` / `[MediatorScoped]` handler or middleware uses. `AddMediatorRegistry()` registers
+it. The keys use the **same format as the reflection fallback**, so cache and offline entries you
+already stored stay valid. Types that can't be keyed statically are skipped and still go through the
+fallback: generic, abstract, or inaccessible types, types with indexers, and types with non-public
+getters.
+
+Turning it on also sets `ShinyMediatorReflectionContractKeys` to `false` for that project. That sets
+the `Shiny.Mediator.ReflectionContractKeys` runtime switch, so the trimmer removes the reflection path
+and the warning goes away. A contract that nothing covers then throws `InvalidOperationException`
+instead of being keyed by reflection.
+
+| Property                              | Default                                                | Description                                                                 |
+| :------------------------------------ | :----------------------------------------------------- | :-------------------------------------------------------------------------- |
+| `ShinyMediatorGenerateContractKeys`   | `false`                                                | Generates and registers the reflection-free `IContractKeySource`.          |
+| `ShinyMediatorReflectionContractKeys` | `true` (`false` when generated keys are on)            | Set to `true` to keep reflection as a fallback, or to `false` to strip it on its own. |
+
+:::tip
+Set these in the **app** project, because the runtime switch only applies to the executable.
+Generated sources from several projects stack: each library's `AddMediatorRegistry()` adds its own.
+:::
 
 ## HTTP Contracts
 
