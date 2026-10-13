@@ -81,6 +81,7 @@ meaningful operation IDs still yields the clearest names.
 | `ContractPostfix` | No | Text appended to each generated contract name (e.g. `"HttpRequest"`) |
 | `Visible` | No | Set to `"false"` to hide the item from the IDE solution explorer. Recommended when using `Uri` |
 | `GenerateJsonConverters` | No | Set to `"true"` to source-generate JSON converters for AOT scenarios. See [Configuration & AOT](./configuration) |
+| `UseEnumNames` | No | Set to `"true"` to name numeric enum members from the `x-enumNames` (NSwag) or `x-enum-varnames` (AutoRest) extension and add `[Flags]` when `x-enumFlags: true`. Off by default: members are `Value1`, `ValueMinus1`, … See [Type Mapping](#type-mapping) |
 
 ## Example Configuration
 
@@ -102,9 +103,119 @@ meaningful operation IDs still yields the clearest names.
 </ItemGroup>
 ```
 
+## Discriminated (Polymorphic) Models
+
+Schemas with a `discriminator` are generated as a class hierarchy. Nothing needs to be turned on. The generator recognizes the two shapes servers actually emit:
+
+- **Union style** (ASP.NET Core `Microsoft.AspNetCore.OpenApi`, `[JsonPolymorphic]`/`[JsonDerivedType]`): the base declares `oneOf`/`anyOf` of `$ref`s plus a `discriminator`.
+- **Inheritance style** (NSwag, Swashbuckle `UseAllOfForInheritance`): the base declares the `discriminator` and derived schemas use `allOf: [{ $ref: Base }, { ...own properties }]`. Multi-level hierarchies (`Puppy : Dog : Animal`) are supported.
+
+```yaml
+Animal:
+  type: object
+  discriminator:
+    propertyName: kind
+    mapping:
+      dog: '#/components/schemas/Dog'
+  properties:
+    kind: { type: string }
+    name: { type: string }
+Dog:
+  allOf:
+    - $ref: '#/components/schemas/Animal'
+    - type: object
+      properties:
+        breed: { type: string }
+Cat:            # not in the mapping - its discriminator value is its schema name, "Cat"
+  allOf:
+    - $ref: '#/components/schemas/Animal'
+    - type: object
+      properties:
+        lives: { type: integer }
+```
+
+generates
+
+```csharp
+[JsonConverter(typeof(AnimalJsonConverter))]
+public abstract partial class Animal
+{
+    [JsonPropertyName("kind")]
+    public abstract string Kind { get; set; }
+
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+}
+
+public partial class Dog : Animal
+{
+    [JsonPropertyName("kind")]
+    public override string Kind { get; set; } = "dog";
+
+    [JsonPropertyName("breed")]
+    public string? Breed { get; set; }
+}
+
+public partial class Cat : Animal { /* Kind = "Cat", Lives */ }
+```
+
+So `List<Animal>` deserializes into `Dog`/`Cat` instances, and `new Dog()` serializes with `"kind": "dog"`.
+
+- The generated `AnimalJsonConverter` reads the discriminator wherever it sits in the object, then hands the payload to the variant's own `JsonTypeInfo`. It works with plain reflection and with `GenerateJsonConverters="true"` (AOT), where it is registered in the generated resolver.
+- The discriminator is always written as the first property, so a strict reader on the other side (System.Text.Json without `AllowOutOfOrderMetadataProperties`) accepts it.
+- Values missing from `discriminator.mapping` use the schema name, as the OpenAPI spec defines.
+- `$type` (ASP.NET Core's default discriminator) becomes a `Type` property.
+- Bases are always `abstract`. A payload with a missing or unknown discriminator throws a `JsonException`. A mapping entry that points at the base itself is ignored with a `SHINYMED009` warning, as is a schema claimed by two bases (C# has single inheritance).
+
+## Type Mapping
+
+| OpenAPI schema | C# type |
+|----------------|---------|
+| `integer` / `int32` | `int` |
+| `integer` / `int64` | `long` |
+| `number` / `float` | `float` |
+| `number` / `double` (or no format) | `double` |
+| `number` / `decimal` | `decimal` |
+| `string` / `date-time` | `DateTimeOffset` |
+| `string` / `date` | `DateOnly` |
+| `string` / `time` | `TimeOnly` |
+| `string` / `uuid` | `Guid` |
+| `string` / `byte` or `binary` | `byte[]` (base64 in JSON) |
+| `array` | `List<T>` |
+
+### Numeric Enums
+
+Integer enums generate a C# enum serialized as numbers (`JsonNumberEnumConverter`). An enum whose values don't fit in `int` gets `long` as its underlying type. In path, query and header values a numeric enum is sent as its number.
+
+The schema only carries the values, so members are named `Value0`, `Value1`, `ValueMinus1`. Servers built with NSwag or AutoRest also emit the C# names as an extension. Set `UseEnumNames="true"` to use them:
+
+```xml
+<MediatorHttp Include="./specs/orders.json"
+              Namespace="MyApp.Orders"
+              UseEnumNames="true" />
+```
+
+```json
+"OrderStatus": {
+  "type": "integer",
+  "enum": [0, 1, 2],
+  "x-enumNames": ["Pending", "InProgress", "Shipped"]
+}
+```
+
+```csharp
+public enum OrderStatus
+{
+    Pending = 0,
+    InProgress = 1,
+    Shipped = 2,
+}
+```
+
+`x-enum-varnames` (AutoRest) is read when `x-enumNames` is absent, and `x-enumFlags: true` adds `[Flags]`. If the name list doesn't match the values one-to-one, the generator falls back to `Value{n}`. The switch is off by default because turning it on renames the members of any enum your spec already annotates.
+
 ## Notes and Limitations
 
 - When using the `Uri` attribute, you must still set the `Include` value to satisfy the MSBuild ItemGroup requirements. Use `Visible="false"` to hide it from the IDE solution explorer.
-- There are scenarios not yet supported, such as discriminated types. These are being evaluated for future implementation.
 - The `OperationId` is used to derive the contract class name when present; otherwise the name is derived from the HTTP method and path segments (see the note under [Overview](#overview)). Meaningful operation IDs still produce the clearest names.
 - Response and request-body schemas that are defined inline (an anonymous `object` rather than a `$ref` to a named component schema) are given a synthesized, strongly-typed contract (e.g. `GetUsersResponse`) instead of falling back to a weakly-typed `object`.

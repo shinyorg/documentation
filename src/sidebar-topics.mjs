@@ -1194,8 +1194,8 @@ export const sidebarTopics = [
         items:[
           { label: 'ColorPicker', link: 'controls/colorpicker/', dateCreated: '2026-04-22', dateUpdated: '2026-04-22', jumpTo: true },
           { label: 'FontPicker', link: 'controls/fontpicker/', dateCreated: '2026-04-25', dateUpdated: '2026-04-25', jumpTo: true },
-          { label: 'Slider', link: 'controls/slider/', dateCreated: '2026-05-04', dateUpdated: '2026-05-04', jumpTo: true },
-          { label: 'RangeSlider', link: 'controls/rangeslider/', dateCreated: '2026-07-07', dateUpdated: '2026-07-07', jumpTo: true },
+          { label: 'Slider', link: 'controls/slider/', dateCreated: '2026-05-04', dateUpdated: '2026-10-13', jumpTo: true },
+          { label: 'RangeSlider', link: 'controls/rangeslider/', dateCreated: '2026-07-07', dateUpdated: '2026-10-13', jumpTo: true },
           { label: 'Markdown', link: 'controls/markdown/', dateCreated: '2026-04-15', dateUpdated: '2026-04-15', jumpTo: true },
           { label: 'SkeletonView', link: 'controls/skeleton/', dateCreated: '2026-05-29', dateUpdated: '2026-05-29', jumpTo: true },
           { label: 'Splash Screen', link: 'controls/splashscreen/', dateCreated: '2026-08-02', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-07' },
