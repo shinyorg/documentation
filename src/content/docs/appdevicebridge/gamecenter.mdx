@@ -1,0 +1,114 @@
+---
+title: Game Center
+description: Apple Game Center and Google Play Games for a Shiny.AppDeviceBridge web app — sign-in, achievements, leaderboards, friends and the services' own UI from the page, with progress queued on the device while offline
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.GameCenter" />
+
+The game center bridge gives the page the platform's game service: **Apple Game Center** on iOS, Mac Catalyst and
+macOS, and **Google Play Games Services v2** on Android. It's built on [Shiny.GameCenter](/client/gamecenter/). Unlocks,
+progress and scores are recorded on the device first and sent once the player is signed in and online, so a page can
+record them offline without retrying.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, Mac Catalyst, macOS | GameKit |
+| Android | Play Games Services v2 |
+| Windows, Linux | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.GameCenter
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddGameCenterBridge(o => o
+        .AddAchievement("first-win", appleId: "com.acme.firstwin", googleId: "CgkI…")
+        .AddAchievement("ten-wins", appleId: "com.acme.tenwins", googleId: "CgkI…", totalSteps: 10)
+        .AddLeaderboard("high-score", appleId: "com.acme.highscore", googleId: "CgkI…")
+    ),
+    webApp => { /* … */ }
+);
+```
+
+The page names achievements and leaderboards by these keys, so it never carries App Store Connect or Play Console ids.
+A key that isn't registered goes to the service as a platform id. Incremental achievements must be registered with
+the step count set in the Play Console, because Apple counts progress as a percentage and the device converts it. An app
+that already calls `services.AddGameCenter(…)` keeps its registration, and the options passed to the bridge are not used.
+
+Platform setup is Shiny.GameCenter's: the Game Center entitlement and capability on Apple, and the Play Games
+`APP_ID` and signing-key SHA-1s on Android. See [Shiny.GameCenter](/client/gamecenter/).
+
+## From the page
+
+```ts
+import { GameCenterBridge } from "@shinyorg/appdevicebridge";
+
+const games = new GameCenterBridge();
+
+const { player } = await games.signIn();          // null when the player declines
+await games.unlock("first-win");
+await games.setProgress("ten-wins", { steps: 4 }); // absolute, never a delta
+await games.submitScore("high-score", { score: 1200 });
+
+const top = await games.getScores("high-score", { scope: "Friends", timeScope: "Week", maxResults: 10 });
+await games.showLeaderboard({ leaderboardKey: "high-score" });
+```
+
+In Blazor, register `AddGameCenterBridgeClient()` and inject `IGameCenterBridge`.
+
+## Offline progress
+
+`unlock`, `progress`, `increment`, `reveal` and `scores` never fail because the player is offline or signed out. They
+are stored on the device, kept across restarts, and sent after sign-in or when connectivity returns. Progress is an
+absolute step count, so a retry never counts twice, and progress never goes backwards. `GET games` reports how many
+items are still waiting in `pendingCount`; `POST games/flush` sends them now and answers the new status.
+
+Reading — achievements, scores and friends — needs a signed-in player and answers `401 not_authenticated` otherwise.
+
+## Sign-in and the player
+
+Shiny signs the player in silently at launch. `POST games/signin` shows the service's sign-in UI when it's needed and
+answers `{ player }`, which is `null` when the player declines. On Apple, after repeated cancels Game Center stops
+offering its sheet, and the player has to sign in from Settings. `games.player` fires whenever the player signs in,
+signs out or switches accounts.
+
+## Friends
+
+`GET games/friends` asks for consent the first time. Apple shows a one-time prompt, and needs
+`NSGKFriendListUsageDescription` in Info.plist. Google shows a dialog and answers `ConsentRequested`: ask again once the
+player is back in the app.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `401` | `not_authenticated` | No player is signed in, for a read |
+| `404` | `invalid_id` | The service doesn't know the achievement or leaderboard |
+| `409` | `no_user_interface` | No window to show the service's UI in |
+| `503` | `network`, `unavailable`, `not_configured` | The service can't be reached, isn't on the device, or the app isn't set up for it |
+| `502` | `game_service_failed` | Anything else |
+
+## Requests
+
+<BridgeApi bridges={["GameCenterBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["GameCenterBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["GameCenterBridge"]} show="types" />
+
+## Security
+
+Like every bridge, `/_bridge/games` is behind the bridge policy: callers on this device only, plus the launch session.
+See [Security](/appdevicebridge/security/).

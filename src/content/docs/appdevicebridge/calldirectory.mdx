@@ -1,0 +1,110 @@
+---
+title: Call Directory
+description: Call blocking and caller identification for a Shiny.AppDeviceBridge web app — the page keeps the list of numbers to block, label or allow, applied by iOS's Call Directory extension and Android's call screening
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.CallDirectory" />
+
+The call directory bridge lets the page block calls and label callers from a list of numbers it owns. It's built on
+[Shiny.Mobile.CallDirectory](/client/calldirectory/), which stores the list in SQLite on the device. iOS loads it
+through a Call Directory extension that the build generates, with no Xcode project, and Android checks every incoming
+call against it.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS | A Call Directory extension (CallKit) |
+| Android 10+ | `CallScreeningService`, with the app holding the call screening role |
+| Mac Catalyst, macOS, Windows, Linux | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.CallDirectory
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddCallDirectoryBridge(o => o.DefaultCountryCode = 1),
+    webApp => { /* … */ }
+);
+```
+
+On iOS, the app's project file also builds the extension:
+
+```xml
+<PropertyGroup>
+  <ShinyCallDirectoryExtension>true</ShinyCallDirectoryExtension>
+  <ShinyCallDirectoryAppGroup>group.com.acme.app</ShinyCallDirectoryAppGroup>
+</PropertyGroup>
+```
+
+`AddCallDirectoryBridge(o => …)` takes Shiny's `CallDirectoryOptions`: the default country code, and on Android whether
+to block every unlisted caller and whether to post a caller-ID notification. An app that already calls
+`services.AddCallDirectory(…)` keeps its registration. See [Shiny.Mobile.CallDirectory](/client/calldirectory/).
+
+## From the page
+
+```ts
+import { CallDirectoryBridge } from "@shinyorg/appdevicebridge";
+
+const calls = new CallDirectoryBridge();
+
+const { phoneNumber } = await calls.normalize({ number: "+1 (800) 555-0100" });   // 18005550100
+await calls.set({ entries: [
+    { phoneNumber, label: "Acme Support", type: "Identify" },
+    { phoneNumber: 18005550199, label: null, type: "Block" }
+] });
+
+const { result } = await calls.reload();
+if (result === "ExtensionDisabled")
+    await calls.requestAccess();   // iOS: opens Settings
+```
+
+In Blazor, register `AddCallDirectoryBridgeClient()` and inject `ICallDirectoryBridge`.
+
+## Entries
+
+An entry is `{ phoneNumber, label, type }`. `phoneNumber` is the country code and digits with no `+` or formatting, such
+as `18005550100`; `POST calldirectory/normalize` turns a number as people write it into that form. `type` is:
+
+| Type | What happens |
+| --- | --- |
+| `Block` | The call is blocked. |
+| `Identify` | The call rings with `label` as the caller ID. On Android, where another app can't change the dialer's caller ID, a notification shows the label while it rings. |
+| `Allow` | Android: the call always rings, even when unlisted callers are blocked. iOS has no allow list and stores it as `Identify`. |
+
+`PUT calldirectory/entries` adds or replaces entries, `POST calldirectory/entries/remove` removes numbers,
+`POST calldirectory/entries/replace` swaps the whole list in one transaction (for a sync from your server), and
+`DELETE calldirectory/entries` clears it.
+
+## Reloading
+
+Edits are stored straight away, but iOS only sees them when the extension loads the list, which
+`POST calldirectory/reload` asks for. Make a batch of edits, then reload once. The result says how the load went:
+`Success`, `ExtensionDisabled` (the user hasn't turned it on), `CurrentlyLoading`, `MaximumEntriesExceeded`, and so on.
+Android reads the list on every call, so there a reload only reports whether screening is on.
+
+## Access
+
+iOS has no permission prompt: the user turns the app on under Settings › Apps › Phone › Call Blocking & Identification.
+`POST calldirectory/access` opens Settings, as close to that page as iOS allows, and answers the current state, so check
+`GET calldirectory` again when the app comes back to the foreground. On Android it asks for the call screening role.
+
+## Requests
+
+<BridgeApi bridges={["CallDirectoryBridge"]} show="requests" />
+
+## Types
+
+<BridgeApi bridges={["CallDirectoryBridge"]} show="types" />
+
+## Security
+
+Blocking calls is a device-level effect, so the bridge is behind the bridge policy like every other: callers on this
+device only, plus the launch session. Entries are validated (a number of at most 15 digits, a label of at most 256
+characters) before they reach the store. See [Security](/appdevicebridge/security/).
