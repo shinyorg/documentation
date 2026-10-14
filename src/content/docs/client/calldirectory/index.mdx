@@ -1,30 +1,35 @@
 ---
 title: Call Directory | Getting Started
-description: Block and identify incoming calls on iOS from a list your app owns - a Call Directory extension built without an Xcode project
+description: Block and identify incoming calls on iOS and Android from a list your app owns - a Call Directory extension built without an Xcode project, and an Android call screening service
 ---
 import GitHubStars from '/src/components/GitHubStars.astro';
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 import AiSkill from '/src/components/AiSkill.astro';
 
-Block calls, or show your own caller ID for them, from a list of phone numbers your app keeps — the iOS
-**Call Directory** (CallKit). The app writes the list; iOS reads it through a Call Directory app extension
-and applies it to every incoming call, even when your app is not running. The package builds that extension
-for you during `dotnet build`: there is no Xcode project, Swift or `Info.plist` editing to do.
+Block calls, or show your own caller ID for them, from a list of phone numbers your app keeps. The app writes
+the list once, through one API, and the platform applies it to every incoming call, even when your app is not
+running:
+
+- **iOS** - the CallKit **Call Directory**. iOS reads the list through a Call Directory app extension, which the
+  package builds for you during `dotnet build`: no Xcode project, Swift or `Info.plist` editing.
+- **Android** - the **call screening role** (Android 10+). A `CallScreeningService` that ships in the package
+  checks every incoming call against the list.
 
 | | |
 |---------|---------|
 | GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
 | Downloads | <NugetDownloads name="Shiny.Mobile.CallDirectory" /> |
 
-<PlatformSupport os={["ios"]} />
+<PlatformSupport os={["ios", "android"]} />
 
 ## Platform support
 
 | Platform | What you get |
 |----------|--------------|
 | iOS 15+ | `CallDirectoryManager`. Blocking and caller identification through a Call Directory extension the package builds into your app |
-| Everywhere else | `NoOpCallDirectoryManager`. `IsSupported` is false and every call is a safe no-op |
+| Android 10+ (API 29) | `CallDirectoryManager`. Blocking, an allow list, optional blocking of unlisted callers, and a caller ID notification, through `ShinyCallScreeningService` while the app holds the call screening role |
+| Android 8-9, and everywhere else | `NoOpCallDirectoryManager` behaviour. `IsSupported` is false and every call is a safe no-op |
 
 Shared view models need no `#if`: branch on `IsSupported` only when the UI should hide the feature.
 
@@ -34,7 +39,7 @@ device. The store - `Set` / `Remove` / `Get` / `Count` - works on the simulator,
 exercised there.
 :::
 
-## Setup
+## iOS setup
 
 ### 1. Project file
 
@@ -79,7 +84,16 @@ On a device, **both** bundle ids need a provisioning profile with the **App Grou
 
 The build fails with a clear error naming the extension's bundle id when no profile matches.
 
-### 3. Register
+## Android setup
+
+There is nothing to add to the project: `ShinyCallScreeningService` is declared in the package and merges into
+your manifest. To show caller ID notifications on Android 13+, declare and request `POST_NOTIFICATIONS`:
+
+```xml
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+```
+
+## Register
 
 ```csharp
 using Shiny;
@@ -87,22 +101,35 @@ using Shiny;
 builder.Services.AddCallDirectory();
 ```
 
-`AddCallDirectory(o => ...)` takes `CallDirectoryOptions` for the rare case the build-stamped values need
-overriding: `AppGroup` and `ExtensionBundleId`.
+`AddCallDirectory(o => ...)` takes `CallDirectoryOptions`:
+
+| Option | Platform | Default | Purpose |
+|--------|----------|---------|---------|
+| `AppGroup` | iOS | from the build | Override the app group stamped into the extension |
+| `ExtensionBundleId` | iOS | the bundled extension | Override the extension bundle id |
+| `DefaultCountryCode` | Android | `1` | Country code for incoming numbers that arrive in national format |
+| `BlockUnlistedCalls` | Android | `false` | Block every caller not in the list, including withheld numbers. `Allow` and `Identify` entries still ring |
+| `ShowCallerIdNotification` | Android | `true` | Post a notification with the entry's label while an `Identify` number rings |
 
 ## Turning it on
 
-iOS has no permission prompt for call blocking. The user turns the extension on in **Settings > Apps > Phone >
-Call Blocking & Identification**, and until they do, `Reload` returns `ExtensionDisabled`.
-
 ```csharp
 var access = await directory.GetCurrentAccess();   // Available, Disabled, NotSupported or Unknown
-if (access == AccessState.Disabled)
-{
-    // opens Settings (best effort - iOS 26 does not land on the exact page); check again on resume
-    await directory.RequestAccess();
-}
+if (access != AccessState.Available)
+    access = await directory.RequestAccess();
 ```
+
+- **iOS** has no permission prompt. The user turns the extension on in **Settings > Apps > Phone > Call
+  Blocking & Identification**; `RequestAccess` opens Settings (best effort - iOS 26 does not land on the exact
+  page) and returns the current state, so check again when the app resumes. Until then `Reload` returns
+  `ExtensionDisabled`.
+- **Android** shows the system "default caller ID & spam app" dialog for the call screening role and returns
+  `Available` once the app holds it, or `Denied`. Android stops showing the dialog after repeated refusals;
+  the user can still pick the app in **Settings > Apps > Default apps > Caller ID & spam app**. Only one app
+  holds the role at a time.
+
+On Android the dialog's result comes back through Shiny's activity result forwarding, which Shiny.Hosting.Maui
+wires up automatically; with Shiny.Hosting.Native, the activity must derive from `ShinyAndroidActivity`.
 
 ## Managing the list
 
@@ -123,7 +150,10 @@ Each entry is a block, an identification, or an allow:
 |--------------------------|--------|
 | `Block` | Calls from the number are blocked |
 | `Identify` | Calls ring with `Label` as the caller ID |
-| `Allow` | Reserved for platforms with an allow list. iOS has none, so it is loaded as `Identify` - a label, with no guarantee the call gets past another blocker or Silence Unknown Callers |
+| `Allow` | Android: always rings, even with `BlockUnlistedCalls`. iOS has no allow list, so it is loaded as `Identify` - a label, with no guarantee the call gets past another blocker or Silence Unknown Callers |
+
+On Android, an app cannot change the caller ID the dialer shows, so `Identify` posts a notification with the
+label while the call rings (`ShowCallerIdNotification`). An `Identify` entry with no label simply rings.
 
 ```csharp
 public class SpamListService(ICallDirectoryManager directory)
@@ -168,7 +198,8 @@ public class SpamListService(ICallDirectoryManager directory)
 | `Reload()` | Asks iOS to load the extension, which applies the list |
 
 **Edits do not reach iOS until `Reload()`.** Batch your edits and reload once: every reload is a full extension
-launch.
+launch. Android checks the list on every call, so edits apply immediately and `Reload()` only reports whether
+screening is active - call it anyway so the same code works on both.
 
 ### Reload results
 
@@ -176,7 +207,7 @@ launch.
 |-----------------------------|---------|
 | `Success` | iOS loaded the list |
 | `NotSupported` | The platform has no call directory |
-| `ExtensionDisabled` | The user has not turned the extension on in Settings |
+| `ExtensionDisabled` | iOS: the user has not turned the extension on in Settings. Android: the app does not hold the call screening role |
 | `ExtensionNotFound` | The app has no extension - the build did not include it |
 | `CurrentlyLoading` | A load is already running; try again shortly |
 | `MaximumEntriesExceeded` | The list is larger than iOS accepts |
@@ -184,6 +215,16 @@ launch.
 | `Failed` | Anything else. The CallKit error and the extension's own error are logged |
 
 ## How it works
+
+### Android
+
+`ShinyCallScreeningService` is called for every incoming call while the app holds the call screening role. It
+normalizes the caller's number (`DefaultCountryCode` for national-format numbers), looks it up in the list and
+answers within Android's 5 second limit: blocked calls are rejected without a notification and still appear in
+the call log; everything else rings. Outgoing calls are never touched, and any failure lets the call through - a
+broken list never blocks the user's phone.
+
+### iOS
 
 - **One SQLite file, one writer.** The list lives in `shiny_calldirectory.db` in the app group container. The
   app is the only writer; the extension only ever reads it. Both use the SQLite that ships with iOS (no
