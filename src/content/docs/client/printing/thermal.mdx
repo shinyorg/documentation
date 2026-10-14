@@ -1,6 +1,6 @@
 ---
 title: Printing | Thermal & Receipt Printers
-description: Build an ESC/POS receipt with a fluent PrintDocument and stream it to a thermal printer over Bluetooth LE or WiFi with Shiny.Printers
+description: Build an ESC/POS receipt with a fluent PrintDocument, stream it to a thermal printer over Bluetooth LE or WiFi, and read paper and cover status back with Shiny.Printers
 ---
 
 Thermal printers have no driver. The app decides what goes on the paper, an encoder turns that into the printer's
@@ -190,6 +190,69 @@ var printer = await networkManager.Connect(found);
   when you know better: `found with { Capabilities = PrinterCapabilities.Paper58mm }`.
 - `NetworkPrinterConfig.ConnectTimeout` defaults to 10 seconds; a timeout throws `TimeoutException`.
 - Dispose the printer to close the socket.
+
+### Printers that don't advertise
+
+Plenty of network receipt printers (most Xprinter, Munbyn and other generic boards) never advertise over mDNS.
+`Sweep()` finds them by trying port 9100 on every host of the local subnet. It completes when the sweep is done -
+a /24 takes a second or two:
+
+```csharp
+var printers = await networkScanner.Sweep().ToList();
+
+// or both at once - an mDNS printer usually answers the sweep too, so de-duplicate on host and port
+var all = await networkScanner.Scan()
+    .Take(TimeSpan.FromSeconds(5))
+    .Merge(networkScanner.Sweep())
+    .Distinct(x => $"{x.Host}:{x.Port}")
+    .ToList();
+```
+
+- With no `Networks` set, it sweeps each active IPv4 interface's subnet and skips the device's own address. A
+  subnet wider than a /24 is narrowed to the /24 around the device, so a corporate /16 is never flooded with connects.
+- A swept printer has no name: `Name` is its IP address, `ServiceType` is empty and `Method` is
+  `NetworkPrinterDiscoveryMethod.PortSweep`.
+- Anything listening on port 9100 answers, including laser printers.
+- Many receipt printers accept one connection at a time, so one that is printing for another client is missed.
+- `NetworkPrinterSweepConfig` sets the `Ports`, explicit `Networks`, `ProbeTimeout` (500ms), `MaxConcurrency` (64) and
+  the `Capabilities` given to each printer found.
+- On iOS and Mac Catalyst the sweep needs the same Local Network permission as the browse.
+
+## Printer status
+
+Over TCP the printer can answer back. `GetStatus()` sends the ESC/POS real-time status queries (`DLE EOT 1-4`), which
+the printer answers even while it is offline, so it can tell you why it stopped:
+
+```csharp
+if (printer.SupportsStatus)
+{
+    var status = await printer.GetStatus();
+    if (!status.CanPrint)
+    {
+        if (status.IsPaperOut) ShowAlert("Load a new roll");
+        else if (status.IsCoverOpen) ShowAlert("Close the printer cover");
+        else if (status.HasError) ShowAlert("The printer needs attention");
+    }
+    else if (status.IsPaperNearEnd)
+    {
+        ShowAlert("Paper is running low");
+    }
+}
+```
+
+| `PrinterStatus` | |
+|---|---|
+| `IsOnline` | False when the printer has taken itself offline. |
+| `IsCoverOpen`, `IsPaperOut`, `IsPaperNearEnd` | Cover and roll sensors. Not every printer has a near-end sensor. |
+| `IsCutterError`, `HasUnrecoverableError`, `HasAutoRecoverableError` | Cutter jam; needs a power cycle; clears itself (e.g. head overheat). |
+| `IsDrawerSensorHigh` | Cash-drawer connector pin 3. Whether high means open depends on the drawer. |
+| `CanPrint`, `HasError` | Rolled up from the flags above. |
+
+- `SupportsStatus` is true when both the transport can read replies and the protocol can ask: ESC/POS over TCP today.
+  BLE and the browser transports are write-only and return false; `GetStatus()` then throws `NotSupportedException`.
+- A printer that does not implement `DLE EOT` never answers: `GetStatus()` throws `TimeoutException` after
+  `NetworkPrinterConfig.StatusTimeout` (3 seconds). A reply that isn't a status byte throws `InvalidDataException`.
+- A status query waits for any print job still being written to the socket, so it never lands in the middle of one.
 
 ## Disconnecting
 

@@ -469,6 +469,14 @@ export const sidebarTopics = [
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
+      {
+        label: 'Call Directory',
+        jumpTo: true,
+        items:[
+          { label: 'Getting Started', link: 'client/calldirectory/', dateCreated: '2026-10-14', dateUpdated: '2026-10-14' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
     ]
   },
   {

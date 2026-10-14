@@ -1,0 +1,199 @@
+---
+title: Call Directory | Getting Started
+description: Block and identify incoming calls on iOS from a list your app owns - a Call Directory extension built without an Xcode project
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Block calls, or show your own caller ID for them, from a list of phone numbers your app keeps — the iOS
+**Call Directory** (CallKit). The app writes the list; iOS reads it through a Call Directory app extension
+and applies it to every incoming call, even when your app is not running. The package builds that extension
+for you during `dotnet build`: there is no Xcode project, Swift or `Info.plist` editing to do.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Mobile.CallDirectory" /> |
+
+<PlatformSupport os={["ios"]} />
+
+## Platform support
+
+| Platform | What you get |
+|----------|--------------|
+| iOS 15+ | `CallDirectoryManager`. Blocking and caller identification through a Call Directory extension the package builds into your app |
+| Everywhere else | `NoOpCallDirectoryManager`. `IsSupported` is false and every call is a safe no-op |
+
+Shared view models need no `#if`: branch on `IsSupported` only when the UI should hide the feature.
+
+:::caution[Test on a device]
+On the iOS simulator CallKit reports `Reload` as `Failed`, so blocking and caller ID can only be verified on a
+device. The store - `Set` / `Remove` / `Get` / `Count` - works on the simulator, so app logic can still be
+exercised there.
+:::
+
+## Setup
+
+### 1. Project file
+
+Reference `Shiny.Mobile.CallDirectory` and turn the extension on. The app group is required: the app and the
+extension share the list through it.
+
+```xml
+<PropertyGroup>
+    <ShinyCallDirectoryExtension>true</ShinyCallDirectoryExtension>
+    <ShinyCallDirectoryAppGroup>group.com.mycompany.myapp</ShinyCallDirectoryAppGroup>
+</PropertyGroup>
+```
+
+The build then:
+
+1. Compiles the extension with `swiftc` into `PlugIns/ShinyCallDirectory.appex`.
+2. Adds the app group entitlement to both the app and the extension.
+3. Stamps the app group into the extension's `Info.plist`. At runtime the C# manager reads the bundle id and
+   app group from that bundle, so the app and the extension can never point at different stores.
+4. Signs the extension with its own provisioning profile on device builds.
+
+| Property | Default | Purpose |
+|----------|---------|---------|
+| `ShinyCallDirectoryExtension` | `false` | Build the extension |
+| `ShinyCallDirectoryAppGroup` | *(required)* | The app group shared by the app and the extension |
+| `ShinyCallDirectoryBundleId` | `$(ApplicationId).CallDirectory` | The extension's bundle id |
+| `ShinyCallDirectoryDisplayName` | `$(ApplicationTitle)` | The name shown in Settings > Apps > Phone > Call Blocking & Identification |
+| `ShinyCallDirectoryCodesignProvision` | best installed match | The extension's provisioning profile, by name or UUID |
+| `ShinyCallDirectoryCodesignEntitlements` | generated | Your own entitlements file for the extension (it must list the app group) |
+| `ShinyCallDirectoryAddAppEntitlement` | `true` | Set `false` when the app group is already in your app's `Entitlements.plist` |
+| `ShinyCallDirectoryMinimumOSVersion` | `SupportedOSPlatformVersion`, at least 15.0 | The extension's deployment target |
+
+The extension is only built on macOS. A build off a Mac (Windows, Hot Restart) gets a warning and an app with no
+extension: `IsSupported` is false and `Reload` reports `ExtensionNotFound`.
+
+### 2. Provisioning (device builds)
+
+On a device, **both** bundle ids need a provisioning profile with the **App Groups** capability and your group:
+
+- the app (`com.mycompany.myapp`)
+- the extension (`com.mycompany.myapp.CallDirectory`, unless you set `ShinyCallDirectoryBundleId`)
+
+The build fails with a clear error naming the extension's bundle id when no profile matches.
+
+### 3. Register
+
+```csharp
+using Shiny;
+
+builder.Services.AddCallDirectory();
+```
+
+`AddCallDirectory(o => ...)` takes `CallDirectoryOptions` for the rare case the build-stamped values need
+overriding: `AppGroup` and `ExtensionBundleId`.
+
+## Turning it on
+
+iOS has no permission prompt for call blocking. The user turns the extension on in **Settings > Apps > Phone >
+Call Blocking & Identification**, and until they do, `Reload` returns `ExtensionDisabled`.
+
+```csharp
+var access = await directory.GetCurrentAccess();   // Available, Disabled, NotSupported or Unknown
+if (access == AccessState.Disabled)
+{
+    // opens Settings (best effort - iOS 26 does not land on the exact page); check again on resume
+    await directory.RequestAccess();
+}
+```
+
+## Managing the list
+
+Numbers are stored as a `long` holding the country code and digits, with no `+` or formatting: `18005550100`.
+`PhoneNumbers.ToCallDirectory` converts what a person typed:
+
+```csharp
+using Shiny.CallDirectory;
+
+PhoneNumbers.ToCallDirectory("+1 (800) 555-0100");      // 18005550100
+PhoneNumbers.ToCallDirectory("800-555-0100");           // 18005550100 - default country code 1
+PhoneNumbers.ToCallDirectory("020 7946 0018", 44);      // 442079460018 - national trunk 0 dropped
+```
+
+Each entry is a block, an identification, or an allow:
+
+| `CallDirectoryEntryType` | Effect |
+|--------------------------|--------|
+| `Block` | Calls from the number are blocked |
+| `Identify` | Calls ring with `Label` as the caller ID |
+| `Allow` | Reserved for platforms with an allow list. iOS has none, so it is loaded as `Identify` - a label, with no guarantee the call gets past another blocker or Silence Unknown Callers |
+
+```csharp
+public class SpamListService(ICallDirectoryManager directory)
+{
+    // a full list from your server: one transaction, and the next load replaces everything iOS holds
+    public async Task Sync(IEnumerable<SpamNumber> fromServer)
+    {
+        await directory.ReplaceAll(fromServer.Select(x => new CallDirectoryEntry(
+            x.Number,
+            x.Label,
+            x.IsSpam ? CallDirectoryEntryType.Block : CallDirectoryEntryType.Identify
+        )));
+        await this.Apply();
+    }
+
+    // small edits: only what changed is sent to iOS on the next load
+    public async Task Edit()
+    {
+        await directory.Set([new(18005550100, "Shiny Support")]);
+        await directory.Remove([18005550101]);
+        await this.Apply();
+    }
+
+    async Task Apply()
+    {
+        var result = await directory.Reload();
+        if (result != CallDirectoryReloadResult.Success)
+        {
+            // ExtensionDisabled, CurrentlyLoading, MaximumEntriesExceeded, ... - see below
+        }
+    }
+}
+```
+
+| Method | What it does |
+|--------|--------------|
+| `Set(entries)` | Adds or replaces entries. Re-sending an unchanged entry costs nothing |
+| `Remove(numbers)` | Removes entries. Numbers that are not stored are ignored |
+| `ReplaceAll(entries)` | Replaces the whole list in one transaction and makes the next load a full one |
+| `Clear()` | Removes every entry |
+| `Get(number)` / `Count()` | Reads the stored list |
+| `Reload()` | Asks iOS to load the extension, which applies the list |
+
+**Edits do not reach iOS until `Reload()`.** Batch your edits and reload once: every reload is a full extension
+launch.
+
+### Reload results
+
+| `CallDirectoryReloadResult` | Meaning |
+|-----------------------------|---------|
+| `Success` | iOS loaded the list |
+| `NotSupported` | The platform has no call directory |
+| `ExtensionDisabled` | The user has not turned the extension on in Settings |
+| `ExtensionNotFound` | The app has no extension - the build did not include it |
+| `CurrentlyLoading` | A load is already running; try again shortly |
+| `MaximumEntriesExceeded` | The list is larger than iOS accepts |
+| `LoadingInterrupted` | The extension ran out of memory or time |
+| `Failed` | Anything else. The CallKit error and the extension's own error are logged |
+
+## How it works
+
+- **One SQLite file, one writer.** The list lives in `shiny_calldirectory.db` in the app group container. The
+  app is the only writer; the extension only ever reads it. Both use the SQLite that ships with iOS (no
+  SQLitePCLRaw bundle), so the package is trim and AOT safe.
+- **Incremental loads.** Every `Set` / `Remove` is logged with what the number was before, so a reload only
+  sends iOS what changed since the last load it accepted. `ReplaceAll` and `Clear` start a new generation, which
+  forces a full load. The extension records what iOS accepted in the app group's defaults, and the app trims the
+  change log up to that point on the next `Reload`.
+- **No lingering locks.** iOS kills a suspended app that holds a lock on a file in a shared container
+  (`0xdead10cc`), so every call opens the database, works in one transaction and closes it.
+- **Off the UI thread.** The store's calls run on a background thread; they are safe to await from a view model.
+
+<AiSkill skillName="shiny-calldirectory" />

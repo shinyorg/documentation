@@ -42,10 +42,10 @@ const announcementConfig = {
   items: [
     {
       id: 'client-v6',
-      title: 'Shiny Client v6',
-      description: 'Easy Live Activities, Game Center, Printing, Geospatial Geofencing, App Store APIs & BLE',
+      title: 'Shiny Client v63',
+      description: 'Easy Live Activities, Game Center, Printing, Geospatial Geofencing, App Store APIs, More Thermal Printer Support, & Call Directory',
       href: '/client/printing',
-      cta: 'Live it up!',
+      cta: 'WOWZA!',
     }, 
     {
       id: 'appdevicebridge-0',
