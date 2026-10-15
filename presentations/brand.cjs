@@ -116,11 +116,11 @@ const SLOGAN = {
   lede:
     'Everything the platform makes hard: Bluetooth, background jobs, push, location, ' +
     'a document database, speech and AI, an HTTP server that runs inside your MAUI app, ' +
-    '70+ UI controls, and plenty more.',
+    '85+ UI controls, and plenty more.',
 
   // The second half of the homepage lede — the value proposition.
   promise:
-    'Thirty-plus libraries that own the platform code, the permissions and the ' +
+    'Fifty-plus libraries that own the platform code, the permissions and the ' +
     'background execution — so your time goes to the app your users actually asked for.',
 
   // Short lines used as eyebrows, pills and footers.

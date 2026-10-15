@@ -6,6 +6,12 @@ import mdx from '@astrojs/mdx';
 import expressiveCode from "astro-expressive-code";
 import starlightSidebarTopics from 'starlight-sidebar-topics';
 import { sidebarTopics, sidebarTopicsOptions, cleanTopicsForStarlight } from './src/sidebar-topics.mjs';
+import { checkBuilderIntegrity } from './src/data/builderIntegrity.ts';
+
+// consts.ts, the Template Builder options and componentTemplateMap.ts must agree - see src/data/builderIntegrity.ts
+const builderErrors = checkBuilderIntegrity();
+if (builderErrors.length > 0)
+  throw new Error(`Builder data is out of sync (${builderErrors.length}):\n  - ${builderErrors.join('\n  - ')}`);
 
 const googleAnalyticsId = 'G-SZKGGX6M5W';
 
@@ -116,6 +122,11 @@ export default defineConfig({
       'import.meta.env.GISCUS': JSON.stringify(giscusConfig),
       // Same deal for the announcement bar — `src/components/Banner.astro`.
       'import.meta.env.ANNOUNCEMENTS': JSON.stringify(announcementConfig),
+    },
+    // Pre-bundle Prism at startup. Discovered lazily, Vite re-optimizes mid-session and the
+    // stale `?v=` hashes 504, so builder islands (LibBuilder/TemplateBuilder) never hydrate.
+    optimizeDeps: {
+      include: ['prismjs', 'prismjs/components/prism-csharp'],
     },
   },
   redirects: {
@@ -468,14 +479,14 @@ export default defineConfig({
         // Default social share image (Open Graph + Twitter). Per-page frontmatter can override.
         // Bump ?v= whenever og-image.png changes — X, Teams, LinkedIn and Slack
         // cache the card by URL, so the same URL keeps serving the old artwork.
-        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png?v=4' } },
-        { tag: 'meta', attrs: { property: 'og:image:secure_url', content: 'https://www.shinylib.net/og-image.png?v=4' } },
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png?v=5' } },
+        { tag: 'meta', attrs: { property: 'og:image:secure_url', content: 'https://www.shinylib.net/og-image.png?v=5' } },
         { tag: 'meta', attrs: { property: 'og:image:type', content: 'image/png' } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
-        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 30+ libraries, 70+ UI controls, AOT trim-clean.' } },
-        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png?v=4' } },
-        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 30+ libraries, 70+ UI controls, AOT trim-clean.' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean.' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png?v=5' } },
+        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean.' } },
         // Adding google analytics
         {
           tag: 'script',

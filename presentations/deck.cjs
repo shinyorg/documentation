@@ -206,8 +206,8 @@ async function build() {
 
     const facts = [
       { v: '40M+', l: 'NuGet downloads', c: LIME },
-      { v: '30+', l: 'libraries', c: GREEN },
-      { v: '70+', l: 'UI controls', c: PURPLE },
+      { v: '50+', l: 'libraries', c: GREEN },
+      { v: '85+', l: 'UI controls', c: PURPLE },
       { v: 'AOT', l: 'trim-clean', c: WHITE },
     ];
     facts.forEach((f, i) => {
@@ -222,7 +222,7 @@ async function build() {
 
     await photo(s, 'tableview/s1.png', { x: 8.55, y: 0.62, w: 2.05, shadow: sh({ blur: 26, offset: 8, opacity: 0.6 }) });
     await photo(s, 'chatview/s1.png', { x: 10.78, y: 1.42, w: 1.85, shadow: sh({ blur: 26, offset: 8, opacity: 0.6 }) });
-    s.addNotes('Shiny is a suite of 30+ independent .NET libraries. The pitch in one line: the platform-specific plumbing every app needs is already written, tested and shipping in production apps with 40M+ NuGet downloads. Everything here runs on .NET 9+, is AOT and trimming clean, and is MIT licensed.');
+    s.addNotes('Shiny is a suite of 50+ independent .NET libraries. The pitch in one line: the platform-specific plumbing every app needs is already written, tested and shipping in production apps with 40M+ NuGet downloads. Everything here runs on .NET 9+, is AOT and trimming clean, and is MIT licensed.');
   }
 
   // 2 ── Why Shiny ────────────────────────────────────────────────────────
@@ -247,7 +247,7 @@ async function build() {
   {
     const s = slide(INK);
     eyebrow(s, 'The catalog');
-    heading(s, 'Thirty-plus packages, nine problem areas', 'Grouped by the problem they solve, not by the platform they run on.');
+    heading(s, 'Fifty-plus packages, nine problem areas', 'Grouped by the problem they solve, not by the platform they run on.');
     await cardGrid(s, [
       { icon: 'FaBook', color: PURPLE, title: 'Foundation', desc: 'Architecture, hosting, Mediator, DI, source generators' },
       { icon: 'FaBluetooth', color: GREEN, title: 'Hardware & Connectivity', desc: 'BLE, GPS, OBD, discovery, Wi-Fi, screen capture' },
@@ -255,7 +255,7 @@ async function build() {
       { icon: 'FaBrain', color: LIME, title: 'AI & Intelligence', desc: 'Conversation, speech, face, voice, documents' },
       { icon: 'FaBell', color: PURPLE, title: 'Background & Delivery', desc: 'Jobs, transfers, local and push notifications' },
       { icon: 'FaRocket', color: GREEN, title: 'MAUI App', desc: 'Shell navigation, hosting, config, permissions' },
-      { icon: 'FaPalette', color: PURPLE, title: 'UI Controls', desc: '70+ controls for MAUI and Blazor, one theme contract' },
+      { icon: 'FaPalette', color: PURPLE, title: 'UI Controls', desc: '85+ controls for MAUI and Blazor, one theme contract' },
       { icon: 'FaDatabase', color: GREEN, title: 'Data & Storage', desc: 'Document DB, spatial, data sync, key/value stores' },
       { icon: 'FaCloud', color: PURPLE, title: 'Server & Cloud', desc: 'Embeddable HTTP server, push dispatch, Aspire' },
     ], { y: 2.3, w: CW, h: 1.45, cols: 3, gapY: 0.28, titleSize: 13.5, descSize: 10.5, chip: 0.4 });
@@ -566,7 +566,7 @@ async function build() {
   }
 
   // 18 ── Divider: Controls ───────────────────────────────────────────────
-  await divider('05', 'UI Controls', '70+ native controls for .NET MAUI and Blazor out of one design system — no WebViews, no per-platform forks.',
+  await divider('05', 'UI Controls', '85+ native controls for .NET MAUI and Blazor out of one design system — no WebViews, no per-platform forks.',
     ['Flagship: TableView, Scheduler, ChatView, DataGrid', 'Office: real .xlsx, .docx and .pptx editing', 'Collections, layout, input and media', 'Status, feedback and desktop controls', 'One shared theme token contract'], 'FaPalette',
     'Section five. The largest single group by package count, and the easiest to demo — the docs site has a live gallery for every control shown here.');
 
@@ -574,7 +574,7 @@ async function build() {
   {
     const s = slide(INK);
     eyebrow(s, 'Section 05 · UI Controls');
-    heading(s, '70+ controls, two hosts, one theme contract', 'Native .NET MAUI and Blazor components out of the same design system.', { subW: 8.0 });
+    heading(s, '85+ controls, two hosts, one theme contract', 'Native .NET MAUI and Blazor components out of the same design system.', { subW: 8.0 });
 
     const groups = [
       ['FaStar', 'Flagship', 'TableView · Scheduler · ChatView · DataGrid · ImageEditor · CameraView', LIME],

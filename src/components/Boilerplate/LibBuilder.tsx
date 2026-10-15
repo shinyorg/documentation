@@ -1,35 +1,20 @@
-import { Data, BLAZOR_COMPATIBLE_IDS, ASPNET_COMPATIBLE_IDS, LINUX_COMPATIBLE_IDS, ASPNET_ONLY_IDS, BLAZOR_ONLY_IDS, ShinyComponents } from '../../consts';
 import { useState } from 'react';
-import NugetList from './Components/NugetList';
-import MauiProgram from './Components/MauiProgram';
-import LinuxProgram from './Components/LinuxProgram';
-import AndroidManifest from './Components/AndroidManifest';
-import AndroidActivity from './Components/AndroidActivity';
-import AppleInfoPlist from './Components/AppleInfoPlist';
-import AppleAppDelegate from './Components/AppleAppDelegate';
-import ProjectFile from './Components/ProjectFile';
-import BlazorProgram from './Components/BlazorProgram';
-import BlazorIndexHtml from './Components/BlazorIndexHtml';
-import AspNetProgram from './Components/AspNetProgram';
-import { Tab, Tabs, TabList, TabPanel } from 'react-tabs';
-import 'react-tabs/style/react-tabs.css';
-import Alert from '../Alert';
-import React from 'react';
-import ApplePrivacy from './Components/ApplePrivacy';
-import WindowsAppxManifest from './Components/WindowsAppxManifest';
 import { mappedKinds, buildSingleLibState, KIND_LABELS } from './componentTemplateMap';
 import { buildProjectFiles, STABLE_GUID } from '../TemplateBuilder/buildProjectFiles';
 import FileTreePreview from '../TemplateBuilder/FileTreePreview';
 import type { TemplateKind } from '../TemplateBuilder/templateFiles';
-
-type AppMode = 'maui' | 'blazor' | 'aspnet' | 'linux';
 
 interface Props {
     componentName: string;
 }
 
 /** Lib Builder driven by the Template Builder engine: previews the files a single library adds/changes. */
-const MappedLibBuilder = ({ componentName, kinds }: { componentName: string; kinds: TemplateKind[] }) => {
+const LibBuilder = ({ componentName }: Props) => {
+  const kinds = mappedKinds(componentName);
+  // scripts/check-builders.mjs fails the build first; this guards a page using an id it doesn't know
+  if (kinds.length === 0)
+    throw new Error(`LibBuilder: '${componentName}' has no entry in componentTemplateMap.ts`);
+
   const [kind, setKind] = useState<TemplateKind>(kinds[0]);
   const files = buildProjectFiles(kind, buildSingleLibState(componentName, kind), { applicationIdGuid: STABLE_GUID });
 
@@ -51,197 +36,6 @@ const MappedLibBuilder = ({ componentName, kinds }: { componentName: string; kin
       <div className="app-builder__output">
         <FileTreePreview files={files} rootName="MyApp" setupOnly />
       </div>
-    </div>
-  );
-};
-
-const LibBuilder = (props: Props) => {
-  const templateKinds = mappedKinds(props.componentName);
-  if (templateKinds.length > 0) {
-    return <MappedLibBuilder componentName={props.componentName} kinds={templateKinds} />;
-  }
-  return <LegacyLibBuilder {...props} />;
-};
-
-const LegacyLibBuilder = (props: Props) => {
-  const components = ShinyComponents.filter(x => x.id === props.componentName);
-  const { usesPush, usesActivity, usingForeground, usesWindows, hasPlatformConfig } = Data;
-  const isBlazorCompatible = BLAZOR_COMPATIBLE_IDS.includes(props.componentName);
-  const isAspNetCompatible = ASPNET_COMPATIBLE_IDS.includes(props.componentName);
-  const isLinuxCompatible = LINUX_COMPATIBLE_IDS.includes(props.componentName);
-  const isMauiCompatible = !ASPNET_ONLY_IDS.includes(props.componentName) && !BLAZOR_ONLY_IDS.includes(props.componentName);
-  const modeCount = [isMauiCompatible, isBlazorCompatible, isAspNetCompatible, isLinuxCompatible].filter(Boolean).length;
-  const [mode, setMode] = useState<AppMode>(
-    isMauiCompatible ? 'maui' : isBlazorCompatible ? 'blazor' : isAspNetCompatible ? 'aspnet' : 'linux'
-  );
-
-  const isMaui = mode === 'maui';
-  const showPlatformConfig = hasPlatformConfig(components);
-  const hasMediator = props.componentName === 'mediator';
-  const hasBlazorScripts = hasMediator;
-
-  const renderTabs = () => {
-    if (mode === 'blazor') {
-      return (
-        <Tabs className="app-builder__tabs">
-          <TabList className="app-builder__tablist">
-            <Tab>NuGet Packages</Tab>
-            <Tab>Project File</Tab>
-            <Tab>Program.cs</Tab>
-            {hasBlazorScripts && <Tab>index.html</Tab>}
-          </TabList>
-          <TabPanel>
-            <NugetList components={components} mode="blazor" />
-          </TabPanel>
-          <TabPanel>
-            <ProjectFile components={components} mode="blazor" />
-          </TabPanel>
-          <TabPanel>
-            <BlazorProgram components={components} />
-          </TabPanel>
-          {hasBlazorScripts &&
-            <TabPanel><BlazorIndexHtml components={components} /></TabPanel>
-          }
-        </Tabs>
-      );
-    }
-    if (mode === 'aspnet') {
-      return (
-        <Tabs className="app-builder__tabs">
-          <TabList className="app-builder__tablist">
-            <Tab>NuGet Packages</Tab>
-            <Tab>Project File</Tab>
-            <Tab>Program.cs</Tab>
-          </TabList>
-          <TabPanel>
-            <NugetList components={components} mode="aspnet" />
-          </TabPanel>
-          <TabPanel>
-            <ProjectFile components={components} mode="aspnet" />
-          </TabPanel>
-          <TabPanel>
-            <AspNetProgram components={components} />
-          </TabPanel>
-        </Tabs>
-      );
-    }
-    if (mode === 'linux') {
-      return (
-        <Tabs className="app-builder__tabs">
-          <TabList className="app-builder__tablist">
-            <Tab>NuGet Packages</Tab>
-            <Tab>Project File</Tab>
-            <Tab>MauiProgram.cs</Tab>
-          </TabList>
-          <TabPanel>
-            <NugetList components={components} mode="linux" />
-          </TabPanel>
-          <TabPanel>
-            <ProjectFile components={components} mode="linux" />
-          </TabPanel>
-          <TabPanel>
-            <LinuxProgram components={components} />
-          </TabPanel>
-        </Tabs>
-      );
-    }
-    return (
-      <Tabs className="app-builder__tabs">
-        <TabList className="app-builder__tablist">
-          <Tab>NuGet Packages</Tab>
-          <Tab>Project File</Tab>
-          <Tab>MauiProgram.cs</Tab>
-          {showPlatformConfig && <Tab>AndroidManifest.xml</Tab>}
-          {usesActivity(components) && <Tab>Android Activity</Tab>}
-          {showPlatformConfig && <Tab>Info.plist</Tab>}
-          {showPlatformConfig && <Tab>PrivacyInfo.xcprivacy</Tab>}
-          {usesPush(components) && <Tab>AppDelegate</Tab>}
-          {usesWindows(components) && <Tab>Package.appxmanifest</Tab>}
-        </TabList>
-        <TabPanel>
-          <NugetList components={components} />
-        </TabPanel>
-        <TabPanel>
-          <ProjectFile components={components} />
-        </TabPanel>
-        <TabPanel>
-          <MauiProgram components={components} />
-        </TabPanel>
-        {showPlatformConfig &&
-          <TabPanel><AndroidManifest components={components} /></TabPanel>
-        }
-        {usesActivity(components) &&
-          <TabPanel><AndroidActivity components={components} /></TabPanel>
-        }
-        {showPlatformConfig &&
-          <TabPanel><AppleInfoPlist components={components} /></TabPanel>
-        }
-        {showPlatformConfig &&
-          <TabPanel><ApplePrivacy components={components} /></TabPanel>
-        }
-        {usesPush(components) &&
-          <TabPanel><AppleAppDelegate /></TabPanel>
-        }
-        {usesWindows(components) &&
-          <TabPanel><WindowsAppxManifest components={components} /></TabPanel>
-        }
-      </Tabs>
-    );
-  };
-
-  return (
-    <div className="app-builder">
-        {modeCount > 1 && (
-          <div className="app-builder__mode-toggle">
-            {isMauiCompatible && (
-              <button
-                className={`app-builder__mode-btn${mode === 'maui' ? ' app-builder__mode-btn--active' : ''}`}
-                onClick={() => setMode('maui')}
-              >
-                MAUI
-              </button>
-            )}
-            {isBlazorCompatible && (
-              <button
-                className={`app-builder__mode-btn${mode === 'blazor' ? ' app-builder__mode-btn--active' : ''}`}
-                onClick={() => setMode('blazor')}
-              >
-                Blazor
-              </button>
-            )}
-            {isLinuxCompatible && (
-              <button
-                className={`app-builder__mode-btn${mode === 'linux' ? ' app-builder__mode-btn--active' : ''}`}
-                onClick={() => setMode('linux')}
-              >
-                Linux (GTK)
-              </button>
-            )}
-            {isAspNetCompatible && (
-              <button
-                className={`app-builder__mode-btn${mode === 'aspnet' ? ' app-builder__mode-btn--active' : ''}`}
-                onClick={() => setMode('aspnet')}
-              >
-                ASP.NET
-              </button>
-            )}
-          </div>
-        )}
-        {isMaui && usesPush(components) && (
-            <Alert type="caution">
-                Using push on iOS/MacCatalyst requires you have an entitlements.plist as well as a provisioning profile that supports push.  If your app is not set to a provisioning profile with push enabled,
-                you will experience build/deployment errors on iOS and startup crashes on MAC Catalyst.
-            </Alert>
-        )}
-        {isMaui && usingForeground(components) && (
-            <Alert type="caution">
-                You are using a component that uses an Android foreground service!  You must have an application icon set or a drawable resource called notification in order for this background operation to work.
-                For additional information, please read <a href="/client/core/android-foreground">Android Foreground Services</a>
-            </Alert>
-        )}
-        <div className="app-builder__output">
-          {renderTabs()}
-        </div>
     </div>
   );
 };

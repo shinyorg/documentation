@@ -709,7 +709,7 @@ export const categories: CategoryCopy[] = [
         accent: '#3949AB',
         accentDark: '#93A0F0',
         page: '/controls/',
-        headline: '70+ native controls for .NET MAUI and Blazor, sharing one theme system — no WebViews.',
+        headline: '85+ native controls for .NET MAUI and Blazor, sharing one theme system — no WebViews.',
         intro: 'One package per host and a shared theme contract across both.',
         featured: [
             { label: 'TableView', href: '/controls/tableview/' },
@@ -730,6 +730,9 @@ export const categories: CategoryCopy[] = [
             { label: 'YogaLayout', href: '/controls/yoga-layout/' },
             { label: 'Floor Plan', href: '/controls/floorplan/' },
             { label: 'MediaElement', href: '/controls/mediaelement/' },
+            { label: 'VideoText', href: '/controls/video-text/' },
+            { label: 'Border Animations', href: '/controls/border-animations/' },
+            { label: 'Keyboard Shortcuts', href: '/controls/keyboard-shortcuts/' },
             { label: 'Theming', href: '/controls/theming/' },
         ],
         libraries: [],

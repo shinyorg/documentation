@@ -30,7 +30,7 @@ export function processTemplate(
     // Then process conditionals based on file type
     if (fileExtension === '.razor') {
         result = processRazorConditionals(result, symbols);
-    } else if (['.csproj', '.xml', '.xcprivacy', '.plist', '.xaml', '.md'].includes(fileExtension)) {
+    } else if (['.csproj', '.xml', '.xcprivacy', '.plist', '.xaml', '.md', '.html'].includes(fileExtension)) {
         result = processXmlConditionals(result, symbols);
         // Some XML files also have C-style conditionals in comments
         result = processCStyleConditionals(result, symbols);
@@ -67,7 +67,9 @@ function processCStyleConditionals(content: string, symbols: Symbols): string {
 
     for (let i = 0; i < lines.length; i++) {
         const line = lines[i];
-        const trimmed = line.trim();
+        // dotnet new also accepts the comment form (//#if, //#else, //#endif) in C# files
+        const raw = line.trim();
+        const trimmed = /^\/\/#(if|elif|else|endif)\b/.test(raw) ? raw.slice(2) : raw;
 
         // CND markers
         if (trimmed === '//-:cnd:noEmit') {

@@ -42,11 +42,17 @@ Always run `npm run build` after non-trivial content/config changes — MDX erro
 
 Update every package version surfaced by the three builders. **Rule: use the latest _stable_ version for every package — EXCEPT Shiny packages (`Shiny.*`), which take the latest _beta_/prerelease.**
 
-Version strings live in three places, all of which must be kept in sync:
+Version strings live in two places:
 
-1. **`src/consts.ts`** — App Builder + Lib Builder. `DEFAULT_VERSION` (shared by the core Shiny client libs) plus each component's `version` and `additionalNugets[].version`.
-2. **`src/components/TemplateBuilder/templateData.ts`** — the `VERSIONS` map (single source of truth for the Template Builder UI).
-3. **`src/components/TemplateBuilder/templateFiles.*.ts`** — version strings are **also hardcoded literally** inside the generated `.csproj` content (e.g. `<MudBlazor Version="9.5.0" />`, `<MicrosoftVersion>10.0.8</MicrosoftVersion>`, Orleans, etc.). These do **not** interpolate `VERSIONS`, so update them too.
+1. **`src/components/TemplateBuilder/templateData.ts`** — the `VERSIONS` map. This is the single source of truth: the
+   Template Builder options read it, and every library version in `src/consts.ts` (Lib Builder snippets, NuGet catalog,
+   `DEFAULT_VERSION`) is `VERSIONS.<key>`, so never write a version literal into `consts.ts`. A new package family
+   needs a new `VERSIONS` key.
+2. **`src/components/TemplateBuilder/templateFiles.*.ts`** — version strings are **also hardcoded literally** inside the generated `.csproj` content (e.g. `<MudBlazor Version="9.5.0" />`, `<MicrosoftVersion>10.0.8</MicrosoftVersion>`, Orleans, etc.). These do **not** interpolate `VERSIONS`, so update them too.
+
+`src/data/builderIntegrity.ts` runs when `astro.config.mjs` loads and fails `npm run dev` / `npm run build` when a
+Shiny package's `.csproj` version (literal or via a property like `<ShinyVersion>`) differs from `VERSIONS`. It only
+knows packages listed in `consts.ts`, so third-party versions in the `.csproj` files are still on you.
 
 Look up latest versions from the NuGet flat-container API (`index.json` lists all versions, prerelease included):
 
@@ -70,6 +76,16 @@ So "update the templates from the builder" really means: apply the same edits (e
 2. Bump the NuGet package version: in `~/Desktop/dev/templates/Template.csproj` (the `Shiny.Templates` package project), increment `<PackageVersion>` by one **minor** (e.g. `7.0.0` → `7.1.0`).
 3. From this repo, run `node scripts/extract-templates.mjs` to regenerate all three `templateFiles.<id>.ts`.
 4. `npm run build` here to confirm, and `git diff` both repos to review.
+
+### Add a library to the builders
+
+Every library page's `<LibBuilder componentName="…">` renders through the Template Builder engine; there is no other
+generator. A new library therefore needs all three, or the build stops (`src/data/builderIntegrity.ts`):
+
+1. A `ShinyComponents` entry in `src/consts.ts` (`version: VERSIONS.<key>`).
+2. A Template Builder option in `templateData.ts`, wired into the matching `templateFiles.<kind>.ts` (`.csproj`
+   `PackageReference`, registration, platform manifests).
+3. An entry in `src/components/Boilerplate/componentTemplateMap.ts` from the component id to that option.
 
 ### Regenerate the App Device Bridge API reference
 
