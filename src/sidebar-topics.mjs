@@ -934,6 +934,7 @@ export const sidebarTopics = [
           { label: 'ParallaxCollectionView', link: 'controls/parallax-collection-view/', dateCreated: '2026-06-05', dateUpdated: '2026-06-05', jumpTo: true },
           { label: 'CarouselGallery', link: 'controls/carousel-gallery/', dateCreated: '2026-05-13', dateUpdated: '2026-05-13', jumpTo: true },
           { label: 'Carousel', link: 'controls/carousel/', dateCreated: '2026-06-15', dateUpdated: '2026-06-15', jumpTo: true, platform: 'blazor' },
+          { label: 'CoverFlowView', link: 'controls/cover-flow/', dateCreated: '2026-10-15', dateUpdated: '2026-10-15', jumpTo: true },
         ]
       },
       {
@@ -1214,11 +1215,13 @@ export const sidebarTopics = [
           { label: 'ChipGroup', link: 'controls/chip-group/', dateCreated: '2026-09-12', jumpTo: true, dateUpdated: '2026-09-12' },
           { label: 'PillView', link: 'controls/pillview/', dateCreated: '2026-04-15', dateUpdated: '2026-04-15', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', dateCreated: '2026-05-29', dateUpdated: '2026-05-29', jumpTo: true },
+          { label: 'Avatar & AvatarGroup', link: 'controls/avatar/', dateCreated: '2026-10-15', jumpTo: true, dateUpdated: '2026-10-15' },
           { label: 'ProgressBar', link: 'controls/progressbar/', dateCreated: '2026-05-04', dateUpdated: '2026-05-04', jumpTo: true },
           { label: 'ProgressLine', link: 'controls/progressline/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },
           { label: 'Confetti', link: 'controls/confetti/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'Marquee', link: 'controls/marquee/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'Border Animations', link: 'controls/border-animations/', dateCreated: '2026-10-14', jumpTo: true, dateUpdated: '2026-10-14' },
+          { label: 'AnimatedBackground', link: 'controls/animated-background/', dateCreated: '2026-10-15', jumpTo: true, dateUpdated: '2026-10-15' },
           { label: 'VideoText', link: 'controls/video-text/', dateCreated: '2026-10-14', jumpTo: true, dateUpdated: '2026-10-14' },
           { label: 'Range Pickers', link: 'controls/range-pickers/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'SecurityPin', link: 'controls/securitypin/', dateCreated: '2026-04-16', dateUpdated: '2026-04-16', jumpTo: true },
