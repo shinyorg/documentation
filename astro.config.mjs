@@ -106,7 +106,7 @@ const announcementConfig = {
       id: 'unihub-10',
       title: 'UniHub 1.0',
       description: 'Universal Hubs - SignalR Styled Hub BLE or HTTP - Why not both!?',
-      href: '/unihub/',
+      href: '/universalhubs/',
       cta: 'YES PLEASE!',
     }       
   ],
