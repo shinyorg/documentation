@@ -61,12 +61,12 @@ const announcementConfig = {
       cta: 'WHAT??!',
     },
     {
-      id: 'controls-16',
-      title: 'Shiny Controls 1.6',
-      description: 'Keyboard Hot Keys, Confetti, Marquee, Date/Time Ranges',
+      id: 'controls-18',
+      title: 'Shiny Controls 1.8',
+      description: 'The Beautification, Animation, & Fixer Version - Animated Borders, Backgrounds, Cover Flow',
       href: '/controls/',
-      cta: 'What!?!',
-    },   
+      cta: 'Show me the beauty!!',
+    },       
     {
       id: 'docdb-v14',
       title: 'Document DB 14',
