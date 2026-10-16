@@ -443,6 +443,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'client/inapppurchases/', dateCreated: '2026-09-15', dateUpdated: '2026-10-04' },
           { label: 'Store Setup', link: 'client/inapppurchases/store-setup', dateCreated: '2026-09-15', dateUpdated: '2026-10-04' },
           { label: 'Server', link: 'client/inapppurchases/server', dateCreated: '2026-09-15', dateUpdated: '2026-10-04' },
+          { label: 'Testing', link: 'client/inapppurchases/testing', dateCreated: '2026-10-16', dateUpdated: '2026-10-16' },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },

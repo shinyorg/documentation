@@ -1,0 +1,600 @@
+---
+title: Testing
+description: Step-by-step testing of Shiny.Mobile.InAppPurchases on the App Store and Google Play, from the mobile app and the server
+---
+import { Steps } from '@astrojs/starlight/components';
+
+This page tests the whole purchase pipeline on both stores:
+
+| | Apple (App Store) | Google Play |
+|---|---|---|
+| **Mobile** | Sandbox Apple Account on a physical device, or TestFlight | License tester with test cards, sideloaded or from a testing track |
+| **Server** | `/iap/verify` with a real signed transaction, App Store Server Notifications (Sandbox URL) | `/iap/verify` with a real purchase token, Real-time Developer Notifications through Pub/Sub |
+
+Work through it in order. Each part builds on the one before, so when something breaks you know which layer broke:
+
+1. [Prepare](#1-prepare) both stores and the server configuration.
+2. [Test the server on its own](#2-test-the-server-on-its-own), without a device.
+3. [Test Apple end to end](#3-apple-end-to-end): device, verification, then notifications.
+4. [Test Google end to end](#4-google-end-to-end): device, verification, then notifications.
+5. Run the [test plan](#5-test-plan) on both platforms before you ship.
+
+The examples use the product ids from the [sample app](https://github.com/shinyorg/shiny/tree/v5/samples/Sample.InAppPurchases.Maui): `coins_100` (consumable), `remove_ads` (non-consumable) and `premium_monthly` (auto-renewable subscription). They also assume a server set up like the [sample server](https://github.com/shinyorg/shiny/tree/v5/samples/Sample.InAppPurchases.Server), with the webhooks at `/iap` and verification at `/iap/verify`. Replace `com.mycompany.myapp` with your bundle id / package name.
+
+:::caution[Nothing here costs money, except where it says so]
+Apple sandbox purchases and Google license-tester purchases are never charged. On Google Play, a tester on a testing track who **isn't** a license tester **is charged real money**.
+:::
+
+---
+
+## 1. Prepare
+
+### Store checklist
+
+Finish [Store Setup](/client/inapppurchases/store-setup) first. Before testing, check that:
+
+- [ ] **Apple:** the **Paid Apps** agreement is *Active* (Business → Agreements). Until it is, `GetProductsAsync` returns nothing and no error.
+- [ ] **Apple:** every product has a price and at least one localization, and was created **more than an hour ago**. New products take that long to reach the sandbox.
+- [ ] **Google:** a build that uses Play Billing has been uploaded to a testing track, and every product and subscription base plan is **Active**.
+- [ ] **Both:** the app's `ApplicationId` exactly matches the App Store Connect bundle id and the Play Console package name.
+
+### Server configuration for testing
+
+Use these values while testing. Keep secrets in user-secrets (or a vault), not in `appsettings.json`:
+
+```json
+{
+  "InAppPurchases": {
+    "Apple": {
+      "BundleId": "com.mycompany.myapp",
+      "AppAppleId": 1234567890,
+      "AllowSandbox": true
+    },
+    "Google": {
+      "PackageName": "com.mycompany.myapp",
+      "RequirePubSubAuthentication": true,
+      "PubSubAudience": "https://<your-tunnel>/iap/google",
+      "PubSubServiceAccountEmail": "pubsub-push@<project>.iam.gserviceaccount.com"
+    }
+  }
+}
+```
+
+```bash
+cd MyServer
+# Optional for Apple: App Store Server API key, needed for test notifications
+dotnet user-secrets set "InAppPurchases:Apple:IssuerId" "<issuer id>"
+dotnet user-secrets set "InAppPurchases:Apple:KeyId" "<key id>"
+dotnet user-secrets set "InAppPurchases:Apple:PrivateKey" "$(cat SubscriptionKey_XXXXXXXXXX.p8)"
+
+# Required for Google: verifying purchases and reading notification details
+dotnet user-secrets set "InAppPurchases:Google:ServiceAccountJson" "$(cat service-account.json)"
+```
+
+- **`AllowSandbox` must be `true`.** Every test purchase on either platform is a sandbox purchase. Turn it off in production only if you never test against your production server.
+- **`AppAppleId`** is only checked for *production* notifications, but set it now so the server config is the same in every environment.
+- Leave out a store's section entirely to switch its endpoint off (it returns `404`).
+
+---
+
+## 2. Test the server on its own
+
+You don't need a device for these steps, so this is the quickest way to find configuration mistakes.
+
+<Steps>
+
+1. **Start the server and check the options validate.**
+
+    ```bash
+    dotnet run --project MyServer
+    ```
+
+    Options are validated at startup. A mistake stops the app with an `OptionsValidationException` that names the setting, for example:
+
+    | Message | Fix |
+    |---|---|
+    | `Apple.IssuerId, Apple.KeyId and Apple.PrivateKey must all be set…` | Set all three or none |
+    | `Apple.PrivateKey is not a valid PEM EC private key (.p8)` | Paste the whole `.p8` file, including the `-----BEGIN PRIVATE KEY-----` lines |
+    | `Google.PubSubAudience is required when Google.RequirePubSubAuthentication is true` | Set the audience and service account email, or turn authentication off for local tests (next step) |
+    | `Configure at least one store…` | The `InAppPurchases` section isn't bound. Check the section name. |
+
+    Turn on debug logging for the library so every decision is logged:
+
+    ```json
+    { "Logging": { "LogLevel": { "Shiny.Mobile.InAppPurchases.Server": "Debug" } } }
+    ```
+
+2. **Check the verification endpoint rejects junk.** You should get `200` with `isValid: false`, not a `500`:
+
+    ```bash
+    curl -s -X POST http://localhost:5000/iap/verify \
+      -H "Content-Type: application/json" \
+      -d '{"platform":"AppStore","verificationData":"not-a-jws","productId":"remove_ads"}'
+    # {"isValid":false,"error":"...","isActive":false,"platform":"AppStore",...}
+
+    curl -s -X POST http://localhost:5000/iap/verify \
+      -H "Content-Type: application/json" \
+      -d '{"platform":"GooglePlay","verificationData":"not-a-token","productId":"remove_ads"}'
+    ```
+
+    For Google, `"error":"Google.ServiceAccountJson is required…"` means the secret isn't set. Any other result means the server reached the Play Developer API. A `502` means the API call failed: the service account isn't invited in the Play Console yet, or its permissions haven't taken effect.
+
+3. **Send the Google webhook a test notification.** For this local test only, turn off Pub/Sub authentication with an environment variable so you don't need a Google-signed token:
+
+    ```bash
+    InAppPurchases__Google__RequirePubSubAuthentication=false dotnet run --project MyServer
+    ```
+
+    Then post a Pub/Sub push envelope. Its `data` is the base64-encoded developer notification:
+
+    ```bash
+    DATA=$(printf '%s' '{"version":"1.0","packageName":"com.mycompany.myapp","eventTimeMillis":"1760000000000","testNotification":{"version":"1.0"}}' | base64 | tr -d '\n')
+
+    curl -i -X POST http://localhost:5000/iap/google \
+      -H "Content-Type: application/json" \
+      -d "{\"message\":{\"data\":\"$DATA\",\"messageId\":\"local-1\"},\"subscription\":\"projects/local/subscriptions/test\"}"
+    ```
+
+    | Check | Expected |
+    |---|---|
+    | First post | `200`. Your handler receives `Type = Test`, `RawType = TEST_NOTIFICATION`. The log says `Processed GooglePlay TEST_NOTIFICATION notification local-1`. |
+    | Same post again (same `messageId`) | `200`, but the log says `Duplicate Google Play notification local-1 ignored` and your handler isn't called |
+    | Change `packageName` in the JSON | `400`, `package '...' does not match Google.PackageName` |
+    | Make your handler throw | `500`, and the next post with the same `messageId` runs the handler again because a failed notification isn't recorded as processed |
+    | Restart with authentication **on** and post again | `401`, `Missing bearer token` |
+
+4. **Send the Apple webhook junk.** Apple notifications are signed by Apple, so you can't forge a valid one. Instead, check the endpoint rejects bad ones:
+
+    ```bash
+    curl -i -X POST http://localhost:5000/iap/apple -H "Content-Type: application/json" -d '{}'
+    # 400 - body has no signedPayload
+
+    curl -i -X POST http://localhost:5000/iap/apple -H "Content-Type: application/json" -d '{"signedPayload":"a.b.c"}'
+    # 400 or 401 - not a valid Apple JWS
+    ```
+
+    Real Apple notifications come in [step 3.4](#34-test-app-store-server-notifications).
+
+5. **Expose the server over public HTTPS.** The stores, Pub/Sub and a physical device all need a public HTTPS URL, and Android blocks plain `http://` by default.
+
+    ```bash
+    devtunnel host -p 5000 --allow-anonymous   # or: ngrok http 5000
+    ```
+
+    Check `https://<your-tunnel>/iap/verify` answers from outside your machine (for example from your phone's browser, with a `POST` tool). Then point the app at the tunnel URL. In the sample, that's `SampleConfig.ServerUrl`.
+
+    Use a tunnel with a stable URL (a persistent dev tunnel, or a reserved ngrok domain). The URL goes into App Store Connect, the Pub/Sub subscription and the `PubSubAudience` setting, so a new URL each session means updating all three.
+
+6. **Unit test your event handler.** `PurchaseEvent` is a plain record, so you can test your `IPurchaseEventHandler` without any store:
+
+    ```csharp
+    [Fact]
+    public async Task Refund_RevokesEntitlement()
+    {
+        var db = new FakeEntitlementDb();
+        db.Grant(accountId, "premium_monthly", "otx-1");
+
+        var handler = new MyPurchaseEventHandler(db);
+        await handler.HandleAsync(new PurchaseEvent
+        {
+            NotificationId = "n-1",
+            Platform = StorePlatform.AppStore,
+            Type = PurchaseEventType.Refunded,
+            RawType = "REFUND",
+            ProductId = "premium_monthly",
+            OriginalTransactionId = "otx-1",
+            AccountToken = accountId
+        }, CancellationToken.None);
+
+        Assert.False(db.IsEntitled(accountId, "premium_monthly"));
+    }
+    ```
+
+    Cover every `PurchaseEventType` you handle. Also call your handler twice with the same event and check it's idempotent: the stores deliver at least once, and the in-memory de-duplicator doesn't survive a restart or work across instances.
+
+</Steps>
+
+---
+
+## 3. Apple end to end
+
+### 3.1 Set up a sandbox tester and device
+
+<Steps>
+
+1. **Create sandbox testers.** In App Store Connect, go to **Users and Access → Sandbox → Test Accounts → +**. Use an email address that isn't already an Apple Account (plus-addressing such as `you+iap1@example.com` works). Create at least two, because purchase history and introductory-offer eligibility are per tester.
+
+2. **Use a physical device.** Sandbox purchases on the Simulator are unreliable. StoreKit configuration files (`.storekit`) only work when launching from an Xcode scheme, so `dotnet build` can't use them. The server also **rejects** `Xcode` and `LocalTesting` environment transactions, because Apple doesn't sign them with its real certificates.
+
+3. **Enable Developer Mode** on the device: **Settings → Privacy & Security → Developer Mode**. Restart when it asks you to.
+
+4. **Deploy a development-signed build:**
+
+    ```bash
+    dotnet build MyApp -f net10.0-ios -t:Run -p:RuntimeIdentifier=ios-arm64
+    ```
+
+    A distribution-signed build doesn't use the sandbox, so make sure this one is development signed.
+
+</Steps>
+
+### 3.2 Test the mobile side
+
+<Steps>
+
+1. **Load products.** Open your store screen. `CanMakePaymentsAsync()` should return `true` and `GetProductsAsync` should return all three products with localized `DisplayPrice` values.
+
+    If a product is missing, it isn't an error: unknown ids are just left out. See [Troubleshooting](#troubleshooting).
+
+2. **Make the first purchase.** Buy `remove_ads`. iOS asks you to sign in. Use the **sandbox tester**, not your real Apple Account (you don't need to sign out of it).
+
+    The purchase sheet must show **`[Environment: Sandbox]`**. If it doesn't, stop: you're not in the sandbox.
+
+    After this first purchase the tester appears under **Settings → Developer → Sandbox Apple Account**, which also has the sandbox controls.
+
+3. **Check the result in the app.**
+
+    | Check | Expected |
+    |---|---|
+    | `PurchaseResult.Status` | `Success` |
+    | `Purchase.Environment` | `Sandbox` |
+    | `Purchase.IsFinished` | `false`, until you call `FinishPurchaseAsync` |
+    | `Purchase.VerificationData` | A long string with three dot-separated parts (a JWS) |
+    | `Purchase.AccountToken` | The `Guid` you passed in `PurchaseOptions.AccountToken` |
+
+    For the server steps, log `VerificationData` in debug builds so you can copy it:
+
+    ```csharp
+    #if DEBUG
+    logger.LogDebug("VerificationData for {ProductId}: {Data}", purchase.ProductId, purchase.VerificationData);
+    #endif
+    ```
+
+4. **Buy the consumable twice.** Buy `coins_100`, grant it, then call `FinishPurchaseAsync(purchase, consume: true)`. Buy it again: it should go through, because a finished consumable can be bought again.
+
+5. **Subscribe.** Buy `premium_monthly`. If it has an introductory offer and this tester is eligible, the offer shows in `StoreProduct.SubscriptionOffers` and on the sheet.
+
+    In the sandbox a 1-month subscription renews **every 5 minutes, up to 12 times**, then expires. You can change the rate under **Settings → Developer → Sandbox Apple Account → Manage → Subscription Renewal Rate**. Each renewal reaches `IPurchaseDelegate` with a new `TransactionId` and the same `OriginalTransactionId`, but only while the app is running.
+
+6. **Test restore.** Delete the app, reinstall it, and tap your **Restore Purchases** button (`RestorePurchasesAsync`). `remove_ads` and the active subscription should come back from `GetEntitlementsAsync()`. The consumable shouldn't.
+
+7. **Test a pending purchase.** In App Store Connect, open the sandbox tester and turn on **Interrupt Purchases for This Tester**. Buy something:
+
+    - `PurchaseAsync` returns `Pending`. Don't grant anything yet.
+    - Complete the interruption on the device (it asks you to accept terms).
+    - The completed purchase arrives through `IPurchaseDelegate.OnPurchaseUpdated` with `State = Purchased`. Grant and finish it there.
+
+    Turn interruption off again afterwards.
+
+8. **Test Ask to Buy (optional).** Create a **Sandbox Test Family** in App Store Connect, sign in as the child, and buy something. The result is `Pending`. When the organizer approves it, the purchase arrives through the delegate. If they decline, nothing arrives and nothing is granted.
+
+9. **Start over when you need to.** **Settings → Developer → Sandbox Apple Account → Manage → Clear Purchase History** lets you buy `remove_ads` again and makes the tester eligible for introductory offers again. Sign out and back in on the device afterwards.
+
+</Steps>
+
+### 3.3 Test server verification
+
+<Steps>
+
+1. **Verify a real transaction.** Copy the `VerificationData` you logged in [3.2](#32-test-the-mobile-side) and send it to the server. This works against `localhost`: Apple transactions are checked **offline** against Apple's root certificate, so no network call to Apple is made.
+
+    ```bash
+    curl -s -X POST http://localhost:5000/iap/verify \
+      -H "Content-Type: application/json" \
+      -d '{"platform":"AppStore","verificationData":"<JWS>","productId":"remove_ads"}'
+    ```
+
+    | Field | Expected |
+    |---|---|
+    | `isValid` | `true` |
+    | `isActive` | `true` (not refunded; for a subscription, not yet expired) |
+    | `kind` | `OneTime` for `remove_ads` and `coins_100`, `Subscription` for `premium_monthly` |
+    | `environment` | `Sandbox` |
+    | `accountToken` | The same `Guid` the app passed in `PurchaseOptions.AccountToken` |
+    | `originalTransactionId` | Matches `Purchase.OriginalTransactionId` on the device |
+
+2. **Check the server rejects tampered and mismatched data.**
+
+    | Change | Expected |
+    |---|---|
+    | Send `"productId":"coins_100"` with the `remove_ads` JWS | `isValid: false`, `Product id does not match the signed transaction` |
+    | Change one character in the middle part of the JWS | `isValid: false` (the signature check fails) |
+    | Set `Apple:AllowSandbox` to `false` and restart | `isValid: false`, `Environment 'Sandbox' is not accepted` |
+    | Set `Apple:BundleId` to something else and restart | `isValid: false`, bundle id mismatch |
+
+3. **Verify from the app.** Point the app at your tunnel URL and make a purchase. The app should call `/iap/verify`, grant only when `isValid` and `isActive` are `true`, and then finish the purchase. Check the server log for the request and the app log for the grant.
+
+4. **Check the app recovers when the server is down.** Stop the server (or point the app at a bad URL) and buy `coins_100`. Verification fails, so the app must **not** finish the purchase. Start the server again and relaunch the app: `GetUnfinishedPurchasesAsync()` returns the purchase, and it's verified, granted and finished exactly once.
+
+</Steps>
+
+### 3.4 Test App Store Server Notifications
+
+<Steps>
+
+1. **Set the sandbox URL.** In App Store Connect, open your app → **App Information → App Store Server Notifications**. Set **Sandbox Server URL** to `https://<your-tunnel>/iap/apple` and choose **Version 2**. Sandbox purchases now send notifications to your server.
+
+2. **Request a test notification.** This needs the App Store Server API key (`IssuerId`, `KeyId`, `PrivateKey`). Call `IAppleStoreClient.RequestTestNotificationAsync(sandbox: true)`. The sample server exposes it as an endpoint:
+
+    ```bash
+    curl -X POST "http://localhost:5000/iap/apple/test?sandbox=true"
+    # {"token":"<testNotificationToken>"}
+    ```
+
+    Within a few seconds Apple posts to the Sandbox URL. Your handler receives `Type = Test`, `RawType = TEST`, and the endpoint returns `200`. If nothing arrives, check the URL in App Store Connect and that the tunnel is up.
+
+3. **Make purchases and check the events.** With the app signed in as the sandbox tester:
+
+    | Action on the device | `RawType` | `Type` |
+    |---|---|---|
+    | Buy `coins_100` or `remove_ads` | `ONE_TIME_CHARGE` | `Purchased` |
+    | Subscribe to `premium_monthly` | `SUBSCRIBED/INITIAL_BUY` | `Purchased` |
+    | Wait about 5 minutes | `DID_RENEW` | `Renewed` |
+    | Cancel in **Manage Subscriptions** (`ShowManageSubscriptionsAsync()`) | `DID_CHANGE_RENEWAL_STATUS/AUTO_RENEW_DISABLED` | `AutoRenewDisabled` |
+    | Turn auto-renew back on | `DID_CHANGE_RENEWAL_STATUS/AUTO_RENEW_ENABLED` | `AutoRenewEnabled` |
+    | Let a cancelled subscription run out | `EXPIRED/VOLUNTARY` | `Expired` |
+    | Subscribe again after it expires | `SUBSCRIBED/RESUBSCRIBE` | `Purchased` |
+    | Switch to another subscription in the same group | `DID_CHANGE_RENEWAL_PREF/...` or `SUBSCRIBED/...` | `PlanChanged` / `Purchased` |
+
+    For each event, check:
+    - `Environment` is `Sandbox`.
+    - `AccountToken` is the `Guid` the app passed, so you can find the user without a device.
+    - `OriginalTransactionId` matches what `/iap/verify` returned for that purchase.
+    - `ExpiresAt` moves forward on each renewal.
+
+4. **Check retries.** Make your handler throw once, then make a purchase. The endpoint returns `500` and Apple retries later (Apple's retry schedule is measured in hours, so this is mostly to confirm nothing is recorded as processed). Fix the handler: the redelivery is processed normally.
+
+5. **Refunds.** You can't reliably trigger `REFUND` or `REVOKE` in the sandbox. Cover them with the [handler unit tests](#2-test-the-server-on-its-own). In production, refunds are requested at [reportaproblem.apple.com](https://reportaproblem.apple.com).
+
+</Steps>
+
+### 3.5 TestFlight (optional)
+
+TestFlight builds also use the sandbox, so you can run the steps above against the build you're about to ship:
+
+<Steps>
+
+1. Build and upload an `.ipa` (see the [sample readme](https://github.com/shinyorg/shiny/blob/v5/samples/Sample.InAppPurchases.Maui/readme.md#apple-production) for the `dotnet publish` command).
+2. Install it from TestFlight. Purchases there are sandbox purchases and the sheet shows the sandbox environment.
+3. To use the sandbox controls (renewal rate, clear purchase history) with a TestFlight build, sign out of **Settings → [your name] → Media & Purchases** and sign in under **Settings → Developer → Sandbox Apple Account**. A dedicated test device makes this easier.
+
+</Steps>
+
+---
+
+## 4. Google end to end
+
+### 4.1 Set up a license tester and device
+
+<Steps>
+
+1. **Add license testers.** In the Play Console, go to **Settings → License testing** and add the Google accounts you'll test with. License testers pay with test cards and are never charged.
+
+2. **Choose a device.** Use a physical device, or an emulator created from a **Google Play** system image (it has the Play Store icon). A "Google APIs" image has no Play Store, so billing doesn't work. Sign in to the Play Store with a license tester account.
+
+    If the device has several Google accounts, the purchase is made by the account that **installed** the app. Keep only the tester account on a test device.
+
+3. **Deploy.** License testers can sideload a debug build as long as the **package name matches** the Play Console app:
+
+    ```bash
+    dotnet build MyApp -f net10.0-android -t:Run
+    ```
+
+    To test the exact build you'll ship, install from the **internal testing** track instead. A new release can take a while to reach testers.
+
+</Steps>
+
+### 4.2 Test the mobile side
+
+<Steps>
+
+1. **Load products.** `CanMakePaymentsAsync()` should return `true` and `GetProductsAsync` should return all three products. For `premium_monthly`, `SubscriptionOffers` has one entry per base plan and per offer the tester is eligible for, each with an `OfferToken`.
+
+2. **Make the first purchase.** Buy `remove_ads`. The Play sheet must show test payment methods such as **"Test card, always approves"**. If it shows your real cards, stop: the account isn't a license tester.
+
+3. **Check the result in the app.**
+
+    | Check | Expected |
+    |---|---|
+    | `PurchaseResult.Status` | `Success` |
+    | `Purchase.VerificationData` | The purchase token (also in `OriginalTransactionId`) |
+    | `Purchase.TransactionId` | The order id, `GPA.xxxx-xxxx-xxxx-xxxxx` |
+    | `Purchase.AccountToken` | The `Guid` you passed in `PurchaseOptions.AccountToken` |
+    | `Purchase.Environment` | `Unknown`, because Google doesn't tell the device. The server can tell (next section). |
+    | `Purchase.ExpirationDate` | `null`, because Google doesn't expose expiry on the device |
+
+4. **Finish quickly, or lose the purchase.** Google refunds a purchase that isn't acknowledged. For license testers that happens after **about 5 minutes**, not 3 days. Check `FinishPurchaseAsync` runs after the grant: if purchases disappear and show as refunded in **Order management**, it didn't.
+
+5. **Buy the consumable twice.** Buy `coins_100` and finish it with `consume: true`. Buy it again: it should go through. If you finish a consumable with `consume: false`, the next purchase returns `AlreadyOwned`. Google has no product-level "consumable" setting; it depends only on how you finish.
+
+6. **Try the test cards.** Each one exercises a different path:
+
+    | Test card | Expected in the app |
+    |---|---|
+    | Always approves | `Success` |
+    | Always declines | `InAppPurchaseException` |
+    | Slow test card, approves after a few minutes | `Pending`, then the purchase arrives through `IPurchaseDelegate` with `State = Purchased`. Grant and finish it there. |
+    | Slow test card, declines after a few minutes | `Pending`, then nothing. Restart the app and check nothing was granted. |
+
+7. **Subscribe.** Buy `premium_monthly` (pass an `OfferToken` to pick a base plan or offer). Test subscriptions renew fast, **at most 6 times**:
+
+    | Period | Test renewal |
+    |---|---|
+    | 1 week, 1 month | 5 minutes |
+    | 3 months | 10 minutes |
+    | 6 months | 15 minutes |
+    | 1 year | 30 minutes |
+
+    Free trials last 3 minutes, a grace period 5 minutes and account hold 10 minutes.
+
+8. **Test restore and already-owned.** Buy `remove_ads` again: the result is `AlreadyOwned`. Clear the app's data or reinstall, then call `RestorePurchasesAsync()`: `remove_ads` and the active subscription come back.
+
+9. **Use Play Billing Lab for edge cases (optional).** The [Play Billing Lab](https://play.google.com/store/apps/details?id=com.google.android.apps.play.billingtestcompanion) app, signed in as the license tester, changes the Play country, resets free-trial eligibility and puts a subscription into payment-declined states (grace period, account hold). Its settings expire after 2 hours.
+
+</Steps>
+
+### 4.3 Test server verification
+
+Google purchase tokens can only be checked with the Play Developer API, so `ServiceAccountJson` must be set and the service account invited in the Play Console (**Users and permissions**, with **View financial data** and **Manage orders and subscriptions**). New permissions can take up to a day to start working.
+
+<Steps>
+
+1. **Verify a real purchase token.** Copy `VerificationData` from the app's debug log:
+
+    ```bash
+    curl -s -X POST http://localhost:5000/iap/verify \
+      -H "Content-Type: application/json" \
+      -d '{"platform":"GooglePlay","verificationData":"<purchase token>","productId":"premium_monthly"}'
+    ```
+
+    | Field | Expected |
+    |---|---|
+    | `isValid` | `true` |
+    | `isActive` | `true` |
+    | `kind` | `Subscription` for `premium_monthly`, `OneTime` for the others |
+    | `environment` | `Sandbox`, because Google marks license-tester purchases as test purchases |
+    | `expiresAt` | The next renewal time (subscriptions only), about 5 minutes away |
+    | `isAcknowledged` | `false` before the app finishes the purchase, `true` after |
+    | `accountToken` | The same `Guid` the app passed |
+
+    A `502` means the server couldn't reach the Play Developer API or was refused (check the server log for the HTTP status). `401`/`403` from Google almost always means the service account's Play Console permissions haven't taken effect yet.
+
+2. **Check the server rejects mismatches.** Send the `premium_monthly` token with `"productId":"remove_ads"`: you get `isValid: false`. Send a made-up token: `isValid: false`.
+
+3. **Watch a subscription change state.** Verify the same subscription token again after cancelling it in **Manage Subscriptions**: `isActive` stays `true` until `expiresAt`, then becomes `false`.
+
+4. **Verify from the app, and test recovery.** Point the app at the tunnel URL and repeat [steps 3 and 4 of 3.3](#33-test-server-verification): the app grants only after verification, and a purchase made while the server is down is recovered on the next launch. Do the recovery test quickly, within the 5-minute acknowledgement window.
+
+</Steps>
+
+### 4.4 Test Real-time Developer Notifications
+
+<Steps>
+
+1. **Check the Pub/Sub setup.** You need (see [Store Setup](/client/inapppurchases/store-setup#real-time-developer-notifications)):
+    - A topic, with `google-play-developer-notifications@system.gserviceaccount.com` as **Pub/Sub Publisher**.
+    - The topic name entered under **Play Console → Monetize with Play → Monetization setup**.
+    - A **push** subscription on the topic, pointing at `https://<your-tunnel>/iap/google`, with **authentication enabled**.
+    - The push subscription's service account and audience copied to `PubSubServiceAccountEmail` and `PubSubAudience`. If you left the audience blank in Pub/Sub, it defaults to the push endpoint URL.
+
+    Restart the server with `RequirePubSubAuthentication` back on (the default).
+
+2. **Publish a message yourself.** This checks Pub/Sub → tunnel → authentication → your handler before involving the Play Console:
+
+    ```bash
+    gcloud pubsub topics publish play-billing \
+      --message='{"version":"1.0","packageName":"com.mycompany.myapp","testNotification":{"version":"1.0"}}'
+    ```
+
+    Pub/Sub wraps and base64-encodes the message for you. The server should return `200` and your handler should receive `Type = Test`.
+
+    If the server logs `Google Pub/Sub push rejected - ...` and returns `401`, the reason tells you what's wrong. Usually the audience or service account email doesn't match the push subscription exactly (including `https://` and any trailing slash).
+
+3. **Send a Play Console test notification.** In **Monetization setup**, click **Send test notification**. You get another `TEST_NOTIFICATION` event. This confirms Google Play can publish to your topic.
+
+4. **Make purchases and check the events.** With the license tester:
+
+    | Action | `RawType` | `Type` |
+    |---|---|---|
+    | Buy `coins_100` or `remove_ads` | `ONE_TIME_PRODUCT_PURCHASED` | `Purchased` |
+    | Subscribe to `premium_monthly` | `SUBSCRIPTION_PURCHASED` | `Purchased` |
+    | Wait about 5 minutes | `SUBSCRIPTION_RENEWED` | `Renewed` |
+    | Cancel in **Manage Subscriptions** | `SUBSCRIPTION_CANCELED` | `AutoRenewDisabled` |
+    | Resubscribe before it runs out | `SUBSCRIPTION_RESTARTED` | `Restarted` |
+    | Let a cancelled subscription run out | `SUBSCRIPTION_EXPIRED` | `Expired` |
+    | Slow card that declines | `ONE_TIME_PRODUCT_CANCELED` or `SUBSCRIPTION_PENDING_PURCHASE_CANCELED` | `PendingCanceled` |
+    | Payment declined (Play Billing Lab) | `SUBSCRIPTION_IN_GRACE_PERIOD`, then `SUBSCRIPTION_ON_HOLD` | `GracePeriodStarted`, `OnHold` |
+    | **Order management → Refund** (with "Remove entitlement") | `VOIDED_PURCHASE` | `Refunded` |
+    | **Order management → Revoke** a subscription | `SUBSCRIPTION_REVOKED` | `Revoked` |
+
+    For each event, check:
+    - `Environment` is `Sandbox`. The server fetched the purchase from the Play Developer API and saw the test-purchase flag.
+    - `AccountToken` is the `Guid` the app passed.
+    - `ExpiresAt` and `IsAutoRenewing` are set for subscriptions.
+    - `OriginalTransactionId` is the purchase token.
+
+    If one-time product events don't arrive, check the notification settings under **Monetization setup**: Google can be set to send only subscription and voided-purchase notifications.
+
+5. **Check retries.** Make your handler throw once and make a purchase. The endpoint returns `500`, Pub/Sub retries with backoff, and the retry is processed once the handler works. In Google Cloud, the push subscription's metrics show failed and retried deliveries.
+
+6. **Replay a real notification locally (optional).** To debug your handler with real Google data and no Pub/Sub, post a notification with a real purchase token straight to a local server with authentication off. The server fetches the purchase from the Play Developer API as usual:
+
+    ```bash
+    DATA=$(printf '%s' '{"version":"1.0","packageName":"com.mycompany.myapp","eventTimeMillis":"1760000000000","subscriptionNotification":{"version":"1.0","notificationType":4,"purchaseToken":"<purchase token>","subscriptionId":"premium_monthly"}}' | base64 | tr -d '\n')
+
+    curl -i -X POST http://localhost:5000/iap/google \
+      -H "Content-Type: application/json" \
+      -d "{\"message\":{\"data\":\"$DATA\",\"messageId\":\"replay-$(date +%s)\"},\"subscription\":\"projects/local/subscriptions/test\"}"
+    ```
+
+    `notificationType` `4` is `SUBSCRIPTION_PURCHASED` and `2` is `SUBSCRIPTION_RENEWED`. Use `oneTimeProductNotification` with `"notificationType":1` and `"sku":"remove_ads"` for one-time products. Change the `messageId` each time, or the de-duplicator ignores the repeat.
+
+</Steps>
+
+---
+
+## 5. Test plan
+
+Run every row on **both** platforms before shipping. "Server" means the event your `IPurchaseEventHandler` receives.
+
+| # | Scenario | App | Server |
+|---|---|---|---|
+| 1 | Buy `coins_100` twice | Granted twice; the second purchase works | `Purchased` × 2, different `TransactionId`s |
+| 2 | Buy `remove_ads`, reinstall, **Restore Purchases** | Unlock comes back | Nothing new |
+| 3 | Buy `remove_ads` again | iOS: the sheet says you own it · Android: `AlreadyOwned` | Nothing new |
+| 4 | Subscribe to `premium_monthly`, wait for renewals | Active; renewals reach the delegate while running | `Purchased`, then `Renewed` every ~5 min; `ExpiresAt` advances |
+| 5 | Cancel in **Manage Subscriptions**, wait | Active until it expires, then not | `AutoRenewDisabled`, then `Expired` |
+| 6 | Cancel the purchase sheet | `Cancelled`, nothing granted | Nothing |
+| 7 | Pending: iOS interrupted purchase / Ask to Buy · Android slow card | `Pending`, then granted through the delegate | `Purchased` once it clears |
+| 8 | Kill the app after paying, before the grant | Recovered on relaunch, granted once | `Purchased` once |
+| 9 | Server down during a purchase | Not finished; recovered when the server is back | `/iap/verify` succeeds on the retry |
+| 10 | Airplane mode, then purchase | `InAppPurchaseException`, `ErrorCode = Network` | Nothing |
+| 11 | Tampered `VerificationData` sent to `/iap/verify` | Nothing granted | `isValid: false` |
+| 12 | Same notification delivered twice | — | Handler runs once |
+| 13 | Handler throws | — | `500`; the store retries; processed once fixed |
+| 14 | Refund · Android **Order management**, iOS handler unit test | Entitlement removed on the next check | `Refunded` / `Revoked` |
+| 15 | Android: don't finish a purchase | Refunded after ~5 minutes (testers) | `VOIDED_PURCHASE` |
+
+---
+
+## Troubleshooting
+
+### Mobile
+
+| Symptom | Cause |
+|---|---|
+| No products load (Apple) | Paid Apps agreement not active, product missing a price or localization, product created less than an hour ago, bundle id mismatch, or running on the Simulator |
+| No products load (Google) | Product or base plan not **Active**, account isn't a license tester, package name mismatch, or an emulator without the Play Store. Clearing the Play Store app's cache helps after catalog changes. |
+| No `[Environment: Sandbox]` on the sheet | Distribution-signed build, or signed in with a real Apple Account |
+| Real cards on the Play sheet | The account isn't in **License testing**, or another account on the device installed the app |
+| `DeveloperError` on Android | A subscription without an active base plan, or a stale `OfferToken` |
+| Android purchases disappear after a few minutes | Never acknowledged: `FinishPurchaseAsync` didn't run |
+| `AlreadyOwned` for a consumable | It was finished with `consume: false`. Call `GetUnfinishedPurchasesAsync()` / `GetEntitlementsAsync()` and finish it with `consume: true`. |
+
+### Server
+
+| Symptom | Cause |
+|---|---|
+| App won't start | Options validation failed. The exception names the setting. |
+| `/iap/apple` or `/iap/google` returns `404` | That store's section isn't configured |
+| Apple: `Environment 'Sandbox' is not accepted` | `AllowSandbox` is `false` |
+| Apple: `Environment 'Xcode' is not accepted` | The transaction came from a StoreKit configuration file. Test with a sandbox account. |
+| Apple: `Apple.AppAppleId must be configured to accept Production notifications` | Set `AppAppleId`. It only matters for production. |
+| Apple: nothing arrives | Sandbox URL not set or not **Version 2** in App Store Connect, or the tunnel is down |
+| Google: `401`, `Missing bearer token` | Push subscription authentication is off, or a request that didn't come from Pub/Sub |
+| Google: `401`, audience or email mismatch | `PubSubAudience` / `PubSubServiceAccountEmail` don't exactly match the push subscription |
+| Google: `400`, package mismatch | `Google.PackageName` doesn't match the app |
+| Google: `502` | The Play Developer API call failed. Usually the service account isn't invited, or its permissions haven't taken effect yet. |
+| Google: `Environment = Unknown` on events | `ServiceAccountJson` isn't set, so the server can't fetch the purchase. Test notifications are always `Unknown`. |
+
+---
+
+## Before you go to production
+
+- [ ] App Store Connect **Production Server URL** set to your production `/iap/apple`, **Version 2**, and `AppAppleId` configured.
+- [ ] The production Pub/Sub push subscription points at your production `/iap/google`, with the production audience on the server.
+- [ ] `/iap/verify` (or your own endpoint) uses `.RequireAuthorization()` and grants to the **authenticated user**, never to an id in the request.
+- [ ] `AccountToken` is your real user id.
+- [ ] Nothing grants a `Pending` purchase, and every purchase is finished after the grant.
+- [ ] With more than one server instance, a shared `IPurchaseEventDeduplicator` is registered (`UseDeduplicator<T>()`).
+- [ ] On Google Play, one purchase made with an account that **isn't** a license tester, then refunded from **Order management**.

@@ -48,7 +48,7 @@ const announcementConfig = {
   items: [
     {
       id: 'client-v6',
-      title: 'Shiny Client v63',
+      title: 'Shiny Client v6.3',
       description: 'Easy Live Activities, Game Center, Printing, Geospatial Geofencing, App Store APIs, More Thermal Printer Support, & Call Directory',
       href: '/client/printing',
       cta: 'WOWZA!',
