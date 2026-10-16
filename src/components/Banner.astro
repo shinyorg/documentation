@@ -31,6 +31,27 @@ import PlasmaBackground from './PlasmaBackground.astro';
 const { rotateMs, items: announcements } = import.meta.env.ANNOUNCEMENTS;
 
 const rotates = announcements.length > 1;
+
+/*
+ * Descriptions accept inline markdown links — `[text](url)` — and nothing else.
+ * Everything is HTML-escaped first, so the only markup that can come out is the
+ * `<a>` built here; `javascript:`-style URLs are left as plain text.
+ */
+const LINK_RE = /\[([^\]]+)\]\(([^)\s]+)\)/g;
+const SAFE_URL_RE = /^(https?:\/\/|mailto:|\/|#|\.)/i;
+
+const escapeHtml = (s: string) =>
+  s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+function renderDescription(md: string, hidden = false) {
+  return escapeHtml(md).replace(LINK_RE, (whole, text, url) => {
+    if (!SAFE_URL_RE.test(url)) return whole;
+    const external = /^https?:\/\//i.test(url);
+    return `<a href="${url}"${external ? ' rel="noopener"' : ''}${hidden ? ' tabindex="-1"' : ''}>${text}</a>`;
+  });
+}
+
+const plainDescription = (md: string) => md.replace(LINK_RE, '$1');
 ---
 
 {/* Still honour a page's own `banner:` frontmatter — that is Starlight's feature, not ours. */}
@@ -51,28 +72,39 @@ const rotates = announcements.length > 1;
   >
     <div class="stage">
       {announcements.map((a: any, i: number) => (
-        <a
+        <div
           class:list={['slide', { 'is-active': i === 0 }]}
-          href={a.href}
           data-slide
           data-announce-id={a.id}
           aria-hidden={i === 0 ? undefined : 'true'}
-          tabindex={i === 0 ? undefined : -1}
         >
+          {/* The slide can't itself be an <a> — the description may hold links of
+              its own and anchors don't nest — so this one covers the whole slide
+              underneath them and keeps "click anywhere" working. */}
+          {a.href && (
+            <a
+              class="cover"
+              href={a.href}
+              tabindex={i === 0 ? undefined : -1}
+              aria-label={`${a.title}: ${plainDescription(a.description)}`}
+            />
+          )}
           <span class="title">{a.title}</span>
           <span class="desc" data-desc>
             <span class="track" data-track>
-              <span class="copy" data-copy>{a.description}</span>
-              <span class="copy" data-copy aria-hidden="true">{a.description}</span>
+              <span class="copy" data-copy set:html={renderDescription(a.description, i !== 0)} />
+              <span class="copy" data-copy aria-hidden="true" set:html={renderDescription(a.description, true)} />
             </span>
           </span>
-          {a.cta && <span class="cta">{a.cta}</span>}
-          <span class="arrow" aria-hidden="true">
-            <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-              <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" />
-            </svg>
-          </span>
-        </a>
+          {a.href && a.cta && <span class="cta">{a.cta}</span>}
+          {a.href && (
+            <span class="arrow" aria-hidden="true">
+              <svg viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M3 8h9M8.5 4.5 12 8l-3.5 3.5" />
+              </svg>
+            </span>
+          )}
+        </div>
       ))}
     </div>
 
@@ -128,7 +160,7 @@ const rotates = announcements.length > 1;
         slide.classList.add('is-dismissed', 'was-dismissed');
         slide.classList.remove('is-active');
         slide.setAttribute('aria-hidden', 'true');
-        slide.setAttribute('tabindex', '-1');
+        slide.querySelectorAll('a').forEach(function (a) { a.setAttribute('tabindex', '-1'); });
         var dot = bar.querySelector('[data-dot][data-announce-id="' + slide.dataset.announceId + '"]');
         if (dot) dot.classList.add('is-dismissed');
       });
@@ -148,7 +180,10 @@ const rotates = announcements.length > 1;
       if (first && !first.classList.contains('is-active')) {
         first.classList.add('is-active');
         first.removeAttribute('aria-hidden');
-        first.removeAttribute('tabindex');
+        // Links in the marquee's duplicate copy stay out of the tab order.
+        first.querySelectorAll('a').forEach(function (a) {
+          if (!a.closest('.copy[aria-hidden]')) a.removeAttribute('tabindex');
+        });
         var firstDot = bar.querySelector('[data-dot][data-announce-id="' + first.dataset.announceId + '"]');
         bar.querySelectorAll('[data-dot]').forEach(function (d) {
           var on = d === firstDot;
@@ -260,7 +295,6 @@ const rotates = announcements.length > 1;
        slide at all — the text would run under the controls and, worse, would
        measure as fitting in space it doesn't have and never start scrolling. */
     padding-inline: 0 var(--controls-reserve);
-    text-decoration: none;
     color: var(--sl-color-white);
     opacity: 0;
     pointer-events: none;
@@ -285,6 +319,14 @@ const rotates = announcements.length > 1;
     pointer-events: auto;
   }
 
+  /* Fills the slide, so a click anywhere that isn't a description link goes to
+     the announcement's `href`. */
+  .cover {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+  }
+
   /* `flex: none` is the point of the title: it never scrolls and never shrinks,
      so the bar always opens with the same fixed, readable label. The
      description is what gives way when space runs short. `max-width` is only a
@@ -307,11 +349,35 @@ const rotates = announcements.length > 1;
   /* `0 1 auto` keeps the CTA tucked against the end of the sentence instead of
      flung to the far edge; it still shrinks (and so marquees) when space runs out. */
   .desc {
+    position: relative;
+    z-index: 1;
     flex: 0 1 auto;
     min-width: 0;
     overflow: hidden;
     font-weight: 500;
     color: var(--sl-color-gray-1);
+    /* Sits above the cover link, so let clicks on plain text fall through to it;
+       only the description's own links catch the pointer. */
+    pointer-events: none;
+  }
+
+  /* Markdown links in the description (`set:html`, hence :global). */
+  .desc :global(a) {
+    pointer-events: auto;
+    color: var(--sl-color-text-accent);
+    font-weight: 700;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+  }
+
+  .desc :global(a:hover) {
+    color: var(--sl-color-white);
+  }
+
+  .desc :global(a:focus-visible) {
+    outline: 2px solid var(--sl-color-accent);
+    outline-offset: 1px;
+    border-radius: 0.2rem;
   }
 
   /* Soften both ends so text scrolls out of view instead of being guillotined. */
@@ -374,16 +440,16 @@ const rotates = announcements.length > 1;
     transition: transform 0.2s ease;
   }
 
-  .slide:hover .cta,
-  .slide:focus-visible .cta {
+  .cover:hover ~ .cta,
+  .cover:focus-visible ~ .cta {
     text-decoration: underline;
   }
 
-  .slide:hover .arrow {
+  .cover:hover ~ .arrow {
     transform: translateX(3px);
   }
 
-  .slide:focus-visible {
+  .cover:focus-visible {
     outline: 2px solid var(--sl-color-accent);
     outline-offset: -3px;
     border-radius: 0.4rem;
@@ -599,13 +665,14 @@ const rotates = announcements.length > 1;
       slides.forEach((slide, i) => {
         const on = i === current;
         slide.classList.toggle('is-active', on);
-        if (on) {
-          slide.removeAttribute('aria-hidden');
-          slide.removeAttribute('tabindex');
-        } else {
-          slide.setAttribute('aria-hidden', 'true');
-          slide.setAttribute('tabindex', '-1');
-        }
+        if (on) slide.removeAttribute('aria-hidden');
+        else slide.setAttribute('aria-hidden', 'true');
+        // The cover link plus any links in the description. The marquee's
+        // duplicate copy never takes focus.
+        slide.querySelectorAll('a').forEach((link) => {
+          if (on && !link.closest('.copy[aria-hidden]')) link.removeAttribute('tabindex');
+          else link.setAttribute('tabindex', '-1');
+        });
       });
       dots.forEach((dot, i) => {
         dot.classList.toggle('is-on', i === current);

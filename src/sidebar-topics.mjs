@@ -296,18 +296,40 @@ export const sidebarTopics = [
         ]
       },
       {
-        label: 'Locations',
+        label: 'GPS',
         jumpTo: true,
         items:[
-          { label: 'Architecture', link: 'client/locations/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
           { label: 'GPS', link: 'client/locations/gps', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Platform GPS Requests', link: 'client/locations/platform-requests', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
+          { label: 'AI Tools', link: 'client/locations/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
+          { label: 'Architecture', link: 'client/locations/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
+        label: 'Geofencing',
+        jumpTo: true,
+        items:[
           { label: 'Geofencing', link: 'client/locations/geofencing', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Region Geofencing', link: 'client/locations/region-geofencing', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'Architecture', link: 'client/locations/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
+        label: 'Reverse Geocoding',
+        jumpTo: true,
+        items:[
           { label: 'Reverse Geocoding', link: 'client/locations/geocoding', dateCreated: '2026-09-26', dateUpdated: '2026-10-04' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
+        label: 'Motion Activity',
+        jumpTo: true,
+        items:[
           { label: 'Motion Activity', link: 'client/locations/motionactivity', dateCreated: '2026-04-23', dateUpdated: '2026-04-23' },
-          { label: 'AI Tools', link: 'client/locations/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
-          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },

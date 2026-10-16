@@ -39,6 +39,8 @@ const giscusConfig = {
 //   title       short and fixed: it never scrolls and never shrinks.
 //   description any length — too long to fit and the bar scrolls it marquee-style
 //               rather than wrapping, so the bar's height never changes.
+//               Accepts inline markdown links: `see [the docs](/client/printing)`.
+//   href        optional — where a click anywhere else on the bar goes.
 //   cta         optional link text before the arrow (hidden on narrow screens).
 //
 // An empty array hides the bar; a single entry shows it without rotation or dots.
@@ -49,37 +51,29 @@ const announcementConfig = {
     {
       id: 'client-v6',
       title: 'Shiny Client v6.3',
-      description: 'Easy Live Activities, Game Center, Printing, Geospatial Geofencing, App Store APIs, More Thermal Printer Support, & Call Directory',
-      href: '/client/printing',
-      cta: 'WOWZA!',
+      description: '[Easy Live Activities](/client/liveactivities), [Game Center](/client/gamecenter), [Geospatial Geofencing](/client/locations/region-geofencing), [App Store APIs](/client/appstore), [More Thermal Printer Support](/client/printing), & [Call Directory](/client/calldirectory)'
     }, 
     {
       id: 'appdevicebridge-0',
       title: 'App Device Bridge',
       description: 'Release updates without the AppStore on .NET!',
       href: '/appdevicebridge/',
-      cta: 'WHAT??!',
+      cta: 'Bridge me there!',
     },
     {
       id: 'controls-18',
       title: 'Shiny Controls 1.8',
-      description: 'The Beautification, Animation, & Fixer Version - Animated Borders, Backgrounds, Cover Flow, Avatars, & Video Text!',
-      href: '/controls/',
-      cta: 'Show me the beauty!!',
+      description: 'The Beautification, Animation, & Fixer Version - [Animated Borders](/controls/border-animations), [Backgrounds](/controls/animated-background/), [Cover Flow](/controls/cover-flow), [Avatars](/controls/avatar/), & [Video Text!](/controls/video-text/)'
     },       
     {
       id: 'docdb-v14',
       title: 'Document DB 14',
-      description: 'Joins & Easy Doc Metadata!',
-      href: '/documentdb/',
-      cta: 'Join Me Too!',
+      description: '[Joins](/documentdb/querying#joins) & [Easy Doc Metadata!](/documentdb/metadata)'
     },
     {
       id: 'httpserver-v20',
       title: 'HTTP Server v2',
-      description: 'Resumable Uploads, OAuth Loopingback, NEW Switchboard SignalR-like Framework, Webhooks, CalDAV, & Scalar Support',
-      href: '/httpserver/',
-      cta: 'Lets GO!',
+      description: '[Resumable Uploads](/httpserver/tus), [OAuth Loopingback](/httpserver/oauth-loopback), [NEW Switchboard SignalR-like Framework](/httpserver/switchboard), [Webhooks](/httpserver/webhooks), [CalDAV](/httpserver/caldav), & [Scalar Support](/httpserver/openapi#an-api-reference-page-with-scalar)'
     },
     {
       id: 'blehubs-10',
