@@ -63,7 +63,7 @@ const announcementConfig = {
     {
       id: 'controls-18',
       title: 'Shiny Controls 1.8',
-      description: 'The Beautification, Animation, & Fixer Version - Animated Borders, Backgrounds, Cover Flow',
+      description: 'The Beautification, Animation, & Fixer Version - Animated Borders, Backgrounds, Cover Flow, Avatars, & Video Text!',
       href: '/controls/',
       cta: 'Show me the beauty!!',
     },       
@@ -82,25 +82,11 @@ const announcementConfig = {
       cta: 'Lets GO!',
     },
     {
-      id: 'mauishell-7',
-      title: 'Shiny MAUI Shell v7',
-      description: 'App Links, App Shortcuts, & Navigation Interception!',
-      href: '/mauishell/',
-      cta: 'Shortcut me to it',
-    },
-    {
       id: 'blehubs-10',
       title: 'BLE Hubs 1.0',
       description: 'Think SignalR for BLE!',
       href: '/blehubs/',
       cta: 'Hub it up!',
-    },
-    {
-      id: 'actors-10',
-      title: 'Actors 1.0',
-      description: 'Tiny Orleans for your .NET apps!',
-      href: '/actors/',
-      cta: 'Teach Me!',
     },
     {
       id: 'unihub-10',
