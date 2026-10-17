@@ -963,7 +963,7 @@ export const sidebarTopics = [
       {
         label: 'Desktop',
         items:[
-          { label: 'Tray Icon', link: 'controls/trayicon/', dateCreated: '2026-06-01', dateUpdated: '2026-06-01', jumpTo: true, platform: 'maui' },
+          { label: 'Tray Icon', link: 'controls/trayicon/', dateCreated: '2026-06-01', dateUpdated: '2026-10-17', jumpTo: true, platform: 'maui' },
           { label: 'Docking', link: 'controls/docking/', dateCreated: '2026-06-07', dateUpdated: '2026-06-07', jumpTo: true },
           { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', dateCreated: '2026-06-07', dateUpdated: '2026-06-07', jumpTo: true, platform: 'blazor' },
         ]
@@ -1238,6 +1238,7 @@ export const sidebarTopics = [
           { label: 'ChipGroup', link: 'controls/chip-group/', dateCreated: '2026-09-12', jumpTo: true, dateUpdated: '2026-09-12' },
           { label: 'PillView', link: 'controls/pillview/', dateCreated: '2026-04-15', dateUpdated: '2026-04-15', jumpTo: true },
           { label: 'BadgeView', link: 'controls/badge/', dateCreated: '2026-05-29', dateUpdated: '2026-05-29', jumpTo: true },
+          { label: 'NotchView', link: 'controls/notch/', dateCreated: '2026-10-17', jumpTo: true, dateUpdated: '2026-10-17' },
           { label: 'Avatar & AvatarGroup', link: 'controls/avatar/', dateCreated: '2026-10-15', jumpTo: true, dateUpdated: '2026-10-15' },
           { label: 'ProgressBar', link: 'controls/progressbar/', dateCreated: '2026-05-04', dateUpdated: '2026-05-04', jumpTo: true },
           { label: 'ProgressLine', link: 'controls/progressline/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },

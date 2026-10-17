@@ -30,6 +30,7 @@ There is no Blazor equivalent: a tray icon is a desktop OS concept.
 - One API across Windows, macOS AppKit, MacCatalyst, and Linux
 - Fluent menu builder with items, check items, separators, and submenus
 - **Per-menu-item icons** (`TrayMenuItem.Icon`) — a `Func<Stream>` per item, native rendering on all four platforms
+- **Pills and progress rows**: a coloured tag after an item's label (`TrayMenuItem.Pill`) and labelled progress bars (`TrayProgressItem`) for usage meters, syncs and downloads. Progress rows update in place, even while the menu is open
 - **Keyboard accelerator dispatch** — `TrayMenuItem.Accelerator` (e.g. `"Ctrl+S"`) is registered with the OS so the shortcut actually fires
 - **Badge / overlay numbers** (`Badge` property) — composited onto the icon on Windows, displayed beside the icon on macOS / Linux
 - **Balloon / toast notifications** (`ShowNotification(title, message)`) — Windows `NIF_INFO`, macOS / Catalyst `NSUserNotificationCenter`, Linux `libnotify`
@@ -135,8 +136,50 @@ pauseSync.IsEnabled = !syncing;
 | `TrayCheckMenuItem` | `.Check(label, isChecked, toggled)` | Renders a check state. Toggled callback receives the new value |
 | `TraySeparator` | `.Separator()` | Visual separator |
 | `TraySubmenu` | `.Submenu(label, builder)` | Nested menu — same fluent API |
+| `TrayProgressItem` | `.Progress(label, value, caption)` or `.Progress(TrayProgressItem)` | A labelled progress bar that can't be clicked. See [Pills and progress rows](#pills-and-progress-rows) |
 
 All items expose `IsEnabled`, `IsVisible`, and `Label`. `TrayMenuItem` additionally exposes `Icon` and `Accelerator` — see the sections below for native behaviour.
+
+### Pills and progress rows
+
+A menu can show **pills** (a short coloured tag after an item's label, such as "New" or "Pro") and **progress rows** (a labelled bar for usage against a limit, a sync or a download). This is the usage-meter style of menu you see in apps like Claude Desktop.
+
+```csharp
+var session = new TrayProgressItem("Session usage", 0.18, caption: "Resets in 4 hr 12 min");
+var sync    = new TrayProgressItem("Syncing library") { Tone = TrayTone.Success, Detail = "0 of 40" };
+
+icon.SetMenu(TrayMenu.Build(b => b
+    .Progress(session)
+    .Progress(sync)
+    .Separator()
+    .Item(new TrayMenuItem("Upgrade plan", OpenBilling) { Pill = new TrayPill("Pro", TrayTone.Accent) })
+    .Item(new TrayMenuItem("What's new", OpenChangelog) { Pill = new TrayPill("New", TrayTone.Success) })));
+
+// later, from any thread (a timer is fine): the row repaints in place, even while the menu is open
+session.Value = 0.82;
+session.Tone = TrayTone.Warning;
+session.Caption = "Resets in 2 hr 3 min";
+```
+
+| Member | Description |
+|---|---|
+| `TrayMenuItem.Pill` | `TrayPill(Text, Tone)` drawn after the label. A solid pill with white text, so it stays readable on light, dark and highlighted rows. Changing it rebuilds the menu |
+| `TrayProgressItem.Label` | Text on the left of the label row |
+| `TrayProgressItem.Value` | Fraction complete, `0`–`1`. Values outside that range are clamped, and `NaN` counts as `0` |
+| `TrayProgressItem.Detail` | Text on the right of the label row. `null` (the default) shows the percentage, e.g. `62%`; `""` shows nothing |
+| `TrayProgressItem.Caption` | Optional smaller line under the bar |
+| `TrayProgressItem.Tone` | Bar colour: `Neutral`, `Accent` (default), `Success`, `Warning`, `Danger` |
+
+Progress rows are informational: they never highlight and can't be clicked. Changing `Value`, `Label`, `Detail`, `Tone` or the caption's text repaints only that row, so keep a reference to the item and update it rather than rebuilding the menu. Adding or removing the caption changes the row's height, so that one does rebuild the menu. Pills are supported on `TrayMenuItem` only (not on check items or submenu headers).
+
+| Platform | Pills | Progress rows |
+|---|---|---|
+| macOS (AppKit) | Image in the item's attributed title; the label still turns to the highlight colour when selected | A custom `NSView` drawn with CoreGraphics; colours follow light/dark mode |
+| MacCatalyst | Same, via `objc_msgSend` | Same, through an `NSView` subclass registered at runtime |
+| Windows | Owner-drawn row that keeps the visual-style background and hover highlight, the menu font, icon and accelerator | Owner-drawn. An open menu is repainted with `InvalidateRect` |
+| Linux | Text: `Upgrade plan  [Pro]` | Text: `Session usage   ▰▰▰▰▰▰▱▱▱▱  62%`, with the caption as a greyed row beneath it |
+
+On Linux the desktop shell draws app-indicator menus itself from DBusMenu and keeps only labels, so nothing richer than text can get through.
 
 ### Per-menu-item icons
 
