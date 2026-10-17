@@ -64,7 +64,12 @@ const announcementConfig = {
       id: 'controls-18',
       title: 'Shiny Controls 1.8',
       description: 'The Beautification, Animation, & Fixer Version - [Animated Borders](/controls/border-animations), [Backgrounds](/controls/animated-background/), [Cover Flow](/controls/cover-flow), [Avatars](/controls/avatar/), & [Video Text!](/controls/video-text/)'
-    },       
+    },
+    {
+      id: 'controls-19',
+      title: 'Shiny Controls 1.9',
+      description: 'Blazor Controls Mobile Friendliness & NEW [Notch View - MacOS & Blazor](/controls/notch-view)'
+    },      
     {
       id: 'docdb-v14',
       title: 'Document DB 14',
