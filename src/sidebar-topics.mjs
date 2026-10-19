@@ -1065,8 +1065,8 @@ export const sidebarTopics = [
               { label: 'Image Sources', link: 'controls/shinyimage/sources', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
               { label: 'SVG', link: 'controls/shinyimage/svg', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
               { label: 'Progress & Templates', link: 'controls/shinyimage/progress', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
-              { label: 'Caching & ImageService', link: 'controls/shinyimage/imageservice', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
-              { label: 'Blazor', link: 'controls/shinyimage/blazor', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+              { label: 'Caching & ImageService', link: 'controls/shinyimage/imageservice', dateCreated: '2026-08-26', dateUpdated: '2026-10-19' },
+              { label: 'Blazor', link: 'controls/shinyimage/blazor', dateCreated: '2026-08-26', dateUpdated: '2026-10-19' },
               { label: 'Properties & Events', link: 'controls/shinyimage/properties', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
             ]
           },
@@ -1084,7 +1084,7 @@ export const sidebarTopics = [
               { label: 'Save & Export', link: 'controls/imageeditor/save-export', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
             ]
           },
-          { label: 'MediaPickerButton', link: 'controls/media-picker-button/', dateCreated: '2026-07-12', dateUpdated: '2026-07-12', jumpTo: true },
+          { label: 'MediaPickerButton', link: 'controls/media-picker-button/', dateCreated: '2026-07-12', dateUpdated: '2026-10-19', jumpTo: true },
         ]
       },
       {

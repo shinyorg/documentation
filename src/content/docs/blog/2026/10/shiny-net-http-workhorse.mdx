@@ -1,0 +1,198 @@
+---
+title: "Shiny.Net.Http - The Mobile Library Workhorse You Didn't Know You Needed"
+description: "Nearly every app eventually has to move a file while nobody is looking at the screen. Shiny.Net.Http has been doing exactly that since 2016 - background uploads and downloads on iOS, Android, Windows, Linux, macOS and Blazor, one API, a persistent queue, retries, pause/resume, and progress you can bind to a UI or push onto the Lock Screen."
+date: 2026-10-19
+authors:
+  - allanritchie
+tags:
+  - httptransfers
+  - Feature
+  - MAUI
+  - iOS
+  - Android
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+Most libraries in Shiny get noticed because of what they do: BLE, GPS, push, health data. **Shiny.Net.Http**
+mostly gets noticed after it is already in the app, quietly doing the job that was never in the spec -
+moving a file while the user is somewhere else.
+
+<NugetBadge name="Shiny.Net.Http" showLabel={true} />
+
+## The feature nobody puts in the spec
+
+Look at a list of real apps and count the ones that never move a file:
+
+- a field-inspection app uploading photos and signed PDFs from a job site
+- a dash-cam or body-cam app shipping video clips home overnight
+- a logistics app sending proof-of-delivery images on a patchy cellular link
+- an offline-maps or training app pulling down hundreds of megabytes of content packs
+- an on-device AI app downloading a model file the first time it runs
+- any app uploading diagnostic logs, backups or database snapshots
+
+All of them start with `HttpClient`, and `HttpClient` works perfectly - on a desk, with the screen on. Then
+someone tests on a phone in a pocket. iOS suspends the process seconds after the app leaves the
+foreground and the socket dies with it. Android reclaims backgrounded processes under memory pressure. The
+200 MB upload restarts from zero next time the app opens, on the user's data plan.
+
+The fix is not a better retry loop inside your process. It is to **stop being the process holding the
+socket**: hand the transfer to whatever the platform runs on your behalf. That is what Shiny.Net.Http does.
+
+## Ten years in the making
+
+This is the oldest code in the Shiny family. It started in **2016** as a Xamarin plugin, before Shiny
+existed, back when "background upload on iOS and Android" meant reading two sets of platform docs and
+writing everything twice. It became a Shiny module when Shiny launched in **2019**, and it has been
+rewritten and re-platformed many times since: Xamarin to .NET MAUI, iOS background session rewrites, an
+Android engine that now lives in a foreground service, and a managed engine that brought the same API to
+Windows, Linux, macOS and Blazor WebAssembly.
+
+The surface you call has barely changed in all that time. What sits under it has absorbed a decade of
+OS-level changes so your app does not have to.
+
+## What you would otherwise have to build
+
+The "just use HttpClient" version of this feature grows a long tail. Shiny.Net.Http already covers it:
+
+| You need | Shiny.Net.Http gives you |
+|----------|--------------------------|
+| Transfers that survive suspension | Background `NSURLSession` on iOS/Mac Catalyst (the OS relaunches your app when it finishes), a foreground service on Android, Service Worker Background Sync on Blazor, a connectivity-aware managed loop on desktop/Linux |
+| A queue that survives app restarts | Transfers are persisted in a Shiny `IRepository` |
+| Network awareness | `PausedByNoNetwork`, and `UseMeteredConnection = false` keeps big transfers off cellular (`PausedByCostedNetwork`) |
+| Pause / resume / cancel | `Pause`, `Resume`, `Cancel`, `CancelAll` - downloads resume with an HTTP `Range` request |
+| Retries and expired tokens | `HttpTransferDelegate` with `maxErrorRetries`, `OnBeforeRetry` and `OnAuthorizationFailed` to refresh a bearer token and re-queue |
+| Resumable uploads | `TransferType.UploadTus` via `TusUploadRequest` for any tus 1.0 server |
+| Cloud storage | `AzureBlobStorageUploadRequest` and `AwsS3UploadRequest` sign requests without pulling in the vendor SDKs |
+| Progress for your UI | Events, an awaitable watch, a bindable monitor and system progress surfaces - see below |
+
+Getting started is two calls:
+
+```csharp
+builder.Services.AddHttpTransfers<MyTransferDelegate>();
+```
+
+```csharp
+await transferManager.Queue(new HttpTransferRequest(
+    "inspection-1234",
+    "https://api.example.com/inspections/1234/photos",
+    TransferType.UploadMultipart,
+    photoPath
+));
+```
+
+When it finishes - even if the app was suspended or terminated in between - your delegate hears about it:
+
+```csharp
+public partial class MyTransferDelegate(
+    ILogger<MyTransferDelegate> logger,
+    IHttpTransferManager manager
+) : HttpTransferDelegate(logger, manager, maxErrorRetries: 3)
+{
+    public override Task OnCompleted(HttpTransferRequest request)
+    {
+        // mark the record as synced, clean up the local file, etc.
+        return Task.CompletedTask;
+    }
+}
+```
+
+## Progress for the UI - only if you want it
+
+A background transfer does not need a screen, and nothing about Shiny.Net.Http requires one. But when a
+screen *does* want to show what is moving, there are four levels to pick from, and every one reports the
+same `TransferProgress`: bytes transferred, total bytes, bytes per second, `PercentComplete` and
+`EstimatedTimeRemaining`.
+
+### 1. The event
+
+Every transfer, every update:
+
+```csharp
+manager.UpdateReceived += (_, result) =>
+{
+    if (result.IsDeterministic)
+        Console.WriteLine($"{result.Request.Identifier}: {result.Progress.PercentComplete:P0} - {result.Progress.EstimatedTimeRemaining}");
+};
+```
+
+Throughput is measured consistently across platforms (and taken straight from `NSProgress` on Apple), and
+update frequency is bounded at the source so a fast connection does not flood your UI thread.
+
+### 2. Await one transfer
+
+When a flow just needs to know when *this* file is done:
+
+```csharp
+await manager.Queue(request);
+var result = await manager.WatchTransfer(request.Identifier);
+
+if (result.Status == HttpTransferState.Completed)
+    await this.Navigation.GoToAsync("done");
+```
+
+### 3. Bind a list
+
+`HttpTransferMonitor` gives you a collection of `HttpTransferObject` - each one `INotifyPropertyChanged`
+with `PercentComplete`, `BytesPerSecond`, `EstimatedTimeRemaining` and `Status` - seeded from the
+persisted queue, so a relaunched app shows bars already in the right place:
+
+```csharp
+public class TransfersViewModel(HttpTransferMonitor monitor)
+{
+    public INotifyReadOnlyCollection<HttpTransferObject> Transfers => monitor.Transfers;
+
+    public Task Start() => monitor.Start(
+        removeFinished: true,
+        syncContext: SynchronizationContext.Current
+    );
+
+    public Task Pause(HttpTransferObject item) => monitor.Pause(item.Identifier);
+    public Task Resume(HttpTransferObject item) => monitor.Resume(item.Identifier);
+}
+```
+
+```xml
+<CollectionView ItemsSource="{Binding Transfers}">
+    <CollectionView.ItemTemplate>
+        <DataTemplate>
+            <VerticalStackLayout>
+                <Label Text="{Binding Identifier}" />
+                <ProgressBar Progress="{Binding PercentComplete}" />
+                <Label Text="{Binding EstimatedTimeRemaining, StringFormat='{0:mm\\:ss} left'}" />
+            </VerticalStackLayout>
+        </DataTemplate>
+    </CollectionView.ItemTemplate>
+</CollectionView>
+```
+
+### 4. Outside your app entirely
+
+The whole premise is that the user is not in your app, so the most useful progress bar is often the one on
+the **Lock Screen**. One registration puts transfers on an iOS Live Activity (Lock Screen and Dynamic
+Island) or the Android foreground-service notification (a live update with a status bar chip on
+Android 16):
+
+```csharp
+builder.Services.AddTransferProgress(opts =>
+{
+    opts.Scope = TransferProgressScope.Summary;       // one surface for the whole batch, or PerTransfer
+    opts.Fields = TransferProgressFields.Default;     // file, direction, %, bytes, speed, ETA
+    opts.ShortStatus = TransferProgressShortStatus.Percent;
+});
+```
+
+The [August deep dive](/blog/2026/08/background-http-transfers/) covers how that works - including why an
+iOS Live Activity has to animate a time range rather than a percentage while your app is suspended.
+
+## Where it runs
+
+iOS, Mac Catalyst, Android, Windows, Linux, macOS, plain .NET and Blazor WebAssembly - trimmable and
+Native AOT compatible.
+
+## Where to go next
+
+- [Getting started](/client/httptransfers/)
+- [Transfers, pause & resume](/client/httptransfers/transfers/)
+- [The transfer delegate - retries and token refresh](/client/httptransfers/delegate/)
+- [Monitoring](/client/httptransfers/monitoring/) and [progress surfaces](/client/httptransfers/progress/)
+- [Resumable uploads (tus)](/client/httptransfers/tus/), [Azure Blob](/client/httptransfers/azure/), [AWS S3](/client/httptransfers/aws-s3/)

@@ -6,7 +6,7 @@ description: The MAUI memory and disk cache tiers, the bounded download queue, r
 On MAUI every remote image goes through `IImageService`. Most apps never touch it directly — the control resolves it — but it is worth understanding, because it is the difference between a scrolling list issuing one request per unique image and one per visible cell.
 
 :::note[MAUI only]
-Blazor deliberately has no cache layer; the browser already has a good one. See [Blazor](/controls/shinyimage/blazor/).
+Blazor deliberately has no cache layer of its own; the browser's HTTP cache is already a revalidating disk cache. Blazor does share one fetch per URL across every image. See [Blazor](/controls/shinyimage/blazor/).
 :::
 
 ## Configuration
@@ -23,6 +23,7 @@ builder.UseShinyControls(cfg => cfg
         o.MaxMemoryCacheBytes    = 32 * 1024 * 1024;
         o.MaxMemoryItemBytes     = 2 * 1024 * 1024;   // larger images stay disk-only
         o.Timeout                = TimeSpan.FromSeconds(60);
+        o.ServeStaleOnError      = true;              // refresh failed? show the expired copy
         o.SvgCacheEntryLimit     = 32;                // parsed SVG documents kept
     })
 );
@@ -33,6 +34,23 @@ builder.UseShinyControls(cfg => cfg
 `MaxMemoryItemBytes` is the per-item ceiling, and it exists so one full-resolution photo cannot evict every thumbnail in the cache to hold the single thing least likely to be asked for again. Images over it stay on disk only.
 
 Per image, `CacheEnabled` opts out of both tiers and `CacheDuration` overrides the expiry. A server-supplied `Cache-Control: max-age` or `Expires` beats both.
+
+## Expiry and revalidation
+
+An expired entry isn't thrown away. It's revalidated:
+
+1. **Fresh** (inside its `max-age`, `Expires` or `DiskCacheDuration`): served from disk, and no request is sent.
+2. **Expired, with an `ETag` or `Last-Modified`**: the request carries `If-None-Match` / `If-Modified-Since`. A `304 Not Modified` extends the entry using the 304's own `max-age` when it sends one, and the image is served from disk. Only the headers cross the network.
+3. **Expired, and the server says it changed**: the new image replaces the entry.
+4. **Expired, and the refresh fails** (offline, timeout, 5xx): the stale copy is shown rather than the error artwork. Set `ServeStaleOnError = false` to fail instead.
+
+`no-store` / `no-cache` responses are written already expired, so they're always revalidated before use.
+
+A custom `IImageDownloader` can take part in revalidation. Forward `request.IfNoneMatch` / `request.IfModifiedSince` as headers, return `new ImageDownloadResult(Stream.Null, NotModified: true)` on a 304, and pass `ETag` / `LastModified` on a 200. A downloader that ignores them still works; it just re-downloads the whole image when an entry expires.
+
+### Clock
+
+Expiry, last-access stamps and progress throttling all read a `TimeProvider`. `UseShinyControls` uses the one registered in DI if there is one, and `TimeProvider.System` otherwise. Pass one to `new ImageService(options, downloader, time)` to step through expiry in a test.
 
 ## Cache management
 
@@ -53,9 +71,11 @@ Nothing re-requests an image just because the cache went away, so an app with a 
 
 Bind the same avatar URL into a dozen visible cells and, without de-duplication, a dozen requests go out for one image — each holding one of the four download slots, so the rest of the list stalls behind duplicates of a picture already being fetched.
 
-`ImageService` collapses them: the first caller starts the download and the rest attach a progress sink to it, so every one of them animates correctly off a single response. A late joiner is handed the current snapshot immediately rather than sitting at "None" until the next chunk arrives — which, on a nearly-finished download, can be never.
+`ImageService` collapses them. Everything past the memory tier is shared per URI: the disk read, the revalidation and the download. The first caller does the work and the rest attach a progress sink to it, so every one of them animates correctly off a single response. A late joiner is handed the current snapshot immediately rather than sitting at "None" until the next chunk arrives — which, on a nearly-finished download, can be never.
 
 The owning caller's cancellation does not kill a download others are still waiting on. Scroll a cell off screen and its own request is abandoned; the shared download keeps going for whoever else asked.
+
+When the work starts, the caller that won the race checks the cache again. A load of the same URI may have finished between its own miss and its win, and without that check it would download an image that is already on disk. A forced reload (`ReloadAsync`) and an image with `CacheEnabled="False"` are never merged with a normal load.
 
 ## Bring your own HttpClient
 

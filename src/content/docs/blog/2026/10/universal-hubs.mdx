@@ -1,0 +1,228 @@
+---
+title: 'Universal Hubs - Write the Hub Once, Connect Over Bluetooth or Wi-Fi'
+description: 'Shiny.UniversalHubs serves the same Shiny.BluetoothLE.Hubs hub over Bluetooth LE and Wi-Fi at once. One hub, one contract, one discovery list. Clients pick the best transport at connect time, BLE and Wi-Fi players share the same groups and pushes, short Wi-Fi drops resume without a disconnect, and a hub can opt in to being reached through a tunnel.'
+date: 2026-10-22
+authors:
+  - allanritchie
+tags:
+  - BluetoothLE
+  - Release
+  - MAUI
+  - AOT
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+Two weeks ago we shipped [Shiny.BluetoothLE.Hubs](/blog/2026/10/ble-hubs/), which puts the SignalR hub model on
+Bluetooth LE. **Shiny.UniversalHubs** is the next step. It serves **the same hub over Wi-Fi as well as BLE**, and you
+don't change your contract, your hub or your app code to get it.
+
+<NugetBadge name="Shiny.UniversalHubs" showLabel={true} />
+<NugetBadge name="Shiny.UniversalHubs.Host" showLabel={true} />
+<NugetBadge name="Shiny.UniversalHubs.Client" showLabel={true} />
+
+On a plane, the players connect over BLE. At home, they connect over Wi-Fi, which has more range, more bandwidth and no
+MTU. A player on Wi-Fi and a spectator on Bluetooth can be in the same game, in the same groups, getting the same
+pushes.
+
+It targets .NET 10, runs on iOS, Android and macOS, and is AOT- and trim-safe with no reflection.
+
+## Why add Wi-Fi?
+
+BLE Hubs is great when there's no network at all, but Bluetooth has hard limits:
+
+- **Range.** A few metres to a room. Walk to the kitchen and you're gone.
+- **Bandwidth.** GATT runs at a few KB/s. Fine for moves and state, slow for anything bigger.
+- **MTU.** Every message is chunked to fit `MTU - 3` bytes, and reassembled on the other side.
+- **Distance only.** Nobody outside the room can join.
+
+When the devices share a network, Wi-Fi fixes all of that. But you don't want two apps, two contracts or two sets of
+hub code. You want the hub you already wrote to be reachable both ways, and the client to pick.
+
+## What you get
+
+| | BLE Hubs | Universal Hubs |
+|---|---|---|
+| Transports | Bluetooth LE | Bluetooth LE **and** Wi-Fi (HTTP), at the same time |
+| Discovery | BLE scan | BLE scan **and** mDNS, merged into one list |
+| Hub base class | `BleHub<T>` | `UniversalHub<T>`, which knows each connection's transport |
+| Files | L2CAP | L2CAP over BLE, plain HTTP over Wi-Fi, same `UploadFile` / `DownloadFile` |
+| Dropped links | a disconnect | a short Wi-Fi drop **resumes**: same connection id, same groups, missed pushes replayed |
+| Beyond the room | no | opt-in **tunnels** to the internet, per hub |
+
+Everything else is still blehubs: the `[BleHubClient]` contract, the generated proxy, `Clients.All` / `Group(...)`,
+`IHubContext<THub>`, streaming, cancellation and typed disconnect reasons. Universal Hubs only carries those calls over
+a second transport. It doesn't reimplement the hub.
+
+## The host
+
+One call sets up both sides. Each hub gets a characteristic (for BLE) and an mDNS service type (for Wi-Fi):
+
+```csharp
+services.AddUniversalServer(server => server
+    .ServiceUuid(ServiceUuid)                                                    // optional - the one BLE service
+    .Ble(o => o.EnableFileTransfers(filesDir))                                   // L2CAP and HTTP files both use it
+    .Http(o => o.AuthorizeFile = req => req.FileName.StartsWith("avatar-"))
+    .AddHub<GameHub>(CharacteristicUuid, "_mygame._tcp", o => o.MaxClients = 6)   // limits cover both transports
+);
+```
+
+The HTTP server binds a free port on every interface and mDNS tells clients where it is, so there's nothing to
+configure. `IUniversalHubHost` starts and stops both transports:
+
+```csharp
+public class Lobby(IUniversalHubHost host)
+{
+    // BLE, Wi-Fi or both - whichever this device can do right now
+    public Task<HubTransports> Open() => host.Start(HubTransports.All);
+    public Task Close() => host.Stop("The host ended the game");
+}
+```
+
+Your hub can stay a `BleHub<T>`, but derive it from `UniversalHub<T>` and its lifecycle hooks get a `HubConnection`
+that says which transport each client is on:
+
+```csharp
+public class GameHub : UniversalHub<IGameHub>
+{
+    public override Task OnConnectedAsync(HubConnection connection)
+    {
+        // connection.Transport: HubTransports.Ble or HubTransports.Http
+        // connection.Ble: the BLE central, connection.Http: the Switchboard caller (null when they don't apply)
+        // connection.Properties: your own per-connection state, the same bag on both transports
+        return Groups.AddToGroupAsync(connection.Id, "lobby");
+    }
+
+    public override Task OnDisconnectedAsync(HubConnection connection, HubDisconnect disconnect)
+        => Clients.Others.Emote(connection.Client.Name ?? "?", disconnect.Reason.ToString());
+
+    public async Task<MoveResult> MakeMove(int cell)
+    {
+        // ...
+        await Clients.All.StateChanged(engine.Snapshot());   // BLE and Wi-Fi clients alike, in order
+        return new MoveResult(true, null);
+    }
+}
+```
+
+`Clients.All`, groups, `IHubContext<THub>`, `MaxClients`, `ValidateClient` and `Context.Abort` all cover BLE and Wi-Fi
+clients together.
+
+## The client
+
+```csharp
+services.AddUniversalHubClient<IGameHub>(CharacteristicUuid, "_mygame._tcp",
+    o => o.ServiceUuid = ServiceUuid);
+```
+
+```csharp
+public class JoinViewModel(IUniversalHubClient<IGameHub> client)
+{
+    // a host seen over BLE and Wi-Fi is one HubHostInfo
+    IDisposable Scan() => client.DiscoverAll().Subscribe(host => /* host.Name, host.Transports, host.Rssi */);
+
+    async Task Join(HubHostInfo host)
+    {
+        await client.Connect(host, new HubConnectOptions("Allan") { Prefer = HubTransports.Http });
+        // client.Transport says which one was used
+        await client.Hub.MakeMove(4);
+    }
+}
+```
+
+- **One list.** BLE scan results and mDNS results are merged, so a host reachable both ways shows up once with both
+  transports.
+- **Prefer and fall back.** `Prefer` is tried first, and the other transport is the fallback. `Allowed` limits which
+  transports may be used at all. A refusal (host full, `ValidateClient`) isn't retried on the other transport.
+- **Nothing else changes.** `IUniversalHubClient<T>` is an `IBleHubClient<T>`. The generated proxy, events,
+  `Disconnected`, streams and file methods work the same over either transport.
+
+## Wi-Fi blips don't end the game
+
+Over Wi-Fi, each client holds a [Switchboard](/httpserver/switchboard/) line from Shiny.Net.HttpServer: server-sent
+events down, POSTs up, with a resume window. If a phone's Wi-Fi drops for a moment, the line comes back with the same
+id, the same groups, and the pushes it missed are replayed. The hub never sees a disconnect. Only a line that's gone
+for good runs `OnDisconnectedAsync`, as `ClientTimeout`.
+
+Disconnect reasons mean the same thing on both transports and on both sides: `ClientDisconnect`, `ClientTimeout`,
+`ServerDisconnect`, `ServerShutdown` or `ConnectionFailed`.
+
+## One hub at a time
+
+`Start`/`Stop` run every hub. `StartHub<THub>()`/`StopHub<THub>()` run one, on both transports, so an always-on hub can
+sit beside one that only runs on demand:
+
+```csharp
+await host.StartHub<ChatHub>();                 // at app start, and left running
+await host.StartHub<GameHub>();                 // when the player taps Host
+await host.StopHub<GameHub>("Game over");       // its clients get ServerShutdown; the chat carries on
+```
+
+The HTTP server starts with the first hub hosted over HTTP and stops with the last, and mDNS only advertises the hubs
+that are running.
+
+## Beyond the room: tunnels
+
+Because the Wi-Fi side is a real HTTP server, it can be put on the internet with any
+[Shiny.Net.HttpServer tunnel](/httpserver/tunneling/). That exposes the whole server, so each hub opts in:
+
+```csharp
+services.AddUniversalServer(server => server
+    .HttpServer(http => http.AddQuickTunnel())                                 // Shiny.Net.HttpServer.Ssh
+    .AddHub<GameHub>(GameCharacteristic, "_mygame._tcp")                        // 404 through the tunnel
+    .AddHub<ChatHub>(ChatCharacteristic, "_mychat._tcp", o => o.AllowTunnel = true));
+```
+
+A tunnel URL has no mDNS, so a remote client connects by address. `FromUrl` works for typed addresses and QR codes too:
+
+```csharp
+await client.Connect(HubHostInfo.FromUrl(new Uri("https://abc.a.pinggy.link")));
+```
+
+Put authentication in front of anything you share on the internet.
+
+## Files
+
+`UploadFile` and `DownloadFile` don't change. Over BLE they use an L2CAP channel. Over Wi-Fi they're plain HTTP `PUT` /
+`GET` requests, tied to the client by a token from the handshake. Both follow the same `EnableFileTransfers` settings,
+plus an optional `AuthorizeFile` rule.
+
+## Under the hood
+
+- **Hub logic stays in blehubs.** blehubs gained two hidden transport seams: a transport endpoint on the host and an
+  external transport on the client. The generated dispatcher, groups, ordered pushes, timeouts and payload limits all
+  run in blehubs, whatever the transport.
+- **The wire.** Each hub is a Switchboard at `/hubs/{characteristicUuid}`, with a few reserved methods: `hub.handshake`,
+  `hub.invoke`, `hub.stream` and `hub.push`. The wire is versioned, and the handshake refuses mismatches.
+- **JSON is re-framed, never re-serialized.** The bytes `IBleHubSerializer` produced for BLE are carried as JSON
+  values over Wi-Fi. Your `JsonSerializerContext` covers both transports, and nothing uses reflection.
+- **Remote errors survive.** A hub exception still arrives as `BleHubRemoteException`, with its type and message.
+- **mDNS TXT** carries the protocol version, host id, name, base path and the running hubs, so clients filter for the
+  hubs they speak before connecting.
+- **One BLE service UUID per host.** Every hub is a characteristic in it, because two 128-bit UUIDs don't fit in a
+  31-byte advertisement.
+
+## Things to know
+
+- **Plane, hotel and public Wi-Fi usually isolate clients from each other**, which blocks mDNS and device-to-device
+  traffic. That's exactly why BLE is the fallback.
+- Hosting runs while the app is in the foreground, the same as BLE hosting.
+- iOS needs `NSLocalNetworkUsageDescription`, your service types in `NSBonjourServices`, and `NSAllowsLocalNetworking`
+  on clients. Android needs the multicast and network permissions and cleartext traffic. The
+  [Getting Started](/universalhubs/) page has the full list.
+- The transport is chosen at connect time. Moving a live session from BLE to Wi-Fi as someone walks in the door is on
+  the list for later.
+
+## Try it: Tic Tac Toe and an always-on chat
+
+The repo's sample is the BLE Hubs tic-tac-toe game, hosting over both transports. The join list shows how each game is
+reachable, and the game screen says which transport is in use. Next to it runs an always-on chat hub, so anyone nearby,
+on the network or (through a quick tunnel) on the internet can message the device's owner. The same app runs on iOS,
+Android and macOS.
+
+## Get started
+
+- [Getting Started](/universalhubs/): packages, setup and platform permissions
+- [Hosting](/universalhubs/hosting/): `AddUniversalServer`, `UniversalHub<T>`, start/stop, tunnels and disconnect reasons
+- [Client](/universalhubs/client/): discovery, transport choice, resume, `FromUrl` and files
+- [How It Works](/universalhubs/how-it-works/): the wire protocol, mDNS TXT and file routes
+- [BluetoothLE Hubs](/blehubs/): contracts, hubs, groups and everything else your hub does

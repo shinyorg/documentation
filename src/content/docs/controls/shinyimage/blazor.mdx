@@ -5,11 +5,23 @@ description: How ShinyImage works on Blazor - streamed progress through fetch, t
 
 The Blazor component mirrors the MAUI control's states — placeholder, ring, image, error artwork — but the machinery underneath is deliberately different.
 
-## There is no cache layer
+## The disk cache is the browser's
 
-The browser already has one: a well-tuned HTTP cache with correct revalidation, shared across tabs and persisted between sessions. Reimplementing that in C# would be slower, would not be shared, and would fight the one the browser is going to use anyway.
+The browser already has one: an HTTP cache on disk that revalidates with `ETag` / `Last-Modified`, shared across tabs and persisted between sessions. Reimplementing that in C# would be slower, would not be shared, and would fight the one the browser is going to use anyway.
 
 So `CacheEnabled`, `CacheDuration` and `IImageService` have no Blazor counterparts. Set cache headers on the server.
+
+## One fetch per URL
+
+What the browser's cache doesn't do is merge requests. A dozen images asking for an uncached URL at once would each make their own fetch and hold their own copy of the bytes. `ShinyImage` shares them:
+
+- Every image showing the same URL rides **one `fetch`** and **one blob**. A late arrival joins the fetch in flight and gets its current progress straight away, or, if it has finished, gets the blob immediately with no request.
+- The blob is reference-counted and released when the last image showing it goes away.
+- One image leaving the screen stops only its own wait. The fetch is cancelled only when nobody is waiting on it any more.
+- A failed load isn't remembered, so the next image to ask tries again.
+- With an `IImageDownloader` registered, the same rules apply to the C# download: one call per URL per scope, which on Blazor Server means per user, so two users never share an authenticated image. The bytes cross into the browser once.
+
+`ReloadAsync()` adds a cache-busting parameter, so a reload always fetches on its own. It reads the time from a `TimeProvider` registered in DI, or `TimeProvider.System` if none is.
 
 ## What Blazor adds is progress
 
