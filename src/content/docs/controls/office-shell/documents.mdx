@@ -1,0 +1,158 @@
+---
+title: Office Shell | Files & Document Store
+description: One IOfficeDocumentStore runs the File backstage of the Word, Excel and PowerPoint editors on .NET MAUI and Blazor — Open, Save, Save As, Export, Print and the recent list — and ShowFileCommands hands it all to the app instead
+---
+import { Aside } from '@astrojs/starlight/components';
+
+`DocumentEditorView`, `SpreadsheetView` and `SlideEditorView` don't raise file events. Every file action
+goes to an **`IOfficeDocumentStore`**: register your own, or let the editor use the default one for its
+host (below). There is nothing to wire either way:
+
+| In the shell | What happens |
+|---|---|
+| Open ▸ **Browse** | The store's picker chooses a file, and the editor opens it and takes ownership of it |
+| A **recent** file | Reopens from the store |
+| **Save** (title bar, backstage, Ctrl+S) | Writes back over the file the document came from. On a new document it does a Save As |
+| **Save As** | Writes a new file. In the app's own format it becomes the open file |
+| **Export** | Writes a new file. The open file stays the same |
+| **Print** | MAUI: the PDF opens in the system viewer. Blazor: the browser's print dialog, as before |
+| **AutoSave** | Where the editor has it, it saves a file that came from the store two seconds after the last edit. A new document waits for its first Save |
+| Title bar | Name, location and "Saving…" / "Saved" / "Couldn't save" follow the store |
+
+**One store serves all three editors.** It only handles files: the editor turns its document into bytes
+in the chosen format, and every call says which app it is for (`OfficeApp.Word`, `Excel` or
+`PowerPoint`). That lets a picker filter to `.docx`, `.xlsx` or `.pptx`, and keeps each editor's recent
+list to its own files. Register it once, and the three editors share it.
+
+## .NET MAUI
+
+```csharp
+builder
+    .UseShinyOffice()
+    .UseOfficeDocumentStore();   // optional — this is also what an editor uses when nothing is registered
+```
+
+```xml
+<office:DocumentEditorView x:Name="Editor" />
+```
+
+```csharp
+// "Being fed a file": the view owns the document from here on.
+await Editor.OpenAsync(stream, "Welcome.docx");
+```
+
+`MauiOfficeDocumentStore` keeps files in one folder (`UseOfficeDocumentStore(folder)` to choose it).
+Browse uses the platform file picker, filtered to the app's format. A picked file from somewhere else is
+**copied into the folder**, and the copy is what Save writes to. On iOS and Android the picker only gives
+the app a temporary copy anyway, so the behaviour is the same everywhere. Print writes the PDF to the
+cache and opens it in the system viewer, which is where you print from on a phone. On the AppKit and GTK
+heads there's no picker, so Browse does nothing; the recent list still works.
+
+## Blazor
+
+```csharp
+builder.Services.AddShinyOfficeDocumentStore();   // optional, Scoped — without it each editor makes its own
+```
+
+```razor
+<DocumentEditorView Document="document" />
+```
+
+`BrowserOfficeDocumentStore` uses real files where the browser can:
+
+- **Chrome, Edge** (File System Access API): Browse is the system open dialog. Save writes back over the
+  file it came from, and Save As and Export are the system save dialog. The recent list reopens files
+  after a reload (the browser asks once per session before it lets the page touch a file again).
+- **Safari, Firefox**: Browse is a file upload and every save is a download. Files from this session
+  stay in the recent list until the page is closed.
+
+The recent list is kept in the visitor's own `localStorage`, so it's per user on Blazor Server too.
+
+## Your own store
+
+```csharp
+public interface IOfficeDocumentStore
+{
+    Task<OfficeDocumentRef?> PickOpenAsync(OfficeApp app, CancellationToken ct = default);
+    Task<Stream> OpenReadAsync(OfficeDocumentRef document, CancellationToken ct = default);
+    Task<OfficeDocumentRef?> SaveAsync(OfficeDocumentRef? target, OfficeSaveRequest request, CancellationToken ct = default);
+    Task<IReadOnlyList<OfficeRecentFile>> GetRecentAsync(OfficeApp app, CancellationToken ct = default);
+}
+```
+
+- **`OfficeDocumentRef(Id, Name)`** is a file the store knows. `Id` is your key (a path, a blob URL, a
+  database id) and is never read by the editors. `Location` is shown in the title bar and on the Info page.
+- **`SaveAsync`** gets a `target`: the open file on a plain Save, or **null** for a new one (Save As,
+  Export, the first Save of a new document), which is when you'd show a save dialog.
+  `request.WriteToAsync(stream)` / `ToBytesAsync()` produce the bytes. `request.Format`, `FileName`,
+  `Action` and `App` describe the file. Return null if the user cancelled.
+- **`PickOpenAsync`** returns null for a cancel. **`GetRecentAsync`** should set
+  `OfficeRecentFile.Document` so the editor can reopen the file itself.
+
+`FileSystemOfficeDocumentStore` (in `Shiny.Controls.Office.Shared`) is a folder-backed store with no
+platform code. It saves atomically (to a temp file, then moved into place), never overwrites when it
+creates a new file (`Report (2).docx`), and keeps the recent list in `.recent.json`. To add a picker,
+derive from it and override `PickOpenAsync`, as the MAUI store does. A cloud store implements the four
+methods directly against its API.
+
+```csharp
+// A store per view, instead of the registered one:
+Editor.DocumentStore = new MyCloudStore(http);
+```
+
+## When the app runs the files
+
+If your app has its own open and save UI (a document list, a sync engine, a server round trip), turn the
+editor's File surface off:
+
+```xml
+<office:DocumentEditorView x:Name="Editor" ShowFileCommands="False" />
+```
+
+```razor
+<SpreadsheetView @ref="sheet" ShowFileCommands="false" />
+```
+
+That hides the ribbon's File button and the backstage, the title bar's Save and AutoSave, the Slide Show
+tab's Export group, and the file commands in the title bar search. On Blazor it also turns off
+<kbd>Ctrl</kbd>+<kbd>S</kbd> and <kbd>Ctrl</kbd>+<kbd>P</kbd>. The rest of the shell is unchanged. File
+still raises `FileMenuRequested` if you handle it (and on MAUI's Word editor, `ShowFileButton` still shows
+it), so the button can open your own menu.
+
+The app then works the editor directly:
+
+```csharp
+await editor.OpenAsync(stream, "Report.docx");   // the view owns the document
+var bytes = editor.Document!.ToArray();          // or Workbook / Deck — write them anywhere
+await editor.SaveAsync();                        // or go through the store anyway:
+await editor.ExportAsync(OfficeFileFormats.Pdf); //   SaveAsAsync / ExportAsync / PrintAsync / OpenAsync(file)
+```
+
+## Migrating from the file events
+
+The editors' file events and their `RecentFiles` property are gone. The bare shell parts (`OfficeTitleBar`,
+`OfficeBackstage`) still raise theirs, for anyone building their own window.
+
+| Was | Now |
+|---|---|
+| `SaveRequested`, `SaveAsRequested`, `ExportRequested`, `PrintRequested` (Word) | The store's `SaveAsync`. Your own UI calls `editor.SaveAsync()` and the others |
+| `FileRequested` + `SpreadsheetFileRequest` / `SlideFileRequest` (Excel, PowerPoint) | The store's `SaveAsync` with an `OfficeSaveRequest`. `SpreadsheetExport` / `SlideExport` still write the bytes yourself |
+| `OpenRequested`, `RecentFileSelected` | The store's `PickOpenAsync` and `OfficeRecentFile.Document` |
+| `RecentFiles` | The store's `GetRecentAsync` |
+| `FileRequested` (MAUI Word's File button), `FileClicked` (Blazor Word) | `FileMenuRequested`, as on the other two editors |
+| `DownloadAsync(format)` (Blazor Word) | `ExportAsync(format)` |
+
+## Ownership and state
+
+- A document the editor opened (from the store, a template, or `OpenAsync(stream, fileName)`) belongs
+  to the editor. It is disposed when the next one replaces it, unless you handle `DocumentOpened` /
+  `WorkbookReplaced` / `DeckReplaced` (MAUI) or bind `WorkbookChanged` / `DeckReplaced` (Blazor). If you
+  handle those, you own it.
+- `CurrentFile` is the store file that is open, or null for a new document or one you set yourself.
+  Setting `Document` / `Workbook` / `Deck` clears it.
+- `OfficeDocument.MarkClean()` clears `IsDirty` after the package was written somewhere other than its
+  `Path`. The editors call it after a store save.
+- `DocumentExport` (in `Shiny.Controls.Office.Skia`) writes a `WordDocument` as docx, PDF, plain text or
+  HTML. It is the Word counterpart of `SpreadsheetExport` and `SlideExport`.
+
+The notebook editor has no backstage, so it doesn't use a store.
