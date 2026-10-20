@@ -82,6 +82,19 @@ cb.SetWrite(request =>
 
 `WriteOptions` flags: `Write`, `WriteWithoutResponse`, `AuthenticatedSignedWrites`, `EncryptionRequired`
 
+### When a handler throws
+
+Return `GattResult.Error(...)` or call `Respond(...)` with a specific `GattState` for failures you expect. If a read, write or subscribe handler throws instead, Shiny catches the exception so it can't crash the app:
+
+| Platform | What the central gets |
+|---|---|
+| iOS / Mac Catalyst / macOS | `CBATTError.UnlikelyError` |
+| Android | `GattStatus.Failure` |
+| Linux | `org.bluez.Error.Failed` (the exception is also logged) |
+| Windows | no answer, so the central waits for its own timeout |
+
+A throwing `SetNotification` hook still has its subscription recorded.
+
 ### Notifications
 
 Send data to subscribed centrals.
