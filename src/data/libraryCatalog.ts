@@ -793,7 +793,7 @@ export const categories: CategoryCopy[] = [
             },
             {
                 label: 'EF Core Extensions',
-                tagline: 'Spatial, vector and full-text search for SQLite on mobile, plus outbox, temporal history and AI tools for EF Core 10',
+                tagline: 'Mobile SQLite search, an outbox, temporal history and AI tools for EF Core 10',
                 summary: 'Feature packages that fill the gaps in EF Core 10, ported from Shiny DocumentDb. Each one plugs in through EF\'s own extension points — interceptors, conventions, the migrations SQL generator and query translation — and never asks you to derive from a base `DbContext`.',
                 highlights: [
                     'Spatial (R*Tree), vector (sqlite-vec) and FTS5 search on SQLite — on iOS and Android too',

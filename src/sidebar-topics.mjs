@@ -8,6 +8,10 @@
  * Add `expandInHomenav: true` to a grouping node (e.g. "Aspire") so the homepage nav
  * panel lists its child libraries instead of the group itself.
  *
+ * Every library in the homepage nav panel shows its `tagline` from `src/data/libraryCatalog.ts` as a
+ * subtitle. Add `homenavNote: '…'` to an item the catalog doesn't cover (e.g. the children of an
+ * `expandInHomenav` group) to give it one too.
+ *
  * Add `featuredInHomenav: [{ label, link, note }]` to a *topic* to give it a row of highlighted
  * links at the top of its block in the homepage nav panel — for pages that matter more than their
  * place in the tree suggests (e.g. Theming, which isn't a control and so never appears in the
@@ -1264,9 +1268,6 @@ export const sidebarTopics = [
     label: 'Data & Storage',
     link: '/documentdb/',
     icon: 'seti:db',
-    featuredInHomenav: [
-      { label: 'EF Core Extensions', link: 'efcore/', note: 'Mobile spatial & vector search, outbox, temporal, AI' },
-    ],
     items:[
       {
         label: 'Document DB',
@@ -1441,9 +1442,6 @@ export const sidebarTopics = [
     label: 'Server & Cloud',
     link: '/httpserver/',
     icon: 'cloud-download',
-    featuredInHomenav: [
-      { label: 'ASP.NET Extensions', link: 'aspnet/', note: 'WebDAV, tus, NuGet & npm feeds, ACME, tunnels' },
-    ],
     items:[
       {
         label: 'HTTP Server',
@@ -1610,6 +1608,7 @@ export const sidebarTopics = [
         items:[
           {
             label: 'Orleans Database Providers',
+            homenavNote: 'Orleans clustering, grain storage and reminders, provisioned',
             jumpTo: true,
             items:[
               { label: 'Getting Started', link: 'aspire/orleans/', dateCreated: '2026-02-25', dateUpdated: '2026-02-25' },
@@ -1621,6 +1620,7 @@ export const sidebarTopics = [
           },
           {
             label: 'Aspire Gluetun VPN',
+            homenavNote: 'Route other resources through a VPN container',
             jumpTo: true,
             items:[
               { label: 'Getting Started', link: 'aspire/gluetun/', dateCreated: '2026-02-26', dateUpdated: '2026-02-26' },
@@ -1631,6 +1631,7 @@ export const sidebarTopics = [
           },
           {
             label: 'Aspire Tunnelling',
+            homenavNote: 'Public addresses for webhooks and demos',
             jumpTo: true,
             items:[
               { label: 'Getting Started', link: 'aspire/tunnel/', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
@@ -1643,6 +1644,7 @@ export const sidebarTopics = [
           },
           {
             label: 'DocumentDB',
+            homenavNote: 'DocumentDb stores and Orleans providers in Aspire',
             items:[
               { label: 'Aspire', link: 'documentdb/aspire', dateCreated: '2026-06-23', dateUpdated: '2026-06-23', attrs: { target: '_blank' } },
               { label: 'Orleans', link: 'documentdb/orleans', dateCreated: '2026-06-13', dateUpdated: '2026-06-13', attrs: { target: '_blank' } }
@@ -1783,6 +1785,7 @@ export function cleanTopicsForStarlight(topics) {
     if (key === 'expandInHomenav') return undefined;
     if (key === 'flattenInHomenav') return undefined;
     if (key === 'featuredInHomenav') return undefined;
+    if (key === 'homenavNote') return undefined;
     if (key === 'homeNavOnly') return undefined;
     if (key === 'platform') return undefined;
     if (key === 'dateCreated') return undefined;
