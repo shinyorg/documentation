@@ -774,8 +774,8 @@ export const categories: CategoryCopy[] = [
         topicId: 'data',
         accent: '#00838F',
         accentDark: '#4FD6E4',
-        headline: 'Store, query, sync and persist data — on the device and in the cloud, with no ORM and no migrations.',
-        intro: 'Lightweight, AOT-compatible data libraries that run everywhere .NET does: a document database over twenty backends, a geospatial database, a two-way sync engine, and a key/value store abstraction.',
+        headline: 'Store, query, sync and persist data — on the device and in the cloud, with or without an ORM.',
+        intro: 'Lightweight data libraries that run everywhere .NET does: a document database over twenty backends, feature packages that fill the gaps in EF Core, a two-way sync engine, and a key/value store abstraction.',
         libraries: [
             {
                 label: 'Document DB',
@@ -789,6 +789,21 @@ export const categories: CategoryCopy[] = [
                 ],
                 packages: ['Shiny.DocumentDb'],
                 frameworks: ['dotnet', 'maui', 'blazor', 'aspnet'],
+                os: ['android', 'ios', 'windows'],
+            },
+            {
+                label: 'EF Core Extensions',
+                tagline: 'Spatial, vector and full-text search for SQLite on mobile, plus outbox, temporal history and AI tools for EF Core 10',
+                summary: 'Feature packages that fill the gaps in EF Core 10, ported from Shiny DocumentDb. Each one plugs in through EF\'s own extension points — interceptors, conventions, the migrations SQL generator and query translation — and never asks you to derive from a base `DbContext`.',
+                highlights: [
+                    'Spatial (R*Tree), vector (sqlite-vec) and FTS5 search on SQLite — on iOS and Android too',
+                    'A transactional outbox delivered with retries, dead letters and ordered partitions',
+                    'Temporal history on SQLite, PostgreSQL, SQL Server and MySQL',
+                    'Scoped AI tools and an MCP server over a `DbContext`',
+                    'Versioned seeding and an Aspire seed gate',
+                ],
+                packages: ['Shiny.EntityFrameworkCore.Sqlite.Mobile', 'Shiny.EntityFrameworkCore.Outbox', 'Shiny.EntityFrameworkCore.Temporal', 'Shiny.EntityFrameworkCore.AI', 'Shiny.EntityFrameworkCore.Mcp', 'Shiny.EntityFrameworkCore.Seeding', 'Shiny.EntityFrameworkCore.Aspire.Hosting'],
+                frameworks: ['dotnet', 'maui', 'aspnet'],
                 os: ['android', 'ios', 'windows'],
             },
             {

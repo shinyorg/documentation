@@ -1,0 +1,386 @@
+---
+title: Transactional Outbox
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+An outbox lets your application record "this happened" **in the same transaction as the write that made it
+happen**, then deliver it to a bus, an HTTP endpoint, or an in-process mediator — with no second datastore and
+no dual-write window. With EF Core the outbox is just another entity in your model: your migrations create its
+table, and your `SaveChanges` commits it.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Outbox" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Outbox
+```
+
+```csharp
+public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+{
+    public DbSet<Order> Orders => Set<Order>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+        => modelBuilder.AddOutbox();            // maps OutboxMessage → its own "outbox" table
+}
+```
+
+```csharp
+services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+services.AddDbContextOutbox<AppDbContext, BusDispatcher>();   // background processor + IOutboxAdmin
+```
+
+```csharp
+db.Orders.Add(order);
+db.Enqueue(new OrderPlaced(order.Id, order.Total));
+await db.SaveChangesAsync();     // the order row and the outbox row commit together, or neither does
+```
+
+Then `dotnet ef migrations add AddOutbox` — the table is picked up like any other entity. No base class, no
+second context.
+
+## The problem it solves
+
+Without an outbox, saving an order and publishing `OrderPlaced` are two writes to two systems:
+
+```csharp
+await db.SaveChangesAsync();
+await bus.Publish(new OrderPlaced(order.Id, order.Total));   // ← crash here and the event is lost forever
+```
+
+There is no ordering of those two calls that is safe. Publish first and a failed save means an event for an
+order that does not exist; save first and a crash means an order nobody downstream ever hears about. The outbox
+removes the second system from the write path entirely: the event is a row in *your* database, written by the
+same transaction, and a background processor delivers it afterwards.
+
+## Two ways to enqueue
+
+### Explicitly, on the context doing the write
+
+`Enqueue` adds an `OutboxMessage` to the change tracker. Nothing is written until `SaveChanges`, which inserts it
+in the same transaction as everything else the context is tracking.
+
+```csharp
+db.Orders.Add(order);
+db.Enqueue(new OrderPlaced(order.Id, order.Total));
+db.Enqueue(new InventoryReserved(order.Id), partitionKey: order.Id.ToString());
+await db.SaveChangesAsync();
+```
+
+| Method | |
+|---|---|
+| `Enqueue<TEvent>(evt, partitionKey?, headers?)` | Serializes with `OutboxOptions.PayloadSerializerOptions` (camelCase by default) |
+| `Enqueue<TEvent>(evt, JsonTypeInfo<TEvent>, …)` | AOT-safe — serializes through source-generated metadata |
+| `EnqueueRaw(messageType, payload, …)` | A payload you already hold as JSON, or a contract name instead of a CLR type |
+
+`MessageType` defaults to the event's full CLR type name. Each call returns the tracked `OutboxMessage`.
+
+:::caution
+Always enqueue on the **same context** that does the business write. A message saved through a different
+context is a dual write with extra steps — exactly the failure the outbox exists to remove.
+:::
+
+### Declaratively, per entity type
+
+`AddOutboxPublishing` registers a `SaveChanges` interceptor that publishes an event for every saved entity of a
+type — no change to your save code.
+
+```csharp
+services.AddDbContext<AppDbContext>(o => o
+    .UseNpgsql(connectionString)
+    .AddOutboxPublishing(p => p
+        .Publish<Order>(
+            ctx => new OrderChanged(ctx.Entity.Id, ctx.Operation),
+            OutboxOperations.Insert | OutboxOperations.Update,
+            partitionKey: ctx => ctx.Entity.Id.ToString())
+        .Publish<Customer>(ctx => ctx.Operation == OutboxOperations.Delete
+            ? new CustomerClosed(ctx.Entity.Id)
+            : null)));
+```
+
+The factory receives an `OutboxPublishContext<T>`: `Entity`, `Operation` (exactly one of `Insert`, `Update`,
+`Delete`), the change-tracker `Entry`, and the `Context`. Return `null` to publish nothing for that save — the
+hook for "only when the status actually changed":
+
+```csharp
+p.Publish<Order>(ctx => ctx.Entry.Property(x => x.Status).IsModified
+    ? new StatusChanged(ctx.Entity.Id, ctx.Entry.Property(x => x.Status).OriginalValue, ctx.Entity.Status)
+    : null,
+    OutboxOperations.Update);
+```
+
+`Publish<T>` matches any entity assignable to `T`, so `Publish<IAggregateRoot>(…)` covers a whole hierarchy.
+
+#### Store-generated keys
+
+An identity key does not exist until its row is inserted, so an event built in `SavingChanges` would carry the
+temporary placeholder. The interceptor handles this without giving up atomicity:
+
+1. Events for updates, deletes and inserts with client-side keys are built **before** the write and ride the same
+   `SaveChanges` — one round trip, EF's own transaction. `OriginalValues` and `IsModified` describe the change.
+2. An insert whose key (or any value) is still temporary is **deferred**: its message id is reserved in entry order
+   (so FIFO still holds), the event is built after the write when the entity has its real key, and a second
+   `SaveChanges` pass writes the message.
+3. To keep both passes in one transaction, the interceptor **begins one** when none is active and commits it after
+   the messages are in. Inside your own `BeginTransaction()` or a `TransactionScope` it simply joins.
+
+If the message insert fails, the transaction rolls back and the exception propagates — the entity is not saved
+either. A failed save never leaves the interceptor's messages in the change tracker, so a retry does not publish
+twice.
+
+## The delivery contract
+
+Delivery is **at-least-once**. A dispatcher that succeeds and then crashes before its acknowledgement is written
+will deliver the same message again. **Consumers must be idempotent.** There is no distributed transaction with
+your bus — that is the whole point of an outbox.
+
+```csharp
+public sealed class BusDispatcher(IBus bus) : IOutboxDispatcher
+{
+    public Task Dispatch(OutboxMessage message, CancellationToken ct)
+        // Throw to retry (with backoff); return normally to acknowledge.
+        => bus.Publish(message.MessageType, message.Payload, ct);
+}
+```
+
+…or skip the type for a transport that needs no injected state:
+
+```csharp
+services.AddDbContextOutbox<AppDbContext>((msg, ct) => bus.Publish(msg.MessageType, msg.Payload, ct));
+```
+
+The dispatcher is resolved from a **fresh DI scope per message**, so scoped dependencies — including another
+`DbContext` — behave the way they would in a request.
+
+### Shiny.Mediator
+
+```csharp
+public sealed class MediatorDispatcher(IMediator mediator) : IOutboxDispatcher
+{
+    public async Task Dispatch(OutboxMessage message, CancellationToken ct)
+    {
+        var type = Type.GetType(message.MessageType)
+            ?? throw new InvalidOperationException($"Unknown message type '{message.MessageType}'.");
+
+        var evt = (IEvent)JsonSerializer.Deserialize(message.Payload, type, JsonSerializerOptions.Web)!;
+        await mediator.Publish(evt, cancellationToken: ct);
+    }
+}
+```
+
+## How the processor works
+
+`AddDbContextOutbox` registers a `BackgroundService` per context type that loops:
+
+1. **Select candidates** — undelivered, not dead-lettered, past their `AvailableAt` gate, ordered by id. Ids are
+   monotonic version-7 UUIDs, so ordering by id is FIFO without a second index.
+2. **Claim each** — one `UPDATE … SET attempts = attempts + 1, available_at = now + backoff, version = version + 1
+   WHERE id = @id AND version = @read`. Zero rows means another worker got there first, so this one moves on.
+   That is the entire concurrency design: no lease table, no leader election, and any number of processors —
+   across any number of hosts — scale by just running.
+3. **Dispatch** — resolve `IOutboxDispatcher` from a fresh scope and call it inside an `outbox.dispatch` span.
+4. **Acknowledge or fail** — success sets `ProcessedAt`; failure records the error, and dead-letters the message
+   once `Attempts` reaches `MaxAttempts`. Both writes are conditioned on the claimed version, so an operator's
+   concurrent edit wins over the in-flight outcome.
+5. **Sweep** — periodically delete acknowledged messages older than `Retention`.
+
+Because the claim pushes `AvailableAt` forward, the backoff doubles as a **visibility timeout**: a processor that
+dies mid-dispatch releases its message rather than stranding it. Make the backoff longer than your slowest
+dispatch.
+
+The processor's own writes are set-based (`ExecuteUpdate` / `ExecuteDelete`), not `SaveChanges`, so your
+`SaveChanges` interceptors — auditing, soft delete, outbox publishing — never fire for its bookkeeping.
+
+Contexts come from `IDbContextFactory<TContext>` when one is registered (so a pooled factory keeps its pooling),
+otherwise from a fresh DI scope per unit of work. Each parallel dispatch lane uses its own context, so a pass holds
+at most `MaxParallelism` contexts (and connections) at once.
+
+### Options
+
+```csharp
+services.AddDbContextOutbox<AppDbContext, BusDispatcher>(o =>
+{
+    o.BatchSize = 50;                                   // messages claimed per poll
+    o.MaxParallelism = 4;                               // concurrent dispatch lanes
+    o.MaxAttempts = 8;                                  // attempts before dead-lettering
+    o.PollInterval = TimeSpan.FromSeconds(5);           // how often an empty queue is checked
+    o.Backoff = n => TimeSpan.FromSeconds(Math.Pow(2, n));
+    o.Retention = TimeSpan.FromDays(7);                 // null keeps acknowledged messages forever
+    o.RetentionInterval = TimeSpan.FromMinutes(5);
+    o.OrderedPartitions = false;
+    o.PayloadSerializerOptions = JsonSerializerOptions.Web;
+});
+```
+
+Options are validated at registration. They are registered **per context type**, and `Enqueue` and
+`AddOutboxPublishing` read `PayloadSerializerOptions` (and the registered `TimeProvider`) from the same
+registration through the context's application service provider — a context built outside DI uses the defaults.
+
+The **table** is not among them — it is a model mapping, chosen once by `modelBuilder.AddOutbox("my_outbox")`, so
+your migrations and the processor cannot disagree about where the messages live.
+
+### Ordering
+
+`OrderedPartitions` dispatches messages sharing a `PartitionKey` strictly in order, one at a time. Different
+partitions still run in parallel, and a message with no partition key has no ordering requirement.
+
+A message that fails blocks **its own partition only**, and only until it dead-letters. Once it does, the
+ordering guarantee for that key is broken by definition — the messages behind it will be delivered without it.
+There is no ordering across partitions, and none at all without a partition key. Ids are monotonic within a
+process; two processes enqueueing in the same millisecond can interleave.
+
+## Watching the queue
+
+`WatchOutbox` is a read-only async stream over a context — for a dashboard, a health check, or a test:
+
+```csharp
+await foreach (var msg in db.WatchOutbox(o => o.States = OutboxStates.DeadLettered, ct))
+    logger.LogError("Outbox dead letter {Id}: {Error}", msg.Id, msg.Error);
+```
+
+```csharp
+// Decoded, narrowed to one event type
+await foreach (var envelope in db.WatchOutbox<OrderPlaced>(cancellationToken: ct))
+    Console.WriteLine(envelope.Event.OrderId);
+```
+
+It **never claims, acknowledges or mutates** a message, so it cannot compete with the processor for work. Each
+revision is yielded once (keyed on `Version`, which every outbox write moves). It is a plain poll — a failed
+message becomes pending again purely because its `AvailableAt` elapsed, which no change notification could
+report. It reads through the context you give it for as long as it runs, so use one nothing else is using.
+
+:::caution
+`WatchOutbox` does **not** promise every revision. A message enqueued, dispatched and acknowledged between two
+polls is never observed, which is correct for a monitor. If you need to see every message, you are the
+dispatcher — register one rather than watching, or you have built a second, competing consumer.
+:::
+
+## The operational runbook
+
+`IOutboxAdmin` is registered keyed by the context type (`[FromKeyedServices(typeof(AppDbContext))]`), and
+unkeyed for the first context registered.
+
+| Question | Call |
+|---|---|
+| How deep is the queue? | `PendingCount()` (and `ScheduledCount()` for messages in backoff) |
+| Is it draining? | `OldestPendingAt()` |
+| What is dead-lettered? | `DeadLetterCount()`, `DeadLetters(take)` (newest first) |
+| Put it back | `Requeue(ids)`, `RequeueAllDeadLettered(messageType?)` |
+| Clean up | `PurgeProcessed(olderThan)` |
+
+**Alert on age, not depth.** A healthy busy system has a large pending count; a system whose processor died has
+an *old* one.
+
+```csharp
+services.AddHealthChecks().AddCheck("outbox", async () =>
+{
+    var oldest = await app.Services.GetRequiredService<IOutboxAdmin>().OldestPendingAt();
+    return oldest < DateTimeOffset.UtcNow.AddMinutes(-5)
+        ? HealthCheckResult.Unhealthy($"oldest pending message is from {oldest:O}")
+        : HealthCheckResult.Healthy();
+});
+```
+
+Requeue clears the dead-letter state and error, zeroes the attempt counter, makes the message eligible now, and
+bumps its version. Messages that are merely *scheduled* or already *processed* are skipped even when named
+explicitly — resetting a backoff and redelivering a business event that already happened are both worse than
+doing nothing. `PurgeProcessed` can only ever delete acknowledged rows; dead letters are never deleted
+automatically.
+
+## Telemetry
+
+The `ActivitySource` and `Meter` are both named `Shiny.EntityFrameworkCore.Outbox` (`OutboxDiagnostics.Name`):
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t.AddSource(OutboxDiagnostics.Name))
+    .WithMetrics(m => m.AddMeter(OutboxDiagnostics.Name));
+```
+
+| Signal | Name |
+|---|---|
+| Span | `outbox.dispatch` (message id, type, attempt, partition) |
+| Counter | `outbox.dispatched` |
+| Counter | `outbox.dead_lettered` |
+| Histogram | `outbox.dispatch.duration` |
+| Gauge | `outbox.pending` (per context type, tag `db.context`) |
+
+The `traceparent` is captured at **enqueue** into the message headers, and the dispatch span is parented to it
+and carries a link to it — so a consumer's work joins the trace of the request that caused the event rather than
+a background loop.
+
+## Storage
+
+`AddOutbox(tableName = "outbox", schema = null)` maps `OutboxMessage` with **explicitly pinned** column names, so a
+naming convention (`EFCore.NamingConventions`, a house style) cannot rename them — these rows are read by other
+processes and raw SQL. The names are lower-case snake_case, so they need no quoting on any provider, and are
+available as constants on `OutboxColumns`.
+
+| Property | Column | |
+|---|---|---|
+| `Id` | `id` | `varchar(32)` key — monotonic v7 UUID in "N" form; ordering by id is FIFO |
+| `MessageType` | `message_type` | The logical event name a dispatcher switches on |
+| `Payload` | `payload` | The serialized event body |
+| `PartitionKey` | `partition_key` | Ordering scope; null means unordered |
+| `Headers` | `headers` | JSON object, including `traceparent` |
+| `CreatedAt` | `created_at` | |
+| `AvailableAt` | `available_at` | Backoff gate |
+| `Attempts` | `attempts` | |
+| `ProcessedAt` | `processed_at` | Null while in flight |
+| `DeadLetteredAt` | `dead_lettered_at` | Never deleted automatically |
+| `Error` | `error` | Last dispatch failure |
+| `Version` | `version` | Concurrency token — the claim primitive |
+
+The poll reads through index `ix_<table>_poll` on (`processed_at`, `dead_lettered_at`, `available_at`). The four
+timestamps are `DateTimeOffset` on the entity but stored as UTC `DateTime` (precision 6), the one mapping every
+provider can compare and order in SQL — SQLite cannot `ORDER BY` a `DateTimeOffset`.
+
+## Without a generic host
+
+`OutboxRunner` is the processor's work as a plain object — for a MAUI app, a scheduled job, or a test that wants
+one deterministic pass instead of a background timer:
+
+```csharp
+var runner = new OutboxRunner(() => new AppDbContext(options), dispatcher, new OutboxOptions(), timeProvider);
+
+await runner.DrainOnce();       // claim + dispatch one batch; returns how many this runner dispatched
+await runner.PurgeExpired();    // retention sweep
+var depth = await runner.PendingDepth();
+```
+
+The context factory must return a **new** context each call; the runner disposes what it gets. With DI, resolve
+the registered runner instead — `GetRequiredKeyedService<OutboxRunner>(typeof(AppDbContext))` — which resolves the
+dispatcher from a scope per message. `new OutboxAdmin(() => new AppDbContext(options))` gives the admin surface
+without a container.
+
+## Provider support
+
+| Provider | |
+|---|---|
+| SQLite, SQL Server, PostgreSQL, MySQL (`MySql.EntityFrameworkCore`) | Supported and tested |
+| Any other relational provider | Expected to work — it needs `ExecuteUpdate`/`ExecuteDelete` and transactions |
+| In-memory, Cosmos DB | **Refused** — `Enqueue`, publishing and processor start-up throw `NotSupportedException` |
+
+The outbox requires a real database transaction; without one, the event and the write that caused it are a dual
+write. A model without `AddOutbox()` fails `Enqueue` and the processor's start-up with an error that says so.
+
+## Limitations
+
+- **Retrying execution strategies** (`EnableRetryOnFailure`): when publishing has to defer an identity-key event,
+  the interceptor begins a transaction from inside `SaveChanges`, which a retrying strategy rejects. Wrap the save
+  in `db.Database.CreateExecutionStrategy().ExecuteAsync(…)` with your own transaction, or use client-generated
+  keys for published entities.
+- `SaveChanges(acceptAllChangesOnSuccess: false)` cannot be combined with a deferred identity-key event (the second
+  pass would insert the entities again); it throws rather than duplicating.
+- If the deferred message insert fails, the transaction rolls back but the context has already accepted the
+  entities' changes — discard the context, as with any failed EF save.
+- `Enqueue` relies on EF's automatic transaction; a context with `AutoTransactionBehavior.Never` and no explicit
+  transaction writes the message and the entity as separate statements. (Declarative publishing opens its own
+  transaction in that case.)
+
+## What this is not
+
+- **Not a message bus.** No transport, no consumer side. `IOutboxDispatcher` hands you a message; publishing it is
+  your implementation.
+- **Not change data capture.** The outbox carries the domain events the application *chose* to publish.
+- **No inbox or dedup store.** Consumer-side idempotency is the consumer's problem; delivery is at-least-once and
+  says so.

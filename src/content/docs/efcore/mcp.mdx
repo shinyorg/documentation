@@ -1,0 +1,165 @@
+---
+title: MCP Server
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+Point Claude Code, Claude Desktop, Copilot or any other MCP client at your EF Core `DbContext` and let it explore
+and query the data, scoped to the authenticated caller.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Mcp" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Mcp
+dotnet add package ModelContextProtocol.AspNetCore   # for the HTTP transport
+```
+
+```
+> which of my orders over $5k are still unshipped?
+  → order_query { filter: { and: [ { field: "total", op: "gt", value: 5000 },
+                                   { field: "status", op: "ne", value: "Shipped" } ] }, limit: 20 }
+```
+
+The tools an MCP client calls are the **same** [`Shiny.EntityFrameworkCore.AI`](/efcore/ai-tools) tools an
+`IChatClient` calls, with the same scope rules. This package adds the MCP transport wiring, an audit trail, the
+orientation resources and prompts, and safety defaults for a caller that is an arbitrary agent rather than your
+own chat client.
+
+## Setup
+
+`WithDbContext<TContext>` adds to the MCP SDK's own builder, so the transport and endpoint are the SDK's:
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>(o => o.UseSqlServer(connectionString));
+builder.Services.AddHttpContextAccessor();
+
+builder.Services
+    .AddMcpServer()
+    .WithHttpTransport()
+    .WithDbContext<AppDbContext>(mcp => mcp
+        .ExposeResources()
+        .ExposePrompts()
+        .AddEntity<Order>(t => t
+            .Where<IHttpContextAccessor>((http, _) =>
+            {
+                var tenant = http.HttpContext?.User.FindFirst("tenant")?.Value
+                    ?? throw new UnauthorizedAccessException();      // no claim: the call fails closed
+                return o => o.TenantId == tenant;
+            })
+            .Ignore(o => o.InternalNotes)
+            .MaxPageSize(50))
+        .AddEntity<Customer>(t => t.Where(c => !c.IsDeleted)));
+
+var app = builder.Build();
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapMcp("/mcp").RequireAuthorization();
+```
+
+Everything on the [AI tools page](/efcore/ai-tools) applies here: capabilities, `Ignore`/`AllowProperties`, page
+caps, `OnInsert` and the request-resolved `Where` forms. Call the MCP options (`AllowWrites`, `ExposeResources`,
+`ExposePrompts`) before `AddEntity`, which returns the base builder.
+
+For a local desktop client, use `.WithStdioServerTransport()` instead of `.WithHttpTransport()`. Over stdio there is
+one process, one OS user and no HTTP identity, so a request-resolved scope there reads configuration, not a
+caller.
+
+### Several contexts on one server
+
+Call `WithDbContext` once per context. Entity names (the tool prefixes) must be unique across the whole server.
+A clash is reported when the server starts. `ExposeResources()` / `ExposePrompts()` apply per context: only the
+contexts that opt in are listed.
+
+```csharp
+builder.Services.AddMcpServer().WithHttpTransport()
+    .WithDbContext<SalesDbContext>(mcp => mcp.ExposeResources().AddEntity<Order>(…))
+    .WithDbContext<SupportDbContext>(mcp => mcp.AddEntity<Ticket>(…));
+```
+
+## The safety model
+
+1. **Allowlist only.** An entity you don't register has no tools, resources or prompts.
+2. **Read-only by default, and writes need two locks.** A write tool needs the per-entity capability
+   (`AllowInsert()`, `AllowAll()`, …) **and** the server-wide `AllowWrites()`. An entity that asks for a write
+   without the second lock is a startup error, not a quietly downgraded server.
+3. **Non-removable scope.** Every `Where` becomes part of the SQL `WHERE` for query, count and aggregate. Get,
+   update and delete find their row through it, and insert and update check it in memory before saving. An
+   out-of-scope id is "not found", never "forbidden", so existence isn't leaked.
+4. **Per-caller scope from the request.** On the HTTP transport the SDK runs each tool call in the request's DI
+   scope and passes it to the tool, so `IHttpContextAccessor`, `ClaimsPrincipal`-based tenant services and any
+   other scoped service resolve to **this caller's** values. Each call still opens its own `DbContext`.
+5. **Fails closed.** If the scope throws, a service is missing, or the call carries no services, the tool call
+   fails without running any SQL. The model sees the SDK's generic "an error occurred". Your exception text stays
+   in the server log.
+6. **Page caps** (`MaxPageSize`, default 100) keep a model from pulling a whole table into its context.
+7. **Hidden fields** (`Ignore`) are absent from schemas and results, can't be filtered on or written, and are
+   never selected from the database.
+8. **No raw SQL, no schema changes.** Every tool reads or writes one entity through the scoped `IQueryable`.
+9. **Audit.** Every call is logged under `Shiny.EntityFrameworkCore.Mcp.Tools` with the tool, the caller
+   (`User.Identity.Name`), a SHA-256 digest of the arguments, the outcome and the duration. Arguments are
+   digested, not logged as text: a filter can carry customer data, and you don't want the audit log to become a
+   second copy of the database. The digest still proves whether two calls were identical.
+
+### What the model reads when it is refused
+
+Refusals written for the model are returned as the tool error, through the SDK's `McpException`: an unknown or
+hidden field (`Field 'x' is unknown or not exposed by this tool.`), a malformed filter, a value of the wrong type,
+a write outside the scope, or a database rejection. Anything else, including a fail-closed scope and provider
+exceptions, comes back as the SDK's generic message, so a server-side detail never reaches the model's context.
+
+## Resources
+
+`ExposeResources(sampleSize = 3)` publishes four resources, so a model can learn the data's shape in one round trip
+instead of guessing tool arguments:
+
+| URI | Content |
+|---|---|
+| `efcore://entities` | Every exposed entity: its context, description, capabilities, fields, tools, page cap and whether a server scope applies |
+| `efcore://entities/{name}/schema` | JSON Schema of one entity's records, built from the EF model |
+| `efcore://entities/{name}/sample` | A few real rows (needs `Query`) |
+| `efcore://stats` | Each context's EF provider name and per-entity row counts (needs `Count`) |
+
+The two resources that touch data (`sample` and the counts in `stats`) call the **registered tools**, so the
+per-caller scope, the page cap and the hidden fields apply exactly as they do to a tool call. A resource that
+queried the context directly would bypass the scope. The counts are the caller's own slice, not a table total that
+would reveal how much is hidden. `efcore://entities` tells the model that a scope *exists*, so an empty result
+isn't a mystery, but never what the scope is.
+
+Without `ExposeResources()` the server doesn't advertise the resources capability at all.
+
+## Prompts
+
+`ExposePrompts()` publishes two:
+
+| Name | Arguments | Produces |
+|---|---|---|
+| `explain-entity` | `name` | Instructions to describe what lives in an entity, with its fields and tools |
+| `build-filter` | `name`, `ask` | Instructions to turn a natural-language request into a `{name}_query` call, with the filter grammar inlined |
+
+Both are built from what the server already exposes. They read no data and never mention the scope's contents.
+
+## Testing it
+
+The package's own tests host a real server on `Microsoft.AspNetCore.TestHost` and connect a real MCP client. That
+setup also works for testing your own scopes:
+
+```csharp
+var app = builder.Build();                         // builder.WebHost.UseTestServer()
+app.MapMcp("/mcp");
+await app.StartAsync();
+
+var http = app.GetTestClient();
+http.DefaultRequestHeaders.Authorization = new("Bearer", tokenFor("acme"));
+await using var client = await McpClient.CreateAsync(
+    new HttpClientTransport(new() { Endpoint = new Uri("http://localhost/mcp") }, http, NullLoggerFactory.Instance));
+
+var result = await client.CallToolAsync("order_count");
+```
+
+## What the model can and cannot see
+
+| | |
+|---|---|
+| Sees | Registered entities, their visible fields and types, JSON schemas, sample rows within its scope, and the tools its capabilities allow |
+| Never sees | Unregistered entities, hidden fields, navigations, the scope predicate (not in a schema, description, prompt or error), or server-side exception text |
+| Can do | Query, count, aggregate and get by id within its scope, plus writes when both locks are open |
+| Cannot do | Raw SQL, schema changes, removing or widening the scope, or exceeding the page cap |

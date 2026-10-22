@@ -1,0 +1,146 @@
+---
+title: SQLite Full-Text Search (FTS5)
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+Every standard SQLite build — including the one inside your iOS and Android app — ships
+[FTS5](https://www.sqlite.org/fts5.html), a fast ranked full-text engine. EF Core just doesn't know it exists: there's
+no way to declare an FTS index, `x.Body.Contains("word")` turns into a full-table `LIKE` scan with no ranking, and
+wiring FTS5 up by hand means a virtual table, three triggers and raw SQL that EF can't compose.
+
+`Shiny.EntityFrameworkCore.Sqlite.Mobile` declares the index in your model, creates and syncs it for you, and gives
+you two LINQ functions — `FullTextMatch` and `FullTextRank` — that compose with the rest of your query.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Sqlite.Mobile" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Sqlite.Mobile
+```
+
+The same package provides [spatial](/efcore/sqlite-spatial) and [vector search](/efcore/sqlite-vector); each feature is
+enabled separately, and full-text needs no native binaries.
+
+## Configure
+
+```csharp
+services.AddDbContext<AppDbContext>(o => o.UseSqlite(
+    $"Data Source={dbPath}",
+    sqlite => sqlite.UseShinyFullText()));
+```
+
+```csharp
+using Shiny.EntityFrameworkCore.Sqlite.Mobile;
+
+public class Article
+{
+    public int Id { get; set; }                       // an integer key is required (see below)
+    public string Title { get; set; } = "";
+    public string? Body { get; set; }
+}
+
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+    => modelBuilder.Entity<Article>(e => e.HasFullTextIndex(x => new { x.Title, x.Body }));
+```
+
+`HasFullTextIndex` takes one property (`x => x.Title`) or an anonymous type of string properties, and an optional FTS5
+tokenizer:
+
+```csharp
+e.HasFullTextIndex(x => new { x.Title, x.Body }, tokenizer: "porter unicode61");   // English stemming: "run" finds "running"
+```
+
+The index is an **external-content** FTS5 table named `{Table}_fts`: FTS5 stores only the inverted index and reads the
+text from your entity table, so nothing is duplicated.
+
+## Search
+
+```csharp
+var results = await db.Articles
+    .Where(a => EF.Functions.FullTextMatch(a, "sqlite AND (mobile OR ios)"))
+    .OrderBy(a => EF.Functions.FullTextRank(a, "sqlite AND (mobile OR ios)"))
+    .Take(20)
+    .ToListAsync();
+```
+
+| Function | Meaning |
+|---|---|
+| `EF.Functions.FullTextMatch(entity, query)` | the entity's index matches the [FTS5 query](https://www.sqlite.org/fts5.html#full_text_query_syntax) |
+| `EF.Functions.FullTextMatch(entity.Property, query)` | the same, restricted to one indexed column (an FTS5 column filter) |
+| `EF.Functions.FullTextRank(entity, query)` | FTS5's `rank` (bm25) — **lower is a better match**; `null` for rows that don't match |
+
+The query uses FTS5 syntax: terms (implicitly AND-ed), `"exact phrases"`, `prefix*`, `AND`/`OR`/`NOT`, parentheses,
+`NEAR(a b, 5)`, `column:term`. It's a normal query parameter, and the match composes with any other filter, ordering,
+paging, projection, `Count`/`Any`, async and compiled queries:
+
+```csharp
+var page = await db.Articles
+    .Where(a => a.Published && EF.Functions.FullTextMatch(a.Title, term))
+    .OrderByDescending(a => a.Date)
+    .Skip(20).Take(20)
+    .Select(a => new { a.Id, a.Title })
+    .ToListAsync();
+```
+
+### Searching raw user input
+
+A search box is not FTS5 syntax — `c++`, `don't:` or a stray `"` is a syntax error. `FullTextQuery.Escape` quotes every
+word so it is searched literally (and can make the last word a prefix for search-as-you-type):
+
+```csharp
+var q = FullTextQuery.Escape(searchBox.Text, prefixLastTerm: true);   // c++ tut  →  "c++" "tut"*
+var hits = db.Articles.Where(a => EF.Functions.FullTextMatch(a, q));
+```
+
+Blank input becomes an empty phrase, which matches nothing.
+
+## How it works
+
+`FullTextMatch` is rewritten, before EF compiles the query, into a key lookup against the FTS table — so SQLite drives
+the query from the full-text index and seeks the matching rows by primary key:
+
+```sql
+SELECT ... FROM "Articles" AS "a"
+WHERE "a"."Id" IN (
+    SELECT "a0"."rowid" FROM "Articles_fts" AS "a0"
+    WHERE match(@q, "a0"."Articles_fts")
+)
+ORDER BY (
+    SELECT "a1"."rank" FROM "Articles_fts" AS "a1"
+    WHERE match(@q, "a1"."Articles_fts") AND "a1"."rowid" = "a"."Id"
+    LIMIT 1)
+```
+
+`match(query, column)` is SQLite's function form of `column MATCH query`; FTS5 treats the two identically. The column
+filter for `FullTextMatch(a.Title, q)` is `{"Title"} : (q)`.
+
+### Keeping it in sync
+
+The FTS table is kept current by the [canonical external-content triggers](https://www.sqlite.org/fts5.html#external_content_tables)
+(`{Table}_fts_ai`, `_au`, `_ad`), so tracked changes, `ExecuteUpdate`, `ExecuteDelete` and raw SQL all update the
+index in the same transaction. Updates that don't touch an indexed column don't touch the index.
+
+## Schema: EnsureCreated and migrations
+
+`EnsureCreated()` creates the FTS5 table and its triggers. With migrations, the index is a table annotation
+(`.Annotation("Shiny:Sidecar:Articles_fts", "{...}")`) in the scaffolded `CreateTable`/`AlterTable`/`DropTable`, so
+adding, removing or changing the index (its columns, its tokenizer, a renamed table or column) drops and recreates
+the FTS table and runs FTS5's `'rebuild'` over the existing rows. See
+[SQLite spatial › Schema](/efcore/sqlite-spatial#schema-ensurecreated-and-migrations) for the shared details.
+
+## Requirements and validation
+
+External-content FTS5 links index entries to rows by **rowid**, so the entity needs a single integer primary key stored
+as `INTEGER` (the default for `int`/`long` keys). Tables without an `INTEGER PRIMARY KEY` (Guid or string keys,
+composite keys) can have their implicit rowid renumbered by `VACUUM`, which would corrupt the index, so they are
+rejected when the model is built — as are WITHOUT ROWID tables, keyless and owned entities, views, TPC, non-string
+properties and an index without `UseShinyFullText()`. Using `FullTextMatch` on an entity with no full-text index, or
+on a property that isn't in it, throws `InvalidOperationException` naming the problem.
+
+## Limitations
+
+- **SQLite only**, one full-text index per table (it can span several columns).
+- **Rank** is FTS5's default bm25 with equal column weights; `FullTextRank` is `null` for non-matching rows, which sort
+  first ascending — pair it with `FullTextMatch`.
+- No snippet/highlight helpers yet; use raw SQL with `snippet()`/`highlight()` if you need them.
+- The query syntax is FTS5's, not Lucene's.
+- **Precompiled (NativeAOT) queries** and compiled models were not tested.

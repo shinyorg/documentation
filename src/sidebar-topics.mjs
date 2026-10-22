@@ -1264,6 +1264,9 @@ export const sidebarTopics = [
     label: 'Data & Storage',
     link: '/documentdb/',
     icon: 'seti:db',
+    featuredInHomenav: [
+      { label: 'EF Core Extensions', link: 'efcore/', note: 'Mobile spatial & vector search, outbox, temporal, AI' },
+    ],
     items:[
       {
         label: 'Document DB',
@@ -1438,6 +1441,9 @@ export const sidebarTopics = [
     label: 'Server & Cloud',
     link: '/httpserver/',
     icon: 'cloud-download',
+    featuredInHomenav: [
+      { label: 'ASP.NET Extensions', link: 'aspnet/', note: 'WebDAV, tus, NuGet & npm feeds, ACME, tunnels' },
+    ],
     items:[
       {
         label: 'HTTP Server',

@@ -1,0 +1,280 @@
+---
+title: AI Tools
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+import { Steps } from '@astrojs/starlight/components';
+
+Expose the entities of an EF Core `DbContext` as `Microsoft.Extensions.AI` tools an LLM can call directly. You opt
+in per entity, pick which operations are allowed, hide fields, and register a **non-removable scope**: a `Where`
+predicate that is ANDed into every query the model runs, pushed down to SQL, and impossible for the model to see,
+remove or widen.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.AI" showLabel={true} />
+
+:::tip[Same tools, different envelope]
+The [MCP server](/efcore/mcp) exposes these same tools to Claude Code, Claude Desktop, Copilot and any other MCP
+client. One implementation, one security model.
+:::
+
+## Setup
+
+<Steps>
+1. Install the package
+
+   ```bash
+   dotnet add package Shiny.EntityFrameworkCore.AI
+   ```
+
+2. Register the tools next to your context
+
+   ```csharp
+   builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+   builder.Services.AddScoped<ICurrentTenant, CurrentTenant>();
+
+   builder.Services.AddDbContextAITools<AppDbContext>(tools => tools
+       .AddEntity<Order>(t => t
+           .Where<ICurrentTenant>((tenant, _) => o => o.TenantId == tenant.Id)   // the scope, per caller
+           .AllowQuery().AllowCount().AllowAggregate().AllowGet()
+           .Description("Customer orders")
+           .Property(o => o.Status, "Pending, Shipped, Delivered or Cancelled")
+           .Ignore(o => o.InternalNotes, o => o.TenantId)
+           .MaxPageSize(50))
+       .AddEntity<Customer>(t => t
+           .Where<ICurrentTenant>((tenant, _) => c => c.TenantId == tenant.Id)
+           .AllowReadOnly()));
+   ```
+
+3. Hand the tools to your `IChatClient`, with the caller's scope on every call
+
+   ```csharp
+   var tools = httpContext.RequestServices.GetRequiredService<DbContextAITools<AppDbContext>>();
+
+   // FunctionInvokingChatClient hands each tool call the provider it was built with,
+   // so build it from the request's scope: that is what a request-resolved Where reads.
+   IChatClient chat = innerClient.AsBuilder().UseFunctionInvocation().Build(httpContext.RequestServices);
+   var response = await chat.GetResponseAsync(messages, new ChatOptions { Tools = [.. tools.Tools] });
+   ```
+
+   Calling a tool yourself? Set `Services` on the arguments:
+   `await tool.InvokeAsync(new AIFunctionArguments(args) { Services = scope.ServiceProvider })`.
+</Steps>
+
+### Without a container
+
+`CreateAITools` builds the same tools from an `IDbContextFactory<TContext>`, so MAUI apps, scripts and tests need no
+DI:
+
+```csharp
+var tools = factory.CreateAITools(b => b
+    .AddEntity<Order>(t => t.Where(o => o.TenantId == "acme").AllowReadOnly()));
+```
+
+## Capabilities
+
+Each capability produces exactly one tool, named `{entity}_{operation}`. The entity name is the CLR type name in
+snake case (`OrderLine` becomes `order_line`); pass `AddEntity<T>(name: "lines")` to choose your own.
+
+| Builder call | Flag | Tool | What it does |
+|---|---|---|---|
+| `AllowGet()` | `Get` | `{entity}_get_by_id` | One row by primary key, through the scope |
+| `AllowQuery()` | `Query` | `{entity}_query` | Structured filter, sort and capped paging |
+| `AllowCount()` | `Count` | `{entity}_count` | Count rows matching an optional filter |
+| `AllowAggregate()` | `Aggregate` | `{entity}_aggregate` | count / sum / min / max / avg over a field |
+| `AllowInsert()` | `Insert` | `{entity}_insert` | Add one row; it must satisfy the scope |
+| `AllowUpdate()` | `Update` | `{entity}_update` | Patch one row; it must be in scope before and after |
+| `AllowDelete()` | `Delete` | `{entity}_delete` | Remove one row, found through the scope |
+
+`AllowReadOnly()` adds the first four, `AllowAll()` adds all seven, and `Allow(EntityAICapabilities)` takes the flags
+directly. An entity with **no** `Allow*` call is read-only.
+
+## The scope
+
+`Ignore` and `AllowProperties` control which *fields* the model sees. `Where` controls which *rows* it can reach.
+It is the reason this package exists:
+
+```csharp
+tools.AddEntity<Order>(t => t
+    .Where(o => !o.IsArchived)                                               // static
+    .Where<ICurrentTenant>((tenant, _) => o => o.TenantId == tenant.Id)       // resolved per call
+    .AllowAll());
+```
+
+Every `Where` is applied to `context.Set<Order>()` as its own `.Where(...)` **before** the model's filter, so every
+statement has the shape `scope AND (model filter)`. An `or` or a `not` in the model's filter only reaches its own
+conditions. The scope is enforced on every tool:
+
+| Tool | Enforcement |
+|------|-------------|
+| `query` / `count` / `aggregate` | The scope is part of the SQL `WHERE`. Out-of-scope rows are never read, counted or summed, even when the model's filter names them. |
+| `get_by_id` | The key lookup runs through the scope. An out-of-scope id returns `{ found: false }`, the same response as a missing one. |
+| `delete` | The row is found through the scope. An out-of-scope id returns `{ deleted: false }` and nothing changes. |
+| `insert` | The new entity is checked against the scope in memory before `SaveChanges`. A row the model would not be allowed to see is refused. |
+| `update` | The row is found through the scope (otherwise `{ updated: false }`), the changes are applied, and the scope must still hold before anything is saved. The model can't move a row out of its own reach. |
+
+The scope never appears in a JSON schema, a tool description or an error message.
+
+### Request-resolved scopes
+
+A static scope works for a single-tenant app. For a shared one, the answer to "which rows may *this* caller see"
+lives in a per-request service. `Where` takes a callback that runs on **every tool call**, resolved from the
+call's own service provider (`AIFunctionArguments.Services`):
+
+```csharp
+t.Where(ctx => o => o.Region == ctx.GetRequiredService<ICurrentUser>().Region)
+ .Where<ICurrentTenant>((tenant, _) => o => o.TenantId == tenant.Id)
+ .Where<IPermissionService>(async (perms, ctx) =>
+ {
+     var ids = await perms.GetVisibleCustomerIdsAsync(ctx.CancellationToken);
+     return o => ids.Contains(o.CustomerId);
+ });
+```
+
+The [MCP server](/efcore/mcp) sets `Services` from the HTTP request scope. On the `IChatClient` lane, set it
+yourself. Values captured in the returned lambda become SQL **parameters**, so one cached query plan serves every
+tenant.
+
+These scopes fail **closed**:
+
+| Situation | Result |
+|---|---|
+| The callback throws | The tool call fails and no SQL runs |
+| `GetRequiredService<T>` finds nothing | The tool call fails |
+| The call carries no `Services` | The tool call fails and names the missing plumbing |
+| The callback returns `null` | The tool call fails. To deny everything, return `o => false`. |
+
+It never falls back to running the query without the predicate. `AddDbContextAITools` also checks at startup that
+every `Where<TService>` service is registered.
+
+### Stamping hidden columns on insert
+
+If you hide the scope column with `Ignore(o => o.TenantId)`, the model can't set it, and its inserts would fail the
+scope check. `OnInsert` runs after the model's values are applied and before the check, so you can stamp
+server-owned values:
+
+```csharp
+t.Ignore(o => o.TenantId)
+ .Where<ICurrentTenant>((tenant, _) => o => o.TenantId == tenant.Id)
+ .OnInsert((order, ctx) => order.TenantId = ctx.GetRequiredService<ICurrentTenant>().Id)
+ .AllowInsert();
+```
+
+The scope check still runs after the hook, so a hook can't place a row outside the scope.
+
+## Fields come from the EF model
+
+Each tool's JSON schema is built from the context's `IEntityType`, not by reflecting over the class:
+
+- **Types and nullability** from the mapped property (`IsNullable`), so `string?` columns are `["string","null"]`
+  and `int` columns are `integer`.
+- **Keys**: the primary key is marked and typed. A store-generated key is left out of the insert schema, and a
+  client-supplied key is required in it.
+- **Enums** are listed by name, so the model writes `"Shipped"` and never has to guess `1`.
+- **Max lengths** (`HasMaxLength`) become `maxLength`.
+- **Descriptions** come from `[Description]` / `[DisplayName]`, then `HasComment` on the column or table, then
+  your `Property(...)` / `Description(...)` overrides.
+- **Owned references and complex types** are flattened to dotted fields (`shipTo.city`) for filtering and
+  sorting, and appear as nested objects in records and write bodies.
+- **Computed / store-generated-on-update columns** can be read but not written.
+
+These are **not exposed**: shadow properties, indexer properties, navigations to other entities, collections (owned
+or primitive), and types the filter can't express (`byte[]`, spatial, JSON documents, value objects with
+converters). Only these scalars are exposed: `string`, `bool`, `char`, `Guid`, numbers, enums, `DateTime`,
+`DateTimeOffset`, `DateOnly`, `TimeOnly` and `TimeSpan`.
+
+:::note[Navigations]
+Navigations are deliberately left out of tool schemas, filters and results, and never loaded. Foreign-key
+columns (`CustomerId`) are ordinary fields. To follow a relationship, register both entities: the model reads
+the key from one tool and passes it to the other, and **each entity's own scope applies on both sides**. A
+navigation would let one entity's tool return rows from another without that second scope.
+:::
+
+`Ignore(...)` removes a field everywhere. It is absent from every schema, refused as a filter, sort or aggregate
+field, refused in an insert or update body, and **never selected**: the read tools project only the visible
+columns, so the database never sends the hidden ones back. `AllowProperties(...)` is the allow-list form. Naming an
+owned or complex member (`o => o.ShipTo`) covers everything under it.
+
+## Structured filters
+
+`query`, `count` and `aggregate` take a `filter` the model builds from a closed grammar:
+
+```json
+{ "and": [
+    { "field": "status", "op": "in", "value": ["Pending", "Shipped"] },
+    { "field": "total", "op": "gte", "value": 100 },
+    { "not": { "field": "shipTo.city", "op": "eq", "value": "Toronto" } }
+] }
+```
+
+| Operator | Applies to |
+|----------|------------|
+| `eq`, `ne` | Every field; `null` tests for `IS NULL` / `IS NOT NULL` |
+| `gt`, `gte`, `lt`, `lte` | Numbers, date/time types and strings |
+| `contains`, `startsWith`, `endsWith` | Strings |
+| `in` | Every field; at most 100 values |
+
+Each node is exactly one leaf or one of `and` / `or` / `not`. A node that mixes them is refused instead of
+guessed at. Filters are capped at 16 levels deep and 128 conditions. A field outside the visible set gets the same
+"unknown or not exposed" answer whether it is hidden, a navigation or misspelled, so the error says nothing about
+what exists. Every value becomes a SQL parameter, never a literal.
+
+String comparison and `contains` follow the column's collation: case-insensitive on SQL Server and MySQL by default,
+case-sensitive on PostgreSQL and SQLite.
+
+## Tool reference
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `get_by_id` | `id`, typed like the key; strings are accepted | `{ found, item }` |
+| `query` | `filter`, `orderBy`, `orderDirection` (`asc`/`desc`), `limit` (default 50, capped at `MaxPageSize`, default 100), `offset` | `{ count, offset, limit, items }` |
+| `count` | `filter` | `{ count }` |
+| `aggregate` | `function` (`count`/`sum`/`min`/`max`/`avg`), `field`, `filter` | `{ function, field, value }` |
+| `insert` | `document` (the writable fields) | `{ inserted, item }` with generated values filled in |
+| `update` | `document` with the key plus only the fields to change | `{ updated, item }` |
+| `delete` | `id` | `{ deleted }` |
+
+Paging always ends with an `ORDER BY` on the primary key, so `offset` is deterministic. On an empty set, `sum`
+returns `0`, and `min`, `max` and `avg` return `null` instead of failing. `sum` and `avg` need a numeric field;
+`min` and `max` also accept date/time fields.
+
+`update` is a **patch**: fields you leave out keep their stored values, and hidden fields can't be written. The key
+identifies the row and is never changed.
+
+## How it works
+
+- **A fresh `DbContext` per call.** Each invocation gets its own context: from `IDbContextFactory<TContext>` when
+  one is registered (resolved from the call's services, so a `Scoped` factory sees the request), otherwise from
+  a new DI scope. A model calling tools in parallel never shares a context, and nothing it loads stays in a change
+  tracker. Register `AddDbContextFactory` when the context's configuration depends on request state, such as a
+  per-tenant connection string.
+- **Writes go through `SaveChanges`.** Insert, update and delete use the change tracker, not
+  `ExecuteUpdate`/`ExecuteDelete`, so your `SaveChanges` interceptors still run (soft delete, auditing,
+  [outbox](/efcore/outbox), [temporal history](/efcore/temporal)). A database rejection comes back to the model as
+  `The database rejected the change.`, with no constraint names or values.
+- **EF global query filters still apply.** The tools use `Set<T>()` without `IgnoreQueryFilters()`, so your
+  `HasQueryFilter` predicates (soft delete, for example) are ANDed with the AI scope.
+- **Errors meant for the model are separate from server failures.** Refusals such as an unknown field, a bad value
+  or a write outside the scope are written for the model, and the MCP server returns their text. A fail-closed
+  scope or a provider exception surfaces only as a generic failure.
+
+## Limitations
+
+- **Write-side scope checks run in memory.** Insert and update evaluate the compiled scope against the entity, and
+  a predicate that throws counts as out of scope. Keep scopes to members of the entity and its owned/complex
+  members: a scope through a navigation (`o => o.Customer.TenantId == …`) works for reads but rejects every write,
+  because the navigation isn't loaded. In-memory string comparison is ordinal, so a scope that matches only through
+  a case-insensitive collation passes in SQL but fails the write check (fail closed).
+- **Id-based tools need a single, visible CLR primary key.** Keyless entities and composite or shadow keys work
+  with `query`/`count`/`aggregate`. Asking for `Get`/`Update`/`Delete` on them is a startup error. `Insert` needs
+  a key and a parameterless constructor (any visibility).
+- **Client-supplied keys can reveal existence.** If the model supplies a key for an insert and that key exists
+  outside its scope, the insert is rejected by the database. Use store-generated keys for scoped entities.
+- **Provider type support applies.** For example, SQLite can't order by `decimal` or `DateTimeOffset` columns.
+  The tools pass your provider's limits through and don't work around them.
+
+### Not ported from DocumentDb
+
+- **JSON collections** (`AddCollection`, schema-free documents): EF entities always have a CLR type and a model.
+- **Auto-embedding** (`AutoEmbedOnInsert`): this belongs in a `SaveChanges` interceptor in your own vector setup,
+  not in the AI tool package.
+- **`PathGuard`**: field names are looked up in a closed set built from the EF model and never reach SQL as text,
+  so no path validation is needed.

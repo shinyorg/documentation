@@ -1,0 +1,240 @@
+---
+title: Versioned Seeding
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+Seeders that run **once per version**. Each one records a marker row in a small `__ShinySeedHistory` table in the
+same database, and only runs again when that row is missing or you bump the seeder's `Version`. The table is
+managed with raw DDL, so you don't change your model or add a migration.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Seeding" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Seeding
+```
+
+```csharp
+public class CountrySeeder : IDbSeeder<AppDbContext>
+{
+    public string Name => "countries";
+    public int Version => 1;          // bump to re-run after editing the data below
+
+    public async Task SeedAsync(AppDbContext db, CancellationToken ct)
+    {
+        // Idempotent: a bumped version re-runs over data that may already be there
+        var existing = await db.Countries.Select(x => x.Code).ToListAsync(ct);
+        if (!existing.Contains("CA")) db.Countries.Add(new Country { Code = "CA", Name = "Canada" });
+        if (!existing.Contains("US")) db.Countries.Add(new Country { Code = "US", Name = "United States" });
+        // no SaveChanges needed: the runner saves pending changes and the marker in one transaction
+    }
+}
+```
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>(o => o.UseNpgsql(connectionString));
+builder.Services.AddDbSeeder<AppDbContext, CountrySeeder>();
+builder.Services.AddDbSeeding<AppDbContext>(o => o.Initialization = DbInitialization.Migrate); // optional
+```
+
+At host startup the hosted service applies migrations if you asked it to, then runs `CountrySeeder` once. On
+every later start it reads the marker and does nothing.
+
+## The problem it solves
+
+EF Core 9 added `UseSeeding` / `UseAsyncSeeding`. That hook runs on **every** `EnsureCreated()` / `Migrate()`
+call and keeps no record of what it already did, so every seed method has to check "is this already here?"
+itself, and changing the seed data has no version to key off.
+
+| | EF `UseSeeding` | Shiny versioned seeding |
+|---|---|---|
+| Runs | every `Migrate`/`EnsureCreated` | once per seeder `Version` |
+| "Already done?" | your code checks | a `__ShinySeedHistory` row |
+| Change the data | edit the code and hope your checks cope | bump `Version` |
+| Failure | partial data, no record | rolled back, retried next start |
+| Model changes | none | none (raw DDL, no migration) |
+
+You can still use EF's hook as the trigger. `UseVersionedSeeding` plugs the versioned runner into it (see
+[Three ways to run seeders](#three-ways-to-run-seeders)).
+
+## Writing seeders
+
+```csharp
+public interface IDbSeeder<in TContext> where TContext : DbContext
+{
+    string Name { get; }       // history key, 200 chars max; renaming re-runs the seeder
+    int Version { get; }       // runs when no marker exists or the marker's version is lower
+    Task SeedAsync(TContext context, CancellationToken cancellationToken);
+}
+```
+
+- **Add or update entities on the context.** The runner calls `SaveChangesAsync` afterwards when anything is
+  pending, then writes the marker in the **same transaction**. Calling `SaveChangesAsync` yourself, as often as
+  you like, is fine too.
+- **Keep it idempotent.** Bumping the version re-runs the seeder over whatever is already there.
+- **Names are unique per context**, compared case-insensitively. SQL Server and MySQL collations would merge
+  `Countries` and `countries` into one row, so the runner rejects that pair on every provider.
+- The interface is **contravariant**. An `IDbSeeder<DbContext>` can be registered for any context type.
+
+For something too small to deserve a class, register a delegate:
+
+```csharp
+builder.Services.AddDbSeeder<AppDbContext>("settings", version: 1, (db, ct) =>
+{
+    db.Settings.Add(new Setting { Key = "theme", Value = "dark" });
+    return Task.CompletedTask;
+});
+```
+
+## Three ways to run seeders
+
+### 1. Hosted service: `AddDbSeeder`
+
+```csharp
+builder.Services.AddDbSeeder<AppDbContext, CountrySeeder>();                // resolved per run, may take scoped deps
+builder.Services.AddDbSeeder<AppDbContext>(new CurrencySeeder());          // an instance
+builder.Services.AddDbSeeder<AppDbContext>("settings", 1, (db, ct) => ...); // a delegate
+
+builder.Services.AddDbSeeding<AppDbContext>(o => o.Initialization = DbInitialization.Migrate);
+```
+
+For each context type, in registration order, the hosted service creates a scope, resolves the context
+(from `AddDbContext`, or from `AddDbContextFactory` if that's what you registered), runs the configured
+`Initialization`, and then runs that context's seeders in the order you registered them. Host startup waits for
+it, so requests never hit an unseeded database. A seeder that throws fails the host start.
+
+| `DbSeedingOptions.Initialization` | Before seeding |
+|---|---|
+| `None` *(default)* | nothing. A migration bundle, deploy step or the app owns the schema |
+| `Migrate` | `Database.MigrateAsync()` |
+| `EnsureCreated` | `Database.EnsureCreatedAsync()` |
+
+`AddDbSeeding<TContext>()` can be called on its own (migrate at startup with no seeders) or more than once;
+each call reconfigures the same options.
+
+### 2. EF's own hook: `UseVersionedSeeding`
+
+```csharp
+builder.Services.AddDbContext<AppDbContext>(o => o
+    .UseNpgsql(connectionString)
+    .UseVersionedSeeding<AppDbContext>());          // no args: runs the AddDbSeeder registrations
+
+// or explicit seeders, e.g. in OnConfiguring with no DI
+optionsBuilder.UseVersionedSeeding(new CountrySeeder(), new CurrencySeeder());
+```
+
+Now `db.Database.Migrate()` / `MigrateAsync()` / `EnsureCreated()` / `EnsureCreatedAsync()` run the seeders
+with run-once markers. This wires both `UseAsyncSeeding` and `UseSeeding`; the sync path blocks on the async
+runner. If you configured a seeding delegate *before* `UseVersionedSeeding`, it still runs first. One configured
+*after* replaces it, which is EF's normal last-call-wins rule.
+
+With no seeders passed, the registrations are resolved from a scope of the application service provider, so
+the context must come from DI. Without DI, the call throws when EF seeds. Inside `AddDbContext`, the lambda
+gets the non-generic builder, so name the context: `UseVersionedSeeding<AppDbContext>()`.
+
+### 3. Directly: `DbSeedRunner`
+
+Where there's no generic host (a MAUI app) or you want to pick the moment yourself:
+
+```csharp
+await db.Database.MigrateAsync();
+var ran = await DbSeedRunner.RunAsync(db, [new CountrySeeder(), new CurrencySeeder()]);
+// ran: the names of the seeders that actually executed this time
+```
+
+### Combining them
+
+Using the hosted service with `Initialization = Migrate` and `UseVersionedSeeding<AppDbContext>()` at the same
+time is safe. `Migrate` fires the EF hook, which runs the seeders. The hosted service then runs the same
+seeders, finds their markers, and does nothing. Each seeder runs once.
+
+## The history table
+
+```text
+__ShinySeedHistory
+  Name          varchar(200)  PRIMARY KEY
+  Version       int
+  AppliedAtUtc  timestamp      (SQLite: ISO-8601 text; SQL Server: datetimeoffset)
+```
+
+It is created in the connection's default schema the first time a marker is written, with
+create-if-not-exists DDL for the provider. `DbSeedHistory` gives you direct access:
+
+```csharp
+var all = await DbSeedHistory.GetAllAsync(db);                 // IReadOnlyList<DbSeedRecord(Name, Version, AppliedAtUtc)>
+var one = await DbSeedHistory.FindAsync(db, "countries");     // null when never recorded
+await DbSeedHistory.RemoveAsync(db, "countries");             // forget it: the seeder runs again next pass
+await DbSeedHistory.RecordAsync(db, "countries", 3);          // mark as applied without running it
+```
+
+A recorded version never goes down. `RecordAsync(db, "countries", 2)` over a version 5 marker leaves it at 5, so
+an older app instance in a rolling deploy can't undo a newer one.
+
+:::caution[Reads never create the table, and `EnsureCreated` needs that]
+`EnsureCreated` does nothing once *any* table exists. That's why reading history never creates the table,
+and why the hosted service runs `Initialization` before seeding. If you call `DbSeedRunner.RunAsync` yourself
+and create the schema with `EnsureCreated`, call `EnsureCreated` **first**. Migrations don't have this problem.
+:::
+
+**Why raw DDL instead of mapping the table into your model?** Mapping it would mean an `OnModelCreating` call
+and a migration in every app, plus a table that shows up in your model snapshot. Keyed on
+`context.Database.ProviderName`, raw DDL needs none of that. It also works when seeding runs before or without
+your schema, which is what the [Aspire seed gate](/efcore/aspire) needs. The cost is one block of SQL per
+provider, which is why the provider list below is fixed.
+
+## How it works
+
+For each seeder, in order:
+
+1. **Fast path.** Read the marker without a lock. If its version is at least the seeder's, skip. Normal startup
+   ends here, with no transaction and no writes.
+2. **Lock.** Begin a transaction through the context's execution strategy, so `EnableRetryOnFailure` works.
+   Then lock the seeder's marker row. If the row doesn't exist yet, the runner inserts an uncommitted
+   placeholder to lock.
+3. **Re-check.** Read the marker again under the lock. Another instance may have just finished.
+4. **Seed.** Run `SeedAsync`, `SaveChangesAsync` if anything is pending, upsert the marker, and commit.
+
+If the seeder throws, the transaction rolls back: no data and no marker. The change tracker is cleared, so a
+retry starts clean, and the next start runs that seeder again. Seeders before it keep their markers.
+
+If the context **already has a transaction**, the seeders join it instead of opening their own, and commit or
+rollback is the caller's. That covers your own `BeginTransaction`, and the cases where EF has a transaction open
+while it seeds.
+
+### Two instances starting at once
+
+The marker-row lock serializes instances. The second one waits on the lock until the first commits, re-reads
+the marker, and skips. A seeder runs **once**, even when several instances start together. The tests start four
+runners at once on every provider and count one execution. The marker upsert itself is race-safe on all four
+providers. Under concurrent writers it never fails with a duplicate key, and the highest version wins.
+
+| Provider | Row lock |
+|---|---|
+| SQLite | the database write lock (one writer per file) |
+| PostgreSQL | `INSERT … ON CONFLICT DO UPDATE` row lock |
+| SQL Server | `UPDATE … WITH (UPDLOCK, SERIALIZABLE)` key-range lock |
+| MySQL | `INSERT … ON DUPLICATE KEY UPDATE` exclusive lock, then `SELECT … FOR UPDATE` |
+
+Seeders should still be **idempotent**. A bumped version re-runs over existing data. On MySQL, DDL commits
+implicitly, so a seeder that creates tables isn't atomic there.
+
+## Provider support
+
+| Provider | EF provider name | Status |
+|---|---|---|
+| SQLite | `Microsoft.EntityFrameworkCore.Sqlite` | ✅ tested |
+| PostgreSQL | `Npgsql.EntityFrameworkCore.PostgreSQL` | ✅ tested |
+| SQL Server / Azure SQL | `Microsoft.EntityFrameworkCore.SqlServer` | ✅ tested |
+| MySQL | `MySql.EntityFrameworkCore` | ✅ tested |
+| anything else | | `NotSupportedException` naming the provider |
+
+## Limitations
+
+- **Relational only.** The marker is SQL. InMemory, Cosmos and other non-relational providers aren't supported.
+- **One schema.** The table goes in the connection's default schema (`search_path` on PostgreSQL, the user's
+  default schema on SQL Server). It isn't configurable.
+- **The runner saves whatever the context tracks.** Pass a fresh context, or one with no unrelated pending
+  changes.
+- **MySQL implicit commits.** If the history table doesn't exist yet when seeding runs inside an EF transaction
+  on MySQL, creating it commits that transaction early. The hosted service and the runner create the table
+  before opening their own transaction, so this only matters for a seeder that joins a transaction you or EF
+  opened.

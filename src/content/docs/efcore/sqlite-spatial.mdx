@@ -1,0 +1,203 @@
+---
+title: SQLite Spatial (no SpatiaLite)
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+EF Core's own spatial support on SQLite — `UseNetTopologySuite()` — is a thin layer over **SpatiaLite**: every
+`Intersects`, `Distance` or `Within` becomes an `ST_*` call that only exists once the native `mod_spatialite`
+library has been loaded into the connection. That library doesn't exist on iOS, Android or Blazor, is forbidden
+to `dlopen` on iOS anyway, and is a packaging chore everywhere else. So on mobile, EF spatial on SQLite simply
+doesn't work.
+
+`Shiny.EntityFrameworkCore.Sqlite.Mobile` fixes that without any native code. NetTopologySuite's geometry engine is
+plain managed C#, so this package keeps the NTS types you already use and evaluates the predicates **itself**:
+each NTS method is translated to a SQLite user-defined function that runs NTS inside the query. Add an
+**R\*Tree** index (compiled into every standard SQLite build) and indexed predicates are pre-filtered by bounding
+box first, exactly like SpatiaLite's spatial index — on iOS, Android, Mac Catalyst, Windows, Linux and macOS.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Sqlite.Mobile" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Sqlite.Mobile
+```
+
+The same package also provides [vector search](/efcore/sqlite-vector) and [full-text search](/efcore/sqlite-fulltext);
+each feature is switched on independently, and spatial needs no native binaries at all.
+
+## Configure
+
+Turn spatial on inside `UseSqlite(...)` — **instead of** `UseNetTopologySuite()` (don't reference
+`Microsoft.EntityFrameworkCore.Sqlite.NetTopologySuite`):
+
+```csharp
+services.AddDbContext<AppDbContext>(o => o.UseSqlite(
+    $"Data Source={dbPath}",
+    sqlite => sqlite.UseShinySpatial()));
+```
+
+Use NetTopologySuite types on your entities and, optionally, give a geometry property an R\*Tree index:
+
+```csharp
+using NetTopologySuite.Geometries;
+using Shiny.EntityFrameworkCore.Sqlite.Mobile;
+
+public class Restaurant
+{
+    public int Id { get; set; }                 // an integer key is required for an index (see below)
+    public string Name { get; set; } = "";
+    public Point? Location { get; set; }        // Point, Polygon, LineString, Multi*, GeometryCollection, Geometry
+    public Polygon? DeliveryArea { get; set; }
+}
+
+public class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
+{
+    public DbSet<Restaurant> Restaurants => Set<Restaurant>();
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+        => modelBuilder.Entity<Restaurant>(e =>
+        {
+            e.HasSpatialIndex(x => x.Location);
+            e.HasSpatialIndex(x => x.DeliveryArea);
+        });
+}
+```
+
+Geometries are stored as **EWKB** in a `BLOB` column (little-endian WKB with the SRID embedded, plus Z/M when the
+geometry has them), so `SRID` and 3-D coordinates round-trip. Change tracking snapshots a copy of each geometry, so
+editing a coordinate in place (`point.X = 5`) is detected on `SaveChanges`.
+
+## Query with NetTopologySuite
+
+Write the NTS calls you would write in memory; they translate to SQL and compose with any other filter, ordering,
+paging or projection:
+
+```csharp
+var area = new Polygon(new LinearRing([
+    new(-122.70, 45.50), new(-122.60, 45.50), new(-122.60, 45.56),
+    new(-122.70, 45.56), new(-122.70, 45.50)]));
+
+var inside = await db.Restaurants
+    .Where(r => r.Location!.Within(area))
+    .OrderBy(r => r.Name)
+    .Take(20)
+    .ToListAsync();
+
+var delivering = await db.Restaurants
+    .Where(r => r.DeliveryArea!.Contains(customerLocation))
+    .Select(r => new { r.Name, r.DeliveryArea!.Area })
+    .ToListAsync();
+```
+
+| Translated | SQL function |
+|---|---|
+| `Intersects`, `Contains`, `Within`, `Covers`, `CoveredBy`, `Touches`, `Crosses`, `Overlaps`, `Disjoint`, `EqualsTopologically` | `shiny_st_<name>(a, b)` |
+| `Distance(g)` | `shiny_st_distance(a, b)` |
+| `IsWithinDistance(g, d)` | `shiny_st_dwithin(a, b, d)` |
+| `Point.X`, `Point.Y`, `Area`, `Length`, `SRID`, `IsEmpty` | `shiny_st_x/y/area/length/srid/isempty(g)` |
+
+Results are exactly what NTS returns in memory — the function *is* NTS — including the cases where NTS throws (for
+example `Crosses` on a `GeometryCollection`), which surface as a query error rather than a silently different answer.
+A `NULL` geometry never matches.
+
+:::caution[NTS distances are planar]
+NetTopologySuite works in the plane: for longitude/latitude data, `Distance` and `IsWithinDistance` are in
+**degrees**, not meters — the same as NTS in memory. For real-world distances use the geodesic helpers below.
+:::
+
+## Geodesic distance in meters
+
+Two `EF.Functions` helpers measure great-circle (haversine) distance on WGS84 coordinates, X = longitude and
+Y = latitude:
+
+```csharp
+var nearby = await db.Restaurants
+    .Where(r => EF.Functions.IsWithinMeters(r.Location, me, 2_000))
+    .OrderBy(r => EF.Functions.GeoDistanceMeters(r.Location, me))
+    .Select(r => new { r.Name, Meters = EF.Functions.GeoDistanceMeters(r.Location, me) })
+    .ToListAsync();
+```
+
+Point-to-geometry distance is exact to the nearest edge (0 when the point is inside a polygon); geometry-to-geometry
+is vertex-sampled, which is accurate enough for filtering and ordering. Both helpers also run in memory, so they
+behave the same when EF evaluates them client-side.
+
+## The R\*Tree index
+
+`HasSpatialIndex` creates a SQLite [R\*Tree](https://www.sqlite.org/rtree.html) virtual table next to the entity
+table, named `{Table}_{Column}_rtree`, holding each row's bounding box keyed by the row's primary key. Every
+predicate that implies the two bounding boxes overlap (everything above except `Disjoint`), plus
+`IsWithinDistance` and `IsWithinMeters`, is rewritten to probe it first:
+
+```sql
+SELECT ... FROM "Restaurants" AS "r"
+WHERE "r"."Id" IN (
+    SELECT "r0"."id" FROM "Restaurants_Location_rtree" AS "r0"
+    WHERE "r0"."minx" <= shiny_st_bbox(@area, 1, 0.0, 0.0) AND "r0"."maxx" >= shiny_st_bbox(@area, 0, 0.0, 0.0)
+      AND "r0"."miny" <= shiny_st_bbox(@area, 3, 0.0, 0.0) AND "r0"."maxy" >= shiny_st_bbox(@area, 2, 0.0, 0.0)
+) AND shiny_st_within("r"."Location", @area)
+```
+
+SQLite drives the query from the R\*Tree (`SEARCH r USING INTEGER PRIMARY KEY`) and only runs the exact NTS test on
+the candidates. Because the pre-filter is implied by the predicate, the rewrite never changes results — it is applied
+inside `OR`, `NOT`, sub-queries and compiled queries too. For `IsWithinDistance` the query box is grown by the
+distance; for `IsWithinMeters` it is grown conservatively by the meters, and near a pole or across the ±180°
+antimeridian the longitude bound is dropped so no match is ever lost.
+
+Check the plan yourself with `ToQueryString()`, or `EXPLAIN QUERY PLAN` on `query.CreateDbCommand()`.
+
+### Keeping it in sync
+
+The R\*Tree is maintained by **SQLite triggers** (`{sidecar}_ai`, `_au`, `_ad`), not by `SaveChanges`. Triggers run in
+the writing statement's transaction and fire for every write path: tracked changes, `ExecuteUpdate`,
+`ExecuteDelete` and raw SQL alike. `NULL` and empty geometries are stored but not indexed.
+
+The triggers compute the bounding box with the `shiny_st_bbox` function, which EF registers on every connection it
+uses (including one you opened yourself and passed to `UseSqlite`). If you write to an indexed table through a
+`SqliteConnection` EF never touched, register the functions on it first:
+
+```csharp
+using var connection = new SqliteConnection(cs);
+SqliteSpatial.RegisterFunctions(connection);   // before or after Open()
+```
+
+## Schema: EnsureCreated and migrations
+
+Both paths create the sidecar, its triggers, and index any rows already in the table.
+
+- **`EnsureCreated()`** creates the R\*Tree and its triggers after the tables (and seeds it from any `HasData` rows).
+- **Migrations**: each index is recorded as a table annotation, so `dotnet ef migrations add` writes it into the
+  migration — `CreateTable(...).Annotation("Shiny:Sidecar:Restaurants_Location_rtree", "{...}")`, and
+  `AlterTable(...)` with old/new annotations when you add, change or remove an index later. Applying the migration
+  drops and rebuilds only the affected sidecars. Adding an index does **not** trigger one of SQLite's table rebuilds,
+  and when a migration does rebuild a table (some column changes require it), the triggers are re-created afterwards
+  and the sidecar keeps its rows.
+
+The migrations snapshot also lists the sidecar as a keyless `ShinySidecar:{name}` entity type marked
+`ExcludeFromMigrations()`; it's how queries address the R\*Tree, and EF never creates or drops it.
+
+:::note[Apply spatial migrations through EF]
+Migrations that index existing rows call `shiny_st_bbox`, so apply them with `Database.Migrate()` or
+`dotnet ef database update`. A SQL script from `dotnet ef migrations script` run in another tool needs the
+functions registered on that connection first.
+:::
+
+## Requirements and validation
+
+An index is keyed by the SQLite **rowid**, so the entity needs a single integer primary key stored as `INTEGER`
+(an `int`/`long` key is, by default). A table without an `INTEGER PRIMARY KEY` still has a rowid, but `VACUUM` may
+renumber it, silently detaching the index — so other keys are rejected when the model is built, with a message
+saying why. Also rejected: owned types, keyless entities, views/SQL queries, TPC inheritance, a non-geometry
+property, and an index without `UseShinySpatial()`. TPH and TPT inheritance work.
+
+## Limitations
+
+- **SQLite only**, `Microsoft.EntityFrameworkCore.Sqlite` (or `Sqlite.Core` with another SQLitePCLRaw bundle).
+- **Planar NTS semantics**: `Distance`/`IsWithinDistance` follow NTS (degrees for lon/lat). Use the `*Meters` helpers
+  for geodesic work.
+- **Distance comparisons aren't indexed**: `r.Location.Distance(p) < d` is evaluated exactly but scans; write
+  `r.Location.IsWithinDistance(p, d)` (or `IsWithinMeters`) to use the R\*Tree. Ordering by distance always scans the
+  filtered rows.
+- **`Disjoint` scans**: its matches lie *outside* any bounding box, so the index can't help.
+- **Other tools**: raw writes from outside .NET (the `sqlite3` CLI, a DB browser) fail on indexed tables with
+  `no such function: shiny_st_bbox`, because they can't run the trigger.
+- **Precompiled (NativeAOT) queries** and compiled models were not tested.

@@ -1,0 +1,173 @@
+---
+title: Aspire Seed Gate
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+An AppHost-side gate that seeds an EF Core database on exactly **two triggers**: the **first time the database
+is set up**, and, if you ask for it, a **destructive recreation** on every start. An ordinary AppHost restart
+never re-seeds. The "already seeded" marker lives **inside the database**, so dropping the container volume drops
+the marker too, and the next start is a first-time setup again.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Aspire.Hosting" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Aspire.Hosting
+```
+
+```csharp
+// AppHost Program.cs
+var db = builder.AddPostgres("pg")
+    .WithDataVolume()
+    .AddDatabase("appdb")
+    .WithDbContextSeeder<AppDbContext>(
+        (options, connectionString) => options.UseNpgsql(connectionString),
+        async (db, ctx, ct) =>
+        {
+            db.Countries.Add(new Country { Code = "CA", Name = "Canada" });
+            // pending changes are saved for you before the marker is written
+        });
+
+builder.AddProject<Projects.Api>("api")
+    .WithReference(db)
+    .WaitFor(db);          // the API starts only after the gate has finished
+```
+
+:::note[Dev-loop tooling]
+This runs in the AppHost, at `dotnet run` / `aspire run` time, against the databases the AppHost provisions. It
+is not a production seeding mechanism. For that, use [versioned seeding](/efcore/seeding) in the app itself.
+:::
+
+## When the gate seeds
+
+```csharp
+.WithDbContextSeeder<AppDbContext>(configure, seed);                       // DbSeedMode.FirstTimeOnly (default)
+
+// AppHost start #1                   -> no marker      -> migrate, seed, write marker
+// AppHost start #2                   -> marker present -> migrate, skip seeding
+// `docker volume rm` the volume, #3  -> marker gone    -> migrate, seed, write marker
+```
+
+Every start brings the schema up to date, so a migration you just added is applied without a volume drop. Only
+the seed callback is gated.
+
+| Mode | No marker (first-time setup) | Marker present |
+|---|---|---|
+| `FirstTimeOnly` *(default)* | initialize, seed (`Recreate = false`) | initialize, **skip** |
+| `Recreate` | initialize, seed (`Recreate = false`) | **`EnsureDeleted`**, initialize, seed (`Recreate = true`) |
+
+The marker is written **only after the callback succeeds** (and after a `SaveChangesAsync` for anything it left
+pending). A seed that throws is retried as a first-time setup on the next start instead of being silently
+skipped.
+
+:::caution[`Recreate` drops the database]
+`DbSeedMode.Recreate` calls `Database.EnsureDeletedAsync()` and rebuilds the database on **every** AppHost start
+after the first. It's a dev-loop convenience for "always start from known data". Don't point it at anything you
+care about.
+:::
+
+## The callback
+
+```csharp
+.WithDbContextSeeder<AppDbContext>(
+    (options, cs) => options.UseSqlServer(cs),
+    async (db, ctx, ct) =>
+    {
+        // db  : your AppDbContext, connected to the resource's database, schema already initialized
+        // ctx : DbSeedGateContext(ResourceName, ConnectionString, Recreate)
+        await DbSeedRunner.RunAsync(db, [new CountrySeeder(), new CurrencySeeder()], ct); // reuse app seeders
+    },
+    DbSeedMode.Recreate,
+    DbInitialization.Migrate);
+```
+
+| Parameter | |
+|---|---|
+| `configure` | points `DbContextOptionsBuilder<TContext>` at the connection string: `UseNpgsql`, `UseSqlServer`, `UseMySQL`, `UseSqlite`, plus anything else you'd configure |
+| `seed` | `(TContext db, DbSeedGateContext ctx, CancellationToken ct) => Task` |
+| `mode` | `FirstTimeOnly` (default) or `Recreate` |
+| `initialization` | `Migrate` (default), `EnsureCreated`, or `None`. `None` leaves the schema to your callback and isn't allowed with `Recreate`, which drops the whole database |
+
+The context is created with `ActivatorUtilities`, so the usual `AppDbContext(DbContextOptions<AppDbContext>)`
+constructor works, and extra constructor parameters come from the AppHost's services.
+
+Running your app's [`IDbSeeder`s](/efcore/seeding) inside the callback works well. The app's own startup seeding
+then finds their markers and does nothing.
+
+### Referencing your DbContext from the AppHost
+
+The AppHost needs the `DbContext` type and its EF provider. Reference the project that defines the context.
+If that project is a library rather than a service the AppHost runs, mark it so Aspire doesn't treat it as a
+project resource:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\MyApp.Data\MyApp.Data.csproj" IsAspireProjectResource="false" />
+  <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
+</ItemGroup>
+```
+
+Migrations come from the context's migrations assembly, the same as at app runtime.
+
+## Raw gate: `WithDbSeeder`
+
+When the seeding doesn't go through a `DbContext` of yours (SQL scripts, a CLI tool, another library), use the
+raw gate. It hands you the connection string and which trigger fired. **Your callback owns the schema and the
+wipe**:
+
+```csharp
+builder.AddPostgres("pg").AddDatabase("appdb")
+    .WithDbSeeder(
+        (options, cs) => options.UseNpgsql(cs),          // how the gate reaches its marker
+        async (ctx, ct) =>
+        {
+            if (ctx.Recreate)
+                await DropEverythingAsync(ctx.ConnectionString, ct);   // false on a first-time setup
+            await RunSeedScriptAsync(ctx.ConnectionString, ct);
+        },
+        DbSeedMode.Recreate);
+```
+
+The marker is still read and written through EF, with a model-less `DbContext` that the first argument points
+at the connection string. That is why the package carries no Npgsql / SqlClient / MySQL driver of its own: your
+AppHost already references the EF provider. If the callback drops the database and doesn't recreate it, the gate
+throws instead of writing the marker into nothing.
+
+:::caution[The marker table counts as "a table" to `EnsureCreated`]
+`EnsureCreated` does nothing once *any* table exists. With `WithDbSeeder`, or `WithDbContextSeeder` with
+`DbInitialization.None`, the gate writes `__ShinySeedHistory` after your callback. If your app creates its schema
+with `EnsureCreated` at startup, create the schema in the callback, or let `WithDbContextSeeder` do it with
+`DbInitialization.EnsureCreated`. Migrations don't have this problem.
+:::
+
+## How it works
+
+- Each gate subscribes to the database resource's `ResourceReadyEvent`. Aspire raises it once the database is
+  created and healthy, and resources that `WaitFor(db)` don't start until the handler finishes. So your API
+  never sees a half-seeded database.
+- The marker is a row in the [Seeding package's](/efcore/seeding) `__ShinySeedHistory` table, keyed
+  `aspire:<resource>:<ContextType>` for `WithDbContextSeeder` and `aspire:<resource>` for `WithDbSeeder`. Several
+  context types can share one database and each still gets its own first-time setup.
+- If the database doesn't exist, there's no marker, and that counts as a first-time setup.
+
+**Why reuse the Seeding table instead of a separate gate table?** DocumentDb kept them apart because its seed
+markers are documents that need a configured store, while its AppHost only had a raw connection. Here both sides
+have an EF context, so one table, one set of per-provider SQL, and one concurrency story serve both. The `aspire:`
+prefix keeps gate markers away from your seeder names, and a `Recreate` wipe resets both, which is what you want
+from "start from scratch".
+
+## Provider support
+
+Any database resource whose connection string your EF provider accepts. Tested with
+`AddPostgres().AddDatabase()`, `AddSqlServer().AddDatabase()` and `AddMySql().AddDatabase()`. The marker SQL
+supports PostgreSQL, SQL Server, MySQL (`MySql.EntityFrameworkCore`) and SQLite. See
+[Versioned Seeding → Provider support](/efcore/seeding#provider-support).
+
+## Limitations
+
+- **`Recreate` is whole-database.** `EnsureDeleted` drops the database, so two `Recreate` gates on one database
+  wipe each other's data. Use one gate per database in `Recreate` mode.
+- **The extension returns `IResourceBuilder<IResourceWithConnectionString>`**, so you can call it with only the
+  context type, `WithDbContextSeeder<AppDbContext>(…)`. Call it last in a resource chain, or keep the original
+  builder in a variable.
+- **AppHost-only.** Nothing here runs in a deployed environment. Aspire publishing ignores the eventing
+  subscription.

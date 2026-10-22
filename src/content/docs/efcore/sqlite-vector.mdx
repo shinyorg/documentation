@@ -1,0 +1,184 @@
+---
+title: SQLite Vector Search (sqlite-vec)
+---
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+On-device semantic search — "find the notes most like this one", RAG over local data — needs vector distance in the
+database. On SQLite that means [`sqlite-vec`](https://github.com/asg017/sqlite-vec), and getting it into an EF Core
+app is where it falls apart: EF has no vector mapping or functions for SQLite, and the usual
+`SqliteConnection.LoadExtension("vec0")` is a `dlopen`, which iOS forbids outright and Android's bundled SQLite
+blocks.
+
+`Shiny.EntityFrameworkCore.Sqlite.Mobile` ships the `sqlite-vec` binaries for every platform, wires them in as a
+SQLite **auto-extension** (statically linked on iOS — no `dlopen`), maps `float[]` / `ReadOnlyMemory<float>` columns,
+translates a `VectorDistance` function, and adds an optional `vec0` index with a LINQ k-nearest-neighbour query.
+
+<NugetBadge name="Shiny.EntityFrameworkCore.Sqlite.Mobile" showLabel={true} />
+
+```bash
+dotnet add package Shiny.EntityFrameworkCore.Sqlite.Mobile
+```
+
+The same package provides [spatial](/efcore/sqlite-spatial) and [full-text search](/efcore/sqlite-fulltext); each
+feature is enabled separately, and only vectors load native code.
+
+## Configure
+
+```csharp
+services.AddDbContext<AppDbContext>(o => o.UseSqlite(
+    $"Data Source={dbPath}",
+    sqlite => sqlite.UseShinyVectors()));
+```
+
+`UseShinyVectors()` registers sqlite-vec as an auto-extension **immediately**, so it is on every SQLite connection
+opened afterwards. If it can't load the binary for the current platform it throws `InvalidOperationException` there
+and then, rather than at the first query.
+
+```csharp
+using Shiny.EntityFrameworkCore.Sqlite.Mobile;
+
+public class Note
+{
+    public int Id { get; set; }                       // an integer key is required for an index (see below)
+    public string Text { get; set; } = "";
+    public float[]? Embedding { get; set; }           // or ReadOnlyMemory<float> (what M.E.AI's Embedding<float> returns)
+}
+
+protected override void OnModelCreating(ModelBuilder modelBuilder)
+    => modelBuilder.Entity<Note>(e => e.HasVectorIndex(x => x.Embedding, dimensions: 384));
+```
+
+With vectors enabled, every `float[]` and `ReadOnlyMemory<float>` property is stored as a `BLOB` in sqlite-vec's
+float32 format (raw little-endian floats). To keep a particular `float[]` as EF's JSON primitive collection instead,
+give it another column type: `e.Property(x => x.Scores).HasColumnType("TEXT")`. A `NULL` or empty vector is stored
+but never indexed. A `float[]` you capture in a query (`weights.Contains(x.Weight)`) keeps EF's normal collection
+behaviour.
+
+## Exact distance — no index needed
+
+`EF.Functions.VectorDistance` translates to sqlite-vec's `vec_distance_*` functions and works in `Where`, `OrderBy` and
+`Select` on any vector column. It is an exact, brute-force scan, which is perfectly fine for thousands of rows:
+
+```csharp
+var similar = await db.Notes
+    .Where(n => n.Embedding != null)
+    .OrderBy(n => EF.Functions.VectorDistance(n.Embedding, query, VectorDistanceMetric.Cosine))
+    .Take(10)
+    .ToListAsync();
+```
+
+| `VectorDistanceMetric` | SQL | Index option |
+|---|---|---|
+| `Cosine` | `vec_distance_cosine` | `distance_metric=cosine` |
+| `Euclidean` | `vec_distance_l2` | `distance_metric=l2` |
+| `Manhattan` | `vec_distance_l1` | `distance_metric=l1` |
+
+Smaller is always closer. A literal metric picks the function directly; a variable metric is translated to a `CASE`.
+`VectorDistance` also runs in memory, so it gives the same answer if EF evaluates it client-side.
+
+## k-nearest neighbours with a `vec0` index
+
+`HasVectorIndex(x => x.Embedding, dimensions, metric = Cosine)` creates a sqlite-vec `vec0` virtual table named
+`{Table}_{Column}_vec`. Query it with `NearestTo`, which returns the matches ordered nearest-first, each with its
+distance:
+
+```csharp
+var hits = await db.Notes
+    .NearestTo(n => n.Embedding, queryEmbedding, k: 5)
+    .ToListAsync();
+
+foreach (var hit in hits)
+    Console.WriteLine($"{hit.Distance:F3}  {hit.Entity.Text}");
+```
+
+```csharp
+public sealed class VectorMatch<TEntity>
+{
+    public required TEntity Entity { get; init; }     // tracked, unless the source query is AsNoTracking()
+    public required double Distance { get; init; }     // under the index's metric; smaller is closer
+}
+```
+
+`NearestTo` is ordinary LINQ, so you can keep composing — `Where`, `Skip`/`Take`, `Select(m => new { m.Entity.Text,
+m.Distance })`, `ToListAsync`. The query vector and `k` are SQL parameters, so the plan is cached once. Under the hood
+it is a join against vec0's KNN query:
+
+```sql
+SELECT "n".*, "n1"."distance" AS "Distance"
+FROM "Notes" AS "n"
+INNER JOIN (
+    SELECT "n0"."distance", "n0"."rowid" FROM "Notes_Embedding_vec" AS "n0"
+    WHERE match(@Query, "n0"."embedding") AND "n0"."k" = @K
+) AS "n1" ON "n"."Id" = "n1"."rowid"
+ORDER BY "n1"."distance"
+```
+
+:::caution[Filters apply after the k nearest are found]
+`db.Notes.Where(n => n.Folder == "work").NearestTo(...)` finds the `k` nearest notes overall and *then* keeps the work
+ones, so it can return fewer than `k`. Ask for more (`k: 50`) and `Take` what you need, or use `VectorDistance` with a
+`Where` for an exact filtered search.
+:::
+
+Every vector written to an indexed column must have exactly `dimensions` floats — vec0 rejects anything else, and
+the `SaveChanges` fails with a `DbUpdateException`.
+
+### Keeping it in sync
+
+The vec0 table is maintained by **SQLite triggers**, so tracked changes, `ExecuteUpdate`, `ExecuteDelete` and raw SQL
+all keep it current inside the same transaction. vec0 doesn't support `INSERT OR REPLACE`, so an update is a delete
+followed by an insert.
+
+## Schema: EnsureCreated and migrations
+
+`EnsureCreated()` creates each vec0 table and its triggers. With migrations, the index travels as a table annotation
+(`.Annotation("Shiny:Sidecar:Notes_Embedding_vec", "{...}")`) in the scaffolded `CreateTable`/`AlterTable`/`DropTable`
+calls; adding, changing (dimensions, metric) or removing an index drops and rebuilds that vec0 table and re-indexes
+the existing rows. See [SQLite spatial › Schema](/efcore/sqlite-spatial#schema-ensurecreated-and-migrations) for the
+shared details — they're the same machinery.
+
+## Requirements and validation
+
+Like every sidecar index, vec0 is keyed by the SQLite rowid, so the entity needs a single integer primary key stored
+as `INTEGER`; other keys, owned/keyless entities, views, TPC, non-vector property types, `dimensions <= 0` and an index
+without `UseShinyVectors()` are rejected when the model is built.
+
+## Platforms and native binaries
+
+| Platform | How sqlite-vec is linked |
+|---|---|
+| iOS / iOS simulator | static library (`xcframework` slice) force-loaded into the app; registered through a `__Internal` entry point |
+| Android | `libsqlite_vec0.so` per ABI (arm64-v8a, armeabi-v7a, x86, x86_64), **16 KB page aligned** |
+| Mac Catalyst, macOS, Linux, Windows | loadable `vec0` from the package's `runtimes/<rid>/native` |
+
+**Android 16 KB pages:** the bundled `.so` files are compiled from the sqlite-vec amalgamation with 16 KB page
+alignment, so they load on Android 15+ devices that use 16 KB memory pages (a Play Store requirement since November
+2025). The upstream release binaries are 4 KB aligned and fail with `dlopen failed: ... program alignment (4096)
+cannot be smaller than system page size (16384)`.
+
+**SQLCipher:** the package references `Microsoft.EntityFrameworkCore.Sqlite.Core`, so you can pair it with
+`SQLitePCLRaw.bundle_e_sqlcipher` instead of the default bundle. The auto-extension is registered against whichever
+engine SQLitePCLRaw loaded (`e_sqlite3` or `e_sqlcipher`).
+
+**Opening connections yourself:** an auto-extension applies to connections opened *after* it is registered. If you
+open a `SqliteConnection` before any DbContext is configured (an in-memory database you hand to `UseSqlite`, say),
+call `SqliteVec.RegisterAutoExtension()` first.
+
+**Not using vectors?** Spatial and full-text need no native code. To keep sqlite-vec out of your app entirely, set
+this in the app project:
+
+```xml
+<PropertyGroup>
+    <ShinySqliteVecNative>false</ShinySqliteVecNative>
+</PropertyGroup>
+```
+
+It removes the iOS static library, the Android `.so` files and the desktop `runtimes/*/native/vec0.*` assets.
+(`UseShinyVectors()` then throws, as there's nothing to load.)
+
+## Limitations
+
+- **SQLite only.** sqlite-vec's `vec0` is a flat (exact) index — fast enough for on-device data, but not an HNSW/IVF
+  approximate index for millions of rows.
+- **Post-filtering** for `NearestTo`, as above.
+- **No Hamming / bit vectors or int8 vectors** — float32 only.
+- **Precompiled (NativeAOT) queries** and compiled models were not tested.
