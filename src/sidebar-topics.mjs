@@ -1385,6 +1385,28 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'EF Core Extensions',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'efcore/', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          {
+            label: 'SQLite (Mobile)',
+            items: [
+              { label: 'Spatial', link: 'efcore/sqlite-spatial', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+              { label: 'Vector Search', link: 'efcore/sqlite-vector', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+              { label: 'Full-Text Search', link: 'efcore/sqlite-fulltext', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+            ]
+          },
+          { label: 'Transactional Outbox', link: 'efcore/outbox', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          { label: 'Temporal History', link: 'efcore/temporal', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          { label: 'AI Tools', link: 'efcore/ai-tools', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          { label: 'MCP Server', link: 'efcore/mcp', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          { label: 'Versioned Seeding', link: 'efcore/seeding', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          { label: 'Aspire Seed Gate', link: 'efcore/aspire', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+          { label: 'Release Notes', link: 'efcore/release-notes', dateCreated: '2026-10-22', dateUpdated: '2026-10-22' },
+        ]
+      },
+      {
         label: 'Data Sync',
         jumpTo: true,
         items: [
