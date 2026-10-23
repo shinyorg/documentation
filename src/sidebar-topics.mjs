@@ -637,6 +637,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'client/push/', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Architecture', link: 'client/push/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
+          { label: 'Platform Setup', link: 'client/push/setup', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
           { label: 'Native', link: 'client/push/native', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
           { label: 'Platform Specific', link: 'client/push/platform', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
           { label: 'Azure Push Notifications', link: 'client/push/azure', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
@@ -1605,7 +1606,11 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'extensions-push/', dateCreated: '2026-06-20', dateUpdated: '2026-06-20' },
           { label: 'Sending', link: 'extensions-push/sending', dateCreated: '2026-06-20', dateUpdated: '2026-06-20' },
-          { label: 'APNs', link: 'extensions-push/apns', dateCreated: '2026-06-20', dateUpdated: '2026-06-20' },
+          { label: 'Client Apps', link: 'extensions-push/client-apps', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
+          { label: 'APNs', link: 'extensions-push/apns', dateCreated: '2026-06-20', dateUpdated: '2026-10-23' },
+          { label: 'FCM', link: 'extensions-push/fcm', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
+          { label: 'WNS', link: 'extensions-push/wns', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
+          { label: 'Web Push', link: 'extensions-push/webpush', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
           { label: 'Live Activities', link: 'extensions-push/live-activities', dateCreated: '2026-07-31', dateUpdated: '2026-07-31' },
           { label: 'Persistence', link: 'extensions-push/persistence', dateCreated: '2026-06-20', dateUpdated: '2026-06-20' },
           { label: 'Metrics', link: 'extensions-push/metrics', dateCreated: '2026-06-20', dateUpdated: '2026-06-20' },

@@ -164,7 +164,7 @@ export const categories: CategoryCopy[] = [
         topicId: 'hardware',
         accent: '#0E9F68',
         accentDark: '#45E8AB',
-        headline: 'Radios, sensors and the local network — Bluetooth, GPS, beacons, Wi-Fi and discovery behind one API.',
+        headline: 'Radios, sensors and the local network — Bluetooth, GPS, beacons, Wi-Fi, VPN and discovery behind one API.',
         intro: 'The parts of an app where every platform does it differently and the documentation assumes you already know. Each library owns the native code, the permissions and the background rules, and gives you one API across iOS, Android, Windows, macOS and beyond.',
         libraries: [
             {

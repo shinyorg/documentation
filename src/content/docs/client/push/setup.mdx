@@ -1,0 +1,332 @@
+---
+title: Platform Setup
+description: End-to-end push setup for Apple (APNs), Android (Firebase), Firebase on iOS, Windows (WNS), Web Push and Azure Notification Hubs, covering the platform consoles, the app, and the server
+---
+import { Steps } from '@astrojs/starlight/components';
+
+A push only arrives when three pieces agree: the **platform** (Apple, Google, Microsoft, the browser) knows your app,
+the **app** registers with it and hands its token to your server, and the **server** holds the credentials to send.
+This page walks through all three for every platform `Shiny.Push` supports.
+
+:::caution[Console links can break]
+Links to the Apple Developer portal, Firebase, Google Cloud, Partner Center, Microsoft Entra and the Azure portal go
+straight to the relevant page, but those consoles are reorganized at any time, which can break a link or move a
+setting. The menu path is shown next to each link so you can still find it by hand.
+:::
+
+| Platform | Platform console | App | Server |
+|---|---|---|---|
+| [iOS / macOS (APNs)](#apple-apns) | Apple Developer | `Shiny.Push` | [`AddApns`](/extensions-push/apns) |
+| [Android (FCM)](#android-firebase-cloud-messaging) | Firebase | `Shiny.Push` | [`AddFcm`](/extensions-push/fcm) |
+| [iOS via Firebase](#ios-via-firebase) | Firebase + Apple Developer | `Shiny.Push.FirebaseMessaging` | [`AddApns`](/extensions-push/apns) with the native token |
+| [Windows (WNS)](#windows-wns) | Partner Center | `Shiny.Push` | [`AddWns`](/extensions-push/wns) |
+| [Blazor WebAssembly (Web Push)](#web-push-blazor-webassembly) | none (VAPID keys) | `Shiny.Push` | [`AddWebPush`](/extensions-push/webpush) |
+| [Azure Notification Hubs](#azure-notification-hubs) | Azure portal + the stores above | `Shiny.Push.AzureNotificationHubs` | Azure Notification Hubs SDK |
+
+The server column is the [`Shiny.Extensions.Push`](/extensions-push/) library, which sends to APNs, FCM, WNS and Web
+Push directly. You can use any backend instead: the app only needs to send its token somewhere.
+
+## Send the token to your server
+
+Every platform ends the same way: `IPushDelegate.OnNewToken` hands you a token, and the app sends it to your server.
+Do it from the delegate so token rotation is covered, not only the first registration:
+
+```csharp
+public class MyPushDelegate(IMyApi api) : PushDelegate
+{
+    public override Task OnNewToken(string token) => api.RegisterPushToken(new
+    {
+        DeviceToken = token,
+#if IOS || MACCATALYST
+        Platform = "iOS",
+#elif MACOS
+        Platform = "MacOS",
+#elif ANDROID
+        Platform = "Android",
+#elif WINDOWS
+        Platform = "Windows",
+#else
+        Platform = "WebBrowser",
+#endif
+#if DEBUG
+        Environment = "Sandbox",      // debug builds get APNs sandbox tokens
+#else
+        Environment = "Production",   // App Store and TestFlight builds get production tokens
+#endif
+        DeviceId = myInstallId,       // a GUID you persist once per install
+        UserIdentifier = currentUserId
+    });
+
+    public override Task OnUnRegistered(string token) => api.UnregisterPushToken(token);
+}
+```
+
+On the server, turn that into a [`DeviceRegistration`](/extensions-push/client-apps), which says what each
+platform's token looks like and how Web Push subscriptions are split up.
+
+---
+
+## Apple (APNs)
+
+Covers iOS, Mac Catalyst, macOS and tvOS. Requires a paid [Apple Developer Program](https://developer.apple.com/programs/) membership.
+
+### Apple Developer portal
+
+<Steps>
+
+1. **Enable push on the App ID.** Open [Certificates, Identifiers & Profiles → Identifiers](https://developer.apple.com/account/resources/identifiers/list), select your App ID (it must match `ApplicationId` in your `.csproj`), tick **Push Notifications** and save.
+
+2. **Regenerate your provisioning profiles.** Profiles created before you enabled push don't carry the capability. Re-download them under [Profiles](https://developer.apple.com/account/resources/profiles/list), or let automatic provisioning refresh them.
+
+3. **Create an APNs auth key for the server.** See [APNs → Apple Developer setup](/extensions-push/apns#apple-developer-setup). One `.p8` key works for every app on the team, in both sandbox and production.
+
+</Steps>
+
+### App
+
+<Steps>
+
+1. **Add the entitlement.** `aps-environment` must be `development` for debug builds and `production` for release builds:
+
+    ```xml
+    <ItemGroup Condition="$(TargetFramework.Contains('-ios')) OR $(TargetFramework.Contains('-maccatalyst'))">
+        <CustomEntitlements Include="aps-environment" Type="string" Value="development" Condition="'$(Configuration)' == 'Debug'" Visible="false" />
+        <CustomEntitlements Include="aps-environment" Type="string" Value="production" Condition="'$(Configuration)' == 'Release'" Visible="false" />
+    </ItemGroup>
+    ```
+
+    Signing fails with a profile that doesn't have the Push Notifications capability, such as a wildcard profile.
+
+2. **Enable background delivery.** Add `remote-notification` to `UIBackgroundModes` in `Platforms/iOS/Info.plist` so silent pushes (`content-available: 1`) wake the app:
+
+    ```xml
+    <key>UIBackgroundModes</key>
+    <array>
+        <string>remote-notification</string>
+    </array>
+    ```
+
+3. **Register Shiny.Push** with `services.AddPush<MyPushDelegate>()` ([Getting Started](/client/push/#setup)), call `IPushManager.RequestAccess()`, and [send the token](#send-the-token-to-your-server) to your server.
+
+4. **Test on a physical device.** The simulator can receive pushes but can't register for a real APNs token.
+
+</Steps>
+
+### Server
+
+Configure [`AddApns`](/extensions-push/apns) with the Team ID, Key ID, bundle id and `.p8` key. Register each device with
+`Platform = iOS` (or `MacOS`) and the `Environment` the app reported: debug-signed builds get **sandbox** tokens, while
+App Store and TestFlight builds get **production** tokens, and the two aren't interchangeable.
+
+For the payload to reach `IPushDelegate.OnReceived` in the background, send `ContentAvailable = true` (see the
+[FAQ](/client/push/faq)).
+
+---
+
+## Android (Firebase Cloud Messaging)
+
+### Firebase console
+
+<Steps>
+
+1. **Create or open a project** in the [Firebase console](https://console.firebase.google.com/).
+
+2. **Add the Android app.** In [Project settings → General](https://console.firebase.google.com/project/_/settings/general), click **Add app → Android** and enter your `ApplicationId` as the package name.
+
+3. **Download `google-services.json`** from the same page. This is the **app's** configuration, and it isn't secret.
+
+4. **Create a service account key for the server.** See [FCM → Firebase setup](/extensions-push/fcm#firebase-setup). That key **is** secret and never goes in the app.
+
+</Steps>
+
+### App
+
+<Steps>
+
+1. **Add `google-services.json`** to `Platforms/Android` with build action `GoogleServicesJson`, or pass a `FirebaseConfig` with the values instead ([Getting Started](/client/push/#android-firebase-configuration)).
+
+2. **Add the tap intent filter** to `MainActivity` so `IPushDelegate.OnEntry` fires when a notification is tapped ([Getting Started](/client/push/#android-activity-setup)).
+
+3. **Register Shiny.Push** with `services.AddPush<MyPushDelegate>()`, call `IPushManager.RequestAccess()` (it also asks for the Android 13+ notification permission), and [send the token](#send-the-token-to-your-server) to your server.
+
+</Steps>
+
+### Server
+
+Configure [`AddFcm`](/extensions-push/fcm) with the service account JSON and register each device with `Platform = Android`.
+Two payload rules decide which delegate method fires:
+
+- `OnReceived` only fires for messages with a **data** section, so put something in `PushNotification.Data`.
+- `PushNotification.DeepLink` is sent as the Android `click_action`. The tap only reaches `OnEntry` if that matches the
+  intent filter (`SHINY_PUSH_NOTIFICATION_CLICK` by default), so for Shiny apps put deep links in `Data` instead.
+
+---
+
+## iOS via Firebase
+
+Use this when you want FCM tokens and topics on iOS as well as Android. Android setup is unchanged.
+
+### Firebase console and Apple Developer portal
+
+<Steps>
+
+1. **Do the [Apple Developer portal](#apple-developer-portal) steps** above. Firebase still delivers through APNs.
+
+2. **Add the iOS app.** In [Project settings → General](https://console.firebase.google.com/project/_/settings/general), click **Add app → iOS** and enter your bundle id. Download `GoogleService-Info.plist`.
+
+3. **Give Firebase your APNs key.** Under [Project settings → Cloud Messaging](https://console.firebase.google.com/project/_/settings/cloudmessaging) → *Apple app configuration*, upload the `.p8` APNs auth key with its Key ID and Team ID.
+
+</Steps>
+
+### App
+
+Add `GoogleService-Info.plist` with build action `BundleResource`, add the [entitlement and background mode](#app) from the
+Apple section, and register with `services.AddPushFirebaseMessaging<MyPushDelegate>()`. See [Firebase (iOS)](/client/push/firebase-ios).
+
+### Server
+
+`OnNewToken` receives the **FCM** token on iOS. The `Shiny.Extensions.Push` FCM transport only delivers to
+`Platform = Android` registrations, so either send `IPushManager.NativeRegistrationToken` (the APNs token) as an
+`iOS` registration and use [`AddApns`](/extensions-push/apns), or send the FCM token through your own FCM sender.
+
+---
+
+## Windows (WNS)
+
+### Partner Center
+
+<Steps>
+
+1. **Reserve the app name** in [Partner Center → Apps and games](https://partner.microsoft.com/dashboard/apps-and-games/overview). WNS only issues channels to apps with a Store identity.
+
+2. **Associate the project with the Store.** In Visual Studio, right-click the project → **Publish → Associate App with the Store**, or copy the identity from the app's [Product identity](https://partner.microsoft.com/dashboard/apps-and-games/overview) page into `Platforms/Windows/Package.appxmanifest`. The app must run **packaged** (MSIX).
+
+</Steps>
+
+### App
+
+Register with `services.AddPush<MyPushDelegate>()`. On Windows, `RequestAccess()` creates a channel with
+`PushNotificationChannelManager`, and the token is the **channel URI**. [Send it](#send-the-token-to-your-server) to your server.
+
+### Server
+
+Configure [`AddWns`](/extensions-push/wns) and register each device with `Platform = Windows`.
+
+:::caution[Check the WNS auth model end to end]
+`Shiny.Push` creates its channel with `PushNotificationChannelManager`, the Store-identity model. `AddWns` authenticates
+with Microsoft Entra, the [Windows App SDK model](https://learn.microsoft.com/windows/apps/windows-app-sdk/notifications/push-notifications/).
+Microsoft documents these as separate models, so send a test push to a real channel before you rely on it.
+:::
+
+---
+
+## Web Push (Blazor WebAssembly)
+
+There's no store console. You generate your own VAPID key pair, and the browser vendor's push service delivers to
+whatever server holds the private key.
+
+### Keys
+
+<Steps>
+
+1. **Generate a VAPID key pair once**, for example with the [`web-push`](https://www.npmjs.com/package/web-push) CLI:
+
+    ```bash
+    npx web-push generate-vapid-keys
+    ```
+
+2. **Keep the private key on the server only.** The public key goes in the app.
+
+</Steps>
+
+### App
+
+<Steps>
+
+1. **Register with the public key:**
+
+    ```csharp
+    services.AddPush<MyPushDelegate>(new WebPushOptions
+    {
+        VapidPublicKey = "<vapid-public-key>"
+    });
+    ```
+
+2. **Serve the service worker.** The bundled worker is served from `./_content/Shiny.Push/push-sw.js` (the default `ServiceWorkerPath`). If you already have a service worker, set `ServiceWorkerPath` to yours and `importScripts('./_content/Shiny.Push/push-sw.js')` from it.
+
+3. **Serve over HTTPS** (`localhost` is fine for development). Safari only allows Web Push after the user installs the site as a PWA.
+
+4. **[Send the token](#send-the-token-to-your-server).** On the web the token is the browser's whole `PushSubscription` serialized as JSON.
+
+</Steps>
+
+### Server
+
+Configure [`AddWebPush`](/extensions-push/webpush) with the same key pair and a contact `Subject`. The subscription JSON
+is split into a `DeviceRegistration`: `endpoint` becomes `DeviceToken`, and `keys.p256dh` and `keys.auth` go in
+`Data`. See [Client Apps → Web Push](/extensions-push/client-apps#web-push). The bundled service worker shows
+`title`, `body` and `icon` and passes `Data` to your delegate, so put deep links in `Data`.
+
+---
+
+## Azure Notification Hubs
+
+Azure Notification Hubs sits between your server and the stores: the app registers an **installation** with the hub,
+and your server sends to the hub by tag. Supported on iOS, Android and Windows.
+
+### Store credentials
+
+Do the platform console steps above first, for every platform you target:
+
+- **Apple:** the [App ID push capability](#apple-developer-portal) and an APNs `.p8` key ([how](/extensions-push/apns#apple-developer-setup)).
+- **Android:** the Firebase project, `google-services.json`, and a service account key ([how](/extensions-push/fcm#firebase-setup)).
+- **Windows:** the [Partner Center](#partner-center) association, plus the Package SID and client secret from the app's WNS settings.
+
+### Azure portal
+
+<Steps>
+
+1. **Create a Notification Hub** (and its namespace) from [Create a resource → Notification Hub](https://portal.azure.com/#create/Microsoft.NotificationHub).
+
+2. **Add the store credentials** under the hub's **Settings**:
+    - **Apple (APNS):** choose **Token**, enter the Key ID, bundle id, Team ID and the contents of the `.p8` file, and pick **Sandbox** or **Production** to match your build.
+    - **Google (FCM v1):** enter the private key, client email and project id from the service account JSON.
+    - **Windows (WNS):** enter the Package SID and security key.
+
+3. **Copy the connection strings** from **Manage → Access Policies**. The app uses `DefaultListenSharedAccessSignature`, which can only register. The server uses `DefaultFullSharedAccessSignature`, which can send, and must never ship in the app.
+
+</Steps>
+
+Microsoft's [Notification Hubs documentation](https://learn.microsoft.com/azure/notification-hubs/) has screenshots of each step.
+
+### App
+
+Do the app steps for each platform above (entitlements, `google-services.json`, Store association), then register with the
+**listen** connection string:
+
+```csharp
+services.AddPushAzureNotificationHubs<MyPushDelegate>(
+    "Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=DefaultListenSharedAccessSignature;SharedAccessKey=<key>",
+    "<hub-name>"
+);
+```
+
+`OnNewToken` receives the hub **installation id**, not the native token. Tags set through `IPushManager.Tags` are stored
+on the installation. See [Azure Push Notifications](/client/push/azure).
+
+### Server
+
+`Shiny.Extensions.Push` doesn't talk to Notification Hubs. Send with Microsoft's
+[`Microsoft.Azure.NotificationHubs`](https://www.nuget.org/packages/Microsoft.Azure.NotificationHubs) package and the
+**full** connection string:
+
+```csharp
+var hub = NotificationHubClient.CreateClientFromConnectionString(fullAccessConnectionString, "<hub-name>");
+
+// to every installation tagged "premium"
+await hub.SendAppleNativeNotificationAsync("{\"aps\":{\"alert\":\"Hello\"}}", "premium");
+await hub.SendFcmV1NativeNotificationAsync("{\"message\":{\"data\":{\"message\":\"Hello\"}}}", "premium");
+
+// to one device, using the installation id the app reported from OnNewToken
+await hub.SendAppleNativeNotificationAsync(payload, $"$InstallationId:{installationId}");
+```

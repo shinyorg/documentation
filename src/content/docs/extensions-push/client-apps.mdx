@@ -1,0 +1,112 @@
+---
+title: Client Apps
+description: Connecting Shiny.Push apps to Shiny.Extensions.Push — what each platform's token looks like and how to turn it into a DeviceRegistration
+---
+
+[`Shiny.Push`](/client/push/) is the on-device half: it registers with the platform and hands your app a token in
+`IPushDelegate.OnNewToken`. This page covers the server half of that handoff. For the platform consoles and app setup,
+see the client [Platform Setup](/client/push/setup).
+
+## What each platform reports
+
+| Client platform | Token from `OnNewToken` | `DevicePlatform` | Server transport |
+|---|---|---|---|
+| iOS, Mac Catalyst | APNs device token (hex) | `iOS` | [APNs](/extensions-push/apns) |
+| macOS | APNs device token (hex) | `MacOS` | [APNs](/extensions-push/apns) |
+| Android | FCM registration token | `Android` | [FCM](/extensions-push/fcm) |
+| Windows | WNS channel URI | `Windows` | [WNS](/extensions-push/wns) |
+| Blazor WebAssembly | `PushSubscription` serialized as JSON | `WebBrowser` | [Web Push](/extensions-push/webpush) |
+| Any, with Azure Notification Hubs | hub installation id | n/a | Notification Hubs, not this library |
+
+## A registration endpoint
+
+The app sends its token, platform and environment (see the client's
+[Send the token to your server](/client/push/setup#send-the-token-to-your-server)). One endpoint covers every platform:
+
+```csharp
+record RegisterRequest(
+    string DeviceToken,
+    DevicePlatform Platform,
+    PushEnvironment Environment = PushEnvironment.Production,
+    string? DeviceId = null,
+    string? UserIdentifier = null);
+
+app.MapPost("/push/register", async (RegisterRequest req, IPushManager push) =>
+{
+    var registration = new DeviceRegistration
+    {
+        DeviceToken    = req.DeviceToken,
+        Platform       = req.Platform,
+        Environment    = req.Environment,
+        DeviceId       = req.DeviceId,
+        UserIdentifier = req.UserIdentifier
+    };
+
+    if (req.Platform == DevicePlatform.WebBrowser)
+        registration = WebPushSubscription.ToRegistration(registration);
+
+    await push.RegisterDevice(registration);
+    return Results.NoContent();
+});
+```
+
+Add `JsonStringEnumConverter` to the HTTP JSON options if the app sends the enums as strings. Unregister with
+`IPushManager.UnregisterDevice(token, platform)` from the app's `OnUnRegistered`.
+
+## Apple
+
+Use the `Environment` the app reports. Debug-signed builds get **sandbox** tokens, while App Store and TestFlight
+builds get **production** tokens. The APNs transport routes each device to the matching host, and a token sent to the
+wrong one fails with `BadDeviceToken`.
+
+## iOS apps using Firebase
+
+With `Shiny.Push.FirebaseMessaging`, `OnNewToken` receives an **FCM** token on iOS, but the FCM transport only
+delivers to `Android` registrations. Either send `IPushManager.NativeRegistrationToken` (the APNs token) from iOS and
+register it as `iOS` for the [APNs](/extensions-push/apns) transport, or deliver those FCM tokens with your own sender.
+
+## Web Push
+
+On the web, `Shiny.Push` reports the whole browser subscription as JSON:
+
+```json
+{ "endpoint": "https://fcm.googleapis.com/fcm/send/…", "expirationTime": null, "keys": { "p256dh": "…", "auth": "…" } }
+```
+
+The Web Push transport needs the endpoint as `DeviceToken` and the keys in `Data`:
+
+```csharp
+using System.Text.Json;
+
+static class WebPushSubscription
+{
+    public static DeviceRegistration ToRegistration(DeviceRegistration registration)
+    {
+        using var doc = JsonDocument.Parse(registration.DeviceToken);
+        var root = doc.RootElement;
+        var keys = root.GetProperty("keys");
+
+        return registration with
+        {
+            DeviceToken = root.GetProperty("endpoint").GetString()!,
+            Data = new Dictionary<string, string>
+            {
+                ["p256dh"] = keys.GetProperty("p256dh").GetString()!,
+                ["auth"]   = keys.GetProperty("auth").GetString()!
+            }
+        };
+    }
+}
+```
+
+When the app unregisters, `OnUnRegistered` receives the same JSON, so parse out the endpoint before calling
+`UnregisterDevice`.
+
+## Payloads the client understands
+
+| Client | Make sure to |
+|---|---|
+| iOS | Set `Apple.ContentAvailable = true` when `OnReceived` must run in the background. Apple throttles these. |
+| Android | Include `Data` so `OnReceived` fires, and put deep links in `Data`: `DeepLink` becomes `click_action`, which must match the app's intent filter for `OnEntry` to fire. |
+| Web | Put deep links and anything the app needs in `Data`. The service worker only shows `title`, `body` and `icon`. |
+| Windows | Toasts are built from `Title` and `Message`. Use `WindowsPushOptions.Payload` for custom XML. |

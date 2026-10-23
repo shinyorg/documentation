@@ -1,0 +1,76 @@
+---
+title: Web Push
+---
+
+The Web Push transport sends to browsers with the Web Push protocol: VAPID authentication and RFC 8291 payload
+encryption. It ships in the `Shiny.Extensions.Push` package (namespace `Shiny.Extensions.Push.WebPush`) and delivers
+to registrations with `Platform = DevicePlatform.WebBrowser`. Web Push has no multicast endpoint, so each device is one
+request, sent concurrently.
+
+## VAPID keys
+
+There's no store console. Generate a key pair once, for example with the [`web-push`](https://www.npmjs.com/package/web-push) CLI:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+Both keys are base64url. Any P-256 pair works: the public key is the 65-byte uncompressed point and the private key the
+32-byte scalar. The **public** key goes in the app and the **private** key stays on the server. If you change the pair,
+every existing subscription stops working and browsers have to subscribe again.
+
+The app side (the `WebPushOptions.VapidPublicKey` and the service worker) is covered in the client
+[Platform Setup → Web Push](/client/push/setup#web-push-blazor-webassembly).
+
+## Configuration
+
+```csharp
+using Shiny.Extensions.Push.WebPush;
+
+push.AddWebPush(o =>
+{
+    o.PublicKey  = "<vapid-public-key>";
+    o.PrivateKey = "<vapid-private-key>";
+    o.Subject    = "mailto:you@example.com";
+});
+```
+
+| Option | Description |
+|---|---|
+| `PublicKey` | VAPID public key (base64url) |
+| `PrivateKey` | VAPID private key (base64url) |
+| `Subject` | A `mailto:` or `https:` contact the push service can use to reach you |
+| `DefaultTimeToLive` | How long the push service keeps an undelivered message. Defaults to 28 days. |
+
+## Registering devices
+
+A browser subscription has three parts. The endpoint goes in `DeviceToken` and the two keys go in `Data` under
+`p256dh` and `auth`. A registration without both keys fails with `InvalidToken`. See
+[Client Apps → Web Push](/extensions-push/client-apps#web-push) for parsing the JSON `Shiny.Push` reports.
+
+```csharp
+await pushManager.RegisterDevice(new DeviceRegistration
+{
+    DeviceToken = subscription.Endpoint,
+    Platform    = DevicePlatform.WebBrowser,
+    Data        = new Dictionary<string, string>
+    {
+        ["p256dh"] = subscription.P256dh,
+        ["auth"]   = subscription.Auth
+    }
+});
+```
+
+## Payload
+
+The encrypted payload is JSON with `title`, `body`, `icon` (from `WebPushOptions.Icon`), `deeplink` and `data`. The
+`Shiny.Push` service worker shows `title`, `body` and `icon` and passes `data` to `IPushDelegate`, so put anything the
+app needs, including deep links, in `Data`.
+
+## Failure handling
+
+| Push service response | Status | Manager action |
+|---|---|---|
+| `404` / `410` | `TokenExpired` | subscription pruned |
+| missing keys, bad endpoint, encryption error | `InvalidToken` | subscription pruned |
+| `429` / `503` | `RateLimited` | surfaced (no auto-retry) |

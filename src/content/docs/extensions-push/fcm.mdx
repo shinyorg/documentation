@@ -1,0 +1,78 @@
+---
+title: FCM
+---
+
+The FCM transport sends to Android devices through Firebase Cloud Messaging's HTTP v1 API, authenticated with a Google
+service account. It ships in the `Shiny.Extensions.Push` package (namespace `Shiny.Extensions.Push.Fcm`) and
+delivers to registrations with `Platform = DevicePlatform.Android`.
+
+:::caution[Console links can break]
+Links to the Firebase and Google Cloud consoles go straight to the relevant page, but Google reorganizes them at any
+time, which can break a link or move a setting. The menu path is shown next to each link so you can still find it by hand.
+:::
+
+## Firebase setup
+
+1. **Open your Firebase project** in the [Firebase console](https://console.firebase.google.com/), or create one. The app and the server must use the same project.
+2. **Create a service account key.** Go to [Project settings → Service accounts](https://console.firebase.google.com/project/_/settings/serviceaccounts/adminsdk) and click **Generate new private key**. The downloaded JSON contains `project_id`, `client_email` and `private_key`. It's a server secret, so keep it out of source control and out of the app.
+3. **Check the FCM API is enabled.** [Project settings → Cloud Messaging](https://console.firebase.google.com/project/_/settings/cloudmessaging) should show *Firebase Cloud Messaging API (V1)* as enabled. If it isn't, enable the [Firebase Cloud Messaging API](https://console.cloud.google.com/apis/library/fcm.googleapis.com) in Google Cloud.
+
+The app side (adding the Android app and `google-services.json`) is covered in the client
+[Platform Setup → Android](/client/push/setup#android-firebase-cloud-messaging).
+
+## Configuration
+
+```csharp
+using Shiny.Extensions.Push.Fcm;
+
+push.AddFcm(o => o.ServiceAccountJsonPath = "firebase-service-account.json");
+
+// or from a secret store
+push.AddFcm(o => o.ServiceAccountJson = builder.Configuration["Push:FcmServiceAccount"]);
+```
+
+| Option | Description |
+|---|---|
+| `ServiceAccountJson` | The service account JSON contents |
+| `ServiceAccountJsonPath` | Path to the service account JSON file |
+| `ProjectId` | Overrides the `project_id` in the service account (rarely needed) |
+
+The provider exchanges the service account for an OAuth token and caches it. Sends are batched up to 500 devices per
+request (see [Sending → Batching](/extensions-push/sending#batching-fcm-multicast)).
+
+## Registering devices
+
+`DeviceToken` is the FCM registration token the app reports from `IPushDelegate.OnNewToken`:
+
+```csharp
+await pushManager.RegisterDevice(new DeviceRegistration
+{
+    DeviceToken = fcmToken,
+    Platform    = DevicePlatform.Android,
+    DeviceId    = installId
+});
+```
+
+FCM tokens from an iOS app using Firebase aren't delivered by this transport, because it only claims `Android`
+registrations. See [Client Apps](/extensions-push/client-apps#ios-apps-using-firebase).
+
+## Android payload
+
+`AndroidPushOptions` sets the notification's `ChannelId`, `Icon`, `Color` and `ImageUrl`. `Data` is sent as the FCM
+`data` section and `CollapseId` as `collapse_key`.
+
+:::caution[Shiny.Push apps]
+- `IPushDelegate.OnReceived` only fires when the message has a **data** section, so include `Data`.
+- `DeepLink` is written to the Android `click_action`. A tap only reaches `IPushDelegate.OnEntry` when that matches the
+  app's intent filter (`SHINY_PUSH_NOTIFICATION_CLICK` by default), so send deep links in `Data` instead.
+:::
+
+## Failure handling
+
+| FCM error | Status | Manager action |
+|---|---|---|
+| `UNREGISTERED` | `TokenExpired` | token pruned |
+| `INVALID_ARGUMENT` / `SENDER_ID_MISMATCH` | `InvalidToken` | token pruned |
+| `QUOTA_EXCEEDED` / `UNAVAILABLE`, HTTP 429 / 503 | `RateLimited` | surfaced (no auto-retry) |
+
+`SENDER_ID_MISMATCH` usually means the app and the server use different Firebase projects.

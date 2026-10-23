@@ -1,0 +1,76 @@
+---
+title: WNS
+---
+
+The WNS transport sends to Windows devices through the Windows Notification Service, authenticated with a Microsoft
+Entra (Azure AD) app registration. It ships in the `Shiny.Extensions.Push` package (namespace
+`Shiny.Extensions.Push.Wns`) and delivers to registrations with `Platform = DevicePlatform.Windows`.
+
+:::caution[Console links can break]
+Links to Microsoft Entra and Partner Center go straight to the relevant page, but Microsoft reorganizes them at any
+time, which can break a link or move a setting. The menu path is shown next to each link so you can still find it by hand.
+:::
+
+## Microsoft setup
+
+1. **Register an app in Microsoft Entra.** Go to [Entra admin center → App registrations](https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) → **New registration**. Note the **Directory (tenant) ID** and **Application (client) ID**.
+2. **Create a client secret.** In the registration, open **Certificates & secrets → New client secret** and copy the value. It's only shown once.
+3. **Associate the app with WNS** in [Partner Center](https://partner.microsoft.com/dashboard/apps-and-games/overview) and grant the Entra app WNS access, as described in Microsoft's [Windows App SDK push notifications](https://learn.microsoft.com/windows/apps/windows-app-sdk/notifications/push-notifications/) guide.
+
+The app side is covered in the client [Platform Setup → Windows](/client/push/setup#windows-wns).
+
+:::caution[Shiny.Push channels]
+`Shiny.Push` creates its Windows channel with `PushNotificationChannelManager`, the Store-identity model, while this
+transport authenticates with Entra, the Windows App SDK model. Microsoft documents these as separate models, so send a
+test push to a real `Shiny.Push` channel before you rely on it.
+:::
+
+## Configuration
+
+```csharp
+using Shiny.Extensions.Push.Wns;
+
+push.AddWns(o =>
+{
+    o.TenantId     = "<entra-tenant-id>";
+    o.ClientId     = "<app-registration-client-id>";
+    o.ClientSecret = "<client-secret>";
+});
+```
+
+| Option | Description |
+|---|---|
+| `TenantId` | Entra directory (tenant) id |
+| `ClientId` | Entra application (client) id |
+| `ClientSecret` | Client secret for the app registration |
+| `TokenEndpoint` | Overrides the token endpoint for national clouds. Defaults to `https://login.microsoftonline.com/{TenantId}/oauth2/v2.0/token`. |
+
+## Registering devices
+
+`DeviceToken` is the WNS **channel URI** the app reports from `IPushDelegate.OnNewToken`:
+
+```csharp
+await pushManager.RegisterDevice(new DeviceRegistration
+{
+    DeviceToken = channelUri,
+    Platform    = DevicePlatform.Windows,
+    DeviceId    = installId
+});
+```
+
+Channel URIs expire, so the app should report a new one whenever it gets one.
+
+## Windows payload
+
+`WindowsPushOptions.Type` picks the notification kind: `Toast` (the default, built from `Title` and `Message`), `Tile`,
+`Badge` or `Raw`. `Payload` sends your own XML or raw string verbatim, and `Launch` sets the toast's activation argument,
+falling back to `DeepLink`.
+
+## Failure handling
+
+| WNS response | Status | Manager action |
+|---|---|---|
+| `410 Gone` | `TokenExpired` | channel pruned |
+| `404 Not Found` | `InvalidToken` | channel pruned |
+| `406` / `429`, or `X-WNS-NotificationStatus: channelthrottled` | `RateLimited` | surfaced (no auto-retry) |
+| `X-WNS-NotificationStatus: dropped` | `Error` | token kept |
