@@ -1,0 +1,79 @@
+---
+title: VPN | Platform Setup
+description: Entitlements, packages and permissions Shiny.Net.Vpn needs on iOS, Mac Catalyst, macOS, Android and Linux, and how each platform is backed
+---
+
+## iOS, Mac Catalyst and macOS
+
+Backed by `NEVPNManager` with an `NEVPNProtocolIKEv2` configuration — Apple's *personal VPN*.
+
+1. Enable the **Personal VPN** capability on the App ID in the Apple Developer portal.
+2. Add the entitlement to `Entitlements.plist`:
+
+```xml
+<key>com.apple.developer.networking.vpn.api</key>
+<array>
+    <string>allow-vpn</string>
+</array>
+```
+
+The first `SaveProfile` shows *"Allow ... to add VPN configurations"*. Without the entitlement the save
+fails with the same error a decline produces, so it also comes back as `AccessState.Denied` — a
+`Denied` on a first run that never showed a prompt means the entitlement is missing.
+
+Secrets never go to NetworkExtension directly: the shared secret and password are written to your
+app's keychain, and the configuration holds keychain references to them. A certificate profile embeds
+the PKCS#12 bundle in the configuration.
+
+Apple only trusts a private CA that the user installed through a configuration profile, so
+`ServerRootCertificate` is not available — use a server certificate from a public CA, or ship the CA
+in a profile.
+
+On iOS 16 and macOS 13 and later, a failed `Connect` carries the reason from
+`fetchLastDisconnectError` (authentication failed, server not responding, certificate rejected).
+Earlier versions give no reason.
+
+## Android
+
+Backed by **platform VPN profiles** — `VpnManager.provisionVpnProfile` with an `Ikev2VpnProfile`. The OS
+negotiates and runs the tunnel itself. This is not `VpnService`, which hands an app a TUN device and
+leaves it to implement the protocol.
+
+- **API 30 (Android 11)** is needed for anything at all.
+- **API 33 (Android 13)** is needed for `Status` — `getProvisionedVpnProfileState` and the
+  `ACTION_VPN_MANAGER_EVENT` broadcasts that say why a session failed. On Android 11 and 12, `Connect`
+  returns as soon as the start is accepted and `GetStatus()` returns `Unknown`.
+- No manifest entries are needed.
+- The consent dialog is shown through `AndroidPlatform.StartActivityForResult`. Shiny.Hosting.Maui
+  forwards activity results automatically; with Shiny.Hosting.Native the activity derives from
+  `ShinyAndroidActivity`.
+- Android always uses the server address as the server's identity, so `RemoteIdentifier` can only
+  repeat it, and it needs `LocalIdentifier` for shared secret and certificate profiles.
+- Username/password profiles use EAP-MSCHAPv2.
+- The profile is listed in *Settings → Network → VPN* under your app's name, where the user can turn
+  it off or delete it.
+
+## Linux
+
+Install `Shiny.Net.Vpn.Linux`. It drives NetworkManager over D-Bus, with the **strongSwan** plugin
+providing IKEv2:
+
+```bash
+sudo apt install network-manager-strongswan      # Debian, Ubuntu, Raspberry Pi OS
+sudo dnf install NetworkManager-strongswan       # Fedora
+```
+
+`SaveProfile` checks for the plugin and throws, naming the package, when it is missing.
+
+- **polkit** gates saving (`org.freedesktop.NetworkManager.settings.modify.system`) and connecting
+  (`org.freedesktop.NetworkManager.network-control`). On a desktop the user gets an authentication
+  dialog; a headless service needs a polkit rule. A refused save returns `AccessState.Denied`.
+- The secret is saved with the connection (`password-flags=0`), so it connects without a secret agent,
+  which a background service does not have.
+- A `ServerRootCertificate` is written as PEM under `~/.local/share/shiny/vpn/` and referenced from the
+  connection.
+- Certificate authentication is not available — the plugin only reads client keys from files.
+- The profile is the NetworkManager connection whose UUID is derived from your entry assembly's name,
+  so it is found again on the next launch. It shows in the desktop's network settings under
+  `VpnProfile.Name`.
+- A failed `Connect` carries NetworkManager's reason (login failed, service failed to start, timeout).

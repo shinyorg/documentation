@@ -1,0 +1,159 @@
+---
+title: VPN | Getting Started
+description: Install, connect, disconnect and monitor a profile in the operating system's built-in IKEv2 VPN client from .NET on iOS, Mac Catalyst, macOS, Android and Linux
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Add your VPN to the device, bring it up and down from code, and know whether it actually connected —
+using the IKEv2 client the operating system already ships. The OS runs the tunnel, so it keeps going
+after your app is closed and shows up in the system VPN settings like any other. Built on
+`Shiny.Core`, so it runs in any Shiny host: MAUI, console, service, or daemon.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Net.Vpn" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["android", "ios", "linux", "macos"]} />
+
+## Read this first
+
+This is **not** a VPN protocol implementation. It configures the OS's built-in **IKEv2** client — the
+one behind iOS's *Add VPN Configuration* screen, Android's platform VPN profiles and NetworkManager's
+strongSwan plugin. Your server must speak IKEv2 (strongSwan, Libreswan, Windows RRAS, most firewalls
+and commercial VPN services do).
+
+WireGuard, OpenVPN or a protocol of your own need an Apple packet tunnel extension
+(`NEPacketTunnelProvider`) or an Android `VpnService` that implements the protocol and moves every
+packet itself. This package does not do that.
+
+Each app owns **one** profile — that is how both phone platforms work — so saving again replaces it.
+
+## What each platform can do
+
+Every manager publishes a **`VpnCapabilities`** flags property, and anything missing throws
+**`VpnNotSupportedException`** naming the limit.
+
+| | iOS / Catalyst / macOS | Android 13+ | Android 11–12 | Linux |
+|---|---|---|---|---|
+| Save, connect, disconnect, remove | ✅ | ✅ | ✅ | ✅ |
+| Status and `StatusChanged` | ✅ | ✅ | ❌ | ✅ |
+| Shared secret (PSK) | ✅ | ✅ | ✅ | ✅ |
+| Username / password (EAP) | ✅ | ✅ | ✅ | ✅ |
+| Client certificate | ✅ | ✅ | ✅ | ❌ |
+| Private CA for the server certificate | ❌ | ✅ | ✅ | ✅ |
+| Remote identity other than the server address | ✅ | ❌ | ❌ | ✅ |
+
+Android below 11 has no API for this at all. On Android 11 and 12 the OS cannot report the state, so
+`Connect` returns as soon as the start is accepted and `GetStatus()` returns `Unknown`. There is no
+Windows target.
+
+<AiSkill skillName="shiny-vpn" />
+
+## Setup
+
+```bash
+dotnet add package Shiny.Net.Vpn
+```
+
+On Linux, install the NetworkManager-backed package instead:
+
+```bash
+dotnet add package Shiny.Net.Vpn.Linux
+```
+
+```csharp
+using Shiny;
+
+builder.Services.AddVpn();   // IVpnManager
+```
+
+Each platform needs a little setup — the Apple *Personal VPN* entitlement, or the strongSwan plugin
+on Linux. See [Platform Setup](/client/vpn/platform/).
+
+## Save a profile
+
+```csharp
+using Shiny.Net.Vpn;
+
+public class VpnSetup(IVpnManager vpn)
+{
+    public async Task<bool> Install(string secret)
+    {
+        var result = await vpn.SaveProfile(new VpnProfile
+        {
+            Name = "Contoso VPN",
+            ServerAddress = "vpn.contoso.com",
+            LocalIdentifier = "phone@contoso.com",
+            Authentication = VpnAuthentication.SharedSecret(secret)
+        });
+
+        // Denied = the user declined the system prompt; nothing was saved
+        return result == AccessState.Available;
+    }
+}
+```
+
+The first save shows the OS's own consent prompt, so call it from the foreground in response to the
+user. Other ways to authenticate:
+
+```csharp
+VpnAuthentication.UsernamePassword("allan", password);                   // IKEv2 EAP-MSCHAPv2
+VpnAuthentication.Certificate(File.ReadAllBytes("me.p12"), "password");  // PKCS#12 client certificate
+```
+
+| Property | |
+|---|---|
+| `Name` | Shown in the system VPN settings. Android lists the profile under your app's name instead. |
+| `ServerAddress` | Host name or IP address of the server. |
+| `Authentication` | Shared secret, username/password or certificate. |
+| `RemoteIdentifier` | The server's IKE ID. Defaults to `ServerAddress`; a different value is not possible on Android. |
+| `LocalIdentifier` | This device's IKE ID. Android needs it for shared secret and certificate profiles. |
+| `ServerRootCertificate` | DER or PEM CA certificate when the server's certificate comes from a private CA. Not possible on Apple — install the CA through a configuration profile instead. |
+
+## Connect and disconnect
+
+```csharp
+try
+{
+    await vpn.Connect(TimeSpan.FromSeconds(20));   // returns once it is connected
+}
+catch (VpnConnectionException ex)
+{
+    // the OS's reason, where it gives one: credentials rejected, server not responding, ...
+    ShowError(ex.Message);
+}
+
+await vpn.Disconnect();
+```
+
+`Connect` throws `VpnPermissionException` when there is no profile to start — including when the user
+deleted it from Settings.
+
+## Watch the state
+
+The user can switch the VPN off in Settings, and the OS reconnects it on its own after a network
+change, so read the state rather than remembering it:
+
+```csharp
+var state = await vpn.GetStatus();
+
+vpn.StatusChanged += (_, state) =>
+{
+    // Unknown, NotConfigured, Disconnected, Connecting, Connected, Reconnecting, Disconnecting
+    MainThread.BeginInvokeOnMainThread(() => this.Status = state.ToString());
+};
+```
+
+Subscribing delivers the current state once, then each change.
+
+## Remove the profile
+
+```csharp
+await vpn.RemoveProfile();   // disconnects and deletes the profile and its stored secrets
+```
+
+Read on: [Platform Setup](/client/vpn/platform/)

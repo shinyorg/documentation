@@ -364,6 +364,16 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'VPN',
+        jumpTo: true,
+        dateUpdated: '2026-10-23',
+        items: [
+          { label: 'Getting Started', link: 'client/vpn/', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
+          { label: 'Platform Setup', link: 'client/vpn/platform', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
         label: 'Wearables',
         jumpTo: true,
         dateUpdated: '2026-09-19',

@@ -325,6 +325,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'windows', 'linux', 'macos'],
             },
             {
+                label: 'VPN',
+                tagline: "Drive the OS's built-in IKEv2 VPN client from your app",
+                summary: "Install your IKEv2 VPN profile on the device, connect and disconnect it from code, and watch whether it is up - using the client the operating system already ships.",
+                highlights: [
+                    'Shared secret, username/password or certificate',
+                    'Connect and wait until it is really up',
+                    'Live connection state',
+                    'Keeps running after the app closes',
+                ],
+                packages: ['Shiny.Net.Vpn'],
+                frameworks: ['maui', 'dotnet'],
+                os: ['android', 'ios', 'linux', 'macos'],
+            },
+            {
                 label: 'Wearables',
                 tagline: 'Talk to your Apple Watch or Wear OS companion app',
                 summary: 'One API over WatchConnectivity and the Wear OS Data Layer: live messages with replies, shared context, queued transfers and files, delivered to a delegate even when the app is in the background.',
