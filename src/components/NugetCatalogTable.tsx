@@ -5,8 +5,8 @@ export interface CatalogPackage {
     family: string;
     /** Docs page that references the package, when there is one */
     doc?: string;
-    /** Documented but not on nuget.org yet - always shown, marked as coming soon */
-    upcoming?: boolean;
+    /** Retired pre-Shiny package - doc links to the Shiny library that replaced it */
+    deprecated?: boolean;
 }
 
 interface NugetInfo {
@@ -47,7 +47,7 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
     const [status, setStatus] = useState<Record<string, Status>>({});
     const [filter, setFilter] = useState('');
     const [sort, setSort] = useState<SortKey>('name');
-    const [hideMissing, setHideMissing] = useState(true);
+    const [hideDeprecated, setHideDeprecated] = useState(true);
 
     useEffect(() => {
         let cancelled = false;
@@ -90,34 +90,33 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
 
     const loaded = Object.keys(status).length;
     const done = loaded >= packages.length;
-    const upcomingIds = useMemo(() => new Set(packages.filter(p => p.upcoming).map(p => p.id)), [packages]);
-    const missingCount = Object.entries(status).filter(([id, s]) => s === 'missing' && !upcomingIds.has(id)).length;
+    const missingCount = Object.values(status).filter(s => s === 'missing').length;
+    const deprecatedCount = useMemo(() => packages.filter(p => p.deprecated).length, [packages]);
     const total = Object.values(info).reduce((sum, i) => sum + (i.downloads ?? 0), 0);
 
     const rows = useMemo(() => {
         const f = filter.trim().toLowerCase();
         let list = packages.filter(p =>
             (!f || p.id.toLowerCase().includes(f) || p.family.toLowerCase().includes(f)) &&
-            !(hideMissing && status[p.id] === 'missing' && !p.upcoming)
+            !(hideDeprecated && p.deprecated)
         );
         if (sort === 'downloads') {
             list = [...list].sort((a, b) => (info[b.id]?.downloads ?? -1) - (info[a.id]?.downloads ?? -1));
         }
         return list;
-    }, [packages, filter, sort, hideMissing, status, info]);
+    }, [packages, filter, sort, hideDeprecated, info]);
 
     const renderVersion = (p: CatalogPackage) => {
         const s = status[p.id];
         if (!s || s === 'loading') return <span className="nuget-catalog__muted">…</span>;
-        if (s === 'missing') return p.upcoming
-            ? <span className="nuget-catalog__pill">coming soon</span>
-            : <span className="nuget-catalog__muted">not published</span>;
+        if (s === 'missing') return <span className="nuget-catalog__muted">not published</span>;
         if (s === 'error') return <span className="nuget-catalog__muted">unavailable</span>;
         const i = info[p.id];
         return (
             <>
                 <code>{i.latest}</code>
-                {i.latest && isPre(i.latest) && <span className="nuget-catalog__pill">beta</span>}
+                {p.deprecated && <span className="nuget-catalog__pill">deprecated</span>}
+                {!p.deprecated && i.latest && isPre(i.latest) && <span className="nuget-catalog__pill">beta</span>}
                 {i.stable && i.stable !== i.latest && (
                     <div className="nuget-catalog__muted nuget-catalog__stable">stable <code>{i.stable}</code></div>
                 )}
@@ -147,8 +146,8 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
                     aria-label="Filter packages"
                 />
                 <label>
-                    <input type="checkbox" checked={hideMissing} onChange={e => setHideMissing(e.target.checked)} />
-                    Hide unpublished{missingCount > 0 ? ` (${missingCount})` : ''}
+                    <input type="checkbox" checked={hideDeprecated} onChange={e => setHideDeprecated(e.target.checked)} />
+                    Hide deprecated ({deprecatedCount})
                 </label>
             </div>
             <div className="nuget-catalog__scroll">
@@ -180,7 +179,7 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
                                     <tr>
                                         <td>
                                             <a href={`https://www.nuget.org/packages/${p.id}`} target="_blank" rel="noopener noreferrer">{p.id}</a>
-                                            {p.doc && <a className="nuget-catalog__doc" href={p.doc}>docs</a>}
+                                            {p.doc && <a className="nuget-catalog__doc" href={p.doc}>{p.deprecated ? 'successor' : 'docs'}</a>}
                                         </td>
                                         <td>{renderVersion(p)}</td>
                                         <td className="nuget-catalog__num">{renderDownloads(p)}</td>
