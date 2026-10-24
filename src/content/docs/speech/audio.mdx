@@ -20,12 +20,12 @@ builder
     .UseMauiApp<App>()
     .UseShiny();                       // required on Android for RECORD_AUDIO permission routing
 
-builder.Services.AddAudioServices();   // IAudioPlayer + IAudioSource + IAudioMonitor + IAudioDevices + IAudio
+builder.Services.AddAudioServices();   // IAudioPlayer + IAudioSource + IAudioMonitor + IAudioDevices + IAudioRecorder + IAudioDuplex + IAudio
 ```
 
 `AddSpeechServices()` already registers the capture/playback pieces; call `AddAudioServices()` when
 you also want the monitor/devices/facade. The individual registrations still exist
-(`AddAudioSource()`, `AddAudioPlayer()`, `AddAudioMonitor()`, `AddAudioDevices()`), and every focused
+(`AddAudioSource()`, `AddAudioPlayer()`, `AddAudioMonitor()`, `AddAudioDevices()`, `AddAudioDuplex()`), and every focused
 interface remains injectable directly — the facade doesn't replace them.
 
 ## The `IAudio` facade
@@ -45,8 +45,9 @@ public class AudioViewModel(IAudio audio)
 }
 ```
 
-`Monitor` and `Devices` are implemented on **iOS / Mac Catalyst and Android only**; accessing them on
-other platforms throws `PlatformNotSupportedException`.
+`Monitor` and `Devices` are implemented on **iOS / Mac Catalyst and Android only**, and `Duplex` on
+**iOS, Mac Catalyst, macOS and Android**; accessing them on other platforms throws
+`PlatformNotSupportedException`.
 
 ## Microphone monitor (`IAudioMonitor`)
 
@@ -366,6 +367,126 @@ media-element volume (settable, and it persists across plays). Marshal `VolumeCh
 before touching bound properties.
 :::
 
+## Full-duplex voice for calls (`IAudioDuplex`)
+
+`IAudioDuplex` runs microphone capture and live PCM playback on **one** voice-processing session, so
+the platform's echo canceller removes what the speaker plays from what the microphone hears. It's the
+audio half of a phone / FaceTime-style call, where PCM frames arrive from the network every ~20 ms and
+must play straight away.
+
+:::caution[Don't build a call from IAudioSource + IAudioPlayer]
+Two separate sessions can't cancel each other's echo, and `IAudioPlayer.StartAsync(Stream)` is built
+for clips: Apple buffers the whole stream and Android copies it to a file before anything plays.
+:::
+
+```csharp
+using Shiny;
+using Shiny.Audio;
+
+public class CallAudio(IAudioDuplex duplex)   // or IAudio.Duplex
+{
+    IAudioDuplexSession? session;
+
+    public async Task Start(Func<ReadOnlyMemory<byte>, CancellationToken, ValueTask> send, CancellationToken ct)
+    {
+        if (await duplex.RequestAccess() != AccessState.Available)
+            return;
+
+        session = await duplex.StartAsync(new AudioDuplexOptions
+        {
+            SampleRate = 16000,     // or 8000
+            Speakerphone = true     // loudspeaker rather than the earpiece
+        }, ct);
+
+        // Mic → network: one 20 ms PCM16 mono frame per item, already echo-cancelled.
+        _ = Task.Run(async () =>
+        {
+            await foreach (var frame in session.Captured.ReadAllAsync(ct))
+                await send(frame, ct);
+        }, ct);
+    }
+
+    // Network → speaker: any thread, any size, never blocks.
+    public void OnReceived(ReadOnlyMemory<byte> pcm16) => session?.Play(pcm16.Span);
+
+    public void ToggleSpeaker() => session!.Speakerphone = !session.Speakerphone;   // live
+
+    // A mic from IAudioDevices.GetInputs(), or null for the system default. Live.
+    public void UseMic(AudioDevice? mic) => session!.InputDevice = mic;
+
+    public Task Stop() => session?.StopAsync() ?? Task.CompletedTask;               // restores the audio session
+}
+```
+
+| `AudioDuplexOptions` | Default | |
+|---|---|---|
+| `SampleRate` | `16000` | `8000` or `16000`, both directions |
+| `Processing` | `AudioProcessingOptions.VoiceChat` | Echo cancellation, noise suppression, AGC. Null / nothing enabled = no echo cancellation |
+| `Speakerphone` | `true` | Loudspeaker rather than the earpiece. A connected headset still wins |
+| `InputDevice` | `null` | The microphone, one of `IAudioDevices.GetInputs()`. Null is the system default. Changeable live |
+| `FrameDuration` | 20 ms | The size of each `Captured` item: whole milliseconds, 10–100 |
+| `PlaybackLatency` | 60 ms | The jitter-buffer target |
+| `MaxPlaybackLatency` | 200 ms | The most that may queue; must be greater than `PlaybackLatency` |
+
+### The playback jitter buffer
+
+`Play` hands audio to a jitter buffer that the output pulls at the hardware rate:
+
+- **Priming.** Nothing plays until about `PlaybackLatency` is queued, so the first late packet doesn't
+  starve the output straight away.
+- **Underruns.** When the queue runs dry, whatever there is plays, then silence, and it primes again
+  before playing more. Lost and late packets come out as silence, never as a stall.
+- **Overflow.** When a burst takes the queue past `MaxPlaybackLatency`, the oldest audio is dropped back
+  down to `PlaybackLatency`, so delay can't build up over a long call.
+- `Buffered` reports how much is queued.
+
+The other direction is bounded too: `Captured` holds about a second of frames, and a reader that falls
+behind loses the oldest. It completes when the session stops.
+
+### Choosing the microphone
+
+`AudioDuplexOptions.InputDevice` picks the mic the call starts on, and `IAudioDuplexSession.InputDevice`
+switches it mid-call without stopping capture or playback:
+
+```csharp
+var inputs = audio.Devices.GetInputs();
+session.InputDevice = inputs.FirstOrDefault(d => d.Type == AudioDeviceType.Bluetooth);   // null = default
+
+session.InputDeviceChanged += (_, _) =>
+{
+    // The chosen mic was unplugged or disconnected: the call is back on the default mic,
+    // and session.InputDevice is null. Raised on a platform thread.
+};
+```
+
+- **Null is the system default.** An output device throws `ArgumentException`. A mic that isn't connected
+  falls back to the default, and `InputDevice` then reads `null`.
+- **A headset's mic and speaker move together** on iOS, Mac Catalyst and Android. Choosing a Bluetooth,
+  wired or USB headset mic routes the call's audio to that headset as well, and `Speakerphone` has no
+  effect while it's chosen. Choosing the **built-in** mic while a headset is connected takes the call off
+  the headset, to the loudspeaker or the earpiece per `Speakerphone`. With `null`, a connected headset
+  wins, as before.
+- **`InputDeviceChanged`** fires only when the platform changes the mic underneath you, never for your own
+  sets.
+- **How long a switch takes** is the platform's. iOS reroutes the session and the engine rebuilds after
+  the route change, a short blip. macOS restarts its voice-processing engine on the new device, a gap of a
+  few tens of milliseconds; queued playback is kept. Android reroutes the running `AudioRecord` in place.
+
+### Platforms
+
+| Platform | How it's built |
+|---|---|
+| iOS / Mac Catalyst | `AVAudioSession` `PlayAndRecord` in `VoiceChat` mode (`DefaultToSpeaker` for speakerphone, HFP Bluetooth when `AllowBluetooth`), one `AVAudioEngine` with voice processing on its input node, a tap resampled by `AVAudioConverter`, and an `AVAudioPlayerNode` fed from the jitter buffer. The engine is rebuilt after a route change. `InputDevice` is the session's preferred input (`setPreferredInput`) |
+| macOS | The same engine, without `AVAudioSession`. `Speakerphone` has no effect. `InputDevice` points the voice-processing unit at that CoreAudio device; only the input changes, since macOS output is a separate device |
+| Android | `AudioRecord` (`VOICE_COMMUNICATION`) and a streaming `AudioTrack` (`USAGE_VOICE_COMMUNICATION`, `CONTENT_TYPE_SPEECH`) on one audio session, with `AcousticEchoCanceler`, `NoiseSuppressor` and `AutomaticGainControl` when the device has them. `MODE_IN_COMMUNICATION` and transient audio focus while running; speakerphone through `setCommunicationDevice` (API 31+) or `setSpeakerphoneOn`. `InputDevice` is the record's `setPreferredDevice`, and it steers the communication device as described above. Below API 31 the session doesn't start a Bluetooth SCO link, so a Bluetooth headset mic may not be reachable there. Add `MODIFY_AUDIO_SETTINGS` to the manifest |
+| Windows, Linux, Browser | Not available |
+
+- **One session at a time.** A second `StartAsync` throws `InvalidOperationException` until the first
+  stops. Invalid options throw `ArgumentException`.
+- **Stopping restores** what the session changed: the audio session category and mode on Apple; the
+  audio mode, communication device and audio focus on Android. Disposing the session stops it.
+- Echo-cancellation quality belongs to the platform and the device. Without processing, use a headset.
+
 ## Linux
 
 Linux support ships in a separate **`Shiny.Audio.Linux`** package. It implements all four services
@@ -446,9 +567,12 @@ if (!LinuxAudioServiceCollectionExtensions.IsLinuxAudioAvailable)
 | `IAudioPlayer.Volume` (set) | ❌ ¹ | ✅ | ✅ | ✅ | ✅ ² |
 | `IAudioMonitor` (live monitor) | ✅ | ✅ | ❌ | ❌ | ✅ |
 | `IAudioDevices` (routes) | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `IAudioDuplex` (call audio) | ✅ ³ | ✅ | ❌ | ❌ | ❌ |
 
 ¹ Native **macOS** (not Mac Catalyst) *can* set the volume via CoreAudio — see the Volume section.
 
 ² **Linux** volume is settable on PulseAudio/PipeWire (the default sink's volume). On the ALSA
 fallback `IsVolumeControlSupported` is `false` and the setter throws — reading returns the last value
 set in-process rather than a real device level. Guard the set, exactly as on iOS.
+
+³ Native **macOS** too.

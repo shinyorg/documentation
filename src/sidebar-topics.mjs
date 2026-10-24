@@ -259,12 +259,12 @@ export const sidebarTopics = [
       {
         label: 'Universal Hubs',
         jumpTo: true,
-        dateUpdated: '2026-10-12',
+        dateUpdated: '2026-10-23',
         items: [
           { label: 'Getting Started', link: 'universalhubs/', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
           { label: 'Hosting', link: 'universalhubs/hosting', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
           { label: 'Connecting Clients', link: 'universalhubs/client', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
-          { label: 'How It Works', link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
+          { label: 'How It Works', link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-10-23' },
           { label: 'Release Notes', link: 'universalhubs/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
         ]
       },

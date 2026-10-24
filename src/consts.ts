@@ -142,7 +142,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyBleHubs
     },
     {
-        // Not on nuget.org yet - shinyorg/universalhubs
+        // shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5
         "id": "universalhubs-host",
         "nuget": "Shiny.UniversalHubs.Host",
         "description": "Universal Hubs - Host (BLE + Wi-Fi)",

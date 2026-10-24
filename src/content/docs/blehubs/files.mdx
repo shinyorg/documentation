@@ -1,6 +1,6 @@
 ---
 title: File Transfers
-description: Move files between a BluetoothLE hub host and its clients over an L2CAP channel, with progress.
+description: Move files between a BluetoothLE hub host and its clients over an L2CAP channel, with progress, and stream live packets over a media channel.
 ---
 
 Hub messages are great for game moves, commands and state, but they are chunked over GATT at a few KB/s. Files, such
@@ -88,3 +88,72 @@ if (client.CanTransferFiles)
 | iOS / macOS / Mac Catalyst | Yes |
 | Android | API 29+ |
 | Windows | No |
+
+## Media Channels
+
+A media channel is an ordered, two-way pipe of raw binary packets beside each hub connection, on an L2CAP channel of
+its own. Use it for live audio and video, or any steady stream of packets. Hub calls go through GATT at a few KB/s and
+through the serializer, so they suit neither. Available from 1.4.
+
+### Host
+
+```csharp
+builder.Services.AddBleHubServer(server => server
+    .Host(o => o.EnableMediaChannels(maxPacketSize: 128 * 1024))   // opens a second L2CAP PSM on Start
+    .AddHub<CallHub>(CallHubCharacteristicUuid)
+);
+
+// IHubContext<CallHub>: one channel per connected client
+callHub.MediaChannelOpened += (_, e) => _ = Task.Run(async () =>
+{
+    // e.Client is the hub client, e.Channel.ConnectionId is its connection id
+    await foreach (var packet in e.Channel.Receive())
+        Play(e.Client, packet);
+});
+
+IBleHubMediaChannel? channel = callHub.GetMediaChannel(connectionId);   // null when that client has none open
+if (channel != null)
+    await channel.Send(frame);
+```
+
+- One PSM serves every hub. `EnableMediaChannels(maxPacketSize, secure)` sets the largest packet either side may send
+  (128 KB by default), and whether Android listens for secure channels.
+- A client has at most one channel. A new one replaces the old.
+- The channel closes when the client disconnects or drops, when the hub stops, or when either side disposes it.
+- When the device has no L2CAP, the hubs still start, and clients see `CanOpenMediaChannel == false`.
+
+### Client
+
+```csharp
+if (client.CanOpenMediaChannel)
+{
+    var media = await client.OpenMediaChannel(ct);   // returns the channel already open, if there is one
+    _ = Task.Run(async () =>
+    {
+        await foreach (var packet in media.Receive(ct))
+            Render(packet);
+    });
+    await media.Send(encodedFrame, ct);
+}
+```
+
+- **No setup**: the handshake gives the client the media PSM and a one-time token for its connection.
+- **`CanOpenMediaChannel` is false** when the host didn't enable media channels, the host is older than 1.4, or L2CAP
+  isn't available. `OpenMediaChannel` then throws `NotSupportedException`. A refused channel throws `BleHubException`.
+- The channel closes when the hub connection ends. While still connected, call `OpenMediaChannel` again to reopen it.
+
+### The channel
+
+`IBleHubMediaChannel` is the same on both sides:
+
+| Member | |
+|---|---|
+| `Send(packet, ct)` | Serialized: packets arrive whole and in order, or the channel closes. A packet over `MaxPacketSize` throws `ArgumentException`. Sending on a closed channel throws `BleHubException` |
+| `Receive(ct)` | The packets from the other side. One reader at a time. Completes when the channel closes. Packets that arrive before you read are buffered |
+| `MaxPacketSize` | The host's setting |
+| `IsOpen` / `Completion` | `Completion` completes when the channel closes, for any reason |
+| `ConnectionId` | The client's connection id on the host, `null` on the client |
+| `DisposeAsync()` | Closes the channel at both ends |
+
+The packet format is yours: add sequence numbers and timestamps as your media needs. Over Wi-Fi,
+[Universal Hubs](/universalhubs/) carries the same channel, and builds audio and video calls on it.

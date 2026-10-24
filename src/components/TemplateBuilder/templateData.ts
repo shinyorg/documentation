@@ -39,7 +39,7 @@ export const VERSIONS = {
     /** Shiny.Push.FirebaseMessaging is off the core train */
     shinyPushFirebase: '6.0.0',
     shinyBleHubs: '1.3.0',
-    /** Not on nuget.org yet - shinyorg/universalhubs (Nerdbank.GitVersioning 1.0.0-beta.{height}) */
+    /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
     shinyUniversalHubs: '1.0.0-beta.1',
     shinyAppDeviceBridge: '2.0.0',
     shinyPermissions: '1.0.0-beta-0009',

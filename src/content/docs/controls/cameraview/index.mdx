@@ -45,6 +45,7 @@ Two pluggable pipelines are what set it apart from other camera controls, and th
 - **Orientation that follows the device** (`Orientation`, default `Device`) across the preview, stills, recorded video and analyzer frames alike — or pinned to a fixed value when several recordings have to agree with one another.
 - **Burn-in video overlays** — composite a watermark, timestamp or telemetry into every *encoded* frame via `VideoRecordingOptions.Overlay`, drawn with `Microsoft.Maui.Graphics` so one implementation covers every platform.
 - **Recording and analyzing at the same time** on every platform — a dash-cam app can read signs off its own live feed while it records.
+- **[Live video for calls](#live-video-for-calls)** (MAUI) — `VideoEncoder` turns camera frames into JPEG or H.264 frames to send, and `RemoteVideoView` draws the ones received from the other side.
 
 ### Effects — [Effects & Filters](/controls/cameraview/effects/)
 
@@ -408,6 +409,75 @@ Two ship-ready implementations are included: `DelegateVideoOverlay` (an inline d
 >
 > When `Overlay` is `null` the fast native recorder is used unchanged (no performance or behavior change). Burn-in overlays are supported on **iOS, Mac Catalyst, macOS, and Android**; on **Windows** `StartVideoRecordingAsync` throws `PlatformNotSupportedException` when an overlay is set — record without it, or use the on-preview `CameraOverlayView`.
 
+## Live Video for Calls
+
+For a video call, the sending side needs small, steady, compressed frames and the receiving side needs to draw them. `Shiny.Maui.Controls.Camera` has both halves: **`VideoEncoder`**, a frame analyzer that compresses what the `CameraView` sees, and **`RemoteVideoView`**, which decodes and draws frames that came from the other device. Carrying the frames between them is up to you; [Universal Hubs](/universalhubs/) calls carry them over Wi-Fi or Bluetooth LE.
+
+```xml
+<cam:CameraView x:Name="Camera" Facing="Front">
+    <cam:VideoEncoder x:Name="Encoder" Codec="H264" MaxDimension="640" FrameRate="15" />
+</cam:CameraView>
+
+<cam:RemoteVideoView x:Name="Remote" Aspect="AspectFill" />
+```
+
+```csharp
+// sending side: raised on the encoder's thread, not the UI thread
+Encoder.FrameEncoded += frame => transport.Send(frame);
+
+// receiving side: Render is safe from any thread, so call it from the receive loop
+transport.Received += frame => Remote.Render(frame);
+
+// H.264 recovery: the view asks for a key frame, the sender's encoder makes one
+Remote.KeyFrameNeeded += (_, _) => transport.RequestKeyFrame();   // other side: Encoder.RequestKeyFrame()
+
+// a slower link: change the profile while the call runs
+Encoder.MaxDimension = 160;
+Encoder.FrameRate = 3;
+Encoder.Bitrate = 64_000;
+```
+
+Each frame is an **`EncodedVideoFrame`** (in `Shiny.Controls.Camera`): `Codec`, `Data`, `Width`, `Height`, `Rotation`, `IsMirrored`, `IsKeyFrame` and `Timestamp`. Frames are encoded **un-rotated**: `Width` × `Height` is the encoded size before rotation, `Rotation` is the clockwise turn that makes it upright, and the receiver rotates and then mirrors. That way turning the phone costs the sender nothing. H.264 data is one access unit in **Annex B** form (`00 00 00 01` start codes), and **every key frame carries its SPS and PPS**, so a receiver can start from any key frame. JPEG frames are always key frames.
+
+### VideoEncoder
+
+`VideoEncoder` is assigned to `CameraView.Analyzer` like any other analyzer, and since a camera runs one analyzer at a time it can't scan barcodes during a call. It needs no `Scan()`, draws nothing on the preview, and takes no frames while nothing is subscribed to `FrameEncoded`.
+
+| Property | Default | Description |
+| --- | --- | --- |
+| `Codec` | `Jpeg` | `Jpeg` or `H264`. |
+| `MaxDimension` | `640` | The long edge of an encoded frame. Larger frames are scaled down to it, smaller ones are never scaled up, and both edges are rounded down to even numbers. |
+| `FrameRate` | `15` | The most frames per second. It's enforced in `WantsFrame()`, before the platform builds a frame, so the frames in between cost nothing. |
+| `Bitrate` | `800000` | H.264 target in bits per second (constant bitrate where the Android encoder supports it). |
+| `JpegQuality` | `0.6` | JPEG quality, 0 to 1. |
+| `KeyFrameInterval` | `2 s` | The longest gap between H.264 key frames. `TimeSpan.Zero` makes every frame a key frame. |
+
+`RequestKeyFrame()` makes the next frame a key frame (safe from any thread), and `VideoEncoder.IsSupported(codec)` says whether this device can encode a codec. Every setting can change while the camera runs: JPEG quality applies from the next frame, and anything that changes an H.264 encoder's shape rebuilds it, starting with a key frame.
+
+### RemoteVideoView
+
+`Render(frame)` decodes on the calling thread and hands the newest image to the UI thread, so a busy UI thread shows the latest frame instead of falling behind. `Aspect` is `AspectFit` by default (letterboxed); `AspectFill` covers the view and crops. `Clear()` blanks the view when the call ends, and `RemoteVideoView.CanDecode(codec)` says what this device can draw.
+
+Frames have to arrive in order. An H.264 delta frame that arrives before the first key frame, or after the decoder has lost its place (a dropped frame, a decoder error, a codec switch), can't be drawn, so the view drops it and raises **`KeyFrameNeeded`**. Send that to the other side and call `RequestKeyFrame()` there. The event is raised off the UI thread, at most about once a second while the view is out of sync. If nobody handles it, the picture comes back at the sender's next scheduled key frame.
+
+### Platforms
+
+| | JPEG encode | JPEG decode | H.264 encode | H.264 decode |
+| --- | --- | --- | --- | --- |
+| iOS, Mac Catalyst | ✅ Core Image | ✅ ImageIO | ✅ VideoToolbox | ✅ VideoToolbox |
+| macOS (AppKit) | ✅ Core Image | ✅ ImageIO | ✅ VideoToolbox | ✅ VideoToolbox |
+| Android | ✅ | ✅ | ✅ MediaCodec, when the device has an AVC encoder | ✅ MediaCodec, drawn into a `TextureView` |
+| Windows | ✅ WIC | ✅ WIC | ❌ | ❌ |
+
+Choose the codec from what both sides support: `VideoEncoder.IsSupported` on the sender and `RemoteVideoView.CanDecode` on the receiver. Prefer H.264 when both have it; it's far smaller than JPEG at the same quality. On iOS and Mac Catalyst the camera already delivers upright, mirrored buffers, so those frames report `Rotation = 0`. Android frames are the sensor's own buffers, with the rotation in the frame.
+
+:::note[Things to keep in mind]
+- **`FrameEncoded` and `KeyFrameNeeded` aren't on the UI thread.** Hand the frame to your transport and return; dispatch before touching UI.
+- **The encoder takes the camera's analyzer slot.** You can't run a barcode scan and a call on the same `CameraView` at once.
+- **H.264 needs `KeyFrameNeeded` wired up** for quick recovery after a lost frame. JPEG never needs it, because every frame stands alone.
+- **This is the media path only.** Signalling, pacing and audio belong to the call layer that carries the frames.
+:::
+
 ## Live Filters & Effects
 
 ```xml
@@ -508,6 +578,7 @@ Assign the matching analyzer to `CameraView.Analyzer` (one runs at a time). To o
 - **Parse a free-form or unknown document** → `AiDocumentAnalyzer` / `AiDocumentAnalyzer<T>` from `.Camera.Ai` — see [AI Document Scanner](/controls/cameraview/ai/).
 - **Restrict scanning to a band** → set the analyzer's `ScanWindow` (the overlay dims outside it and frames a reticle).
 - **Just take a photo or record video** → no analyzer required; use `CapturePhotoAsync` / `StartVideoRecordingAsync`.
+- **Stream the camera for a video call** → `VideoEncoder` as the analyzer on the sending side and `RemoteVideoView` on the receiving side — see [Live Video for Calls](#live-video-for-calls).
 
 ### Changing how it looks
 
