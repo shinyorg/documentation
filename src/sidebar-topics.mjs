@@ -1027,11 +1027,12 @@ export const sidebarTopics = [
         label: 'TabbedPage',
         jumpTo: true,
         platform: 'maui',
-        dateUpdated: '2026-08-26',
+        dateUpdated: '2026-10-25',
         items:[
-          { label: 'Getting Started', link: 'controls/tabbedpage/', dateCreated: '2026-08-25', dateUpdated: '2026-08-25' },
+          { label: 'Getting Started', link: 'controls/tabbedpage/', dateCreated: '2026-08-25', dateUpdated: '2026-10-25' },
+          { label: 'Tab Headers', link: 'controls/tabbedpage/tab-headers', dateCreated: '2026-10-25', dateUpdated: '2026-10-25' },
           { label: 'Shell', link: 'controls/tabbedpage/shell', dateCreated: '2026-08-25', dateUpdated: '2026-08-25' },
-          { label: 'Properties & Events', link: 'controls/tabbedpage/properties', dateCreated: '2026-08-25', dateUpdated: '2026-08-25' },
+          { label: 'Properties & Events', link: 'controls/tabbedpage/properties', dateCreated: '2026-08-25', dateUpdated: '2026-10-25' },
         ]
       },
       {
