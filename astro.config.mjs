@@ -280,6 +280,8 @@ export default defineConfig({
       '/client/hosting/manual/': '/foundation/hosting/manual/',
       '/appbuilder/': '/foundation/appbuilder/',
       '/ai-skills/': '/foundation/ai-skills/',
+      // Commercial support merged into the help page
+      '/foundation/commercial-support/': '/foundation/support/#commercial-support',
       // Template Builder merged into the App Builder
       '/templates/builder/': '/foundation/appbuilder/',
 

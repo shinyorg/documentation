@@ -66,6 +66,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'client/core/', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
           { label: 'Platform', link: 'client/core/platform', dateCreated: '2026-09-11', dateUpdated: '2026-10-12' },
+          { label: 'Screen Posture', link: 'client/core/screen-posture', dateCreated: '2026-10-25', dateUpdated: '2026-10-25' },
           { label: 'Lifecycle Hooks', link: 'client/core/lifecycle', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Startup Tasks', link: 'client/core/startup', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'App Startup Installer', link: 'client/core/app-startup-installer', dateCreated: '2026-09-19', dateUpdated: '2026-10-10' },
@@ -208,7 +209,8 @@ export const sidebarTopics = [
       { label: 'AI Skills', link: 'foundation/ai-skills', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
       { label: 'Apps & Samples Built with Shiny', link: 'foundation/apps', dateCreated: '2026-06-11', dateUpdated: '2026-06-11' },
       { label: 'NuGets', link: 'foundation/nugets', dateCreated: '2026-09-23', dateUpdated: '2026-09-23' },
-      { label: 'Getting Help', link: 'foundation/support', dateCreated: '2026-09-04', dateUpdated: '2026-09-04' },
+      { label: 'Help & Commercial Support', link: 'foundation/support', dateCreated: '2026-09-04', dateUpdated: '2026-10-25' },
+      { label: 'Xamarin Plugins to MAUI', link: 'foundation/xamarin-migration', dateCreated: '2026-10-25', dateUpdated: '2026-10-25' },
     ],
   },
   {
@@ -1023,6 +1025,7 @@ export const sidebarTopics = [
           { label: 'Properties & Events', link: 'controls/flyout/properties', dateCreated: '2026-08-25', dateUpdated: '2026-08-25' },
         ]
       },
+      { label: 'Foldables', link: 'controls/foldables/', dateCreated: '2026-10-25', dateUpdated: '2026-10-25', jumpTo: true },
       {
         label: 'TabbedPage',
         jumpTo: true,

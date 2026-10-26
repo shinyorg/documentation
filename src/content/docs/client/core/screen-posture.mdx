@@ -1,0 +1,99 @@
+---
+title: Screen Posture
+description: Foldables, hinges and iPhone Duo with IScreenPosture - where the fold is, tabletop and book posture, and two-pane layout
+---
+
+`IScreenPosture` tells you whether the app's window is divided by a fold or hinge, where the fold is, and the hinge's state. It answers the question every two-pane layout has to ask - *is there a fold, and where is it?* - once, for every platform that has the answer:
+
+| Platform | Source |
+|----------|--------|
+| Android foldables (Pixel Fold, Galaxy Z Fold/Flip, Surface Duo, resizable emulator) | Jetpack WindowManager `FoldingFeature` for the current Activity |
+| iPhone Duo (iOS 27.1+) | `UIHingeInteraction` and the window's reserved regions (division and occlusion) on the key window |
+| Blazor WebAssembly (Chromium on foldables) | Device Posture API (`navigator.devicePosture`) and Viewport Segments API (`window.viewport.segments`) |
+| Everything else (Mac Catalyst, macOS, tvOS, Windows, Linux, older iOS) | `ScreenPosture.None` - `IsSupported` is false |
+
+It is registered next to `IScreenInfo` by every Shiny host - there is nothing to add.
+
+```csharp
+public class ReaderViewModel(IScreenPosture posture)
+{
+    public void OnAppearing()
+    {
+        posture.Changed += this.OnPosture;
+        this.Apply(posture.Current);
+    }
+
+    public void OnDisappearing() => posture.Changed -= this.OnPosture;
+
+    void OnPosture(object? sender, ScreenPosture p) => this.Apply(p);  // main thread on Android / iOS
+
+    void Apply(ScreenPosture p)
+    {
+        // window size in dp / points, e.g. from your MAUI Window
+        if (p.Segments(new ScreenSize(windowWidth, windowHeight)) is { } panes)
+        {
+            // p.IsTabletop: video in panes.First (top), controls in panes.Second (bottom)
+            // p.IsBook:     list in panes.First (left), detail in panes.Second (right)
+        }
+        else
+        {
+            // one pane
+        }
+    }
+}
+```
+
+## ScreenPosture
+
+| Member | Meaning |
+|--------|---------|
+| `State` | `FoldState.None` - nothing crosses the window (a device that doesn't fold, a foldable shown closed on its outer screen, or a window that doesn't reach the fold). `Flat` - the window spans the fold but the device is laid flat. `HalfOpen` - part-way open with the fold across the window. |
+| `Orientation` | `FoldOrientation.Vertical` - the fold runs top to bottom (book: left and right panes). `Horizontal` - it runs left to right (tabletop: top and bottom panes). `None` when there is no fold. |
+| `Fold` | Where the fold is, as a `ScreenRect?` in **window coordinates, device-independent units** (Android dp, Apple points, CSS pixels). Null unless the fold divides the window. A crease with no physical gap is a zero-width (or zero-height) line. |
+| `IsSeparating` | True when content laid across the fold would be split or hidden - always while half open, and for a flat dual-screen device with a physical gap. Lay out two panes when this is true. |
+| `Hinge` | `HingeStatus` - `Unknown`, `Closed`, `PartiallyOpen`, `FullyOpen`. |
+| `HingeAngleDegrees` | The hinge angle in whole degrees, iOS only. Its rate and precision are not guaranteed - use it for live effects, never to decide a layout. |
+| `Occlusions` | Parts of the window hidden by hardware - the iPhone Duo camera housings. Empty on Android and in the browser. |
+| `IsTabletop` / `IsBook` | `HalfOpen` with a horizontal / vertical fold. |
+| `Segments(ScreenSize window)` | The two rectangles either side of the fold, or null when nothing separates them (no fold, not separating, or a fold outside the window). |
+
+`ScreenPosture.None` is what every unsupported platform reports. Readings compare by value, so `Changed` is only raised when something actually changed.
+
+:::note[Why ScreenRect and not Rect]
+The geometry types are `Shiny.ScreenRect` and `Shiny.ScreenSize`. MAUI imports `Microsoft.Maui.Graphics.Rect` and `Size` implicitly, and most Shiny apps import `Shiny` globally, so a second `Rect` would make every unqualified use in the app ambiguous.
+:::
+
+## IScreenPosture
+
+| Member | |
+|--------|---|
+| `IsSupported` | Whether this platform can report posture at all. It does **not** say the device folds. |
+| `Current` | The posture now. |
+| `Changed` | Raised when `Current` changes. Watching starts with the first subscriber and stops with the last. |
+| `SupportedPostures` | Android: `Horizontal` when WindowManager reports tabletop support, plus any orientation a fold has been seen in. iOS: both once a hinge has been reported. Empty when nothing is known yet. |
+
+## Platform notes
+
+### Android
+
+- Layout info belongs to an **Activity**: the listener follows the resumed Activity and is removed when it stops. v1 reports the current Activity only.
+- Posture only streams live while the Activity handles `ScreenSize | SmallestScreenSize | ScreenLayout | Orientation` config changes - MAUI's template `MainActivity` does. Without them a fold recreates the Activity, and the new one is read when it resumes.
+- WindowManager reports no hinge angle and no hinge state when the fold is not in the window, so `Hinge` is `Unknown` on the outer screen. `HalfOpened` maps to `PartiallyOpen` and `Flat` to `FullyOpen`.
+- Shiny.Core references `Xamarin.AndroidX.Window.WindowJava` for this.
+
+Testing on the emulator: create a foldable AVD (Pixel Fold or 7.6" Fold-in), then `adb emu posture 2` (half open), `adb emu posture 3` (flat), `adb emu posture 1` (closed - outer screen) and `adb emu rotate` to turn book into tabletop.
+
+### iPhone Duo (iOS 27.1+)
+
+- There is **no spanned mode**: closed means the app is on the outer display, so it reads as `FoldState.None` with `Hinge = Closed`. Fully open is `Flat` with no `Fold`, because there is no active division to avoid. Only partly open with an active division region is `HalfOpen`.
+- The hinge comes from a `UIHingeInteraction` on the key window, and is `Unknown` until UIKit delivers its first update. The fold and camera housings come from the window's reserved regions, re-read on every hinge update and whenever the window's bounds change.
+- Not on Mac Catalyst or tvOS. Below iOS 27.1, `IsSupported` is false.
+
+### Blazor WebAssembly
+
+- Chromium on Android foldables only, and the Device Posture API needs a secure context (HTTPS or localhost); everywhere else `IsSupported` is false.
+- Changes are picked up from the posture `change` event, `resize`, and the `(horizontal-viewport-segments: 2)` / `(vertical-viewport-segments: 2)` media queries - a fold can appear without the viewport changing size.
+- In desktop Chrome you can try it through DevTools' device posture emulation, or the DevTools protocol (`Emulation.setDevicePostureOverride` and a `displayFeature` on `Emulation.setDeviceMetricsOverride`).
+- `folded` reads as `HalfOpen` / `PartiallyOpen`; two viewport segments with no `folded` posture read as `Flat`. The fold is the gap between the two segments. No hinge angle or occlusions.
+- Call `await host.Services.UseShiny()` so the JS module is loaded before the first read; until then `IsSupported` is false and `Current` is `None`.
+- CSS layouts don't need this service: `@media (device-posture: folded)` and `env(viewport-segment-*)` work directly. `IScreenPosture` is for C# logic.

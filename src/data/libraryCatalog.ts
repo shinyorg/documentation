@@ -779,6 +779,7 @@ export const categories: CategoryCopy[] = [
             { label: 'VideoText', href: '/controls/video-text/' },
             { label: 'Border Animations', href: '/controls/border-animations/' },
             { label: 'Keyboard Shortcuts', href: '/controls/keyboard-shortcuts/' },
+            { label: 'Foldables', href: '/controls/foldables/' },
             { label: 'Theming', href: '/controls/theming/' },
         ],
         libraries: [],
