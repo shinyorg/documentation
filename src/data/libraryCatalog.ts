@@ -459,6 +459,19 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'macos', 'windows', 'linux'],
             },
             {
+                label: 'Age Signals',
+                tagline: 'The store-shared age range for Texas SB 2420 and other app store age laws',
+                summary: 'Read the user\'s age range as the app store shares it - Apple Declared Age Range and Google Play Age Signals - from one IAgeSignals, with nullable age checks that never mistake "unknown" for "no".',
+                highlights: [
+                    'Apple Declared Age Range on iOS and macOS 26+',
+                    'Google Play Age Signals with verification tiers',
+                    'Eligibility, regulatory flags and significant-change approval',
+                ],
+                packages: ['Shiny.AgeSignals'],
+                frameworks: ['maui', 'dotnet'],
+                os: ['android', 'ios', 'macos'],
+            },
+            {
                 label: 'In-App Purchases',
                 tagline: 'StoreKit 2 and Google Play Billing 9 behind one API, with the backend included',
                 summary: 'Sell consumables, non-consumables and subscriptions through the App Store and Google Play from one `IInAppPurchaseManager`. The server package verifies purchases and turns App Store Server Notifications and Google Play RTDN into one stream of purchase events.',

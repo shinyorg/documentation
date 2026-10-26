@@ -475,6 +475,15 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Age Signals',
+        jumpTo: true,
+        dateUpdated: '2026-10-26',
+        items: [
+          { label: 'Getting Started', link: 'client/agesignals/', showNew: true, dateCreated: '2026-10-26', dateUpdated: '2026-10-26' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
         label: 'In-App Purchases',
         jumpTo: true,
         items: [
@@ -625,7 +634,7 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'client/notifications/', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
-          { label: 'Sending Notifications', link: 'client/notifications/sending', dateCreated: '2026-03-26', dateUpdated: '2026-03-26' },
+          { label: 'Sending Notifications', link: 'client/notifications/sending', dateCreated: '2026-03-26', dateUpdated: '2026-10-26' },
           { label: 'Channels', link: 'client/notifications/channels', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Platform Specific', link: 'client/notifications/platform', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
           { label: 'Scheduling & Triggers', link: 'client/notifications/scheduling', dateCreated: '2026-03-26', dateUpdated: '2026-03-26' },
@@ -641,7 +650,8 @@ export const sidebarTopics = [
           { label: 'Architecture', link: 'client/push/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
           { label: 'Platform Setup', link: 'client/push/setup', dateCreated: '2026-10-23', dateUpdated: '2026-10-23' },
           { label: 'Native', link: 'client/push/native', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
-          { label: 'Platform Specific', link: 'client/push/platform', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
+          { label: 'Platform Specific', link: 'client/push/platform', dateCreated: '2026-03-28', dateUpdated: '2026-10-26' },
+          { label: 'Push Images', link: 'client/push/images', dateCreated: '2026-10-26', dateUpdated: '2026-10-26' },
           { label: 'Azure Push Notifications', link: 'client/push/azure', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
           { label: 'Firebase (iOS)', link: 'client/push/firebase-ios', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
           { label: 'FAQ', link: 'client/push/faq', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },

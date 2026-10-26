@@ -43,11 +43,43 @@ await notifications.Send(new Notification
 | `Message` | `string?` | Notification body (required) |
 | `Channel` | `string?` | Channel identifier |
 | `Payload` | `IDictionary<string, string>` | Custom key/value data |
+| `ImageUri` | `string?` | Image to show: an https URL, a `file://` URI or a local path ([Images](#images)) |
 | `BadgeCount` | `int?` | App icon badge number |
 | `Thread` | `string?` | Thread ID for grouping |
 | `ScheduleDate` | `DateTimeOffset?` | When to display |
 | `RepeatInterval` | `IntervalTrigger?` | Repeating schedule |
 | `Geofence` | `GeofenceTrigger?` | Location-based trigger |
+
+## Images
+
+Set `ImageUri` to show an image with the notification:
+
+```csharp
+await notificationManager.Send(new Notification
+{
+    Title = "Your order shipped",
+    Message = "Arriving Thursday",
+    ImageUri = "https://cdn.example.com/orders/1234.jpg",
+    ScheduleDate = DateTimeOffset.Now.AddHours(1)
+});
+```
+
+`ImageUri` takes an http(s) URL, a `file://` URI or a local file path. The image is downloaded or copied into the app's
+own storage when `Send` runs, so a scheduled, repeating or geofence notification needs no network when it fires. It
+shows the image as it was at send time. Your source file is never moved or changed.
+
+| Platform | How it appears |
+|---|---|
+| iOS / Mac Catalyst / macOS | An attachment: a thumbnail that expands when long-pressed (JPEG, PNG, GIF, HEIC, up to 10 MB) |
+| Android | A big picture with the image as the large icon. This takes the place of `UseBigTextStyle` |
+| Windows | The toast's hero image |
+| Linux | Ignored |
+
+If the image can't be read (a missing file, an HTTP error, an unrecognized type, more than 10 MB), a warning is logged
+and the notification is sent without it. `Send` never fails because of the image. For an image that needs
+authentication, download it yourself and pass the local path.
+
+For images on push notifications, see [Push Images](/client/push/images/).
 
 ## Getting Pending Notifications
 

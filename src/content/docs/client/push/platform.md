@@ -11,7 +11,10 @@ When a push notification arrives, your `PushDelegate` receives a `PushNotificati
 | Property | Type | Description |
 |----------|------|-------------|
 | `Data` | `IDictionary<string, string>` | Key/value data payload from the push message |
-| `Notification` | `Notification?` | Title and message (null for silent/data-only pushes) |
+| `Notification` | `Notification?` | Title, message and `ImageUri` (null for silent/data-only pushes) |
+
+`Notification.ImageUri` is the image URL sent with the push: Firebase's notification image on Android, otherwise the
+first [image key](/client/push/images/) found in the payload. See [Push Images](/client/push/images/) for showing it.
 
 ## AndroidPushNotification
 
@@ -77,6 +80,16 @@ Convenience method that calls `CreateBuilder()` and `Notify()` in one step.
 
 ```csharp
 android.SendDefault(1001);
+```
+
+#### CreateBuilderAsync / SendDefaultAsync
+
+The same, plus the push image (`ImageUri`) as a `BigPictureStyle` and large icon. If there is no image, or it can't be
+downloaded, you get the plain notification. `LoadImageAsync()` returns the scaled `Bitmap` for a builder of your own.
+See [Push Images](/client/push/images/#android).
+
+```csharp
+await android.SendDefaultAsync(1001);
 ```
 
 ### Full Android Example

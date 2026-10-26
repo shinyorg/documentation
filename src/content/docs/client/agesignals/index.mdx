@@ -1,0 +1,162 @@
+---
+title: Age Signals
+description: Read the user's age range as the app store shares it - Apple Declared Age Range and Google Play Age Signals - for app store accountability laws like Texas SB 2420
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+`IAgeSignals` reads the user's age range from the app store. On iOS and macOS 26+ it uses Apple's **Declared Age Range**; on Android, **Google Play Age Signals**. Use it to comply with the app store accountability laws or to gate features by age.
+
+Under these laws the **stores** verify age and get parental consent. The **app** must read the signal the store gives it and act on it. Texas SB 2420 has been in force since June 2026, when the Fifth Circuit stayed the injunctions against it. Utah, Louisiana and California (AB 1043, from 2027) have passed laws of the same shape.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.AgeSignals" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos"]} />
+
+:::note
+This library reports what the store shares. It is not legal advice; check what your app has to do in each jurisdiction with counsel.
+:::
+
+## Setup
+
+```bash
+dotnet add package Shiny.AgeSignals
+```
+
+```csharp
+using Shiny;
+
+builder.Services.AddAgeSignals();
+```
+
+### Apple
+
+:::caution
+Add the `com.apple.developer.declared-age-range` entitlement. **Without it Apple's call never returns.** The request hangs; it does not fail.
+:::
+
+Enable the **Declared Age Range** capability on the App ID, then add the entitlement:
+
+```xml
+<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <CustomEntitlements Include="com.apple.developer.declared-age-range" Type="Boolean" Value="true" Visible="false" />
+</ItemGroup>
+```
+
+Declared Age Range is Swift-only, so the package ships a small Swift framework that it embeds in your app. Nothing to add yourself. It loads on any iOS version. Before 26, every call reports `NotSupported`.
+
+### Android
+
+- The app must be installed from Google Play. Sideloaded builds fail with `AgeSignalsErrorReason.AppNotOwned`.
+- Play returns its default bands, 0-12, 13-15, 16-17 and 18+. To use your own, set up to three minimum ages in **Play Console**; you can't set them at runtime.
+
+The Play Age Signals library (0.0.4) is bound inside the package and its binding is internal, so nothing extra appears in your app's API.
+
+## Usage
+
+```csharp
+using Shiny.AgeSignals;
+
+public class AgeGate(IAgeSignals ageSignals)
+{
+    public async Task<bool> CanUseChat()
+    {
+        try
+        {
+            var signal = await ageSignals.RequestAgeRange(13, 16, 18);
+            return signal.Status switch
+            {
+                AgeSignalStatus.NotSupported => true,                    // no store age API - your own policy applies
+                AgeSignalStatus.Shared => signal.IsAtLeast(16) == true,  // null means unknown
+                _ => false                                               // Declined, VerificationRequired
+            };
+        }
+        catch (AgeSignalsException)
+        {
+            return false;   // the store couldn't answer - use the most protective experience
+        }
+    }
+}
+```
+
+- **`RequestAgeRange(gate1, gate2, gate3)`** takes Apple's age gates: one to three ascending ages that bound the returned range. Apple may present a sheet. Google Play ignores the gates and shows its own prompt only outside the US law states; in those states users verify in the Play Store itself.
+- **`IsAtLeast(age)` and `IsAdult` return `bool?`.** `null` means the store can't tell: nothing was shared, or the band straddles the age. Never read `null` as yes or no.
+- **Nothing is cached.** Consent can be revoked and a birthday can cross a band. Ask at the moments the law cares about: first launch, before a gated feature, and after an update.
+
+### The result
+
+| `AgeSignal` | |
+|---|---|
+| `Status` | `Shared`, `Declined`, `VerificationRequired` (Play: the user must verify in the Play Store), `NotSupported` |
+| `LowerBound` / `UpperBound` | Inclusive bounds. `UpperBound` is null for the top band (e.g. 18+); Apple leaves `LowerBound` null for the lowest band |
+| `Source` | How the range was established, weakest first, so you can require a minimum: `signal.Source >= AgeRangeSource.Confirmed` |
+| `CommunicationLimits` | Apple: the guardian has communication limits on |
+| `SignificantChange` | Play: guardian approval of your significant changes (`Approved`, `Pending`, `Declined`) |
+| `SignificantChangeApprovedThrough` | Play: everything effective before this date is approved |
+| `InstallId` | Play: the supervised install's id. Send it to your server to match revoked-approval notifications |
+
+| `AgeRangeSource` | Apple | Google Play |
+|---|---|---|
+| `SelfDeclared` | `selfDeclared` | `TIER_A` |
+| `GuardianDeclared` | `guardianDeclared` | `TIER_B` |
+| `Confirmed` | `confirmed` (and the deprecated 26.2 `*Checked` cases) | `TIER_C`: card, email, selfie estimation, ID |
+| `IdVerified` | - | `TIER_D`: government ID plus selfie, or digital ID |
+
+### Eligibility
+
+`GetEligibility()` shows no UI, so it is safe to call at startup:
+
+```csharp
+var e = await ageSignals.GetEligibility();
+if (e.AgeRangeRequired == true)
+{
+    // the store says this app must get the age range for this user
+}
+```
+
+| `AgeSignalsEligibility` | |
+|---|---|
+| `IsSupported` | The platform has a store age API |
+| `IsEligible` | Apple `isEligibleForAgeFeatures` (26.2+) |
+| `AgeRangeRequired` | Apple `declaredAgeRangeRequired` (26.4+) |
+| `SignificantChangeRequiresParentalConsent` | Apple (26.4+) |
+| `SignificantChangeRequiresAdultNotification` | Apple (26.4+) |
+
+Values the platform can't answer are `null`. Android has no eligibility API, so on Android everything but `IsSupported` is null.
+
+### Significant changes
+
+Some laws require a guardian to approve significant changes to an app a child already has. On iOS 26.4+, show Apple's acknowledgment:
+
+```csharp
+await ageSignals.ShowSignificantUpdate("Adds chat with other players");
+```
+
+It returns `false` where the platform has no such sheet. On Google Play, declare significant changes in Play Console and read the guardian's answer from `AgeSignal.SignificantChange`.
+
+### Errors
+
+`AgeSignalsException.Reason` says why the store couldn't answer:
+
+| Reason | |
+|---|---|
+| `Network`, `Transient` | Retry later |
+| `StoreUnavailable` | Play Store or Play services missing or outdated |
+| `AppNotOwned` | Play: not installed from Google Play |
+| `NotAvailable`, `InvalidAccount` | The store can't provide an age range for this device or account |
+| `NoUserInterface` | No window or activity to present from |
+
+`NativeCode` carries Play's `AgeSignalsErrorCode`. Gates that aren't positive and ascending throw `ArgumentOutOfRangeException`.
+
+## Platforms
+
+| | |
+|---|---|
+| iOS 26+ | Declared Age Range. Regulatory flags from 26.4, `confirmed` from 26.5 |
+| macOS 26+ | Declared Age Range; no significant-update sheet |
+| Android | Play Age Signals 0.0.4 |
+| Mac Catalyst, Windows, Linux, Blazor | `NotSupported` |

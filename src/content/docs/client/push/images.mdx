@@ -1,0 +1,217 @@
+---
+title: Push Images
+description: Show an image with a push notification - an iOS Notification Service Extension built by dotnet build with no Xcode project, and Android big picture notifications
+---
+import { Steps } from '@astrojs/starlight/components';
+
+A push can carry an image URL. Shiny reports it as `PushNotification.Notification.ImageUri` on every platform, and
+shows it as part of the notification on iOS and Android.
+
+| Platform | How the image is shown | What you do |
+|---|---|---|
+| iOS | A Notification Service Extension downloads it and attaches it before iOS displays the push | `<ShinyPushServiceExtension>true</ShinyPushServiceExtension>` and send `mutable-content` |
+| Android (background) | Firebase shows a notification message's `notification.image` itself | nothing |
+| Android (foreground, data messages) | Your `IPushDelegate` posts it as a big picture | `await android.SendDefaultAsync(id)` |
+| Web (Blazor WebAssembly) | The Shiny.Push service worker passes the payload's `image` to the browser (Chromium shows it) | nothing |
+| Mac Catalyst, macOS, Windows | Not shown by Shiny.Push (a WNS toast can carry its own image) | `ImageUri` is still reported |
+
+## iOS
+
+iOS shows an image on a push only when a **Notification Service Extension** inside the app downloads it and attaches it.
+Normally that takes an Xcode project with a second target. Shiny builds the extension during `dotnet build`, with no
+Xcode project, Swift or `Info.plist` edits:
+
+```xml
+<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <ShinyPushServiceExtension>true</ShinyPushServiceExtension>
+</PropertyGroup>
+```
+
+The build compiles a small Swift extension with `swiftc`, writes its `Info.plist` and puts it in the app at
+`PlugIns/ShinyNotificationService.appex`. On device builds it gets its own provisioning profile and is signed with
+the app's identity, using the same SDK tasks that sign the app.
+
+:::note[Why Swift and not C#]
+iOS gives a service extension about **24 MB of memory and 30 seconds**. A second .NET runtime in the extension would use
+up most of that memory before your code ran, so the stock extension is plain Swift. As a result, your
+`IPushDelegate` code does **not** run inside it.
+:::
+
+### Sending
+
+The push needs an alert, **`"mutable-content": 1`** in `aps`, and the image URL under one of the image keys:
+
+```json
+{
+    "aps": {
+        "alert": { "title": "New photo", "body": "Tap to view it" },
+        "mutable-content": 1
+    },
+    "image": "https://cdn.example.com/photos/1234.jpg"
+}
+```
+
+The extension checks these keys in order and uses the first that holds an http(s) URL:
+
+| Key | Notes |
+|---|---|
+| `image` | |
+| `image-url` | |
+| `imageUrl` | |
+| `attachment-url` | |
+| `fcm_options.image` | What Firebase sends for `apns.fcm_options.image`, so FCM-to-iOS images work as-is |
+
+A dotted key walks nested dictionaries. With [Shiny.Extensions.Push](/extensions-push/) on the server:
+
+```csharp
+await pushManager.SendToUser("user-1", new PushNotification
+{
+    Title = "New photo",
+    Message = "Tap to view it",
+    ImageUrl = "https://cdn.example.com/photos/1234.jpg"
+});
+```
+
+`ImageUrl` sets `mutable-content` and the `image` key for APNs, and `notification.image` for FCM, so one send covers
+iOS and Android. See [Sending](/extensions-push/sending/#images).
+
+### What the extension does
+
+<Steps>
+1. iOS starts the extension for an alert push with `mutable-content` (never for a silent push).
+2. It reads the image keys from the payload and downloads the first URL it finds.
+3. It picks the file type from the response's `Content-Type`, or from the URL's extension, and attaches the file.
+4. It hands the notification back to iOS, which shows it with the image as a thumbnail that expands when long-pressed.
+</Steps>
+
+If anything goes wrong, the push is still shown without the image. That covers a payload with no image, a non-2xx
+response, a file over the size limit, a type iOS can't attach, or the time running out. The extension never drops a
+notification.
+
+iOS can attach JPEG, PNG, GIF and HEIC images up to 10 MB, audio up to 5 MB, and video up to 50 MB.
+
+### Configuration
+
+| Property / item | Default | Purpose |
+|---|---|---|
+| `ShinyPushServiceExtension` | - | `true` builds the extension |
+| `ShinyPushImageKeys` | `image;image-url;imageUrl;attachment-url;fcm_options.image` | Payload keys, checked in order |
+| `ShinyPushImageMaxBytes` | `10485760` | Largest download that is attached |
+| `ShinyPushServiceExtensionBundleId` | `$(ApplicationId).NotificationService` | The extension's bundle ID |
+| `ShinyPushServiceExtensionCodesignProvision` | best installed match | Provisioning profile name or UUID |
+| `ShinyPushServiceExtensionCodesignEntitlements` | - | Entitlements for the extension, such as app groups for your own Swift |
+| `ShinyPushServiceExtensionMinimumOSVersion` | `SupportedOSPlatformVersion`, at least 15.0 | Deployment target |
+| `ShinyPushServiceExtensionDisplayName` | `Notification Service` | `CFBundleDisplayName` |
+| `ShinyPushServiceExtensionInfoPlist` | - | A plist whose keys are merged into the extension's `Info.plist` |
+| `ShinyPushServiceExtensionPrincipalClass` | `ShinyNotificationService` | `NSExtensionPrincipalClass`, for your own Swift |
+| `ShinyPushServiceExtensionSource` (item) | the stock Swift | Your own `UNNotificationServiceExtension` Swift |
+
+`PushImages.AppleKeys` reads the keys from the extension built into the app, so `ImageUri` in C# reports the same URL
+that the extension attached.
+
+### Signing
+
+On device builds the extension needs a provisioning profile for its bundle ID, `org.example.app.NotificationService`
+by default. A team wildcard profile works for development. For App Store, TestFlight and Ad Hoc builds, create an App ID
+and a profile of the same kind as the app's. The build warns if the two profiles are of different kinds, because those
+installs reject that mix. No push entitlement is needed: only the app receives pushes.
+
+Simulator builds need no profile. The extension is only built on macOS. A Windows build, including Hot Restart, warns
+and builds without it.
+
+### Images that need authentication
+
+The extension sends no cookies or headers. Use a short-lived signed URL, such as an S3 pre-signed URL or an Azure SAS
+token, instead of storing a credential that the extension would have to read.
+
+### Plain http hosts
+
+App Transport Security applies to the extension separately from the app, so an `http://` URL is blocked unless the
+extension allows it:
+
+```xml
+<ShinyPushServiceExtensionInfoPlist>Platforms/iOS/NotificationService.plist</ShinyPushServiceExtensionInfoPlist>
+```
+
+```xml
+<!-- Platforms/iOS/NotificationService.plist -->
+<plist version="1.0">
+<dict>
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSExceptionDomains</key>
+        <dict>
+            <key>images.example.local</key>
+            <dict><key>NSExceptionAllowsInsecureHTTPLoads</key><true/></dict>
+        </dict>
+    </dict>
+</dict>
+</plist>
+```
+
+### Your own extension
+
+To run your own logic, add your Swift file. You might decrypt the payload, rewrite the title, or attach more than one
+file. It replaces the stock one:
+
+```xml
+<ItemGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <ShinyPushServiceExtensionSource Include="Platforms/iOS/MyNotificationService.swift" />
+</ItemGroup>
+<PropertyGroup Condition="$([MSBuild]::GetTargetPlatformIdentifier('$(TargetFramework)')) == 'ios'">
+    <ShinyPushServiceExtensionPrincipalClass>MyNotificationService</ShinyPushServiceExtensionPrincipalClass>
+</PropertyGroup>
+```
+
+```swift
+import UserNotifications
+
+@objc(MyNotificationService)
+class MyNotificationService: UNNotificationServiceExtension {
+    override func didReceive(_ request: UNNotificationRequest, withContentHandler contentHandler: @escaping (UNNotificationContent) -> Void) {
+        let content = request.content.mutableCopy() as! UNMutableNotificationContent
+        content.title = "[Shiny] " + content.title
+        contentHandler(content)
+    }
+}
+```
+
+Start from the stock extension, `buildTransitive/swift/ShinyNotificationService.swift` in the package, to keep its
+download and fallback handling.
+
+### Testing
+
+`xcrun simctl push` and dropping an `.apns` file on the simulator **do not run service extensions**. The simulator adds
+those notifications directly, without going through the APNs path that starts the extension. They still reach your
+delegate with `ImageUri` set, but no image is attached. To see the image, send a real APNs push to a device.
+
+## Android
+
+Firebase handles a **notification message**'s image itself while the app is in the background. Set
+`notification.image` (`AndroidPushOptions.ImageUrl` with Shiny.Extensions.Push) and it appears as a big picture.
+
+In the foreground, and for **data messages**, Firebase hands the message to the app instead. Post it with the image from
+your delegate:
+
+```csharp
+public class MyPushDelegate : PushDelegate
+{
+    public override async Task OnReceived(PushNotification push)
+    {
+#if ANDROID
+        if (push is AndroidPushNotification android)
+            await android.SendDefaultAsync(1001);
+#endif
+    }
+}
+```
+
+| Member | What it does |
+|---|---|
+| `ImageUri` | Firebase's notification image, otherwise the first `FirebaseConfig.ImageKeys` data value that is an http(s) URL (the same default keys as iOS) |
+| `LoadImageAsync()` | Downloads the image as a `Bitmap` scaled to at most 1440 px on its longest side, or returns `null` |
+| `CreateBuilderAsync()` | `CreateBuilder()` plus the image as a `BigPictureStyle` and large icon |
+| `SendDefaultAsync(id)` | `CreateBuilderAsync()`, then posts it |
+
+A download that fails returns no image, never an exception, so the notification still goes out. Firebase gives a
+message about 10 seconds, so the download times out after 8.
