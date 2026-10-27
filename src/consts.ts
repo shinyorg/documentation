@@ -454,6 +454,13 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyControls
     },
     {
+        "id": "controls-foldables",
+        "nuget": "Shiny.Maui.Controls.Foldables",
+        "description": "Foldables",
+        "category": "controls",
+        "version": VERSIONS.shinyControls
+    },
+    {
         "id": "tableview",
         "nuget": "Shiny.Maui.Controls",
         "blazorNuget": "Shiny.Blazor.Controls",
@@ -1625,6 +1632,28 @@ export const ShinyComponents: ShinyComponent[] = [
         "description": "Call Directory (caller ID & call blocking)",
         "category": "devicedata",
         "version": VERSIONS.shinyClient
+    },
+    {
+        "id": "vpn",
+        "nuget": "Shiny.Net.Vpn",
+        "description": "VPN (OS IKEv2 client)",
+        "category": "hardware",
+        "linuxNuget": "Shiny.Net.Vpn.Linux",
+        "version": VERSIONS.shinyClient
+    },
+    {
+        "id": "agesignals",
+        "nuget": "Shiny.AgeSignals",
+        "description": "Age Signals",
+        "category": "devicedata",
+        "version": VERSIONS.shinyClient
+    },
+    {
+        "id": "actors",
+        "nuget": "Shiny.Actors",
+        "description": "Actors",
+        "category": "foundation",
+        "version": VERSIONS.shinyActors
     },
     {
         "id": "aiconversation",

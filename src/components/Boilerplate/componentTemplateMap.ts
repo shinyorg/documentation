@@ -78,6 +78,7 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyblazor', paramId: 'shinycontrols' },
     ],
     'controls-desktop': [{ kind: 'shinyapp', paramId: 'shinydesktopcontrols' }],
+    'controls-foldables': [{ kind: 'shinyapp', paramId: 'shinyfoldables' }],
     // Docking ships in Shiny.Maui.Controls.Desktop on MAUI, and inside the main
     // Shiny.Blazor.Controls package on Blazor (there is no Blazor add-on).
     markdown: [
@@ -160,6 +161,12 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     appstore: [{ kind: 'shinyapp', paramId: 'appstore' }],
     inapppurchases: [{ kind: 'shinyapp', paramId: 'inapppurchases' }],
     calldirectory: [{ kind: 'shinyapp', paramId: 'calldirectory' }],
+    vpn: [{ kind: 'shinyapp', paramId: 'vpn' }],
+    agesignals: [{ kind: 'shinyapp', paramId: 'agesignals' }],
+    actors: [
+        { kind: 'shinyapp', paramId: 'actors' },
+        { kind: 'shinyblazor', paramId: 'actors' },
+    ],
     liveactivities: [{ kind: 'shinyapp', paramId: 'liveactivities' }],
     appfunctions: [{ kind: 'shinyapp', paramId: 'appfunctions' }],
     'appfunctions-ai': [
@@ -600,8 +607,6 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyaspnet', paramId: 'mediatorfluentvalidation' },
     ],
     'mediator-dapper': [
-        { kind: 'shinyapp', paramId: 'shinymediator' },
-        { kind: 'shinyapp', paramId: 'mediatordapper' },
         { kind: 'shinyblazor', paramId: 'shinymediator' },
         { kind: 'shinyblazor', paramId: 'mediatordapper' },
         { kind: 'shinyaspnet', paramId: 'shinymediator' },

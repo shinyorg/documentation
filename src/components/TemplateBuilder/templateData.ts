@@ -43,6 +43,8 @@ export const VERSIONS = {
     shinyUniversalHubs: '1.5.0-beta-0004',
     shinyAppDeviceBridge: '2.1.0',
     shinyPermissions: '1.0.0-beta-0009',
+    /** shinyorg/actors - Shiny.Actors and its add-ons ship together */
+    shinyActors: '1.0.0-beta.11',
 
     // MAUI tooling
     devflow: '0.1.0-preview.13.26526.5',
@@ -216,9 +218,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'mediatorfluentvalidation', label: 'Mediator FluentValidation', type: 'bool', defaultValue: false, category: 'framework',
         version: VERSIONS.shinyMediator,
         description: 'FluentValidation for contracts marked [Validate] (Shiny.Mediator.FluentValidation) https://shinylib.net/mediator/middleware/validation/', visibleWhen: (s) => !!s.shinymediator },
-    { id: 'mediatordapper', label: 'Mediator Dapper', type: 'bool', defaultValue: false, category: 'framework',
-        version: VERSIONS.shinyMediator,
-        description: 'Dapper query requests through the mediator (Shiny.Mediator.DapperRequests) https://shinylib.net/mediator/extensions/dapper/', visibleWhen: (s) => !!s.shinymediator },
     { id: 'mediatorappfunctions', label: 'Mediator App Functions', type: 'bool', defaultValue: false, category: 'framework',
         version: VERSIONS.shinyMediator,
         description: 'Expose mediator contracts as Siri / Gemini app functions (Shiny.Mediator.AppFunctions) https://shinylib.net/mediator/extensions/appfunctions/', visibleWhen: (s) => !!s.shinymediator },
@@ -322,6 +321,15 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyClient,
         description: 'Caller ID & call blocking - iOS CallKit extension / Android CallScreeningService (Shiny.Mobile.CallDirectory) https://shinylib.net/client/calldirectory/',
         visibleWhen: noDesktop },
+    { id: 'vpn', label: 'VPN', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Install, connect & monitor a profile in the OS\'s built-in IKEv2 VPN client - iOS, Mac Catalyst, Android 11+ (Shiny.Net.Vpn) https://shinylib.net/client/vpn/' },
+    { id: 'agesignals', label: 'Age Signals', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'The user\'s age range from Apple Declared Age Range (iOS 26+) / Google Play Age Signals (Shiny.AgeSignals) https://shinylib.net/client/agesignals/' },
+    { id: 'actors', label: 'Actors', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyActors,
+        description: 'Orleans-style virtual actors in-process - one call at a time, persisted state, streams & reminders (Shiny.Actors) https://shinylib.net/actors/' },
     { id: 'printing', label: 'Native Printing', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Print PDF, image & HTML through the OS print system (Shiny.Printing) https://shinylib.net/client/printing/native/' },
@@ -489,6 +497,9 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'shinyoffice', label: 'Shiny Office Documents', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Word, Excel & PowerPoint document viewers and editors (Shiny.Maui.Controls.Office) https://shinylib.net/controls/document-viewer/' },
+    { id: 'shinyfoldables', label: 'Shiny Foldables', type: 'bool', defaultValue: false, category: 'ui',
+        version: VERSIONS.shinyControls,
+        description: 'Fold & hinge posture for Android foldables and iPhone Duo, feeding the fold-aware Shiny Controls (Shiny.Maui.Controls.Foldables) https://shinylib.net/controls/foldables/' },
     { id: 'shinykeyframe', label: 'Shiny Keyframe Animation', type: 'bool', defaultValue: false, category: 'ui',
         version: VERSIONS.shinyControls,
         description: 'Declarative XAML timelines with seekable, reversible playback https://shinylib.net/controls/keyframe/' },
@@ -669,7 +680,7 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.usedeeplinks = s.deeplinks !== '';
     s.usehttp = !!(s.authservice && s.refit);
     s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui || s.shinyblazorcontrols);
-    s.usemauicontrols = !!(s.aichatui || s.shinycontrols || s.shinyspeechaddins || s.shinycameraview || s.shinymediaelement || s.shinyoffice || s.shinykeyframe || s.shinytheme !== 'None');
+    s.usemauicontrols = !!(s.aichatui || s.shinycontrols || s.shinyspeechaddins || s.shinycameraview || s.shinymediaelement || s.shinyoffice || s.shinykeyframe || s.shinyfoldables || s.shinytheme !== 'None');
     s.themeaurora = s.shinytheme === 'Aurora';
     s.themematerial = s.shinytheme === 'Material';
     s.themeocean = s.shinytheme === 'Ocean';
@@ -1016,6 +1027,9 @@ const BLAZOR_PARAMS: TemplateParam[] = [
     { id: 'datasync', label: 'Data Sync', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyDataSync,
         description: 'Bidirectional JSON sync with the outbox & cursors persisted to LocalStorage https://shinylib.net/client/datasync/' },
+    { id: 'actors', label: 'Actors', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyActors,
+        description: 'Orleans-style virtual actors in the browser - one call at a time, persisted state, streams & reminders (Shiny.Actors) https://shinylib.net/actors/' },
     { id: 'shinyspeech', label: 'Speech (STT/TTS)', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinySpeech,
         description: 'Speech-to-text and text-to-speech (Web Speech API) https://shinylib.net/speech/' },
