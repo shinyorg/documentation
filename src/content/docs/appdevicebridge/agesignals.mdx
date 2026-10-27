@@ -1,0 +1,105 @@
+---
+title: Age Signals
+description: The user's age range as the app store shares it, for a Shiny.AppDeviceBridge web app — Apple Declared Age Range and Google Play Age Signals, for app store accountability laws such as Texas SB 2420
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.AgeSignals" />
+
+The age signals bridge asks the app store for the user's age range, for app store accountability laws such as Texas
+SB 2420, and for any app that gates features by age. It's built on [Shiny.AgeSignals](/client/agesignals/): one API over
+Apple's Declared Age Range and Google Play Age Signals.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, macOS 26+ | Declared Age Range. Older versions answer, with `status: "NotSupported"` |
+| Android | Google Play Age Signals, for an app installed from Google Play |
+| Mac Catalyst, Windows, Linux | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.AgeSignals
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddAgeSignalsBridge(),
+    webApp => { /* … */ }
+);
+```
+
+On Apple, add the `com.apple.developer.declared-age-range` entitlement and enable the capability for the App ID. Without
+it, the request never returns. On Android, the app must be installed from Google Play; a sideloaded build answers
+`403 app_not_owned`. See [Shiny.AgeSignals](/client/agesignals/).
+
+## From the page
+
+```ts
+import { AgeSignalsBridge } from "@shinyorg/appdevicebridge";
+
+const ages = new AgeSignalsBridge();
+
+const signal = await ages.requestAgeRange({ gates: [13, 16, 18] });
+if (signal.status === "Shared" && signal.lowerBound !== null && signal.lowerBound >= 18)
+    showAdultContent();
+else if (signal.status === "VerificationRequired")
+    askToVerifyInPlayStore();
+```
+
+In Blazor, register `AddAgeSignalsBridgeClient()` and inject `IAgeSignalsBridge`. The C# `AgeSignal` also has
+`IsAtLeast(age)`, which answers `true` or `false` when the store is sure, and `null` when it can't tell (nothing shared,
+or a range that straddles the age), so treat `null` as "not verified".
+
+## The signal
+
+`POST agesignals/request` takes one to three ascending ages, the gates the returned range is bounded by. Apple may present
+a sheet. Google Play ignores the gates and uses the bands set in Play Console (0–12, 13–15, 16–17 and 18+ by default), so
+configure the same ages there.
+
+| `status` | Meaning |
+| --- | --- |
+| `Shared` | An age range was shared: `lowerBound` and `upperBound` (inclusive; `upperBound` is null for the highest band) |
+| `Declined` | The user, or their guardian, declined to share. It's a result, not an error |
+| `VerificationRequired` | Google Play: the user is where verification is mandatory and their age is unknown. Send them to the Play Store |
+| `NotSupported` | The OS version has no store age API |
+
+`source` says how the range was established, weakest first: `SelfDeclared`, `GuardianDeclared` (a supervised account),
+`Confirmed` (a payment card, ID or age estimation) and `IdVerified` (Google Play only; Apple reports these as
+`Confirmed`). An app can require a minimum. `communicationLimits` is Apple's flag for a child whose guardian turned on
+communication limits.
+
+Nothing is cached: consent can be revoked and a birthday crosses a band, so ask at the moments the law cares about —
+first launch, before a gated feature, and after an update.
+
+## Eligibility and significant updates
+
+`GET agesignals` reports, with no UI, whether the OS has the API and what Apple says applies to this user: `isEligible`
+(26.2+), and `ageRangeRequired` and the significant-change flags (26.4+). They are null on Android.
+
+When a significant change to the app needs a guardian's acknowledgment, `POST agesignals/significant-update` with
+`{ description }` shows Apple's sheet (iOS 26.4+). It answers `{ shown: false }` on Android: declare the change in Play
+Console instead, and read the guardian's approval from the signal's `significantChange`,
+`significantChangeApprovedThrough` and `installId`.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `400` | `bad_request` | The gates are not one to three positive, ascending ages, or the description is empty |
+| `403` | `app_not_owned` | Google Play: the app was not installed from Play |
+| `409` | `invalid_account`, `no_user_interface` | The account can't share an age range, or there is no window to present from |
+| `503` | `network`, `transient`, `not_available`, `store_unavailable` | Try again later, or the store can't answer on this device |
+| `502` | `age_signals_failed` | Anything else |
+
+## Requests
+
+<BridgeApi bridges={["AgeSignalsBridge"]} show="requests" />
+
+## Types
+
+<BridgeApi bridges={["AgeSignalsBridge"]} show="types" />

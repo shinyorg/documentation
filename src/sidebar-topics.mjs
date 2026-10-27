@@ -758,6 +758,7 @@ export const sidebarTopics = [
             showNew: false,
             items: [
               { label: 'Overview', link: 'appdevicebridge/bridges', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
+              { label: 'Age Signals', link: 'appdevicebridge/agesignals', showNew: true, dateCreated: '2026-10-27', dateUpdated: '2026-10-27' },
               { label: 'App Links', link: 'appdevicebridge/app-links', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'App & Device', link: 'appdevicebridge/app', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
               { label: 'Beacons', link: 'appdevicebridge/beacons', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
@@ -788,6 +789,7 @@ export const sidebarTopics = [
               { label: 'Sensors', link: 'appdevicebridge/sensors', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
               { label: 'Speech', link: 'appdevicebridge/speech', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Tray Icon & Quick Entry', link: 'appdevicebridge/desktop', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'VPN', link: 'appdevicebridge/vpn', showNew: true, dateCreated: '2026-10-27', dateUpdated: '2026-10-27' },
               { label: 'Wearables', link: 'appdevicebridge/wearables', showNew: false, dateCreated: '2026-09-18', dateUpdated: '2026-09-18' },
               { label: 'Wi-Fi', link: 'appdevicebridge/wifi', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' }
             ]

@@ -1,0 +1,146 @@
+---
+title: VPN
+description: The app's profile in the operating system's built-in IKEv2 VPN client, for a Shiny.AppDeviceBridge web app — save and remove the profile, connect, disconnect and watch the tunnel
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Vpn" />
+
+The VPN bridge lets the page install the app's profile in the operating system's built-in IKEv2 VPN client, then
+connect, disconnect and watch the tunnel. It's built on [Shiny.Net.Vpn](/client/vpn/). The OS owns the tunnel: it keeps
+running after the app closes, shows in the system VPN settings, and the user can switch it off or delete it there.
+
+This is IKEv2 only, through the OS's own client. WireGuard, OpenVPN and custom protocols need a packet tunnel extension
+or a `VpnService`, which this bridge does not provide.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, Mac Catalyst, macOS | `NEVPNManager` (personal VPN) |
+| Android 11+ | Platform VPN profiles (`VpnManager` + `Ikev2VpnProfile`); Android 13 to report the tunnel's state |
+| Linux | NetworkManager's strongSwan plugin, over D-Bus |
+| Android 10 and older, Windows | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Vpn
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddVpnBridge(),
+    webApp => { /* … */ }
+);
+```
+
+- **Apple:** enable the *Personal VPN* capability on the App ID and add the
+  `com.apple.developer.networking.vpn.api` entitlement with the value `allow-vpn`.
+- **Android:** no manifest entries are needed.
+- **Linux:** install `network-manager-strongswan` (Debian, Ubuntu) or `NetworkManager-strongswan` (Fedora). Saving and
+  connecting go through polkit: interactive on a desktop, and a polkit rule on a headless device.
+
+An app that already calls `services.AddVpn()` keeps its registration. See [Shiny.Net.Vpn](/client/vpn/).
+
+## From the page
+
+```ts
+import { VpnBridge } from "@shinyorg/appdevicebridge";
+
+const vpn = new VpnBridge();
+
+const { capabilities } = await vpn.getStatus();
+if (!capabilities.usernamePassword)
+    return;
+
+const { access } = await vpn.saveProfile({
+    name: "Acme",
+    serverAddress: "vpn.acme.com",
+    authentication: "UsernamePassword",
+    username,
+    password
+});
+if (access === "Denied")
+    return;   // the user declined the OS consent prompt
+
+await vpn.onStatusChanged(e => showState(e.state));
+await vpn.connect({ timeoutSeconds: 30 });
+```
+
+In Blazor, register `AddVpnBridgeClient()` and inject `IVpnBridge`.
+
+## Capabilities
+
+Platforms expose different parts of their VPN client, so check `capabilities` from `GET vpn` before offering an option.
+An option the platform lacks answers `501 not_supported`.
+
+| Capability | Missing on |
+| --- | --- |
+| `status` | Android 11 and 12: the state is `Unknown`, `connect` returns once the OS accepts the request, and `vpn.status` never fires |
+| `certificate` | Linux, which reads certificates from files rather than taking them inline |
+| `serverRootCertificate` | Apple, which only trusts a private CA the user installed through a configuration profile |
+| `remoteIdentifier` | Android, which always uses the server address as the server's identity |
+
+## The profile
+
+`PUT vpn/profile` installs the app's one profile, or replaces it. It takes a `name`, a `serverAddress` and one of three
+kinds of `authentication`:
+
+| `authentication` | Needs |
+| --- | --- |
+| `SharedSecret` | `secret`, the pre-shared key. Servers usually look it up by `localIdentifier`, which Android requires |
+| `UsernamePassword` | `username` and `password`, for EAP-MSCHAPv2 |
+| `Certificate` | `pkcs12`, the client certificate and its private key as a base64 .p12 bundle, with its `password`. Android requires `localIdentifier` |
+
+`remoteIdentifier` is the server's IKE ID (the server address when left out), and `serverRootCertificate` is the CA
+certificate, DER or PEM, that issued the server's, for a server with a private CA.
+
+The first save shows the OS consent prompt. A user who declines gets `{ access: "Denied" }` and nothing is saved. Saving
+does not connect, and a tunnel that is up keeps its old settings until the next connect. Secrets go to the keychain or
+keystore and are never read back. `DELETE vpn/profile` disconnects and deletes the profile and its secrets.
+
+## The tunnel
+
+`POST vpn/connect` brings the tunnel up and waits for it, `timeoutSeconds` (1 to 300, 30 by default), then answers the
+new state. `POST vpn/disconnect` takes it down and keeps the profile. `vpn.status` fires on every change, including ones
+the user makes in system settings and the OS reconnecting on its own, and starts with the current state when the page
+subscribes.
+
+| `state` | Meaning |
+| --- | --- |
+| `NotConfigured` | No profile, or the user removed it in Settings |
+| `Disconnected`, `Connecting`, `Connected`, `Reconnecting`, `Disconnecting` | The tunnel's state |
+| `Unknown` | The platform can't report it (`capabilities.status` is false) |
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `400` | `bad_request` | The profile is incomplete, or `timeoutSeconds` is out of range |
+| `403` | `vpn_permission` | No profile is saved, the user withdrew consent, or an entitlement is missing |
+| `501` | `not_supported` | The platform has no VPN client to drive, or lacks the option asked for |
+| `502` | `vpn_connection_failed` | The tunnel did not come up: rejected credentials, a server that does not answer, a rejected certificate, or the timeout. The message carries the OS's reason |
+| `502` | `vpn_failed` | Anything else, such as NetworkManager not running |
+
+## Requests
+
+<BridgeApi bridges={["VpnBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["VpnBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["VpnBridge"]} show="types" />
+
+## Security
+
+The VPN decides where the device's traffic goes, so a page that can save a profile can send it to a server of its
+choosing. The bridge sits behind the bridge policy like every other (callers on this device only, plus the launch
+session), but register it only for a web app you ship. Don't put credentials in the web app's bundle: fetch them from
+your server after the user signs in. The C# `VpnProfileRequest` leaves its secrets out of `ToString()`, so a logged
+request doesn't leak them. See [Security](/appdevicebridge/security/).
