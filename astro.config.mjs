@@ -49,6 +49,13 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
+      id: 'commercial-support',
+      title: 'Commercial Support',
+      description: 'Guaranteed response times on Shiny bug fixes, straight from the maintainers. Plans from US$1,500 a year.',
+      href: 'https://shinysoft.biz/support/?utm_source=shinylib&utm_medium=banner&utm_campaign=support',
+      cta: 'See the plans',
+    },
+    {
       id: 'client-v6',
       title: 'Shiny Client v6.3',
       description: '[Easy Live Activities](/client/liveactivities), [Game Center](/client/gamecenter), [Geospatial Geofencing](/client/locations/region-geofencing), [App Store APIs](/client/appstore), [More Thermal Printer Support](/client/printing), & [Call Directory](/client/calldirectory)'
