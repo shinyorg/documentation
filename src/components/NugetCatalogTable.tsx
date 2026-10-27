@@ -7,6 +7,8 @@ export interface CatalogPackage {
     doc?: string;
     /** Retired pre-Shiny package - doc links to the Shiny library that replaced it */
     deprecated?: boolean;
+    /** Stable version shipped for this package's release train, shown while nuget.org search still lists its betas */
+    released?: string;
 }
 
 interface NugetInfo {
@@ -23,6 +25,12 @@ const BATCH = 20;       // packageid: terms are OR'd, so one request covers a wh
 const CONCURRENCY = 4;
 
 const isPre = (v: string) => v.includes('-');
+
+/** The search index lags a release by hours: report a just-shipped stable instead of the beta it supersedes. */
+const withReleased = (i: NugetInfo, released?: string): NugetInfo =>
+    released && i.latest && isPre(i.latest) && i.latest.split('-')[0] === released
+        ? { ...i, latest: released, stable: released }
+        : i;
 
 async function fetchBatch(ids: string[]): Promise<Map<string, NugetInfo>> {
     const q = ids.map(id => `packageid:${id}`).join(' ');
@@ -53,6 +61,7 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
         let cancelled = false;
         const batches: string[][] = [];
         for (let i = 0; i < packages.length; i += BATCH) batches.push(packages.slice(i, i + BATCH).map(p => p.id));
+        const released = new Map(packages.map(p => [p.id, p.released]));
 
         let next = 0;
         const worker = async () => {
@@ -65,7 +74,7 @@ const NugetCatalogTable = ({ packages }: { packages: CatalogPackage[] }) => {
                         const n = { ...prev };
                         for (const id of ids) {
                             const f = found.get(id.toLowerCase());
-                            if (f) n[id] = f;
+                            if (f) n[id] = withReleased(f, released.get(id));
                         }
                         return n;
                     });

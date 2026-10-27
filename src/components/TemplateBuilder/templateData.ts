@@ -9,47 +9,47 @@ export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.12.0',
     shinyShell: '7.0.3',
-    shinyControls: '1.8.0-beta-0004',
+    shinyControls: '2.1.0',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '6.3.0',
-    shinyConfiguration: '6.3.0',
+    shinyClient: '6.4.0',
+    shinyConfiguration: '6.4.0',
     shinyLocalization: '2.0.1',
     shinyStores: '6.0.1',
     shinyReflector: '6.0.1',
     shinyDI: '6.0.1',
     shinySerialization: '6.0.1',
-    shinyContactStore: '6.3.0',
-    shinyCalendar: '6.3.0',
-    shinySpeech: '3.0.0-beta-0030',
-    shinyAiConversation: '3.0.0-beta-0030',
+    shinyContactStore: '6.4.0',
+    shinyCalendar: '6.4.0',
+    shinySpeech: '3.0.0-beta-0036',
+    shinyAiConversation: '3.0.0-beta-0036',
     shinyMusic: '4.1.0',
     shinyHealth: '2.0.1',
     shinyDocumentDb: '14.1.0',
-    shinyHttpServer: '2.2.0',
-    shinyDataSync: '6.3.0',
+    shinyHttpServer: '2.2.1',
+    shinyDataSync: '6.4.0',
     shinyObd: '1.4.0',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
-    shinyRecognition: '1.0.0-beta-0006',
+    shinyRecognition: '1.0.0-beta-0007',
     /** Shiny.AspNet.* server libraries (WebHosting, JsonPatch, Idempotency, ...) ship together. */
     shinyAspNet: '1.0.0',
-    shinyExtensionsPush: '3.0.0-beta-0006',
+    shinyExtensionsPush: '3.0.0-beta-0008',
     shinyFirestoreMobile: '4.0.1',
     /** Shiny.Push.FirebaseMessaging is off the core train */
     shinyPushFirebase: '6.0.0',
-    shinyBleHubs: '1.3.0',
+    shinyBleHubs: '1.5.0-beta-0004',
     /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
-    shinyUniversalHubs: '1.0.0-beta.1',
-    shinyAppDeviceBridge: '2.0.0',
+    shinyUniversalHubs: '1.5.0-beta-0004',
+    shinyAppDeviceBridge: '2.1.0',
     shinyPermissions: '1.0.0-beta-0009',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.13.26512.5',
+    devflow: '0.1.0-preview.13.26526.5',
 
     // Microsoft + third-party
     /** The MicrosoftVersion MSBuild property - Microsoft.Extensions.* / ASP.NET Core, kept on the TFM's major */
-    microsoftExtensions: '10.0.13',
+    microsoftExtensions: '10.0.14',
     ctMvvm: '8.4.2',
     sentry: '6.12.1',
     biometric: '2.5.1',
@@ -58,7 +58,7 @@ export const VERSIONS = {
     skiaExtended: '3.0.0',
     userDialogs: '9.2.2',
     mudblazor: '9.11.0',
-    radzen: '12.1.2',
+    radzen: '12.1.7',
     fluentUI: '5.0.1',
     sqliteNetPcl: '1.11.285',
     roomsharp: '0.5.5',
@@ -68,9 +68,9 @@ export const VERSIONS = {
     humanizer: '3.0.10',
     unitsNet: '5.75.1',
     sysLinqAsync: '7.0.1',
-    refit: '16.3.0',
+    refit: '16.4.0',
     orleans: '10.4.0',
-    scalar: '2.18.0',
+    scalar: '2.18.3',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';

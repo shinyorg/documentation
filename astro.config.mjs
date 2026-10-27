@@ -56,26 +56,14 @@ const announcementConfig = {
       cta: 'See the plans',
     },
     {
-      id: 'client-v6',
-      title: 'Shiny Client v6.3',
-      description: '[Easy Live Activities](/client/liveactivities), [Game Center](/client/gamecenter), [Geospatial Geofencing](/client/locations/region-geofencing), [App Store APIs](/client/appstore), [More Thermal Printer Support](/client/printing), & [Call Directory](/client/calldirectory)'
+      id: 'client-v64',
+      title: 'Shiny Client v6.4',
+      description: '[iPhone Duo](/client/core/screen-posture), [VPN Management](/client/vpn), [Push Notification Images](/client/push), & [Age Signals](/client/agesignals)'
     }, 
     {
-      id: 'appdevicebridge-0',
-      title: 'App Device Bridge',
-      description: 'Release updates without the AppStore on .NET!',
-      href: '/appdevicebridge/',
-      cta: 'Bridge me there!',
-    },
-    {
-      id: 'controls-18',
-      title: 'Shiny Controls 1.8',
-      description: 'The Beautification, Animation, & Fixer Version - [Animated Borders](/controls/border-animations), [Backgrounds](/controls/animated-background/), [Cover Flow](/controls/cover-flow), [Avatars](/controls/avatar/), & [Video Text!](/controls/video-text/)'
-    },
-    {
-      id: 'controls-19',
-      title: 'Shiny Controls 1.9',
-      description: 'Blazor Controls Mobile Friendliness & NEW [Notch View - MacOS & Blazor](/controls/notch-view)'
+      id: 'controls-21',
+      title: 'Shiny Controls v2',
+      description: '[Foldables](/controls/foldables), [MediaElement Encoder Support](/controls/mediaelement), [Document SDK](/controls/office-shell/documents), [Tray Icon Improvements](/controls/trayicon), & [Notch View](/controls/notch)'
     },      
     {
       id: 'docdb-v14',
