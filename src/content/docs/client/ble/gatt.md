@@ -30,6 +30,20 @@ foreach (var svc in services)
 var service = await peripheral.GetServiceAsync("180D");
 ```
 
+You don't need to discover services before reading, writing or subscribing. The first operation that needs a service
+discovers them, and later operations reuse the result until the peripheral disconnects. `GetService` and
+`GetCharacteristic` read the discovered list. `GetServices` and `GetAllCharacteristics` always run a fresh discovery,
+so keep them out of hot paths.
+
+:::note[Android]
+Discovery runs once per peripheral and is shared by every operation waiting on it. Your timeout (`.Timeout(...)` or
+a cancellation token) applies to it. When the last operation waiting on it times out or is cancelled, the discovery
+is torn down and the next operation starts again. With no timeout of your own, discovery gives up after 30 seconds.
+Some peripherals take several seconds to discover, so give the first operation after connecting enough time, or
+await `GetServiceAsync` once before your reads. If discovery comes back with an empty service list, which can happen
+right after a reconnect, a lookup rediscovers once before it throws `No service found`.
+:::
+
 ## Characteristics
 
 ### Discovering Characteristics
