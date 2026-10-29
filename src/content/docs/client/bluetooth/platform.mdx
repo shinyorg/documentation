@@ -1,0 +1,90 @@
+---
+title: Classic Bluetooth | Platform Setup
+description: Permissions, entitlements and platform requirements for Shiny.Bluetooth on Android, Windows, macOS and Linux
+---
+
+## Android
+
+```xml
+<!-- Android 12 (API 31) and above -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN"
+                 android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<!-- only if you call RequestDiscoverable -->
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+
+<!-- Android 11 (API 30) and below -->
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+```
+
+`RequestAccess()` asks for `BLUETOOTH_SCAN` and `BLUETOOTH_CONNECT` (or the legacy three) and returns
+`NotSetup` if any of them is missing from the manifest. `RequestDiscoverable` asks for
+`BLUETOOTH_ADVERTISE` itself, and throws `BluetoothPermissionException` if it isn't granted.
+
+`neverForLocation` keeps discovery free of a location prompt. Drop it only if you derive location
+from the results.
+
+## Windows
+
+Unpackaged apps need nothing. Packaged (MSIX) apps declare the device capabilities:
+
+```xml
+<Capabilities>
+  <DeviceCapability Name="bluetooth" />
+  <DeviceCapability Name="radios" />
+</Capabilities>
+```
+
+`Pair` uses Windows' own pairing UI. `RequestDiscoverable` isn't available: Windows only makes a PC
+discoverable while the Bluetooth settings page is open.
+
+## macOS
+
+`Shiny.Bluetooth` targets **macOS (AppKit)**, not Mac Catalyst.
+
+```xml
+<!-- Info.plist -->
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Connects to your Bluetooth printer</string>
+```
+
+```xml
+<!-- Entitlements.plist, when sandboxed -->
+<key>com.apple.security.device.bluetooth</key>
+<true/>
+```
+
+The .NET macOS SDK has no IOBluetooth binding, so Shiny drives IOBluetooth through the Objective-C
+runtime. IOBluetooth delivers every callback on the main run loop, so this works in an AppKit app
+(including Shiny's macOS hosting), but not in a console app that never runs an `NSApplication` loop.
+
+`RequestDiscoverable` isn't available, and the `secure` flag on `Connect`/`Listen` is ignored, because
+IOBluetooth negotiates security itself.
+
+## Linux
+
+Reference `Shiny.Bluetooth.Linux` and register with `AddLinuxBluetooth()`. It talks to BlueZ over
+D-Bus, so it needs:
+
+- `bluetoothd` running, with the adapter at `hci0` (the only adapter used)
+- permission to talk to `org.bluez` on the system bus: root, or a member of the `bluetooth` group
+  under the default D-Bus policy
+- a BlueZ **agent** to answer PIN or confirmation requests during `Pair`. A desktop session has one.
+  On a headless device, use `bluetoothctl` or pair once by hand. Without an agent, `Pair` returns `false`.
+
+Every connection, in both directions, goes through BlueZ's `ProfileManager1`. The library registers a
+`Profile1` object for each service UUID. BlueZ does the SDP lookup, the RFCOMM connect or accept and
+the security checks, then hands the process the connected socket. `Connect` needs BlueZ to already
+know the device, either paired or seen by `Discover`, and throws `BluetoothConnectionException`
+saying so if it doesn't.
+
+`RequestDiscoverable` sets the adapter's `Discoverable` and `DiscoverableTimeout` properties. If
+polkit refuses, it throws `BluetoothPermissionException`.
+
+## iOS, Mac Catalyst and tvOS
+
+There is no target. On Apple's mobile platforms classic Bluetooth is ExternalAccessory, which only
+reaches MFi-certified accessories with a protocol string Apple has approved for the app. Use
+[BluetoothLE](/client/ble/) for cross-platform device communication that includes iOS.

@@ -1,0 +1,114 @@
+---
+title: Classic Bluetooth | Connections
+description: Open RFCOMM connections to a service UUID, host an RFCOMM service with an SDP record, and read and write the connection as a Stream
+---
+
+Every classic Bluetooth connection here is **RFCOMM**: a reliable, ordered byte stream to a service
+the remote device publishes in its SDP records. That covers the Serial Port Profile, which almost
+every serial adapter, printer and dongle speaks, and any custom service UUID of your own.
+
+## Connect to a service
+
+```csharp
+var device = await bluetooth.GetDevice("00:1A:7D:DA:71:13", ct);   // or one from Discover / GetPairedDevices
+await using var connection = await device.Connect(
+    BluetoothServiceUuids.SerialPort,   // 00001101-0000-1000-8000-00805F9B34FB
+    ct: ct
+);
+
+var writer = new StreamWriter(connection.Stream, leaveOpen: true) { NewLine = "\r\n", AutoFlush = true };
+var reader = new StreamReader(connection.Stream, leaveOpen: true);
+
+await writer.WriteLineAsync("ATZ");
+var reply = await reader.ReadLineAsync(ct);
+```
+
+`IBluetoothDevice.Connect` looks the service UUID up in the device's SDP records, opens RFCOMM to the channel it finds,
+and returns a `BluetoothConnection` with the remote `Device`, the `ServiceUuid` and the `Stream`.
+Disposing either the connection or the stream disconnects.
+
+It throws `BluetoothConnectionException` when the device is out of range or off, doesn't publish the
+service, or refuses the connection.
+
+### Secure and insecure connections
+
+`secure: true` (the default) requires an authenticated, encrypted link, and pairs first if the two
+devices aren't already paired. Pass `secure: false` for devices that can't pair at all. That maps to
+Android's "insecure" RFCOMM sockets, Windows' `PlainSocket` protection level, and BlueZ's
+`RequireAuthentication`. On macOS, IOBluetooth always negotiates security itself and ignores the flag.
+
+### Other service UUIDs
+
+`BluetoothServiceUuids` holds a few well-known ones (`SerialPort`, `DialupNetworking`,
+`ObexObjectPush`, `ObexFileTransfer`). `BluetoothServiceUuids.FromShortId(0x1234)` expands any
+SIG-assigned 16- or 32-bit id onto the Bluetooth base UUID. For your own app-to-app protocol, generate
+a random UUID and use it on both sides.
+
+## Host a service
+
+```csharp
+var serviceId = Guid.Parse("8ce255c0-200a-11e0-ac64-0800200c9a66");
+await using var listener = await bluetooth.Listen(serviceId, "My App Sync", ct: ct);
+
+while (!ct.IsCancellationRequested)
+{
+    var connection = await listener.Accept(ct);
+    _ = Handle(connection, ct);
+}
+```
+
+`Listen` publishes an SDP record with your service UUID and name on a free RFCOMM channel, and queues
+every incoming connection for `Accept`. Disposing the listener withdraws the record and closes any
+connection that was never accepted. Connections you have already accepted stay open.
+
+`Accept` throws `ObjectDisposedException` after the listener is disposed. It throws
+`BluetoothException` when the platform takes the listener down, for example when the radio is
+switched off or `bluetoothd` restarts.
+
+On an accepted connection, `connection.Device` is a full `IBluetoothDevice`, so you can `Pair` with it
+or `Connect` back to one of its services. Its `Name` is filled in only where the platform already
+knew it. The library doesn't look the name up.
+
+### Being found
+
+A device you have paired with can connect at any time. An unpaired device has to find yours in an
+inquiry first, so make it discoverable where the platform allows it:
+
+```csharp
+if (bluetooth.Capabilities.HasFlag(BluetoothCapabilities.Discoverable))
+    await bluetooth.RequestDiscoverable(TimeSpan.FromMinutes(2), ct);
+```
+
+Android asks the user with a system dialog and returns `false` if they decline. Linux sets the
+adapter's `Discoverable` flag for the given duration. Windows and macOS give apps no way to do this:
+a PC or Mac is discoverable only while its Bluetooth settings are open.
+
+## Working with the stream
+
+RFCOMM is a byte stream, like TCP. **It does not preserve message boundaries**: a 200-byte write can
+arrive as several reads, and two writes can arrive as one. Always frame what you send, with line
+endings, a length prefix or a delimiter, and read in a loop:
+
+```csharp
+static async Task Handle(BluetoothConnection connection, CancellationToken ct)
+{
+    await using (connection)
+    {
+        var buffer = new byte[1024];
+        int read;
+        while ((read = await connection.Stream.ReadAsync(buffer, ct)) > 0)
+            await connection.Stream.WriteAsync(buffer.AsMemory(0, read), ct);
+    }
+    // the remote side disconnected
+}
+```
+
+There is no separate "disconnected" event. A remote disconnect shows up as a read that returns `0`,
+or as an `IOException` from a write.
+
+| Platform | How the stream is backed |
+|----------|--------------------------|
+| Android | `BluetoothSocket` input and output streams |
+| Windows | `StreamSocket` input and output streams |
+| macOS | `IOBluetoothRFCOMMChannel`: received data is queued for `ReadAsync`, and writes are split to the channel MTU. **Async only**: the synchronous `Read`/`Write` throw. |
+| Linux | The connected RFCOMM socket BlueZ hands over, read and written directly |
