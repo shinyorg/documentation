@@ -427,6 +427,24 @@ export const sidebarTopics = [
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
+      {
+        label: 'Biometrics',
+        jumpTo: true,
+        dateUpdated: '2026-10-29',
+        items: [
+          { label: 'Getting Started', link: 'client/biometrics/', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
+        label: 'NFC',
+        jumpTo: true,
+        dateUpdated: '2026-10-29',
+        items: [
+          { label: 'Getting Started', link: 'client/nfc/', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
     ]
   },
   {
@@ -762,6 +780,7 @@ export const sidebarTopics = [
               { label: 'App Links', link: 'appdevicebridge/app-links', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'App & Device', link: 'appdevicebridge/app', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
               { label: 'Beacons', link: 'appdevicebridge/beacons', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Biometrics', link: 'appdevicebridge/biometrics', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
               { label: 'Bluetooth LE', link: 'appdevicebridge/bluetoothle', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Calendar', link: 'appdevicebridge/calendar', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Call Directory', link: 'appdevicebridge/calldirectory', showNew: true, dateCreated: '2026-10-14', dateUpdated: '2026-10-14' },
@@ -778,6 +797,7 @@ export const sidebarTopics = [
               { label: 'In-App Purchases', link: 'appdevicebridge/inapppurchases', showNew: true, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Live Activities', link: 'appdevicebridge/liveactivities', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Maps & Directions', link: 'appdevicebridge/maps', showNew: false, dateCreated: '2026-09-22', dateUpdated: '2026-10-06' },
+              { label: 'NFC', link: 'appdevicebridge/nfc', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
               { label: 'Notifications', link: 'appdevicebridge/notifications', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'OBD-II', link: 'appdevicebridge/obd', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Photos', link: 'appdevicebridge/photos', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
@@ -787,6 +807,7 @@ export const sidebarTopics = [
               { label: 'Region Geofencing', link: 'appdevicebridge/region-geofencing', showNew: true, dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
               { label: 'Screen Recorder', link: 'appdevicebridge/screenrecorder', showNew: false, dateCreated: '2026-09-24', dateUpdated: '2026-09-24' },
               { label: 'Sensors', link: 'appdevicebridge/sensors', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
+              { label: 'Share Target', link: 'appdevicebridge/share-target', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
               { label: 'Speech', link: 'appdevicebridge/speech', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Tray Icon & Quick Entry', link: 'appdevicebridge/desktop', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'VPN', link: 'appdevicebridge/vpn', showNew: true, dateCreated: '2026-10-27', dateUpdated: '2026-10-27' },

@@ -1,0 +1,115 @@
+---
+title: Share Target
+description: Text, links and files other apps share to a Shiny.AppDeviceBridge web app
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.ShareTarget" />
+
+The share target bridge makes the app a place other apps can share to. What they send — text, a link, files — waits
+in a queue for the page, with the files copied into a [file root](/appdevicebridge/storage/).
+
+This is the receiving side. To share *from* the page, use `device/share` on the [App & Device](/appdevicebridge/app/)
+bridge.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.ShareTarget
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddShareTargetBridge(),
+    webApp => { /* … */ }
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IShareTargetBridge` | `AddShareTargetBridgeClient()` | `ShareTargetBridge` |
+
+## Details
+
+Each share is a `SharedContent`: an id, when it arrived, its `text`, `subject` and `url`, and its `files`. The page
+reads the queue when it boots, listens for `sharetarget.received` while it's open, and removes each share once it has
+acted on it. That way a share that launched the app isn't missed, and one seen live isn't handled twice after a
+reload.
+
+```ts
+const shares = new ShareTargetBridge();
+
+async function handle(share: SharedContent) {
+    if (share.url) await saveBookmark(share.url, share.subject);
+    for (const f of share.files) await importFile(f.file);   // read through /_bridge/files
+    await shares.remove(share.id);                           // deletes its files too
+}
+
+for (const share of await shares.getPending()) await handle(share);
+shares.onReceived(handle);
+```
+
+| Topic | Details |
+| --- | --- |
+| **Queue** | every share is kept, oldest first, across restarts, until the page removes it. Past `MaxPending` (20) the oldest is dropped with its files. |
+| **Links** | `url` is only ever an absolute `http` or `https` URL, so the page can open it. Text that is nothing but such a link arrives as the `url`, which is how Android and most share sheets send links. Any other scheme (`javascript:`, `file:`, an app's own) is kept as `text`. |
+| **Files** | copied into `Root` (`data` by default) under `shares/{id}/`, at most `MaxFiles` (20) per share, each within the server's `MaxFileWriteBytes`. Names are cleaned to one safe path segment. A file that can't be read or is too large is left out, and the rest of the share is kept. |
+| **Removing** | `remove` deletes the share's files. Move a file somewhere else through the files bridge first to keep it. |
+| **No file root** | if `Root` doesn't exist, the bridge answers `501`, and shares keep their text and link but drop their files. |
+| **Background** | shares never go to `background.js`. The OS brings the app to the foreground to receive one. |
+
+Options:
+
+| Option | Default | Why |
+| --- | --- | --- |
+| `Root` | `data` | Where shared files go. `cache` suits an app that acts on a share straight away. |
+| `MaxPending` | 20 | The most shares kept waiting. |
+| `MaxFiles` | 20 | The most files taken from one share. |
+| `MaxTextLength` | 65,536 | Longer text is cut. |
+| `AcceptCommandLineFiles` | `false` | Linux only: treat files on the command line as a share. |
+
+Platform setup. The OS only offers the app for what it declares:
+
+| Platform | Details |
+| --- | --- |
+| **Android** | `ACTION_SEND` and `ACTION_SEND_MULTIPLE` intent filters, with the MIME types to accept, on a `SingleTop` main activity. Text, links and files. Only `content:` files are taken: a `file:` path could name the app's own private files. |
+| **iOS / Mac Catalyst** | `CFBundleDocumentTypes` for the file types to accept: the app appears under "Open in" and "Copy to", and the files arrive through `OpenUrl`. Text and links from the share sheet need a share extension. The bridge doesn't ship one, but an app with its own extension can hand content over with `ShareTarget.ReceiveAsync`. |
+| **Windows** | a packaged app with the Share Target declaration in its manifest: text, links and files. File type associations deliver files too. |
+| **maui-labs AppKit** | the head overrides `OpenUrls` and passes file URLs to `ShareTarget.ReceiveAsync`, because files that launch the app arrive before `MauiProgram`. |
+| **Linux** | `%F` in the .desktop file's `Exec` line, plus `o.AcceptCommandLineFiles = true`. Cold starts only. |
+
+```csharp
+// maui-labs AppKit head
+public override void OpenUrls(NSApplication application, NSUrl[] urls)
+    => _ = ShareTarget.ReceiveAsync(new IncomingShare(
+        Files: [.. urls.Where(x => x.IsFileUrl).Select(x => IncomingShareFile.FromPath(x.Path!))]
+    ));
+```
+
+## Requests
+
+<BridgeApi bridges={["ShareTargetBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["ShareTargetBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["ShareTargetBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+See [Security](/appdevicebridge/security/).
+
+What arrives is content from another app, so treat it as untrusted input. The bridge already does the following:
+- It never offers a `url` that isn't http or https.
+- It cleans file names so they can't escape `shares/{id}/`.
+- It looks up a share's id in the queue rather than using it as a path.
+- On Android, it refuses `file:` URIs.
+
+On Linux, only turn on `AcceptCommandLineFiles` for an app launched from its .desktop file, because any readable
+file named on the command line reaches the page.

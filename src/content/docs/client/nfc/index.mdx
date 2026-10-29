@@ -1,0 +1,189 @@
+---
+title: NFC
+description: Read and write NDEF NFC tags on Android, iOS, Windows / macOS / Linux PC/SC readers and Blazor WebAssembly with Shiny.Nfc
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+`INfcManager` reads and writes **NDEF** tags: URLs, text, MIME payloads, smart posters and Android app records. That
+covers almost every NFC feature an app ships, and NDEF is the one thing every platform can do.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Nfc" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui", "blazor"]} os={["android", "ios", "windows", "macos", "linux", "web"]} />
+
+| Platform | Uses | Notes |
+|---|---|---|
+| Android | `NfcAdapter` reader mode | Tag UID available. A blank tag is formatted by its first write |
+| iOS | CoreNFC `NFCNDEFReaderSession` | The system scan sheet stays up for the whole scan. iPhone 7 or later. No tag UID |
+| Windows, macOS, Linux | A PC/SC contactless reader (`winscard.dll`, `PCSC.framework`, `pcsc-lite`) | NFC Forum Type 2 (NTAG, MIFARE Ultralight) and Type 4 tags |
+| Blazor WebAssembly | Web NFC (`NDEFReader`) | Chrome on Android only |
+| Mac Catalyst, iOS simulator | - | `Capabilities` is `None` |
+
+:::note
+NDEF only, on purpose. Payment cards, passports, MIFARE Classic, raw tag commands, card emulation and peer-to-peer are out of scope.
+:::
+
+## Setup
+
+```bash
+dotnet add package Shiny.Nfc
+```
+
+```csharp
+using Shiny;
+
+builder.Services.AddNfc();
+```
+
+### Android
+
+Add the NFC permission to `AndroidManifest.xml`. It's a normal permission: granted at install and never prompted. Mark the hardware optional unless the app is useless without it.
+
+```xml
+<uses-permission android:name="android.permission.NFC" />
+<uses-feature android:name="android.hardware.nfc" android:required="false" />
+```
+
+Scans run in reader mode on the current activity, so tags come to your scan instead of launching an intent. If the activity changes or the screen rotates, the scan re-arms on the activity that resumes.
+
+### iOS
+
+Add `NFCReaderUsageDescription` to `Info.plist`, enable **NFC Tag Reading** for the App ID, and add the entitlement:
+
+```xml
+<!-- Info.plist -->
+<key>NFCReaderUsageDescription</key>
+<string>Reads and writes your NFC tags</string>
+
+<!-- Entitlements.plist -->
+<key>com.apple.developer.nfc.readersession.formats</key>
+<array>
+    <string>TAG</string>
+</array>
+```
+
+:::caution
+Use `TAG`, not `NDEF`. Since the iOS 18 SDK, App Store Connect rejects an upload whose entitlement lists `NDEF`, and `TAG` covers NDEF reader sessions.
+:::
+
+### Windows and macOS
+
+Plug in a PC/SC contactless reader, such as an ACS ACR122U. Readers plugged in or unplugged during a scan are picked up within a second.
+
+A **sandboxed macOS app** (anything from the Mac App Store, and the default for a .NET macOS app) also needs the smart card entitlement, without which PC/SC finds no readers:
+
+```xml
+<key>com.apple.security.smartcard</key>
+<true/>
+```
+
+### Linux
+
+Install and start the PC/SC daemon, plus the reader's CCID driver:
+
+```bash
+sudo apt install pcscd libpcsclite1 libccid
+pcsc_scan   # check the reader and a tag show up
+```
+
+On Linux, NFC ships in the `net10.0` build of `Shiny.Nfc` and loads `libpcsclite.so.1` at runtime, with no D-Bus dependency. If `pcscd` isn't running yet when a scan starts, the scan waits for it instead of failing.
+
+### Blazor WebAssembly
+
+Web NFC is Chrome on Android, in a secure context (https). The first scan shows the browser's permission prompt and has to start from a user gesture, such as a button click. Other browsers report `NfcCapabilities.None`.
+
+## Checking support
+
+```csharp
+using Shiny.Nfc;
+
+if (nfc.Capabilities == NfcCapabilities.None)
+    return; // no NFC here - hide the feature
+
+var access = await nfc.RequestAccess();
+// Available, Disabled (Android: NFC switched off), NotSetup (PC/SC: no reader yet), Denied (Web NFC)
+```
+
+`Capabilities` is a set of flags: `ReadNdef`, `WriteNdef`, `MakeReadOnly` and `TagIdentifier`. iOS has no `TagIdentifier`.
+
+## Reading and writing one tag
+
+For a single tap, `ReadOne` and `WriteOne` start a scan, do the work, and end the scan:
+
+```csharp
+var result = await nfc.ReadOne(new NfcScanOptions { AlertMessage = "Hold your phone near the tag" });
+if (result?.Message is { } message && message.Records[0].TryGetUri(out var uri))
+    await Launcher.OpenAsync(uri);
+
+var written = await nfc.WriteOne(new NdefMessage(NdefRecord.CreateUri("https://shinylib.net")));
+```
+
+`ReadOne` returns null when the scan ended before a tag was tapped, for example when the user dismissed the iOS scan sheet. Then `WriteOne` returns false.
+
+## Scanning
+
+A scan is an `IAsyncEnumerable<INfcTag>`, and **the scan session lives exactly as long as the `await foreach`**. The radio starts on the first tag request. Leaving the loop (`break`, cancellation or an exception) ends the session, dismissing the iOS scan sheet or stopping Android reader mode.
+
+```csharp
+await foreach (var tag in nfc.Scan(new NfcScanOptions { AlertMessage = "Tap a tag" }, ct))
+{
+    var message = await tag.ReadNdef(ct);    // null for a blank tag
+    if (tag.IsWritable && message == null)
+        await tag.WriteNdef(new NdefMessage(NdefRecord.CreateText("claimed")), ct);
+}
+```
+
+- A tag is only usable inside the loop body that received it. Keep its `Identifier` or the message you read, never the tag.
+- Only one scan runs at a time. Starting a second one throws `InvalidOperationException`.
+- While your loop is busy with one tag, the newest tag waits for it, and an older unhandled one is dropped.
+- The loop ends normally when the user dismisses the platform's scan UI (iOS ends a session itself after 60 seconds), and throws `NfcException` when the platform ends it for any other reason.
+
+## Messages and records
+
+`NdefMessage` and `NdefRecord` encode and parse NDEF on every platform, so the same records work everywhere:
+
+| Factory | Record |
+|---|---|
+| `NdefRecord.CreateUri("https://…")` | Well-known URI, with the standard prefix compression |
+| `NdefRecord.CreateText("hello", "en")` | Well-known text, UTF-8 or UTF-16 |
+| `NdefRecord.CreateSmartPoster(uri, title)` | A URI with a title |
+| `NdefRecord.CreateMime("application/json", bytes)` | A MIME payload |
+| `NdefRecord.CreateExternal("example.com", "type", bytes)` | An NFC Forum external type |
+| `NdefRecord.CreateAndroidApplication("com.example.app")` | An Android Application Record, which opens or installs the app |
+| `NdefRecord.CreateAbsoluteUri(uri)` | An absolute-URI type record |
+
+Read them back with `TryGetUri`, `TryGetText` and `TryGetSmartPoster`, or use `MimeType`, `TypeNameFormat`, `Type` and `Payload` for anything else. `message.Length` is the encoded size. Compare it with `tag.MaxSize` before writing.
+
+## Locking a tag
+
+```csharp
+await tag.MakeReadOnly();
+```
+
+:::danger
+This is **permanent**. No app can ever write to the tag again, and there is no unlock. Ask the user first.
+:::
+
+## Errors
+
+| Exception | When |
+|---|---|
+| `NfcTagLostException` | The tag left the field. A write cut short may have destroyed the previous message |
+| `NfcTagReadOnlyException` | The tag is locked |
+| `NdefMessageTooLargeException` | The message doesn't fit. Nothing was written |
+| `NdefFormatException` | The tag holds bytes that aren't a valid NDEF message |
+| `NfcNotSupportedException` | The platform or the tag can't do it. Check `Capabilities` first |
+
+All of them derive from `NfcException`.
+
+## Platform notes
+
+- **iOS:** an NDEF session never exposes the tag's UID, so `Identifier` is always null.
+- **PC/SC:** MIFARE Classic and other storage cards that aren't Type 2 are reported as tags, but read as having no NDEF and refuse writes. Built-in laptop NFC is usually a PC/SC reader too.
+- **Web NFC:** the message comes with the tap, so `ReadNdef` returns what was read rather than reading again. A write goes to the next tag in range, which is the one just read as long as it's still held there. Web NFC doesn't report lock state or capacity, so `IsWritable` is optimistic and `MaxSize` is null. It can only write the text, URL and smart poster well-known types at the top level.
+- **Tag UIDs** aren't secret. Some phones acting as tags randomise them on every tap. Use them to tell stickers apart, never to authenticate.

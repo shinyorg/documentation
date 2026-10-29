@@ -61,6 +61,11 @@ const announcementConfig = {
       description: '[iPhone Duo](/client/core/screen-posture), [VPN Management](/client/vpn), [Push Notification Images](/client/push), & [Age Signals](/client/agesignals)'
     }, 
     {
+      id: 'client-v65',
+      title: 'Shiny Client v6.5',
+      description: '[Biometrics](/client/biometrics) & [NFC](/client/nfc)'
+    },     
+    {
       id: 'controls-21',
       title: 'Shiny Controls v2',
       description: '[Foldables](/controls/foldables), [MediaElement Encoder Support](/controls/mediaelement), [Document SDK](/controls/office-shell/documents), [Tray Icon Improvements](/controls/trayicon), & [Notch View](/controls/notch)'

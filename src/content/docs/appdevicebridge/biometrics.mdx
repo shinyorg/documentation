@@ -1,0 +1,120 @@
+---
+title: Biometrics
+description: Verify the device owner from a Shiny.AppDeviceBridge web app with Touch ID, Face ID, Optic ID, Android fingerprint / face / iris and Windows Hello
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Biometrics" />
+
+The biometrics bridge shows the platform's own biometric prompt to the page, for example to unlock a vault or confirm a
+sensitive action. It's built on [Shiny.Biometrics](/client/biometrics/).
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, Mac Catalyst, macOS | LocalAuthentication: Touch ID, Face ID, Optic ID. On macOS a paired Apple Watch also works when the passcode is allowed |
+| Android | AndroidX BiometricPrompt: fingerprint, face, iris |
+| Windows | Windows Hello: face, fingerprint or the Hello PIN |
+| Linux | nothing: every route answers `501` |
+
+A device without biometric hardware still answers, with `status: "NotSupported"`.
+
+:::caution
+The answer is a local yes/no for the page's UI. Don't send it to your server as proof of identity. Your server needs its
+own credential, such as a token or a passkey.
+:::
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Biometrics
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddBiometricsBridge(),
+    webApp => { /* … */ }
+);
+```
+
+On iOS, add `NSFaceIDUsageDescription` to `Info.plist`. Without it, prompting on a Face ID device answers
+`409 cannot_prompt`. Android and Windows need nothing. See [Shiny.Biometrics](/client/biometrics/).
+
+## From the page
+
+```ts
+import { BiometricsBridge } from "@shinyorg/appdevicebridge";
+
+const biometrics = new BiometricsBridge();
+
+const availability = await biometrics.getAvailability();
+if (availability.status === "Available" || availability.isDeviceCredentialSet) {
+    const result = await biometrics.authenticate({
+        reason: "Unlock your vault",
+        allowDeviceCredential: true
+    });
+
+    if (result.status === "Success")
+        unlockVault();
+    else if (result.status === "Fallback")
+        showPasswordLogin();
+}
+```
+
+In Blazor, register `AddBiometricsBridgeClient()` and inject `IBiometricsBridge`.
+
+## Availability
+
+`GET biometrics` reports, with no UI:
+
+| Field | Meaning |
+| --- | --- |
+| `status` | `Available`, `NotSupported` (no hardware), `NotEnrolled`, `LockedOut` (the passcode unlocks it), `PasscodeNotSet` (Apple), `Unavailable` (busy, disconnected or disabled by policy), `SecurityUpdateRequired` (Android) |
+| `types` | The hardware present, even when nothing is enrolled: `Fingerprint`, `Face`, `Iris`, or `Unknown` for Windows Hello. Apple reports one, Android every sensor the device declares |
+| `isDeviceCredentialSet` | A passcode, PIN or pattern is set, so `allowDeviceCredential` has something to fall back to |
+
+Use `types` to label the button: "Face ID", "Touch ID", "Fingerprint" or "Windows Hello". `?strength=Weak` asks Android
+about class 2 biometrics, which includes most camera-based face unlock.
+
+## Prompting
+
+`POST biometrics/authenticate` shows the prompt and answers `{ status, errorMessage }`. A cancel, lockout or missing
+enrollment is a `status`, not an error:
+
+| `status` | Meaning |
+| --- | --- |
+| `Success` | The device owner was verified |
+| `Cancelled` | The user or the system dismissed the prompt |
+| `Fallback` | Apple: the user tapped the fallback button. Show your own login |
+| `Failed`, `LockedOut`, `NotEnrolled`, `PasscodeNotSet`, `NotAvailable`, `Timeout` | Show `errorMessage`, the platform's own message |
+
+| Field | Platforms | Meaning |
+| --- | --- | --- |
+| `reason` | All | Required, at most 256 characters. Shown in the prompt |
+| `title`, `subtitle` | Android | The prompt's title (defaults to `reason`) and a line under it |
+| `cancelText` | Apple, Android | The cancel button |
+| `fallbackText` | Apple | The button after a failed match. `null` keeps "Enter Password", `""` hides it |
+| `allowDeviceCredential` | All | Accept the passcode, PIN or pattern too. Windows Hello always offers its PIN |
+| `strength` | Android | `Strong` (class 3, the default) or `Weak` (class 2) |
+| `confirmationRequired` | Android | For face, wait for the user to confirm after a match. On by default |
+
+Aborting the request (an `AbortSignal`, or a cancelled token in C#) dismisses the prompt.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `400` | `bad_request` | The reason is empty, or a text is over 256 characters |
+| `409` | `cannot_prompt` | The app has nothing to show the prompt from: no Android activity, or a missing `NSFaceIDUsageDescription` |
+| `501` | `not_supported` | Linux, or the app did not register the bridge |
+
+## Requests
+
+<BridgeApi bridges={["BiometricsBridge"]} show="requests" />
+
+## Types
+
+<BridgeApi bridges={["BiometricsBridge"]} show="types" />

@@ -1,0 +1,143 @@
+---
+title: NFC
+description: Read and write NDEF NFC tags from a Shiny.AppDeviceBridge web app - one-tap reads and writes, continuous scanning with tag events, and writing or locking a held tag
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Nfc" />
+
+The NFC bridge reads and writes **NDEF** tags (URLs, text, MIME payloads, smart posters and Android app records) for
+the page. It's built on [Shiny.Nfc](/client/nfc/). A WebView has no Web NFC (neither Android's WebView nor WKWebView
+implements it), so this is the page's only way to reach the NFC radio.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| Android | Reader mode on the current activity |
+| iOS | CoreNFC, with the system scan sheet. No tag UID |
+| Windows, macOS, Linux | A PC/SC contactless reader such as an ACR122U (Linux: `pcscd`) |
+| Mac Catalyst, a device with no NFC | nothing: every route answers `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Nfc
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddNfcBridge(),
+    webApp => { /* … */ }
+);
+```
+
+Android needs `<uses-permission android:name="android.permission.NFC" />`. iOS needs `NFCReaderUsageDescription` and
+the `com.apple.developer.nfc.readersession.formats` entitlement with `TAG`. See [Shiny.Nfc](/client/nfc/#setup).
+
+## One tap
+
+For a single read or write, the bridge starts a scan, handles the first tag, and ends the scan:
+
+```ts
+import { NfcBridge } from "@shinyorg/appdevicebridge";
+
+const nfc = new NfcBridge();
+
+const read = await nfc.read({ alertMessage: "Hold your phone near the tag" });
+const url = read?.records?.find(r => r.uri)?.uri;
+
+const { written } = await nfc.write({
+    records: [{ uri: "https://shinylib.net" }, { text: "Shiny" }]
+});
+```
+
+`read` answers 204 (`null`) when the scan ended before a tag was tapped, for example when the user dismissed the iOS
+sheet. `write` then answers `{ written: false }`. Aborting the request ends the scan.
+
+## Scanning
+
+To keep scanning, listen for `nfc.tag` first (the scan answers `409 not_listening` otherwise), then start it. Each tag
+arrives with its message already read:
+
+```ts
+// subscribe before starting - the scan needs a listener
+const stopTags = await nfc.onTag(tag => {
+    console.log(tag.identifier, tag.records);   // identifier is null on iOS
+});
+await nfc.onScanEnded(e => console.log("scan ended:", e.reason));   // Stopped, Dismissed or Failed
+
+await nfc.startScan({ alertMessage: "Tap your badge" });
+// …
+await nfc.stopScan();
+```
+
+The scan also stops when the page stops listening for `nfc.tag`, so a page that navigates away doesn't leave the iOS
+sheet up. Only one NFC session runs at a time: a one-tap call during a scan answers `409 nfc_busy`. Before starting, the
+scan answers `409 nfc_unavailable` when NFC is switched off on Android.
+
+### Writing to a scanned tag
+
+A native tag only exists while the scan is handling it, so to write to or lock a tag from `nfc.tag`, scan with
+`holdSeconds` (up to 60). The scan then holds each tag until the page releases it or the hold runs out. A tag tapped
+meanwhile waits its turn.
+
+```ts
+await nfc.onTag(async tag => {
+    if (!tag.records) {
+        await nfc.writeTag(tag.tagId, { records: [{ uri: `https://example.com/asset/${crypto.randomUUID()}` }] });
+    }
+    await nfc.releaseTag(tag.tagId);   // move on to the next tag now
+});
+await nfc.startScan({ holdSeconds: 10 });
+```
+
+`tagId` is the bridge's handle for the held tag, not its UID. Once the tag is released, its routes answer
+`404 tag_not_held`. With `holdSeconds` left at 0, the default, every tag is released straight away. That's the setting
+for read-only scanning, such as a check-in kiosk.
+
+`lockTag(tagId)` makes the tag read-only. **This is permanent**: no app can ever write to it again.
+
+## Records
+
+A record from a tag carries its raw parts (`format`, `type`, base64 `payload`, `id`) plus the decoded value for the
+common types: `uri` (URI records and smart posters), `text` and `language`, and `mimeType`.
+
+To write, set exactly one kind per record:
+
+| Record | Fields |
+| --- | --- |
+| URI | `{ uri }` |
+| Text | `{ text, language? }` (`en` by default) |
+| MIME | `{ mimeType, data }` (base64) |
+| Android Application Record | `{ androidPackage }`: opens, or offers to install, the app |
+| Raw | `{ format, type, data }`, for example `{ format: "External", type: "example.com:thing", data }` |
+
+Any record can also set `id`. A message has 1 to 32 records and at most 32 KB.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `400` | `bad_request` | A record isn't exactly one kind, the message is empty or too large, or `holdSeconds` is over 60 |
+| `404` | `tag_not_held` | The tag behind `tagId` was released, its hold ran out, or the scan stopped |
+| `409` | `nfc_busy`, `not_listening`, `nfc_unavailable` | Another NFC session is running, nobody listens for `nfc.tag`, or NFC is off |
+| `409` | `tag_read_only`, `tag_not_supported` | The tag is locked, or can't hold NDEF or be locked |
+| `410` | `tag_lost` | The tag left the field. A write cut short may have destroyed the previous message |
+| `413` | `message_too_large` | The message doesn't fit on the tag. Nothing was written |
+| `422` | `invalid_ndef` | The tag holds bytes that aren't NDEF |
+| `502` | `nfc_failed` | Anything else the radio reported |
+
+## Requests
+
+<BridgeApi bridges={["NfcBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["NfcBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["NfcBridge"]} show="types" />

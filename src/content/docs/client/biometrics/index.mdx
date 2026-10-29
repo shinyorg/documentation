@@ -1,0 +1,159 @@
+---
+title: Biometrics
+description: Verify the device owner with Touch ID, Face ID, Optic ID, Android fingerprint / face / iris and Windows Hello from one IBiometrics
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+
+`IBiometrics` verifies the device owner with the platform's own prompt. It uses **LocalAuthentication** on iOS, Mac Catalyst and macOS, **AndroidX BiometricPrompt** on Android, and **Windows Hello** on Windows. You can check what the device supports without showing any UI, and you can let the user fall back to their passcode or PIN.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Biometrics" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows"]} />
+
+| Platform | Uses | Biometrics |
+|---|---|---|
+| iOS, Mac Catalyst, macOS | `LAContext` | Touch ID, Face ID, Optic ID. On macOS a paired Apple Watch also works when the passcode is allowed. iPhone Duo reports through the same types. |
+| Android | AndroidX `BiometricPrompt` 1.1 | Fingerprint, face and iris, as class 3 (strong) or class 2 (weak) |
+| Windows | `UserConsentVerifier` | Windows Hello: face, fingerprint or the Hello PIN |
+| Linux, Blazor, plain .NET | - | Reports `NotSupported` |
+
+:::caution
+The result is a **local yes/no**. Use it to gate UI or unlock data stored on the device. Don't send "biometrics passed" to your server as proof of identity: anyone in control of a rooted or jailbroken device can fake it. Your server needs its own credential, such as a token or a passkey.
+:::
+
+## Setup
+
+```bash
+dotnet add package Shiny.Biometrics
+```
+
+```csharp
+using Shiny;
+
+builder.Services.AddBiometrics();
+```
+
+### iOS
+
+Add `NSFaceIDUsageDescription` to `Info.plist`. On a Face ID device, iOS terminates an app that prompts without it, so `Authenticate` throws `InvalidOperationException` first.
+
+```xml
+<key>NSFaceIDUsageDescription</key>
+<string>Unlock your account with Face ID</string>
+```
+
+### Android
+
+There's nothing to add. `USE_BIOMETRIC` and `USE_FINGERPRINT` merge in from the AndroidX manifest. The prompt is shown from the current activity, which must be a `FragmentActivity`. MAUI's `MauiAppCompatActivity` and any `AppCompatActivity` are.
+
+### Windows
+
+There's nothing to add. The prompt is parented to the app's main window, so it opens in front of the app rather than behind it.
+
+## Checking availability
+
+`GetAvailability()` shows no UI, so it's safe to call when a screen loads to decide whether to offer biometric sign-in, and what to call it.
+
+```csharp
+using Shiny.Biometrics;
+
+var availability = await biometrics.GetAvailability();
+
+switch (availability.Status)
+{
+    case BiometricStatus.Available:
+        var label = availability.Types switch
+        {
+            BiometricType.Face => "Face ID",           // Apple; "Face unlock" on Android
+            BiometricType.Fingerprint => "Touch ID",   // Apple; "Fingerprint" on Android
+            BiometricType.Iris => "Optic ID",
+            _ => "Windows Hello"
+        };
+        break;
+
+    case BiometricStatus.NotEnrolled:
+        // the hardware is there - suggest setting it up in Settings
+        break;
+
+    case BiometricStatus.LockedOut:
+        // too many failed attempts - the passcode unlocks it again
+        break;
+}
+```
+
+| Member | Description |
+|---|---|
+| `Status` | `Available`, `NotSupported`, `NotEnrolled`, `LockedOut`, `PasscodeNotSet` (Apple), `Unavailable` (busy, disconnected or disabled by policy), `SecurityUpdateRequired` (Android) |
+| `Types` | The hardware present, reported even when nothing is enrolled. Apple reports exactly one type. Android reports every sensor the device declares. Windows reports `Unknown`. |
+| `IsDeviceCredentialSet` | A passcode, PIN or pattern is set, so `AllowDeviceCredential` has something to fall back to |
+| `IsAvailable` | `Status == Available` |
+
+On Android, pass `BiometricStrength.Weak` to ask about class 2 biometrics, which includes most camera-based face unlock.
+
+## Authenticating
+
+```csharp
+var result = await biometrics.Authenticate(new BiometricRequest
+{
+    Reason = "Unlock your vault",
+    Title = "Unlock",               // Android
+    AllowDeviceCredential = true    // let the user enter their passcode / PIN instead
+});
+
+switch (result.Status)
+{
+    case BiometricResultStatus.Success:
+        // verified
+        break;
+
+    case BiometricResultStatus.Cancelled:
+        // the user dismissed it - do nothing
+        break;
+
+    case BiometricResultStatus.Fallback:
+        // Apple: the user tapped the fallback button - show your own login
+        break;
+
+    default:
+        // LockedOut, NotEnrolled, PasscodeNotSet, Failed, NotAvailable, Timeout
+        // result.ErrorMessage has the platform's own message
+        break;
+}
+```
+
+Failures come back as a status instead of an exception. `Authenticate` only throws when `Reason` is empty, when it has nothing to show the prompt from (no current Android `FragmentActivity`), when `NSFaceIDUsageDescription` is missing, or when the token is cancelled.
+
+### Request options
+
+| Property | Platforms | Description |
+|---|---|---|
+| `Reason` | All | Required. Apple shows it under the system title, Android uses it as the description (or as the title when `Title` is null), and Windows shows it as the message. |
+| `Title` | Android | The prompt title |
+| `Subtitle` | Android | A line under the title |
+| `CancelText` | Apple, Android | The cancel button. Android needs one when `AllowDeviceCredential` is off and uses the system "Cancel" by default. |
+| `FallbackText` | Apple | The button shown after a failed match. Null keeps the system "Enter Password", and an empty string hides it. When `AllowDeviceCredential` is off, tapping it returns `Fallback`. |
+| `AllowDeviceCredential` | All | Accept the passcode, PIN or pattern as well as biometrics. Windows Hello always offers its PIN, so it can't be turned off there. |
+| `Strength` | Android | `Strong` (class 3, the default) or `Weak` (class 2). Android 9 and 10 reject strong biometrics combined with the device credential, so that combination is relaxed to weak there. |
+| `ConfirmationRequired` | Android | For passive biometrics such as face, wait for the user to confirm after a match. On by default. |
+
+### Cancelling
+
+Cancel the token to dismiss the prompt from code, for example when the app goes to the background. `Authenticate` then throws `OperationCanceledException`.
+
+```csharp
+using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+var result = await biometrics.Authenticate(new BiometricRequest { Reason = "Confirm payment" }, cts.Token);
+```
+
+## Windows Hello
+
+Windows Hello accepts face, fingerprint or the Hello PIN, and it never reports which one was used. So on Windows:
+
+- `Types` is `Unknown` when Hello is set up
+- `AllowDeviceCredential = false` can't hide the PIN
+- `NotEnrolled` means Hello isn't set up for this user
