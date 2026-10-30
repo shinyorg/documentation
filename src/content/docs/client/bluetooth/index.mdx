@@ -1,0 +1,153 @@
+---
+title: Classic Bluetooth | Getting Started
+description: Classic Bluetooth (BR/EDR) for .NET - RFCOMM / Serial Port Profile connections and servers over a Stream, device discovery, pairing and discoverability on Android, Windows, macOS and Linux
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+Classic Bluetooth (BR/EDR) for the devices Bluetooth LE never replaced: SPP serial adapters, receipt
+and label printers, barcode scanners, OBD dongles and a long tail of industrial and medical
+equipment. One `IBluetoothManager` is both the client and the server. It finds devices, pairs with
+them, and opens or accepts RFCOMM connections that you read and write as an ordinary
+`System.IO.Stream`.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.Bluetooth" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["android", "windows", "macos", "linux"]} />
+
+:::note[Not for BLE, and not on iOS]
+This is the classic radio only. If your device talks about services and characteristics, it is
+Bluetooth LE, so use [BluetoothLE](/client/ble/) instead. That includes "BLE serial" modules such as
+the HM-10.
+
+There is **no iOS or Mac Catalyst target**. On iOS, classic Bluetooth goes through ExternalAccessory,
+which only reaches MFi-certified accessories whose protocol Apple has approved for your app.
+:::
+
+## What each platform can do
+
+| Operation | Android | Windows | macOS | Linux |
+|-----------|---------|---------|-------|-------|
+| Paired devices | ✅ | ✅ | ✅ | ✅ |
+| Discovery (inquiry) | ✅ | ✅ | ✅ | ✅ |
+| Pair | ✅ | ✅ | ✅ | ✅ (needs a BlueZ agent for PIN / confirmation) |
+| Connect (RFCOMM client) | ✅ | ✅ | ✅ | ✅ |
+| Listen (RFCOMM server) | ✅ | ✅ | ✅ | ✅ |
+| Make discoverable | ✅ (system dialog) | ❌ | ❌ | ✅ |
+
+`IBluetoothManager.Capabilities` reports the same thing at runtime. An operation the platform does
+not support throws `BluetoothNotSupportedException`.
+
+<AiSkill skillName="shiny-bluetooth" />
+
+## Setup
+
+```bash
+dotnet add package Shiny.Bluetooth
+```
+
+On Linux, add the BlueZ-backed package as well:
+
+```bash
+dotnet add package Shiny.Bluetooth.Linux
+```
+
+```csharp
+using Shiny;
+
+builder.Services.AddBluetooth();        // Android, Windows, macOS
+services.AddLinuxBluetooth();           // Linux
+```
+
+A MAUI app that also targets iOS has to leave the package out of the iOS and Mac Catalyst builds:
+
+```xml
+<PackageReference Include="Shiny.Bluetooth"
+                  Condition="!$(TargetFramework.Contains('-ios')) AND !$(TargetFramework.Contains('maccatalyst'))" />
+```
+
+```csharp
+#if ANDROID || WINDOWS
+builder.Services.AddBluetooth();
+#endif
+```
+
+Then ask for access. This requests the Android permissions or raises the macOS privacy prompt. It
+returns `Disabled` when access is granted but the radio is off:
+
+```csharp
+var access = await bluetooth.RequestAccess();
+if (access != AccessState.Available)
+    return;
+```
+
+See [Platform Setup](/client/bluetooth/platform/) for the manifest entries and entitlements.
+
+## Finding devices
+
+```csharp
+var devices = new List<IBluetoothDevice>(await bluetooth.GetPairedDevices());
+
+await foreach (var result in bluetooth.Discover(ct))
+{
+    Console.WriteLine($"{result.Device.Name} {result.Device.Address} {result.Rssi} dBm");
+    if (!devices.Contains(result.Device))
+        devices.Add(result.Device);
+}
+```
+
+`Discover` runs an inquiry for about 12 seconds and yields each address once. On Android and macOS
+that is the OS's own inquiry cycle. Windows and Linux would otherwise scan until stopped, so they get
+the same window (`IBluetoothManager.InquiryDuration`). Cancel the token or break out of the loop to end
+it sooner. **Finish the inquiry before connecting**: an inquiry in progress slows connections on the
+same radio to a crawl.
+
+Each `BluetoothDiscoveryResult` holds the `Device` and the `Rssi` (signal strength in dBm) it was heard
+at. The signal strength describes that sighting, not the device, so it lives on the result. Devices
+from `GetPairedDevices()` have none.
+
+An `IBluetoothDevice` carries:
+
+| Property | |
+|----------|-|
+| `Address` | Always `AA:BB:CC:DD:EE:FF`. `GetDevice` also accepts `aa-bb-…`, `AABBCC…` and the other platform forms. Two devices are equal when their addresses are. |
+| `Name` | The friendly name, or null if the OS has not resolved it yet |
+| `IsPaired` | Whether this machine is bonded with it, as read and kept current by `Pair()` |
+| `ClassOfDevice` / `MajorDeviceClass` | The raw Class of Device, and its major class decoded (`Phone`, `Imaging`, `AudioVideo`, …) |
+| `Pair()` / `Connect(serviceUuid)` | See below and [Connections](/client/bluetooth/connections/) |
+
+You don't need to discover a device you already know the address of:
+
+```csharp
+var device = await bluetooth.GetDevice("00:1A:7D:DA:71:13");
+```
+
+`GetDevice` fills in the name, pairing state and class from whatever the OS already knows about the
+address. On Linux, BlueZ must already know the device (paired, or seen by
+`Discover`) before you can connect.
+
+## Pairing
+
+```csharp
+if (!device.IsPaired && !await device.Pair(ct))
+    return; // declined, wrong PIN, or timed out
+```
+
+The OS shows its own confirmation or PIN prompt where the pairing method needs one. `Pair` returns
+`true` when the device ends up paired, including when it already was. A secure `Connect` pairs on the
+way in anyway, so call `Pair` when you want the prompt to come at a predictable point in your UI.
+
+On Linux, a device that asks for a PIN or a confirmation needs a BlueZ agent to answer it. A desktop
+session already has one. On a headless device, pair once with `bluetoothctl` (`agent on`,
+`default-agent`, `pair <address>`). Shiny marks a device it paired as *trusted*, so it can connect to
+your server later without BlueZ asking an agent to authorize it.
+
+## Next
+
+- [Connections](/client/bluetooth/connections/): connect to a service, host one, and work with the stream
+- [Platform Setup](/client/bluetooth/platform/): permissions, entitlements and platform limits

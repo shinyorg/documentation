@@ -196,6 +196,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'macos', 'windows', 'linux'],
             },
             {
+                label: 'Classic Bluetooth',
+                tagline: 'RFCOMM serial connections, discovery and pairing over classic Bluetooth',
+                summary: 'Talk to the classic Bluetooth (BR/EDR) devices BLE never replaced, such as SPP serial adapters, printers and scanners. Connect to a service or host one, and read and write the connection as a Stream.',
+                highlights: [
+                    'RFCOMM client and server over a Stream',
+                    'Discovery and paired devices',
+                    'Pairing and discoverability',
+                    'A Linux package over BlueZ',
+                ],
+                packages: ['Shiny.Bluetooth', 'Shiny.Bluetooth.Linux'],
+                frameworks: ['dotnet', 'maui'],
+                os: ['android', 'windows', 'macos', 'linux'],
+            },
+            {
                 label: 'BluetoothLE Hubs',
                 tagline: 'SignalR style hubs between nearby devices over Bluetooth LE',
                 summary: 'One device hosts a hub and nearby devices connect and call it through a source generated, strongly typed proxy. The host pushes events to everyone, one client or a group - no server or network required.',

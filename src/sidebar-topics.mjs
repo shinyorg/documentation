@@ -245,6 +245,17 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Classic Bluetooth',
+        jumpTo: true,
+        dateUpdated: '2026-10-28',
+        items: [
+          { label: 'Getting Started', link: 'client/bluetooth/', dateCreated: '2026-10-28', dateUpdated: '2026-10-28' },
+          { label: 'Connections', link: 'client/bluetooth/connections', dateCreated: '2026-10-28', dateUpdated: '2026-10-28' },
+          { label: 'Platform Setup', link: 'client/bluetooth/platform', dateCreated: '2026-10-28', dateUpdated: '2026-10-28' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
         label: 'BluetoothLE Hubs',
         jumpTo: true,
         dateUpdated: '2026-10-03',
