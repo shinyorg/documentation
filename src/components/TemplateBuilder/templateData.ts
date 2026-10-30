@@ -9,27 +9,27 @@ export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.12.0',
     shinyShell: '7.0.3',
-    shinyControls: '2.1.0',
+    shinyControls: '2.2.0-beta-0001',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '6.4.0',
-    shinyConfiguration: '6.4.0',
+    shinyClient: '6.5.1',
+    shinyConfiguration: '6.5.1',
     shinyLocalization: '2.0.1',
     shinyStores: '6.0.1',
     shinyReflector: '6.0.1',
     shinyDI: '6.0.1',
     shinySerialization: '6.0.1',
-    shinyContactStore: '6.4.0',
-    shinyCalendar: '6.4.0',
-    shinySpeech: '3.0.0-beta-0036',
-    shinyAiConversation: '3.0.0-beta-0036',
+    shinyContactStore: '6.5.1',
+    shinyCalendar: '6.5.1',
+    shinySpeech: '3.0.0',
+    shinyAiConversation: '3.0.0',
     shinyMusic: '4.1.0',
-    shinyHealth: '2.0.1',
+    shinyHealth: '2.1.0',
     shinyDocumentDb: '14.1.0',
     shinyHttpServer: '2.2.1',
-    shinyDataSync: '6.4.0',
-    shinyObd: '1.4.0',
+    shinyDataSync: '6.5.1',
+    shinyObd: '1.5.0',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
     shinyRecognition: '1.0.0-beta-0007',
     /** Shiny.AspNet.* server libraries (WebHosting, JsonPatch, Idempotency, ...) ship together. */
@@ -41,7 +41,7 @@ export const VERSIONS = {
     shinyBleHubs: '1.5.0-beta-0004',
     /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
     shinyUniversalHubs: '1.5.0-beta-0004',
-    shinyAppDeviceBridge: '2.1.0',
+    shinyAppDeviceBridge: '2.2.0',
     shinyPermissions: '1.0.0-beta-0009',
     /** shinyorg/actors - Shiny.Actors and its add-ons ship together */
     shinyActors: '1.0.0-beta.11',
@@ -268,6 +268,14 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyObd,
         description: 'Vehicle OBD-II diagnostics over Bluetooth LE https://shinylib.net/obd/',
         visibleWhen: noDesktop },
+    { id: 'obdbluetooth', label: 'OBD (Classic Bluetooth)', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyObd,
+        description: 'Vehicle OBD-II diagnostics over classic Bluetooth (SPP) adapters such as ELM327 v1.5 and OBDLink LX - Android & Windows (Shiny.Obd.Bluetooth) https://shinylib.net/obd/bluetooth/',
+        visibleWhen: (s) => !!(s.useandroid || s.usewindows) },
+    { id: 'classicbluetooth', label: 'Classic Bluetooth', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'RFCOMM / SPP connections, discovery & pairing over classic Bluetooth - Android & Windows (Shiny.Bluetooth) https://shinylib.net/client/bluetooth/',
+        visibleWhen: (s) => !!(s.useandroid || s.usewindows) },
     { id: 'httpserver', label: 'HTTP Server', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyHttpServer,
         description: 'Host HTTP/1.1, HTTP/2 & HTTP/3, WebSockets and SSE inside the app, where ASP.NET Core cannot run https://shinylib.net/httpserver/maui/' },
@@ -327,6 +335,12 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'agesignals', label: 'Age Signals', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'The user\'s age range from Apple Declared Age Range (iOS 26+) / Google Play Age Signals (Shiny.AgeSignals) https://shinylib.net/client/agesignals/' },
+    { id: 'biometrics', label: 'Biometrics', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Face ID / Touch ID, AndroidX BiometricPrompt & Windows Hello from one IBiometrics (Shiny.Biometrics) https://shinylib.net/client/biometrics/' },
+    { id: 'nfc', label: 'NFC', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyClient,
+        description: 'Read & write NDEF tags - Android, iOS CoreNFC, PC/SC readers on Windows (Shiny.Nfc) https://shinylib.net/client/nfc/' },
     { id: 'actors', label: 'Actors', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyActors,
         description: 'Orleans-style virtual actors in-process - one call at a time, persisted state, streams & reminders (Shiny.Actors) https://shinylib.net/actors/' },
@@ -379,7 +393,7 @@ const MAUI_PARAMS: TemplateParam[] = [
         description: 'Host your web app on the device with native bridges (Shiny.AppDeviceBridge.WebView) https://shinylib.net/appdevicebridge/' },
     { id: 'aiconversation', label: 'AI Conversation', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyAiConversation,
-        description: 'AI Conversation with speech recognition and text-to-speech https://shinylib.net/aiconversation/' },
+        description: 'AI Conversation sessions with voice - push-to-talk, wake word & spoken replies (Shiny.AiConversation + Shiny.AiConversation.Voice) https://shinylib.net/aiconversation/' },
     { id: 'aichatclient', label: 'AI Conversation Chat Client', type: 'choice', defaultValue: 'None', category: 'services',
         version: VERSIONS.shinyAiConversation,
         description: 'The chat client AI Conversation talks to https://shinylib.net/aiconversation/chat-client-provider/',
@@ -394,9 +408,13 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyAiConversation,
         description: 'AiChatView - a drop-in chat screen wired to AI Conversation (Shiny.AiConversation.Maui) https://shinylib.net/aiconversation/chat-view/',
         visibleWhen: (s) => !!s.aiconversation },
-    { id: 'aimessagestore', label: 'AI Conversation Message Store', type: 'bool', defaultValue: false, category: 'services',
+    { id: 'aimessagestore', label: 'AI Conversation Session Store', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyAiConversation,
-        description: 'Persist conversations to SQLite (Shiny.AiConversation.MessageStores.SqliteDocDb) https://shinylib.net/aiconversation/message-store/',
+        description: 'Persist sessions & assistant memory to SQLite (Shiny.AiConversation.Stores.SqliteDocDb) https://shinylib.net/aiconversation/message-store/',
+        visibleWhen: (s) => !!s.aiconversation },
+    { id: 'aicamera', label: 'AI Conversation Camera Tool', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyAiConversation,
+        description: 'use_camera - the assistant asks to take a photo or scan a barcode / document through Shiny CameraView (Shiny.AiConversation.Maui.Camera, pulls in CameraView) https://shinylib.net/aiconversation/camera/',
         visibleWhen: (s) => !!s.aiconversation },
     { id: 'faceintelligence', label: 'Face Intelligence', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyRecognition,
@@ -680,6 +698,10 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.usedeeplinks = s.deeplinks !== '';
     s.usehttp = !!(s.authservice && s.refit);
     s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui || s.shinyblazorcontrols);
+    // the camera tool opens Shiny's CameraView modal (UseShinyCamera)
+    s.useaicamera = !!(s.aiconversation && s.aicamera);
+    if (s.useaicamera) s.shinycameraview = true;
+    s.useclassicbluetooth = !!(s.classicbluetooth || s.obdbluetooth);
     s.usemauicontrols = !!(s.aichatui || s.shinycontrols || s.shinyspeechaddins || s.shinycameraview || s.shinymediaelement || s.shinyoffice || s.shinykeyframe || s.shinyfoldables || s.shinytheme !== 'None');
     s.themeaurora = s.shinytheme === 'Aurora';
     s.themematerial = s.shinytheme === 'Material';

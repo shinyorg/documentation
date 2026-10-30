@@ -1650,6 +1650,33 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyClient
     },
     {
+        "id": "biometrics",
+        "nuget": "Shiny.Biometrics",
+        "macOsSupported": true,
+        "description": "Biometrics (Face ID, Touch ID, BiometricPrompt, Windows Hello)",
+        "category": "devicedata",
+        "version": VERSIONS.shinyClient
+    },
+    {
+        // PC/SC readers on Windows / macOS / Linux, CoreNFC on iOS, reader mode on Android
+        "id": "nfc",
+        "nuget": "Shiny.Nfc",
+        "macOsSupported": true,
+        "description": "NFC (NDEF tags)",
+        "category": "hardware",
+        "version": VERSIONS.shinyClient
+    },
+    {
+        // classic Bluetooth (BR/EDR) - Android, Windows, macOS (AppKit) and Linux; no iOS / Mac Catalyst
+        "id": "bluetooth",
+        "nuget": "Shiny.Bluetooth",
+        "macOsSupported": true,
+        "linuxNuget": "Shiny.Bluetooth.Linux",
+        "description": "Classic Bluetooth (RFCOMM / SPP)",
+        "category": "hardware",
+        "version": VERSIONS.shinyClient
+    },
+    {
         "id": "actors",
         "nuget": "Shiny.Actors",
         "description": "Actors",
@@ -1686,8 +1713,22 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "aiconversation-sqlitestore",
-        "nuget": "Shiny.AiConversation.MessageStores.SqliteDocDb",
-        "description": "AI Conversation - SQLite Message Store",
+        "nuget": "Shiny.AiConversation.Stores.SqliteDocDb",
+        "description": "AI Conversation - SQLite Session Store",
+        "category": "intelligence",
+        "version": VERSIONS.shinyAiConversation
+    },
+    {
+        "id": "aiconversation-voice",
+        "nuget": "Shiny.AiConversation.Voice",
+        "description": "AI Conversation - Voice",
+        "category": "intelligence",
+        "version": VERSIONS.shinyAiConversation
+    },
+    {
+        "id": "aiconversation-camera",
+        "nuget": "Shiny.AiConversation.Maui.Camera",
+        "description": "AI Conversation - MAUI Camera Tool",
         "category": "intelligence",
         "version": VERSIONS.shinyAiConversation
     },

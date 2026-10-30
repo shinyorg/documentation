@@ -12,6 +12,41 @@ export interface WhatsNewItem {
 
 export const whatsNew: WhatsNewItem[] = [
   {
+    date: "2026-10-30",
+    title: "AI Conversation 3",
+    href: "/aiconversation/",
+    icon: "comment",
+    description: "Rebuilt around sessions. Replies stream as they are written and can be interrupted, and each session persists to SQLite with search, auto titles and context compaction. The assistant keeps its own long-term memory, sees images and can ask to use the camera. Voice is now the separate <code>Shiny.AiConversation.Voice</code> package: push-to-talk, wake word, barge-in, answering a question by voice while the AI is still speaking, and replies spoken sentence by sentence.",
+  },
+  {
+    date: "2026-10-30",
+    title: "Speech & Audio 3",
+    href: "/speech/",
+    icon: "seti:audio",
+    description: "Full-duplex audio for calls, overlapping playback, WAV recording, real-time mic effects, VU metering and a live mic monitor. <code>SpeechTone</code> sets emotion and tone once and works across Azure, OpenAI, ElevenLabs and Typecast. Linux gets audio through <code>Shiny.Audio.Linux</code> and offline speech-to-text through <code>Shiny.Speech.Linux.Whisper</code>.",
+  },
+  {
+    date: "2026-10-30",
+    title: "Classic Bluetooth",
+    href: "/client/bluetooth/",
+    icon: "signal",
+    description: "RFCOMM serial connections to the classic Bluetooth devices BLE never replaced, such as SPP adapters, printers and scanners. Discover, pair, connect or host a service, and read and write the connection as a <code>Stream</code>. Runs on Android, Windows, macOS and Linux (BlueZ). <code>Shiny.Obd.Bluetooth</code> 1.5 uses it to reach the ELM327 and OBDLink adapters that <code>Shiny.Obd.Ble</code> can't see.",
+  },
+  {
+    date: "2026-10-29",
+    title: "Biometrics",
+    href: "/client/biometrics/",
+    icon: "seti:lock",
+    description: "Verify the device owner with the platform's own prompt: Face ID, Touch ID and Optic ID on Apple, AndroidX BiometricPrompt on Android, and Windows Hello, all through one <code>IBiometrics</code>. Check what's available without showing any UI, and fall back to the device passcode or PIN.",
+  },
+  {
+    date: "2026-10-29",
+    title: "NFC",
+    href: "/client/nfc/",
+    icon: "phone",
+    description: "Read and write NDEF tags: URLs, text, MIME payloads, smart posters and Android app records. One <code>INfcManager</code> covers Android reader mode, iOS CoreNFC, PC/SC contactless readers on Windows, macOS and Linux, and Web NFC in Blazor WebAssembly.",
+  },
+  {
     date: "2026-10-22",
     title: "EF Core Extensions",
     tag: "coming in 1.0",

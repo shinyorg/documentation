@@ -305,11 +305,12 @@ export const sidebarTopics = [
           { label: 'VIN Decoding', link: 'obd/vin', dateCreated: '2026-08-07', dateUpdated: '2026-08-07' },
           { label: 'Connection & Adapters', link: 'obd/connection', dateCreated: '2026-03-01', dateUpdated: '2026-03-01' },
           { label: 'BLE Transport', link: 'obd/ble', dateCreated: '2026-03-01', dateUpdated: '2026-03-01' },
+          { label: 'Classic Bluetooth Transport', link: 'obd/bluetooth', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'WiFi Transport', link: 'obd/wifi', dateCreated: '2026-08-07', dateUpdated: '2026-08-07' },
           { label: 'Serial Transport', link: 'obd/serial', dateCreated: '2026-08-07', dateUpdated: '2026-08-07' },
           { label: 'Custom Transports', link: 'obd/transports', dateCreated: '2026-03-01', dateUpdated: '2026-03-01' },
           { label: 'Adapter Emulator', link: 'obd/emulator', dateCreated: '2026-08-08', dateUpdated: '2026-09-02' },
-          { label: 'Release Notes', link: 'obd/release-notes', dateCreated: '2026-03-01', dateUpdated: '2026-03-01' }
+          { label: 'Release Notes', link: 'obd/release-notes', dateCreated: '2026-03-01', dateUpdated: '2026-10-30' }
         ]
       },
       {
@@ -600,7 +601,7 @@ export const sidebarTopics = [
           { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper', dateCreated: '2026-07-30', dateUpdated: '2026-07-30' },
           { label: 'Custom Provider', link: 'speech/custom-provider', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-10-29' }
+          { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-10-30' }
         ]
       },
       {

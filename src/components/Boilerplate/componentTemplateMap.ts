@@ -163,6 +163,9 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     calldirectory: [{ kind: 'shinyapp', paramId: 'calldirectory' }],
     vpn: [{ kind: 'shinyapp', paramId: 'vpn' }],
     agesignals: [{ kind: 'shinyapp', paramId: 'agesignals' }],
+    biometrics: [{ kind: 'shinyapp', paramId: 'biometrics' }],
+    nfc: [{ kind: 'shinyapp', paramId: 'nfc' }],
+    bluetooth: [{ kind: 'shinyapp', paramId: 'classicbluetooth' }],
     actors: [
         { kind: 'shinyapp', paramId: 'actors' },
         { kind: 'shinyblazor', paramId: 'actors' },
@@ -212,6 +215,11 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     'aiconversation-sqlitestore': [
         { kind: 'shinyapp', paramId: 'aiconversation' },
         { kind: 'shinyapp', paramId: 'aimessagestore' },
+    ],
+    'aiconversation-voice': [{ kind: 'shinyapp', paramId: 'aiconversation' }],
+    'aiconversation-camera': [
+        { kind: 'shinyapp', paramId: 'aiconversation' },
+        { kind: 'shinyapp', paramId: 'aicamera' },
     ],
     faceintelligence: [{ kind: 'shinyapp', paramId: 'faceintelligence' }],
     voiceintelligence: [{ kind: 'shinyapp', paramId: 'voiceintelligence' }],
