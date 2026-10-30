@@ -1,0 +1,97 @@
+---
+title: AI Conversation
+description: Persisted, streaming conversations with the app's own AI model — questions with choices, images, memory and a hands-free voice loop — for a Shiny.AppDeviceBridge web app, backed by Shiny.AiConversation
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.AiConversation" />
+
+The AI conversation bridge gives the page conversations with the app's AI model. Replies stream as events, the AI
+can ask questions with choices, sessions are stored and resumable, and the assistant remembers things across them. A
+hands-free voice loop (wake word, push-to-talk, talking over a reply) is optional. The model, its key, its tools and
+its prompts stay in the app; the page never sees them.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.AiConversation
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddAiConversationBridge(
+        ai => ai
+            .SetChatClientProvider<MyChatClientProvider>()   // or register an IChatClient
+            .AddSessionTitles(),
+        o => o.Voice = true                                   // optional: the voice loop
+    ),
+    webApp => { /* … */ }
+);
+```
+
+The first argument configures Shiny.AiConversation itself: the model, stores, tools, memory and interceptors. Without a
+provider it uses the `IChatClient` registered in the container. The in-memory stores are the default; register the
+SQLite stores from `Shiny.AiConversation.Stores.SqliteDocDb` to keep sessions across launches.
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IAiConversationBridge` | `AddAiConversationBridgeClient()` | `AiConversationBridge` |
+
+## Details
+
+Built on Shiny.AiConversation 3.0.
+
+| Topic | Details |
+| --- | --- |
+| **Sessions** | `POST sessions` starts one, `GET sessions/latest` carries on the most recent (`204` when there are none), `GET sessions` lists and searches them, and `DELETE sessions/{id}` deletes one with its messages and memory. A session never ends: it is compacted as its context fills. |
+| **Sending** | `POST sessions/{id}/messages` takes `text`, or an `answer` to a question with choices, plus up to 4 `images` from file roots and per-turn `instructions`. It answers with the `turnId` straight away; with `"wait": true` it answers once the turn ends, with the reply. A new message supersedes a turn still running, and `DELETE sessions/{id}/turn` interrupts it. |
+| **Streaming** | `ai.delta` carries each piece of the reply, `ai.message` each stored or changed message, and `ai.turn.ended` how the turn ended (`Completed`, `AwaitingUser`, `Interrupted`, `Superseded`, `Failed`, with the error). Every event names its session. |
+| **Open sessions** | Events come from sessions the bridge has open: starting, reading or sending to one opens it. It keeps `MaxOpenSessions` (8) open and closes the least recently used idle one beyond that; using it again reopens it. |
+| **Questions** | When the model asks something, `ai.questions` and the session's `pendingQuestions` carry it. Answer a question with choices with `answer: { questionId, choiceIds }` (one id unless `allowMultiple`), and one without choices with text. A question no longer pending answers `409 no_such_question`. |
+| **History** | `GET sessions/{id}/messages?before=&count=` pages backwards. Each message has its display `text`, what was actually `spokenText` when it was interrupted, and its `parts`: text, tool calls and results, answers and images. An image part's `attachmentId` fetches it from `GET attachments?id=`. |
+| **Memory** | `GET memory`, `PUT memory` and `DELETE memory` read, write and forget what the assistant remembers, globally, per profile or per session; `ai.memory` fires when the assistant changes it. Writes from the page are recorded as the user's. |
+| **Voice** | With `o.Voice = true`, `POST voice` attaches the voice loop to a session, with an optional `wakeWord`, interruption mode, quiet words, follow-up timeout and culture. It needs a listener on `ai.voice.state` to attach (`409 not_listening`) and detaches once the last one is gone, so a page that went away can't leave the microphone waiting for a wake word. `voice/talk`, `voice/stop`, `voice/pause` and `voice/resume` drive it, and `ai.voice.transcript`, `ai.voice.speaking`, `ai.voice.interrupted` and `ai.voice.level` report it. A loop the app attached itself answers `409 voice_busy`. |
+| **Platforms** | Sessions and memory work on every platform. The voice loop uses Shiny.Speech's on-device recognizer and synthesizer on iOS, Mac Catalyst, macOS, Android and Windows; Linux has none, so register a cloud or Whisper `ISpeechToTextService` and `ITextToSpeechService` there. Without AI conversations registered, the bridge answers `501`; without the voice loop, its routes do. |
+| **Platform setup** | For voice: Android needs `RECORD_AUDIO`. Apple platforms need `NSSpeechRecognitionUsageDescription` and `NSMicrophoneUsageDescription`, plus the `com.apple.security.device.audio-input` entitlement for sandboxed apps. |
+
+## From the page
+
+```ts
+import { AiConversationBridge } from "@shinyorg/appdevicebridge";
+
+const ai = new AiConversationBridge();
+const session = (await ai.getLatestSession()) ?? (await ai.startSession({}));
+
+await ai.onDelta(e => e.sessionId === session.id && (reply.textContent += e.text));
+await ai.onQuestions(e => showChoices(e.questions));
+await ai.onTurnEnded(e => e.error && showError(e.error));
+
+await ai.send(session.id, { text: "Plan a dinner for four" });
+
+// Or wait for the whole reply.
+const { reply } = await ai.send(session.id, { text: "Make it vegetarian", wait: true });
+
+// Answering a question with choices.
+await ai.send(session.id, { answer: { questionId: "size", choiceIds: ["large"] } });
+```
+
+## Requests
+
+<BridgeApi bridges={["AiConversationBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["AiConversationBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["AiConversationBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+The page spends the app's model, and every tool the app registers runs when the model decides to call it, on a prompt
+the page wrote. Register only the tools the web app may use, and treat a page that can reach this bridge as able to
+call them. See [Security](/appdevicebridge/security/).

@@ -1,0 +1,85 @@
+---
+title: Audio
+description: Play clips, read and set the system volume, record the microphone to WAV with effects, list audio routes and run a live microphone monitor from a Shiny.AppDeviceBridge web app, backed by Shiny.Audio
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Audio" />
+
+The audio bridge gives the page the device's speakers and microphone: play clips, read and set the system volume,
+record the microphone to a WAV file, list the audio routes, and route the microphone live to the output (a PA). Level
+meters for all three arrive as events.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Audio
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddAudioBridge(o => o.MaxRecordingDuration = TimeSpan.FromMinutes(10)),
+    webApp => { /* … */ }
+);
+```
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IAudioBridge` | `AddAudioBridgeClient()` | `AudioBridge` |
+
+## Details
+
+Built on Shiny.Audio 3.0, with Shiny.Audio.Linux on Linux.
+
+| Topic | Details |
+| --- | --- |
+| **Playing** | `POST playback` takes exactly one of an absolute `http`/`https` `url` or a `file` in a file root, and answers once the clip plays, with its `id`. Clips play together, at most 32 at once (`409 too_many_clips`). `DELETE playback/{id}` stops one and `DELETE playback` stops all. `audio.playback.ended` says whether it played out, was stopped, or failed. |
+| **Volume** | `GET status` reads the system media volume and `PUT volume` sets it. iOS and Mac Catalyst can only read it, so setting it answers `501` (`volumeControlSupported` is `false`). `audio.volume` fires for the hardware buttons too. |
+| **Recording** | `POST recording` records 16 kHz mono WAV, optionally through an effect preset (`Robot`, `Chipmunk`, `DeepVoice`, `Cathedral`, `Telephone`, `Megaphone`, `Ensemble`) and the platform's voice processing. `mode: "Both"` keeps the clean take too. `DELETE recording` files it into the `data` root under `audio-recordings/` as `REC_yyyyMMdd-HHmmss.wav`, read through the [files bridge](/appdevicebridge/storage/). `POST recording/cancel` keeps nothing. |
+| **Time limit** | A recording runs for at most `MaxRecordingDuration` (one hour by default; `null` for none), and less if the page asks with `maxDurationSeconds`. When it runs out, the bridge stops it, files it and raises `audio.recording.ended` with `MaxDurationReached`. |
+| **Routes** | `GET devices` lists inputs and outputs and which are in use. Pass an input's `id` as `inputDeviceId`. `POST devices/picker` shows the system output picker (AirPlay and Bluetooth on iOS). `audio.devices` fires when a route comes or goes. |
+| **Monitor** | `POST monitor` routes the microphone straight to the output, with live `gain` (`PUT monitor`). It needs a listener on `audio.monitor.level` to start (`409 not_listening`) and stops once the last one is gone, so a page that went away can't leave the microphone on the speaker. Use headphones or echo cancellation: a speaker feeds back. |
+| **One microphone** | A recording and the monitor can't run at once; the second gets `409 microphone_busy`, as it does while the native app or the speech bridge holds the microphone. |
+| **Platforms** | Playback, recording and routes: iOS, Mac Catalyst, macOS, Android, Windows and Linux. Monitor: iOS, Mac Catalyst, macOS, Android and Linux; Windows answers `501`. Anything a platform lacks answers `501`, and `GET status` says which parts are there. To bring your own implementations, pass `o => o.RegisterAudioServices = false` and register `IAudioPlayer`, `IAudioRecorder`, `IAudioDevices` or `IAudioMonitor`. |
+| **Platform setup** | Android needs `RECORD_AUDIO`. Apple platforms need `NSMicrophoneUsageDescription`, plus the `com.apple.security.device.audio-input` entitlement for sandboxed apps. Linux needs PulseAudio, PipeWire or ALSA. |
+
+## From the page
+
+```ts
+import { AudioBridge } from "@shinyorg/appdevicebridge";
+
+const audio = new AudioBridge();
+
+const clip = await audio.play({ url: "https://example.com/chime.mp3" });
+await audio.onPlaybackEnded(e => e.id === clip.id && console.log("done"));
+
+await audio.requestAccess();
+await audio.onRecordingLevel(e => meter.value = e.level);
+await audio.startRecording({ effect: "Robot", maxDurationSeconds: 30 });
+const recording = await audio.stopRecording();
+await audio.play({ file: recording.file });
+
+// The monitor runs while something listens to its level.
+const stop = await audio.onMonitorLevel(e => meter.value = e.level);
+await audio.startMonitor({ gain: 0.8, processing: { echoCancellation: true } });
+```
+
+## Requests
+
+<BridgeApi bridges={["AudioBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["AudioBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["AudioBridge"]} show="types" />
+
+## Security
+
+These routes sit under `AppDeviceBridgePolicies.Bridges` like every other bridge: callers on this device by default.
+A `url` is fetched by the device rather than the page, so CORS doesn't apply to it, but only the sound comes back,
+never the content. A `file` must be in one of the page's own file roots. See [Security](/appdevicebridge/security/).

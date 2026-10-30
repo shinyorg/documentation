@@ -54,14 +54,10 @@ export const VERSIONS = {
     microsoftExtensions: '10.0.14',
     ctMvvm: '8.4.2',
     sentry: '6.12.1',
-    biometric: '2.5.1',
     liveCharts: '2.0.5',
     skia: '4.153.1',
     skiaExtended: '3.0.0',
     userDialogs: '9.2.2',
-    mudblazor: '9.11.0',
-    radzen: '12.1.7',
-    fluentUI: '5.0.1',
     sqliteNetPcl: '1.11.285',
     roomsharp: '0.5.5',
     msExtAi: '10.11.0',
@@ -425,10 +421,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'documentintelligence', label: 'Document Intelligence', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyRecognition,
         description: 'On-device ID document scanning & extraction (Recognition IQ) https://shinylib.net/documentintelligence/' },
-    { id: 'fingerprint', label: 'Biometric Auth', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.biometric,
-        description: 'Fingerprint & face recognition by Oscore (Oscore.Maui.Biometric) https://github.com/oscoreio/Maui.Biometric',
-        visibleWhen: noDesktop },
     { id: 'screenrecord', label: 'Screen Recording', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'Record the device screen (Shiny.ScreenRecorder) https://shinylib.net/client/screenrecorder/' },
@@ -559,15 +551,6 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'shinyblazorcontrols', label: 'Shiny Blazor Controls', type: 'bool', defaultValue: false, category: 'blazor',
         version: VERSIONS.shinyControls,
         description: 'Shiny.Blazor.Controls \u2014 the Blazor control set, usable from Blazor Hybrid https://shinylib.net/controls/' },
-    { id: 'mudblazor', label: 'MudBlazor', type: 'bool', defaultValue: false, category: 'blazor',
-        version: VERSIONS.mudblazor,
-        description: 'Material Design Blazor component library https://mudblazor.com/' },
-    { id: 'radzen', label: 'Radzen.Blazor', type: 'bool', defaultValue: false, category: 'blazor',
-        version: VERSIONS.radzen,
-        description: '80+ Blazor UI components by Radzen https://blazor.radzen.com/' },
-    { id: 'fluentui', label: 'Microsoft FluentUI', type: 'bool', defaultValue: false, category: 'blazor',
-        version: VERSIONS.fluentUI,
-        description: 'Fluent Design Blazor components by Microsoft https://www.fluentui-blazor.net/' },
 
     // Storage
     { id: 'documentdb', label: 'Document DB', type: 'bool', defaultValue: false, category: 'storage',
@@ -697,7 +680,7 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.useconfig = !!(s.configuration || s.push !== 'None' || s.authtype !== 'None');
     s.usedeeplinks = s.deeplinks !== '';
     s.usehttp = !!(s.authservice && s.refit);
-    s.useblazor = !!(s.blazor || s.radzen || s.mudblazor || s.fluentui || s.shinyblazorcontrols);
+    s.useblazor = !!(s.blazor || s.shinyblazorcontrols);
     // the camera tool opens Shiny's CameraView modal (UseShinyCamera)
     s.useaicamera = !!(s.aiconversation && s.aicamera);
     if (s.useaicamera) s.shinycameraview = true;
@@ -985,15 +968,6 @@ const BLAZOR_PARAMS: TemplateParam[] = [
             { value: 'net10.0', label: '.NET 10.0', description: 'Target .NET 10.0' },
         ],
     },
-    { id: 'uilibrary', label: 'UI Component Library', type: 'choice', defaultValue: 'None', category: 'ui',
-        description: 'Pick one component library — registration is wired in Program.cs & wwwroot/index.html',
-        choices: [
-            { value: 'None', label: 'None', description: 'No UI component library' },
-            { value: 'MudBlazor', label: 'MudBlazor', description: 'MudBlazor https://mudblazor.com/' },
-            { value: 'Radzen', label: 'Radzen.Blazor', description: 'Radzen.Blazor https://blazor.radzen.com/' },
-            { value: 'FluentUI', label: 'Microsoft FluentUI', description: 'Microsoft FluentUI https://www.fluentui-blazor.net/' },
-        ],
-    },
 
     // Shiny extensions
     { id: 'localization', label: 'Localization', type: 'bool', defaultValue: false, category: 'extensions',
@@ -1162,10 +1136,6 @@ const BLAZOR_PARAMS: TemplateParam[] = [
 
 function computeBlazorSymbols(state: TemplateState): Record<string, boolean | string> {
     const s = { ...state } as Record<string, boolean | string>;
-    s.mudblazor = s.uilibrary === 'MudBlazor';
-    s.radzen = s.uilibrary === 'Radzen';
-    s.fluentui = s.uilibrary === 'FluentUI';
-    s.useui = s.uilibrary !== 'None';
     // AI Conversation and the cloud providers pull in Speech automatically.
     s.useshinyspeech = !!(s.shinyspeech || s.aiconversation || s.speechazure || s.speechelevenlabs || s.speechtypecast || s.speechopenai);
     s.shinyspeech = !!s.useshinyspeech;
