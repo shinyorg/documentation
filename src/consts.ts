@@ -175,6 +175,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyObd,
         "additionalNugets": [
             { "nuget": "Shiny.Obd", "version": VERSIONS.shinyObd },
+            { "nuget": "Shiny.Obd.Bluetooth", "version": VERSIONS.shinyObd },
             { "nuget": "Shiny.Obd.Wifi", "version": VERSIONS.shinyObd },
             { "nuget": "Shiny.Obd.Serial", "version": VERSIONS.shinyObd }
         ]

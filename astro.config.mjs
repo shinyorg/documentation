@@ -56,6 +56,11 @@ const announcementConfig = {
       cta: 'See the plans',
     },
     {
+      id: 'client-v65',
+      title: 'AI Conversations, Speech, & Audio Release',
+      description: 'Have a full conversation with AI, use speech commands, and interact with audio content seamlessly.'
+    },     
+    {
       id: 'client-v64',
       title: 'Shiny Client v6.4',
       description: '[iPhone Duo](/client/core/screen-posture), [VPN Management](/client/vpn), [Push Notification Images](/client/push), & [Age Signals](/client/agesignals)'
@@ -63,7 +68,7 @@ const announcementConfig = {
     {
       id: 'client-v65',
       title: 'Shiny Client v6.5',
-      description: '[Biometrics](/client/biometrics) & [NFC](/client/nfc)'
+      description: '[Biometrics](/client/biometrics), [NFC](/client/nfc), & [Classic Bluetooth](/client/bluetooth)'
     },     
     {
       id: 'controls-21',

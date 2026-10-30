@@ -1,126 +1,44 @@
 ---
 title: Wake Word
-description: Hands-free voice activation for AI conversations
+description: Hands-free activation for voice conversations, what it costs with cloud speech-to-text, and on-device wake word detection
 ---
 
-:::caution[Describes 2.x]
-This page describes the 2.x `IAiConversationService` API, which v3 replaces with [sessions](/aiconversation/). The voice loop (wake word, push-to-talk, follow-up listening) is moving to the upcoming `Shiny.AiConversation.Voice` package.
-:::
-
-Wake word detection enables a hands-free "Hey Siri" style experience. The service listens continuously for a keyword phrase, captures the user's utterance that follows, and sends it to the AI automatically.
-
-## Starting Wake Word
+A wake word gives a hands-free "Hey Siri" experience: the [voice conversation](/aiconversation/voice) listens for a phrase, then captures what the user says next and sends it to the session.
 
 ```csharp
-await aiService.StartWakeWord("Hey Copilot");
+await voice.Attach(session, new VoiceOptions { WakeWord = "hey shiny" });
 ```
 
-Once started, the service:
-1. Continuously listens for the wake word phrase
-2. When detected, captures the user's utterance via speech-to-text
-3. Sends the utterance to the AI via `TalkTo()`
-4. If the turn carries questions, skips wake word detection and listens directly for the user's reply (conversation continuation)
-5. Otherwise, loops back to listening for the wake word
+With a wake word set, the loop opens the microphone as soon as the session is attached and waits in `WaitingForWakeWord`. When the phrase is heard it moves to `Listening`, sends the next utterance, speaks the reply, and goes back to waiting. If the AI asked something, it listens for the answer without the wake word first (`FollowUp`, see [Voice](/aiconversation/voice#the-voice-loop)). Push-to-talk keeps working while a wake word is set.
 
-## Stopping Wake Word
+A wake word heard before the loop started waiting is dropped as stale, so an old detection never starts a new turn.
+
+## Off by default
+
+`WakeWord` is `null` by default, which means push-to-talk only and a closed microphone. Only the app can choose the phrase, and an always-listening microphone has battery, privacy and (with cloud speech-to-text) cost implications.
+
+## The cost with cloud speech-to-text
+
+Without help, the wake word is matched by the speech-to-text engine itself: it is passed as a keyword, and cloud providers detect keywords by **transcribing everything** and matching the results. An always-on wake word therefore streams all room audio to the cloud, with per-minute cost, battery drain and privacy implications.
+
+Your options, best first:
+
+1. **An on-device wake word detector** (below). Fixes cost and privacy: the cloud recognizer is only opened after the wake word.
+2. **Push-to-talk** on platforms where you use cloud speech-to-text (for example Android, where the built-in recognizer isn't good enough for conversation).
+3. **Accept the cost**: it works, it's just billed and always listening.
+
+## On-device detection: `IWakeWordDetector`
+
+Register an `IWakeWordDetector` and the voice conversation uses it instead of the recognizer while waiting for the wake word. Speech-to-text stays **closed** in `WaitingForWakeWord` and only opens once the detector hears the phrase:
 
 ```csharp
-aiService.StopWakeWord();
-```
-
-This cancels the background listening loop and returns the service to an idle state. The `WakeWord` property is cleared and `IsWakeWordEnabled` returns to `false`.
-
-## Checking State
-
-```csharp
-if (aiService.IsWakeWordEnabled)
+public interface IWakeWordDetector
 {
-    Console.WriteLine($"Listening for: {aiService.WakeWord}");
+    // yield each time one of the wake words is heard, until cancelled
+    IAsyncEnumerable<string> Listen(IReadOnlyList<string> wakeWords, CancellationToken ct);
 }
+
+builder.Services.AddSingleton<IWakeWordDetector, MyKeywordSpotter>();
 ```
 
-## Conversation Continuation
-
-When the AI asks a question, the wake word loop skips keyword detection and immediately listens for the
-user's reply. This creates a natural back-and-forth without requiring the wake word after every response.
-
-"Is that a question" is a **typed signal**, not a guess at the wording: the AI answers with a
-[structured turn](/aiconversation/structured-turns) whose `Questions` collection drives the decision.
-When the model can't produce one, the service falls back to checking whether the reply ends in `?`.
-
-The conversation continues as long as the AI keeps asking. Once a turn carries no questions, the loop
-returns to wake word detection.
-
-### The follow-up window
-
-An open microphone with nobody answering is a problem — the next unrelated thing said in the room becomes
-the answer. `FollowUpTimeout` bounds the wait:
-
-```csharp
-aiService.FollowUpTimeout = TimeSpan.FromSeconds(30);   // default is 20 seconds
-aiService.FollowUpTimeout = null;                       // wait indefinitely
-```
-
-When it expires, `PendingQuestions` is cleared and the loop goes back to requiring the wake word.
-
-If voice interruption is enabled and the user says a quiet word during TTS playback, the conversation breaks immediately and returns to wake word detection. See [Voice Interruption](#voice-interruption) below.
-
-## Voice Interruption
-
-During text-to-speech playback, the service can listen for voice interruptions. This is controlled by the `QuietWords` property:
-
-```csharp
-// Default quiet words: cancel, quiet, shut up, stop, nevermind, never mind, hush
-// Customize:
-aiService.QuietWords = ["stop", "cancel", "quiet"];
-
-// Disable voice interruption entirely:
-aiService.QuietWords = null;
-```
-
-Two interruption behaviors:
-
-| Speech | Behavior |
-| --- | --- |
-| **Quiet words** | If the user says only a quiet word (e.g., "stop"), TTS is silenced and the conversation loop breaks, returning to wake word detection |
-| **Other speech** | If the user says anything else during TTS (e.g., "actually, tell me about..."), TTS is silenced and the new utterance is sent to the AI as the next message, continuing the conversation |
-
-:::note
-Quiet words must be the user's entire utterance to trigger. Saying "cancel this appointment" will **not** trigger the quiet word — it will be treated as a new message to the AI.
-:::
-
-## Constraints
-
-| Constraint | Details |
-| --- | --- |
-| **Only one wake word at a time** | calling `StartWakeWord()` while already active throws `InvalidOperationException` |
-| **Exclusive with ListenAndTalk** | `ListenAndTalk()` throws `InvalidOperationException` if wake word is active (they both use the microphone) |
-| **Waits for in-progress work** | `StartWakeWord()` waits for any active `TalkTo()` call to complete before starting the listener |
-
-## Example: Settings Toggle
-
-```csharp
-async Task ToggleWakeWord()
-{
-    if (aiService.IsWakeWordEnabled)
-    {
-        aiService.StopWakeWord();
-    }
-    else
-    {
-        await aiService.StartWakeWord("Hey Copilot");
-    }
-}
-```
-
-## How It Works
-
-Wake word detection is powered by [Shiny.Speech](https://www.nuget.org/packages/Shiny.Speech)'s `ISpeechToTextService`. The service calls `ListenForKeyword()` to detect the wake phrase, then `ListenUntilSilence()` to capture the user's command. Both are platform-native implementations — no cloud API is needed for the wake word detection itself.
-
-:::note
-The quality of wake word detection depends on the platform's speech recognition engine. For best results, use short, distinctive phrases (2-3 words) that are unlikely to occur in background conversation.
-:::
-
-:::caution[Android]
-Android's native speech recognition stops and restarts between segments, causing brief pauses during continuous wake word listening. This can result in missed wake words during the restart gap. For a smoother experience on Android, use [Azure Speech Services](https://www.nuget.org/packages/Shiny.Speech.Azure) which provides continuous streaming recognition without interruptions. See [Platform Notes](/aiconversation/#platform-notes) for setup details.
-:::
+Wrap any on-device keyword spotter (an openWakeWord or Porcupine model, a platform API) in this interface. Shiny doesn't ship a detector model. When a detector is registered the wake word is no longer passed to the recognizer as a keyword.

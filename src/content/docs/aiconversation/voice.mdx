@@ -1,0 +1,196 @@
+---
+title: Voice
+description: Talk to an AI session by voice - push-to-talk, wake word, follow-up answers, interruption and sentence-streamed text-to-speech
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+`Shiny.AiConversation.Voice` lets the user talk to an [`IAiSession`](/aiconversation/) and hear the reply. It handles the microphone and the speaker: push-to-talk, an optional wake word, listening for the answer when the AI asks something, stopping when the user talks over it, and speaking the reply sentence by sentence while it is still streaming.
+
+The session still owns the conversation. The voice driver only uses the session's public API (`Send`, `Interrupt`, events, `PendingQuestions`), so everything said by voice lands in the same persisted history as typed messages.
+
+<NugetBadge name="Shiny.AiConversation.Voice" showLabel={true} />
+
+```bash
+dotnet add package Shiny.AiConversation.Voice
+```
+
+## Setup
+
+The voice package **does not register a speech engine**. Register the [Shiny.Speech](/speech/) speech-to-text and text-to-speech providers you want (native, Azure, OpenAI, ElevenLabs, Typecast, Whisper…) yourself, then add voice:
+
+```csharp
+builder.Services.AddSpeechServices();          // or a cloud provider from Shiny.Speech.*
+builder.Services.AddShinyAiConversation(opts => { /* chat client, stores, tools */ });
+builder.Services.AddShinyAiConversationVoice(v => v
+    .AddVoiceSelectionTools()                 // optional: the AI can change its own voice
+    // .SetSoundProvider<MySounds>()          // optional: replace the built-in cues
+);
+```
+
+:::tip[Android]
+Android's built-in recognizer isn't good enough for conversation. Register a cloud speech-to-text provider (Azure, OpenAI, ElevenLabs) on Android.
+:::
+
+`IVoiceConversation` is a singleton: there is one microphone, so **one session is attached at a time**.
+
+## Attaching a session
+
+```csharp
+public class AssistantViewModel(IAiSessionManager sessions, IVoiceConversation voice)
+{
+    IAiSession? session;
+
+    public async Task Start()
+    {
+        if (await voice.RequestAccess() != AccessState.Available)
+            return;
+
+        this.session = await sessions.GetLatest() ?? await sessions.Start();
+        await voice.Attach(this.session, new VoiceOptions
+        {
+            WakeWord = null,                               // push-to-talk only (the default)
+            Interruption = InterruptionMode.QuietWords,    // the default
+            Acknowledgement = AiAcknowledgement.Full
+        });
+    }
+
+    public Task Talk() => voice.PushToTalk();             // listen for one utterance now
+    public Task Hush() => voice.StopSpeaking();           // stop the reply, don't listen
+
+    public async Task Stop()
+    {
+        await voice.Detach();
+        await this.session!.DisposeAsync();               // you still own the session
+    }
+}
+```
+
+`RequestAccess()` returns the real permission state from the speech-to-text engine (`Denied`, `Restricted`, `NotSupported`…), not a collapsed "restricted".
+
+:::tip[Share one session instance]
+Pass the same `IAiSession` instance to the chat UI and to `Attach`. Two instances of one session work (they reload each other's changes), but two turns running at once on different instances end in a `SessionConflictException`.
+:::
+
+| Method | What it does |
+|---|---|
+| `Attach(session, options)` | starts the voice loop. With a wake word the mic opens immediately; without one it stays closed until push-to-talk. Throws if a session is already attached |
+| `PushToTalk()` | listens for one utterance now, with or without a wake word. While the AI is speaking it stops the reply and listens instead |
+| `StopSpeaking()` | stops the current reply without listening |
+| `Pause()` / `Resume()` | releases the mic and speaker (for example while the camera is open) and picks up again |
+| `Detach()` | stops listening and speaking; a reply in progress is recorded as interrupted |
+| `TextToSpeech` | the voice used for replies; starts from `VoiceOptions.TextToSpeech`, changed at runtime by the voice-selection tools |
+
+## The voice loop
+
+One recognition loop runs while a session is attached. Wake word, push-to-talk and follow-up answers are states of that loop, not separate modes.
+
+| `VoiceState` | Meaning |
+|---|---|
+| `Off` | no wake word: the microphone is closed until `PushToTalk` |
+| `WaitingForWakeWord` | the microphone is open, waiting for the wake word |
+| `Listening` | capturing the user's utterance |
+| `Thinking` | the utterance was sent; waiting for the model |
+| `Speaking` | the reply is being spoken |
+| `FollowUp` | the AI asked something; listening for the answer **without** the wake word |
+| `Paused` | mic and speaker released by `Pause()` |
+
+```
+Off / WaitingForWakeWord ── push-to-talk / wake word ──► Listening ── utterance ──► Thinking ──► Speaking
+        ▲                                                                                         │
+        └──────── no question, or nobody answered ◄── FollowUp ◄── the session is AwaitingUser ◄──┘
+```
+
+**Follow-up timing depends on who started it.** A turn the user started (push-to-talk or wake word) waits as long as it takes. A follow-up is the AI's idea, so it times out after `FollowUpTimeout` (20 seconds, `null` waits forever) and goes back to the wake word, or off. Otherwise an abandoned question leaves the mic open and the next unrelated thing said in the room becomes the answer.
+
+When the follow-up times out, the session **keeps** its `PendingQuestions`, so a chat UI can still show and answer them. Only the voice loop moves on.
+
+Results that arrived before the loop started listening are dropped first, so a stale transcript is never taken as the new utterance. Nothing said after the state changes to `Listening` is lost, and a push-to-talk tap is never discarded as stale.
+
+## Interruption
+
+What happens when the user talks while the AI is speaking:
+
+| `InterruptionMode` | While the AI thinks and speaks | Notes |
+|---|---|---|
+| `Off` | the microphone is muted, plus a short `EchoSettleWindow` (750 ms) after speaking; then anything heard is dropped | for playback-only setups. **Quiet words are ignored in this mode** |
+| `QuietWords` *(default)* | only an utterance that is **entirely** a quiet word stops the reply: "stop" does, "cancel this appointment" doesn't | acts on the first matching partial result. Low false-trigger risk |
+| `Full` | any speech stops the reply and becomes the next message; quiet words still just stop | best with headphones. A final result below `InterruptionMinConfidence` (0.5) is treated as the AI's own voice once audio has started; a confidence of 0 means "not reported" and is let through |
+
+Default quiet words: `cancel`, `quiet`, `shut up`, `stop`, `nevermind`, `never mind`, `hush` (`VoiceOptions.QuietWords`).
+
+Every interruption calls `turn.Interrupt(spokenText)` with the sentences that **fully played**, so the model is told what the user actually heard. A new utterance in `Full` mode is then sent as a normal message, never recursively.
+
+:::caution[Echo cancellation and iOS]
+`QuietWords` and `Full` listen while the AI speaks, so they turn on echo cancellation automatically (`AudioProcessingOptions.EchoCancellation`). On iOS, voice processing during playback can make text-to-speech quieter or change the audio route compared with plain playback. Apps that care use `InterruptionMode.Off`.
+:::
+
+## Speaking the reply
+
+Replies are spoken **sentence by sentence as they stream**, so the first audio starts long before the model finishes.
+
+- A sentence ends at `. ! ?` (and `。！？`) followed by whitespace, or at a line break. Decimals (`3.50`), list numbers (`1.`), initials and common abbreviations (`e.g.`, `Dr.`, `etc.`) don't end a sentence.
+- Markdown is stripped before speaking: emphasis, headings, list markers, inline code, links (their text is kept), images and table pipes. Fenced code blocks are skipped entirely. Voice input also tells the model to answer in plain spoken prose.
+- When the engine can synthesize to a stream (`ITextToSpeechService.CanSynthesizeToStream`) and an `IAudioPlayer` is registered, the next sentence is synthesized **while the current one plays**, so cloud voices don't pause between sentences. Otherwise each sentence goes through `SpeakAsync` in order.
+- Only reply text is spoken. Tool calls, memory writes and other model-only parts never are.
+
+
+## Answering while it speaks
+
+When the AI asks a question with choices, you don't have to wait for it to finish reading them. With
+`VoiceOptions.AnswerInterruptions` (on by default; needs `QuietWords` or `Full` interruption), saying an answer
+while it speaks stops the reply and answers:
+
+| You say | Sends |
+|---|---|
+| "large", "the large", "I'll take medium please" | that choice |
+| "the second one", "option three", "the last one" | the choice at that position |
+| "yeah", "yes please", "nope", "no thanks" | Yes / No, when the question has Yes/No choices |
+| "cheese and olives" | several choices, when the question allows more than one |
+
+The answer goes to the session as `AiInput.Answer(question, choiceIds)` (marked as voice, so the next reply stays
+spoken-style), and the interrupted reply records how much you heard. Only a **final** result that is **entirely**
+an answer counts, so the AI reading its own options aloud ("small, medium or large?") can't answer for you. The
+question is known as soon as the model's `ask_user` call streams in, normally well before the speech ends.
+Questions without choices can't be answered this way (any speech could be the answer); use `Full` interruption
+for those. A follow-up answered after the reply ("the second one") is matched the same way. The `ask_user` tool
+asks the model to give yes/no questions explicit Yes/No choices so this works for them too.
+
+
+## Events
+
+`voice.GetEvents(ct)` is a hot `IAsyncEnumerable<VoiceEvent>` whose first item is the current `VoiceStateChanged`:
+
+| Event | When |
+|---|---|
+| `VoiceStateChanged` | the state changed |
+| `InterimTranscript` | partial text while the user talks (coalescable) |
+| `FinalTranscript` | the utterance that was sent to the session |
+| `SpeakingSentence` | a sentence is about to be spoken |
+| `SpeechInterrupted` | a reply was stopped: the `Reason` (QuietWord / Answer / NewSpeech / PushToTalk / Stop), what the user said and how much had been spoken |
+| `ResponseLatency` | end of the user's utterance → first audio of the reply. The key turn-taking number to watch |
+| `AudioLevel` | microphone and speaker levels for meters (coalescable) |
+| `VoiceError` | a recognition, speech or turn error. The loop keeps going |
+
+Errors are never fatal: a recognizer failure ends the current listen, publishes `VoiceError`, and the next listen restarts the recognizer. Sound playback failures are only logged.
+
+## Cost and battery with cloud speech-to-text
+
+- **A wake word with cloud speech-to-text streams all room audio to the cloud**: per-minute cost, battery and privacy. See [Wake Word](/aiconversation/wake-word) for the options, including an on-device `IWakeWordDetector`.
+- `QuietWords` and `Full` keep the recognizer open while the AI speaks, which is billed time with a cloud provider. That's usually acceptable for `QuietWords`; use `Off` if it isn't.
+- End-of-utterance comes from the provider's silence detection. Tune it with `SpeechRecognitionOptions.SilenceTimeout` (passed through `VoiceOptions.SpeechToText`) and watch `ResponseLatency`.
+
+## VoiceOptions
+
+| Option | Default | |
+|---|---|---|
+| `WakeWord` | `null` | push-to-talk only. See [Wake Word](/aiconversation/wake-word) |
+| `Interruption` | `QuietWords` | see above |
+| `QuietWords` | the default list | ignored with `Off` |
+| `InterruptionMinConfidence` | `0.5` | `Full` mode echo floor |
+| `FollowUpTimeout` | 20 s | `null` waits forever |
+| `EchoSettleWindow` | 750 ms | `Off` mode only |
+| `Acknowledgement` | `Full` | see [Acknowledgements & Sound](/aiconversation/acknowledgements) |
+| `ToolAcknowledgement` | `"One moment."` | spoken before a slow tool runs; `null` disables it |
+| `LessWordyInstruction` | "Be concise…" | added to each voice turn in `LessWordy` mode |
+| `SpeechToText` | `null` | recognition options (culture, silence timeout, audio processing) |
+| `TextToSpeech` | `null` | the initial voice, rate, pitch |

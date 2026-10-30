@@ -574,9 +574,12 @@ export const sidebarTopics = [
           { label: 'Assistant Memory', link: 'aiconversation/memory', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
           { label: 'Questions', link: 'aiconversation/structured-turns', dateCreated: '2026-07-31', dateUpdated: '2026-10-29' },
+          { label: 'Voice', link: 'aiconversation/voice', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'Wake Word', link: 'aiconversation/wake-word', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
           { label: 'AI Tools', link: 'aiconversation/ai-tools', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
           { label: 'MAUI Chat UI', link: 'aiconversation/chat-view', dateCreated: '2026-07-31', dateUpdated: '2026-10-29' },
+          { label: 'Images & Attachments', link: 'aiconversation/images', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
+          { label: 'Camera Tool', link: 'aiconversation/camera', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },

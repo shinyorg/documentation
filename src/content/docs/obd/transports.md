@@ -2,7 +2,7 @@
 title: Custom Transports
 ---
 
-The `IObdTransport` interface abstracts the communication channel between your app and the OBD adapter. The library ships with [BLE](/client/obd/ble), [WiFi](/client/obd/wifi) and [serial (USB/UART)](/client/obd/serial) — between them they cover every adapter on the market, so reach for a custom transport only for a channel none of them handles: the Android USB Host API, a J2534 pass-thru box, or a replay harness over a recorded session.
+The `IObdTransport` interface abstracts the communication channel between your app and the OBD adapter. The library ships with [BLE](/client/obd/ble), [classic Bluetooth (SPP)](/client/obd/bluetooth), [WiFi](/client/obd/wifi) and [serial (USB/UART)](/client/obd/serial) — between them they cover every adapter on the market, so reach for a custom transport only for a channel none of them handles: the Android USB Host API, a J2534 pass-thru box, or a replay harness over a recorded session.
 
 For transports that support discovery, implement `IObdDeviceScanner` as well:
 
@@ -40,7 +40,8 @@ implementation usually misses:
 
 | Transport | Package | Worth reading for |
 |-----------|---------|-------------------|
-| [WiFi](/client/obd/wifi) | `Shiny.Obd.Wifi` | The clearest of the three — a socket, a read pump, prompt framing |
+| [WiFi](/client/obd/wifi) | `Shiny.Obd.Wifi` | The clearest of them — a socket, a read pump, prompt framing |
+| [Classic Bluetooth](/client/obd/bluetooth) | `Shiny.Obd.Bluetooth` | Driving a `Stream` another library hands you, and choosing a device with no service UUID to scan for |
 | [Serial](/client/obd/serial) | `Shiny.Obd.Serial` | Device enumeration and connect-time probing |
 | [BLE](/client/obd/ble) | `Shiny.Obd.Ble` | Chunked writes and notification reassembly |
 

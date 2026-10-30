@@ -25,6 +25,7 @@ Version 3 of `Shiny.AiConversation` is built around **sessions**. A session is o
 | `IAiSessionStore` | persists session headers and messages |
 | `ISessionInterceptor` | adds tools and system prompts, reacts to turns |
 | `IChatClientProvider` | hands out the `IChatClient` for each turn |
+| `IAiAttachmentStore` | stores images referenced by messages |
 
 The core package depends only on Microsoft.Extensions.AI. It doesn't reference Shiny.Speech or Shiny.Audio, so text chat needs no audio packages. Voice sits on top of the session API in its own package and talks to the session only through `Send`, `Interrupt`, events and `PendingQuestions`.
 
@@ -91,7 +92,7 @@ Each request is built in a fixed order:
 2. Mode instructions: when the input came from voice, the model is told its reply is spoken (plain prose, no markdown, at most one question).
 3. The [memory](/aiconversation/memory) index (paths and descriptions, wrapped as data), when memory is on.
 4. The rolling summary from [compaction](/aiconversation/compaction), when there is one. Summary messages in the history are markers for the UI and aren't sent again.
-5. Non-compacted history in sequence order. Failed and still-streaming messages are skipped, interrupted replies are sent as what was heard, and a tool call whose result never arrived is dropped (providers reject an unanswered tool call).
+5. Non-compacted history in sequence order. Failed and still-streaming messages are skipped, interrupted replies are sent as what was heard, and a tool call whose result never arrived is dropped (providers reject an unanswered tool call). User images are sent as image content when they arrived in this turn or are kept in context, otherwise as an "[image: …]" mention (see [Images](/aiconversation/images)).
 6. The new user message.
 
 The tools sent are the session's tools, the turn's tools, the built-in [`ask_user`](/aiconversation/structured-turns) tool and, when memory is on, the `memory` tool.
@@ -123,6 +124,34 @@ Two numbers are tracked separately:
 Why the last request: Microsoft.Extensions.AI's function-invoking client sums usage across the tool loop, which overstates the context size. While streaming, each request reports its own usage, and the session reads them one at a time. When the provider reports no usage, the size is estimated (about four characters per token, plus overhead per message and per tool) and `IsEstimate` is true. A freshly loaded session also starts with an estimate.
 
 `Pressure` (`Normal`, `Warning`, `Critical`) comes from the session's thresholds against `MaxTokens`. The library only **reports** it, with a `ContextPressureChanged` event when the level changes; the app decides how to warn the user.
+
+## The voice driver
+
+`Shiny.AiConversation.Voice` sits on top of a session and owns only the audio: the microphone, the speaker and the recognition loop. It never reaches into the session; it uses the same public API as any app code:
+
+- a final utterance becomes `session.Send(AiInput.Voice(text))` (with `WithInstructions` for brief replies),
+- the reply is spoken from the turn's `TextDelta` events, sentence by sentence,
+- when the user interrupts, `turn.Interrupt(spokenText)` records the sentences that actually played, so the next prompt says what was heard,
+- after the turn, `AwaitingUser` (from `ask_user` or a trailing `?`) opens the follow-up listen.
+
+Only one session is attached to the voice driver at a time, because the microphone is a single resource. Text sessions can run alongside it. A realtime backend (OpenAI Realtime, Gemini Live) could later replace both the turn pipeline and the voice driver while producing the same events and persisting through the same store. See [Voice](/aiconversation/voice).
+
+## Rounds within a turn
+
+A turn is usually one model round (one streamed request, with any tool loop inside it). A tool added in
+`OnBeforeTurn` can queue more input with `TurnContext.QueueFollowUp(...)` and end the round; the session then
+stores that input as a user message and runs another round **in the same turn**: the same `IAiTurn`, events and
+completion, with a new assistant message for the new round. The [camera tool](/aiconversation/camera) uses this to
+deliver photos to providers that can't take images in tool results. Images themselves are stored as attachments
+and referenced from messages, never inlined.
+
+## The MAUI adapter
+
+`Shiny.AiConversation.Maui` is another client of the public API: `AiChatView` maps `MessageAdded` /
+`MessageUpdated` to bubbles 1:1, updates a streaming reply in place from `TextDelta`, pages history by sequence,
+renders choice chips from `PendingQuestions` and answers with `AiInput.Answer`. Bind the same `IAiSession` instance
+the voice driver is attached to, and typed and spoken turns show up in one conversation. See
+[MAUI Chat UI](/aiconversation/chat-view).
 
 ## Events: `IAsyncEnumerable` only
 

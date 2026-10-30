@@ -1,19 +1,17 @@
 ---
 title: MAUI Chat UI
-description: AiChatView - a drop-in .NET MAUI chat control wired to IAiConversationService
+description: AiChatView - a drop-in .NET MAUI chat control bound to an AI session, with streaming replies, choice chips, images, push-to-talk and an assistant memory view
 ---
 
-:::caution[Describes 2.x]
-This page describes the 2.x `IAiConversationService` API, which v3 replaces with [sessions](/aiconversation/). `AiChatView` is being moved to the session API in the MAUI adapter.
-:::
-
-`Shiny.AiConversation.Maui` ships **`AiChatView`** — a complete chat screen for your AI conversation.
+`Shiny.AiConversation.Maui` ships **`AiChatView`**, a complete chat screen for an [`IAiSession`](/aiconversation/).
 It derives from the [Shiny.Maui.Controls](/controls/chatview/) `ChatView`, so every style, template and
-behavior property of the base control still applies, but the provider, session, history paging and
-live AI events are already wired up.
+behavior property of the base control still applies. The provider, history paging, streaming replies and
+choice chips are already wired up.
 
-There is no view model plumbing: the control resolves `IAiConversationService` from the app's service
-provider.
+
+:::caution[XAML namespace]
+Debug builds inflate XAML at runtime, and the URL namespace `http://shiny.net/maui/aiconversation` only resolves once `Shiny.AiConversation.Maui` is loaded. If no C# code has touched it yet, the page fails with *"Type AiChatView not found in xmlns"*. Use the assembly-qualified form shown here, which loads the assembly.
+:::
 
 ## Installation
 
@@ -21,138 +19,188 @@ provider.
 dotnet add package Shiny.AiConversation.Maui
 ```
 
-The package brings `Shiny.Maui.Controls` with it. Register the conversation service as usual in
-`MauiProgram.cs` (see [Getting Started](/aiconversation/)) and make sure `.UseShinyControls()` is
-called on the `MauiAppBuilder`.
+The package brings `Shiny.Maui.Controls` and [`Shiny.AiConversation.Voice`](/aiconversation/voice) with it (the
+push-to-talk action uses the voice conversation). Register AI Conversation as usual in `MauiProgram.cs` (see
+[Getting Started](/aiconversation/)) and call `.UseShinyControls()` on the `MauiAppBuilder`.
 
 ## Usage
 
 ```xml
 <ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
              xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
-             xmlns:ai="http://shiny.net/maui/aiconversation"
+             xmlns:ai="clr-namespace:Shiny.AiConversation.Maui;assembly=Shiny.AiConversation.Maui"
              x:Class="MyApp.ChatPage"
              Title="Chat">
 
-    <ai:AiChatView BotName="Aura"
+    <ai:AiChatView Session="{Binding Session}"
+                   BotName="Aura"
                    BotAvatar="bot.png"
                    GreetingMessage="Hi! What can I help you with?"
+                   AllowImages="True"
+                   ShowContextWarnings="True"
                    ShowMicrophoneAction="True"
-                   ShowTokenUsage="True"
-
                    MyBubbleColor="{StaticResource Primary}"
                    MyTextColor="White"
                    OtherBubbleColor="#F0EEFF"
-                   OtherTextColor="#1A1A2E"
                    BubbleCornerRadius="16"
-                   PlaceholderText="Ask me something..."
-                   SendButtonText="Send" />
+                   PlaceholderText="Ask me something..." />
 </ContentPage>
 ```
 
-## What it wires for you
+### Which session it shows
 
-| Feature | Description |
-| --- | --- |
-| **Sending** | typed messages are forwarded to `IAiConversationService.TalkTo`; replies arrive on `AiResponded` and render as AI bubbles. |
-| **Voice** | utterances heard by speech-to-text render as user bubbles via `SpeechOccurred`. That covers wake-word conversations happening elsewhere in the app, so the transcript stays complete even when the user never types. `ShowMicrophoneAction` adds a push-to-talk action to the input bar that calls `ListenAndTalk`. |
-| **History** | the chat is backfilled from the registered [`IMessageStore`](/aiconversation/message-store) and pages further back when the user scrolls to the top. With no message store registered, the chat simply starts empty and stays live-only — nothing throws. |
-| **Typing indicator** | driven by `AiState` (`Thinking` / `Responding`), with a heartbeat so a long turn keeps the bubble alive. |
-| **Errors** | failures from `TalkTo` and anything raised on `ErrorOccurred` render as an AI bubble carrying `Identifier = "error"`, so a `MessageTemplateSelector` can style them. |
-| **Multiple choice** | a turn that carries [choices](/aiconversation/structured-turns) renders tappable buttons under the bubble; the tapped label is sent as the user's answer. |
+- **Bind `Session`** to show a session you own. This is the recommended setup: keep **one `IAiSession` instance**
+  for the whole app and hand it to both the chat view and the [voice conversation](/aiconversation/voice), so
+  typed and spoken turns land in the same conversation and two instances never race each other.
+- **Leave `Session` unset** and the view resumes the most recent session (`GetLatest()`), or starts one, the
+  first time it gets a handler. In that case the view owns the instance and disposes it when it's unloaded.
+  `NewConversation()` replaces it with a fresh session.
+
+The MAUI sample does the first: a small singleton owns the shared session and the voice options.
+
+```csharp
+public class ConversationHost(IAiSessionManager manager, IVoiceConversation voice)
+{
+    IAiSession? session;
+
+    public async Task<IAiSession> GetSession()
+        => this.session ??= await manager.GetLatest() ?? await manager.Start();
+}
+
+public partial class ChatViewModel(ConversationHost host) : ObservableObject, IPageLifecycleAware
+{
+    [ObservableProperty] IAiSession? session;
+
+    public async void OnAppearing() => this.Session = await host.GetSession();
+    public void OnDisappearing() { }
+}
+```
+
+## What it does for you
+
+- **One bubble per message.** Session messages map 1:1 to bubbles. A streamed reply is one bubble: it appears
+  with the first text and is updated in place (throttled to about every 100 ms) as text streams in.
+- **Sending.** Typed text goes to `session.Send(AiInput.Text(...))`. The bubble takes the stored user message's
+  id, so the session's own `MessageAdded` merges into it instead of adding a duplicate.
+- **Voice turns too.** Utterances heard by a voice conversation attached to the same session show up as user
+  bubbles, and their replies as AI bubbles, wherever the voice turn was started (wake word, Aura page, …).
+- **History.** The newest page is loaded from the session on open; scrolling to the top pages further back by
+  message sequence (`GetMessages(beforeSequence, count)`). Compacted messages are still shown.
+- **What's hidden.** Tool calls, memory writes, summaries and replies with no text have no bubble.
+- **Typing indicator.** Follows the session state (`Thinking` / `Responding`) with a heartbeat, so long turns
+  keep the indicator alive.
+- **Errors.** `SessionError` events render as AI bubbles with `Identifier = "error"`. Stored replies that
+  failed or were interrupted carry `Identifier = "failed"` / `"interrupted"` for template targeting.
+- **Titles.** When the session gets a title (for example from `AddSessionTitles()`), the chat session name updates.
+
+## Choice chips
+
+When the latest reply asked [questions with choices](/aiconversation/structured-turns), a button per choice is
+rendered under that bubble. Tapping one sends `AiInput.Answer(question, choiceId)`, so the model receives the
+choice label and the bubble shows it. Multi-select questions collect picks and commit with a send chip
+(`ChoiceSendText`). Each question set can be answered once.
+
+Chips come from the session's `PendingQuestions`, which every turn replaces, so they only ever appear on the
+newest reply. Supplying your own `MessageTemplate` / `MessageTemplateSelector` takes precedence; read the
+questions off a message with `AiChoiceTemplateSelector.ReadQuestions(message)`.
+
+## Images
+
+Set `AllowImages="True"` and the input bar lets the user attach a photo. It's sent as
+`AiInput.Text(...).WithImage(...)`, stored through the registered [attachment store](/aiconversation/images),
+and shown in the user bubble when the store can give a display URI (`UseFileAttachments(...)` does).
+`Settings.ImageRetention` (default `DropAfterTurn`) decides how long the model keeps seeing the photo.
+
+## Interrupted replies
+
+A reply cut off while it was being spoken is stored with what was actually heard. By default the bubble shows the
+full reply; set `Settings.ShowSpokenPartOfInterruptedReplies = true` to show only the heard part (followed by "…").
+
+## Context warnings
+
+Sessions never end, so long conversations fill the model's context window. The view surfaces the session's
+[context pressure](/aiconversation/compaction):
+
+- `ContextPressureChanged` (event) fires with the `ContextSnapshot` whenever the level changes. Use it to show
+  your own banner with "Compact" and "New conversation" actions.
+- `ShowContextWarnings="True"` instead pushes an AI bubble with `ContextWarningText` (`Identifier = "context"`)
+  when the level rises to Warning or Critical.
+- `Compact()` compacts the current session; `NewConversation()` starts a fresh one (only when the view owns its
+  session; with a bound `Session`, start the new one where it's owned).
+
+## Push-to-talk
+
+`ShowMicrophoneAction="True"` adds an input-bar action over [`IVoiceConversation`](/aiconversation/voice). Register
+`AddShinyAiConversationVoice()` and your Shiny.Speech providers. On first use the action attaches the voice
+conversation to **this chat's session** (detaching it from any other, since one session holds the microphone at a
+time) with `VoiceOptions`, then calls `PushToTalk()`. Tapping while the AI is speaking stops the reply and listens.
 
 ## Properties
 
 | Property | Default | Description |
 |----------|---------|-------------|
-| `AiService` | resolved from DI | The `IAiConversationService` to drive. Leave unset to resolve it from the app's service provider |
-| `BotName` | `Assistant` | Display name of the AI (also the chat session name) |
+| `Session` | `null` | The session to show. Null resumes the latest (or starts one) and owns it |
+| `BotName` | `Assistant` | Display name of the AI (used as the session name until the session has a title) |
 | `BotAvatar` | `null` | `ImageSource` for the AI |
-| `BotBubbleColor` | `null` | Per-user bubble color for the AI; falls back to `OtherBubbleColor` |
-| `UserName` | `Me` | Display name of the device user |
-| `UserAvatar` | `null` | `ImageSource` for the device user |
-| `UserBubbleColor` | `null` | Per-user bubble color for the device user; falls back to `MyBubbleColor` |
-| `LoadHistory` | `true` | Backfill and page history from the message store |
-| `GreetingMessage` | `null` | AI message shown when there is no history to display |
-| `ShowTokenUsage` | `false` | Appends a token usage footer to AI messages when the provider reports usage |
-| `ShowMicrophoneAction` | `false` | Adds a push-to-talk action to the input bar; invoking it again cancels the listen |
+| `BotBubbleColor` | `null` | Bubble color for the AI; falls back to `OtherBubbleColor` |
+| `UserName` / `UserAvatar` / `UserBubbleColor` | `Me` / `null` / `null` | The device user's identity; bubble color falls back to `MyBubbleColor` |
+| `LoadHistory` | `true` | Backfill and page history from the session |
+| `GreetingMessage` | `null` | AI message shown when there's no history |
+| `ShowTokenUsage` | `false` | Appends a token usage footer to AI messages that report usage |
+| `AllowImages` | `false` | Lets the user attach photos |
+| `ShowChoiceButtons` | `true` | Renders choice chips under the reply that asked |
+| `ChoiceSendText` | `Send` | Label of the commit chip for multi-select questions |
+| `ShowContextWarnings` | `false` | Pushes a warning bubble at context Warning / Critical |
+| `ContextWarningText` | "This conversation is getting long…" | Text of that bubble |
+| `ShowMicrophoneAction` | `false` | Adds a push-to-talk action to the input bar |
 | `MicrophoneActionText` | `🎤 Voice Input` | Label of that action |
-| `ShowChoiceButtons` | `true` | Renders a button per `AiChoice` under AI bubbles that ask a multiple-choice question |
-| `ChoiceSendText` | `Send` | Label of the commit button shown for questions that allow more than one choice |
-| `Settings` | — | The live `AiChatSettings` behind the properties above |
-| `Refresh()` | — | Method — tears down and reloads the conversation (use after `ClearChatHistory`) |
+| `VoiceOptions` | `null` | Options used when the action attaches the voice conversation |
 
-## Styling
+| Member | Description |
+|--------|-------------|
+| `CurrentSession` | The session currently shown |
+| `Settings` | The live `AiChatSettings` (also `ImageRetention`, `ShowSpokenPartOfInterruptedReplies`, `ErrorPrefix`) |
+| `Refresh()` | Reloads the conversation from the store |
+| `NewConversation()` | Starts and shows a new session (view-owned sessions only) |
+| `Compact()` | Compacts the current session |
+| `ContextPressureChanged` | Event: the session's context pressure changed |
 
-Styling is entirely inherited from `ChatView` — `MyBubbleColor`, `MyTextColor`, `OtherBubbleColor`,
-`OtherTextColor`, `ChatBackgroundColor`, `BubbleFontSize`, `BubbleFontFamily`, `BubbleCornerRadius`,
-`TimestampFontSize`, `PlaceholderText`, `SendButtonText`, `SendButtonBackgroundColor`,
-`SendButtonTextColor`, `InputBarBackgroundColor`, `InputBarBorderColor`, `IsInputBarVisible`,
-`ShowTypingIndicator`, `MessageTemplate`, `MessageTemplateSelector`, `InputActions`,
-`CustomBubbleActions`, `PageSize`, `UseFeedback` and `AdjustForKeyboard` all behave exactly as
-documented for [ChatView](/controls/chatview/). Leave the colors unset to follow the active
-Shiny theme.
+Everything else (`MyBubbleColor`, `OtherTextColor`, `ChatBackgroundColor`, `BubbleFontSize`, `BubbleFontFamily`,
+`BubbleCornerRadius`, `TimestampFontSize`, `PlaceholderText`, `SendButtonText`, `SendButton*` / `InputBar*` colors,
+`IsInputBarVisible`, `ShowTypingIndicator`, `MessageTemplate`, `MessageTemplateSelector`, `InputActions`,
+`CustomBubbleActions`, `PageSize`, `UseFeedback`, `AdjustForKeyboard`) is inherited from
+[`ChatView`](/controls/chatview/).
 
-:::note
+:::tip
 Hosting the chat inside a `FloatingPanel`? Set `AdjustForKeyboard="False"`, same as the base control.
 :::
 
-## Driving a plain ChatView
+## A plain ChatView
 
-If you would rather lay out the chat yourself, register the bridge and bind `Provider` + `SessionId`
-on a regular `ChatView`:
+To drive the base `ChatView` (or your own layout) yourself, hand it an `AiChatSessionProvider` for a session:
 
 ```csharp
-builder.Services.AddShinyAiConversation(opts =>
-{
-    opts.AddGithubCopilotChatClient();
-    opts.AddChatSessionProvider(cfg =>
-    {
-        cfg.BotName = "Aura";
-        cfg.ShowTokenUsage = true;
-    });
-});
+var session = await sessions.GetLatest() ?? await sessions.Start();
+chatView.Provider = new AiChatSessionProvider(session, new AiChatSettings { BotName = "Aura" }, attachmentStore);
 ```
 
-That registers an `AiChatSessionProvider` as `IChatSessionProvider`, configured by the same
-`AiChatSettings` object the control uses.
+The provider resolves every session id the control asks for to that one session, and raises
+`ContextPressureChanged` like the view.
 
+`opts.ConfigureChatView(s => ...)` registers app-wide `AiChatSettings` defaults: every `AiChatView` uses them for
+the properties it doesn't set itself (bot name and avatar, bubble colors, history, token usage, choices, greeting,
+images), and you can pass the same instance to an `AiChatSessionProvider`.
 
-## Multiple choice
+## Assistant memory view
 
-When the AI asks a question with a fixed set of answers, `AiChatView` renders each
-[`AiChoice`](/aiconversation/structured-turns) as a chip under the bubble. Tapping one sends its `Label`
-back as the user's answer — the model resolves it in context, so nothing is matched locally.
+`AiMemoryView` shows everything the assistant has [saved about the user](/aiconversation/memory), sorted by scope
+and path, and lets the user edit or delete a note, or "Forget everything" (with a confirmation, `ConfirmForget`).
+It resolves `IAiSessionManager.Memory` from the app's services unless you set `Memory`.
 
 ```xml
-<ai:AiChatView ShowChoiceButtons="True" ChoiceSendText="Confirm" />
+<ContentPage xmlns:ai="clr-namespace:Shiny.AiConversation.Maui;assembly=Shiny.AiConversation.Maui" Title="What the AI Remembers">
+    <ai:AiMemoryView />
+</ContentPage>
 ```
 
-Questions with `AllowMultiple` toggle their chips on and off and commit with a send chip, so the user
-picks several before anything is sent. Once an answer goes out, that bubble's chips are disabled.
-
-### Inside your own template
-
-A custom `MessageTemplate` or `MessageTemplateSelector` replaces the whole bubble body, so the built-in
-choice selector is only installed when you have set **neither**. To render choices in your own template,
-read them off the message metadata:
-
-```csharp
-public class MyTemplateSelector : DataTemplateSelector
-{
-    protected override DataTemplate? OnSelectTemplate(object item, BindableObject container)
-    {
-        if (item is ChatMessage message && AiChoiceTemplateSelector.ReadQuestions(message) is { Length: > 0 } questions)
-        {
-            // questions[i].Choices[j].Label - render however you like
-            return this.MyChoiceTemplate;
-        }
-        return null;   // null falls back to the control's default bubble
-    }
-}
-```
-
-The metadata key is `AiChoiceTemplateSelector.QuestionsMetadataKey` and the payload round-trips through
-`AiTurnSerializer.SerializeQuestions` / `DeserializeQuestions`.
-
-Set `ShowChoiceButtons="False"` to turn the feature off entirely.
+The XAML namespace for everything on this page is `clr-namespace:Shiny.AiConversation.Maui;assembly=Shiny.AiConversation.Maui` (the `http://shiny.net/maui/aiconversation` URL also works in compiled XAML, see the caution above).

@@ -1,0 +1,120 @@
+---
+title: Camera Tool
+description: Let the assistant ask to use the camera - a photo it can see, or a barcode, text or document scan - through Shiny's CameraView modal
+---
+
+`Shiny.AiConversation.Maui.Camera` adds a built-in **`use_camera`** tool. When seeing something would help ("how
+much sugar is in this?", "what does this error message say?"), the model asks to use the camera. The user is asked
+first, Shiny's own [CameraView modal](/controls/cameraview/media-service) opens titled with the reason, and the
+result goes back into the same turn.
+
+## Installation
+
+```bash
+dotnet add package Shiny.AiConversation.Maui.Camera
+```
+
+```csharp
+builder
+    .UseShinyControls()
+    .UseShinyCamera();   // registers IMediaService
+
+builder.Services.AddShinyAiConversation(opts => { /* ... */ });
+builder.Services.AddAiConversationCamera();
+```
+
+Add the camera permission: `NSCameraUsageDescription` in `Platforms/iOS/Info.plist` and
+`<uses-permission android:name="android.permission.CAMERA" />` in the Android manifest. `IMediaService` asks for
+the permission itself the first time; a refusal comes back to the model as "cancelled", never as an error.
+
+## The tool
+
+```text
+use_camera(purpose, mode?: photo|text|barcode|document, facing?: back|front)
+```
+
+- `purpose` is required and becomes the camera page title ("Point at the nutrition label"), so the user always
+  sees why the camera is open.
+- `mode` defaults to `photo`. The schema only offers the modes that are available (see scanners below).
+- The tool is added per turn (`OnBeforeTurn`), optionally only for some profiles.
+
+What the model gets back:
+
+| Outcome | Tool result |
+|---|---|
+| user declines the prompt | "The user declined to open the camera." |
+| user closes the camera / no permission | "The user cancelled the camera." |
+| scan found something | "barcode result:\n…" (the scanned text) |
+| scan found nothing | "Nothing was found." |
+| photo | the image (see below) |
+
+## Consent
+
+With `RequireConfirmation` (the default) the user is asked before the camera opens. The default
+`AlertCameraConsent` shows an alert on the current page: `The assistant would like to use the camera: {purpose}`.
+Its `Title`, `AllowText` and `DenyText` are settable; replace it entirely with your own `ICameraConsent`:
+
+```csharp
+builder.Services.AddAiConversationCamera(c => c.SetConsent<MyConsentSheet>());
+```
+
+## Modes and scanners
+
+Photos work out of the box. The scan modes come from Shiny's analyzer packages, which you install and wire up
+yourself with `AddScanner` (the camera package doesn't depend on any of them). A scanner returns the text to give
+the model, or null when nothing was scanned:
+
+```csharp
+// Shiny.Maui.Controls.Camera.Barcode / .Ocr / .Documents
+builder.Services.AddAiConversationCamera(c => c
+    .AddScanner(CameraMode.Barcode, async (media, request, ct) =>
+        (await media.ScanBarcodeAsync())?.Value)
+    .AddScanner(CameraMode.Text, (media, request, ct) =>
+        media.ScanTextStringAsync())
+    .AddScanner(CameraMode.Document, async (media, request, ct) =>
+        (await media.ScanReceiptAsync())?.ToString())
+    .Configure(o => o with { RequireConfirmation = true })
+);
+```
+
+Scan modes send text, not the image: cheaper, and nothing visual leaves the device.
+
+## Options
+
+`Configure(o => o with { ... })` sets the `CameraToolOptions`:
+
+| Option | Default | Meaning |
+|---|---|---|
+| `RequireConfirmation` | `true` | Ask before opening the camera |
+| `ImageRetention` | `DropAfterTurn` | How long the model keeps seeing the photo (see [Images](/aiconversation/images)) |
+| `MaxDimension` | `1568` | Longest edge of photos sent to the model; smaller is cheaper |
+| `AllowedModes` | `null` | Limit the modes the model may ask for; null = every available mode |
+| `Profiles` | `[]` | Only sessions with one of these profiles get the tool; empty = every session |
+
+## How the photo reaches the model
+
+Most chat APIs can't take an image inside a tool result, so there are two paths, chosen by
+[`IChatClientProvider.SupportsImagesInToolResults`](/aiconversation/chat-client-provider):
+
+- **`false` (the default): a follow-up message in the same turn.** The tool ends the current model round
+  ("The photo will arrive in the next message.") and queues a follow-up with
+  `TurnContext.QueueFollowUp(...)`: a user message with `Source = Camera` carrying the photo as an
+  [`ImagePart`](/aiconversation/images). The session sends it as a second round of the **same turn**, so the
+  turn's events, reply and voice playback continue as if it were one answer.
+- **`true`: inline.** The photo is returned in the tool result (text plus image content) and the model answers in
+  the same round. The stored tool result only keeps an "[image/jpeg attachment]" placeholder, so the model sees
+  the photo for this turn only.
+
+Either way, binary data is never written into stored messages.
+
+## Voice
+
+Opening the camera pauses anything holding the microphone or speaker: the voice conversation registers itself as
+an `IAudioFocusParticipant`, and the tool calls `Pause()` before the camera opens and `Resume()` after it closes.
+Implement `IAudioFocusParticipant` for your own audio features to get the same treatment.
+
+## Privacy
+
+- The user is asked first (unless you turn it off) and always sees the purpose as the camera title.
+- Photos are taken with metadata stripped (no GPS/EXIF) and downscaled to `MaxDimension`.
+- With `ImageRetention.DontStore` the photo is never stored: it goes to the model once, from memory.
