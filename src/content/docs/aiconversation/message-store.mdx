@@ -1,11 +1,12 @@
 ---
 title: Session Store
-description: Persist AI sessions and their messages with IAiSessionStore
+description: Persist AI sessions and their messages with IAiSessionStore, including the SQLite store
 ---
+import NugetBadge from '/src/components/NugetBadge.tsx';
 
 `IAiSessionStore` persists sessions. It is the only source of truth: the session manager keeps nothing in memory, so every `Get` reads the store.
 
-The default is `InMemoryAiSessionStore`, which is fine for tests and for apps that don't need history to survive a restart. A SQLite document store package (replacing `Shiny.AiConversation.MessageStores.SqliteDocDb`) is coming in the next phase of v3. Until then, implement the interface below to persist sessions.
+The default is `InMemoryAiSessionStore`, which is fine for tests and for apps that don't need history to survive a restart. For persistence, use the SQLite store package below or implement the interface yourself.
 
 ```csharp
 builder.Services.AddShinyAiConversation(opts =>
@@ -13,6 +14,52 @@ builder.Services.AddShinyAiConversation(opts =>
     opts.SetSessionStore<MySessionStore>();
 });
 ```
+
+## SQLite store
+
+<NugetBadge name="Shiny.AiConversation.Stores.SqliteDocDb" showLabel={true} />
+
+```bash
+dotnet add package Shiny.AiConversation.Stores.SqliteDocDb
+```
+
+`Shiny.AiConversation.Stores.SqliteDocDb` stores sessions, messages and [assistant memory](/aiconversation/memory) in one SQLite database through [Shiny.DocumentDb](/documentdb/). It replaces the 2.x `Shiny.AiConversation.MessageStores.SqliteDocDb` package.
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    // registers IAiSessionStore and IAiMemoryStore
+    opts.SetSqliteDocDbStores(Path.Combine(FileSystem.AppDataDirectory, "ai.db"));
+});
+```
+
+Already using a named Shiny.DocumentDb store? Point both stores at it with `SetDocDbStores(key)`. Its options must call `MapAiConversation()`, which adds the JSON metadata, the version mappings and the full-text index the stores rely on:
+
+```csharp
+builder.Services.AddDocumentStore("app", opts =>
+{
+    opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db");
+    opts.MapAiConversation();
+});
+
+builder.Services.AddShinyAiConversation(opts => opts.SetDocDbStores("app"));
+```
+
+What it does to stay safe with several writers:
+
+| Concern | How |
+|---|---|
+| Header saves | the header is stored in a version-mapped document, so the database rejects a save from a stale version and the store throws `SessionConflictException` |
+| Message sequence | a version-mapped counter per session is incremented in the **same transaction** as the message insert; a conflicting writer rolls back and retries with the next number |
+| Memory documents | version-checked the same way (`MemoryConflictException`) |
+| Search | `SearchMessages` uses the database's full-text index (FTS5 on SQLite): ranked, with stemming, over user and assistant text only |
+| Queries | indexes on message session id and sequence, and on session last activity |
+
+The core documents are nested inside small storage wrappers (`StoredAiSession`, `StoredAiMessage`, `StoredAiSequence`, `StoredAiMemory`) that carry the id, the version and a few denormalized query fields.
+
+:::note[Encryption at rest]
+The store doesn't encrypt conversations. If you need that, use an encrypted database provider (for example SQLCipher with Shiny.DocumentDb) or your own `IAiSessionStore`.
+:::
 
 ## Two document types
 
@@ -76,7 +123,7 @@ public interface IAiSessionStore
 | `AppendMessage` | allocate `Sequence` (unique and increasing per session) and return the message with it set |
 | `UpdateMessage` | replace the message with the same `MessageId` |
 | `GetMessages` | return messages in sequence order; with a `Limit` and `BeforeSequence` (or no cursor), the **newest** `Limit` before the cursor; with `AfterSequence`, the oldest after it; honour `IncludeCompacted` |
-| `SearchMessages` | rank user and assistant message `Text` against the query; skip sessions with `Settings.ExcludeFromSearch` |
+| `SearchMessages` | rank user and assistant message `Text` against the query; skip sessions with `Settings.ExcludeFromSearch`; honour `SessionId`, `ExcludeSessionId`, `From` / `To` and `ExcludeFromSequence` |
 | `Purge` | delete sessions whose last activity is before the date |
 
 The version check and the sequence allocation are what make two live instances of one session safe. See [Architecture](/aiconversation/architecture#two-instances-of-one-session). A store backed by a database should do both atomically (a conditional update or a transaction).
@@ -91,6 +138,8 @@ var header = JsonSerializer.Deserialize(json, AiConversationJsonContext.Default.
 ```
 
 Every document has a `SchemaVersion`, so a store can migrate older rows when it reads them.
+
+For search, the public `SearchText` helper splits a query into terms (punctuation, possessives and common stop words removed) and builds a snippet around the first match, which is what the built-in stores use.
 
 ## Reading history
 

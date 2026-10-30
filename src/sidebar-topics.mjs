@@ -559,6 +559,8 @@ export const sidebarTopics = [
           { label: 'Architecture', link: 'aiconversation/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-10-29' },
           { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
           { label: 'Session Store', link: 'aiconversation/message-store', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'Context & Compaction', link: 'aiconversation/compaction', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
+          { label: 'Assistant Memory', link: 'aiconversation/memory', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
           { label: 'Questions', link: 'aiconversation/structured-turns', dateCreated: '2026-07-31', dateUpdated: '2026-10-29' },
           { label: 'Wake Word', link: 'aiconversation/wake-word', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },

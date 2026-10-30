@@ -1,100 +1,100 @@
 ---
 title: AI Tools
-description: Register AI tools and use the built-in chat history lookup
+description: Register AI tools, and use the built-in conversation search, session titles and long-term memory
 ---
 
-:::caution[Describes 2.x]
-This page describes the 2.x `IAiConversationService` API, which v3 replaces with [sessions](/aiconversation/). Tools are now added by [interceptors](/aiconversation/#interceptors) or `opts.AddTool(...)`; voice-selection tools move to the upcoming Voice package, and the chat lookup tool is being replaced by conversation search.
-:::
+Sessions send [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) tools (`AITool`) with every request, so the AI can call functions on the user's behalf. The session runs the tool loop itself, records each call and result in the stored reply, and reports them as `ToolCallStarted` / `ToolCallCompleted` turn events.
 
-The AI conversation service supports [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) tools (`AITool`) that are included in every chat request. This lets the AI call functions on the user's behalf.
+Tools are never persisted. They're rebuilt whenever a session is loaded, so they come from registration or [interceptors](/aiconversation/#interceptors), not from `Start`.
 
-## How Tools Are Provided
-
-Tools are supplied through the `IContextProvider` visitor pattern. Each registered `IContextProvider` populates an `AiContext` via its `Apply()` method, adding tools to the context's `Tools` list. The `AiContext` also carries system prompts, quiet words, and speech options — so providers can influence the full request pipeline. The built-in `ContextProvider` automatically passes through any `AITool` instances registered in DI — so **any library that registers `AITool` instances in your service collection will have those tools available to the AI** via the default provider.
-
-You can also supply tools from a custom `IContextProvider`:
+## Registering tools
 
 ```csharp
-public class MyToolProvider : IContextProvider
+builder.Services.AddShinyAiConversation(opts =>
 {
-    public Task Apply(AiContext context)
+    // every session
+    opts.AddTool(AIFunctionFactory.Create(GetWeather, "get_weather", "Gets the current weather for a city"));
+
+    // only sessions whose AiSessionSettings.Profile is "cooking"
+    opts.AddTool(AIFunctionFactory.Create(StartTimer, "start_timer"), AiToolFlags.None, "cooking");
+
+    // a tool that should never trigger a spoken "one moment"
+    opts.AddTool(AIFunctionFactory.Create(LogMood, "log_mood"), AiToolFlags.Silent);
+});
+```
+
+Any `AITool` registered directly in DI is added to every session too, so libraries that register tools (for example Shiny.DI's generated tools or `AddDocumentStoreAITools`) just work.
+
+`AiToolFlags.Silent` marks tools that are bookkeeping rather than visible work: `ToolCallStarted.Silent` is true for them, the session doesn't switch back to `Thinking`, and a voice driver never acknowledges them aloud. The built-in `ask_user`, `memory` and conversation search tools are silent.
+
+For tools that depend on the session (or should change per turn), add them from an interceptor:
+
+```csharp
+public class CartTools(ICartService carts) : ISessionInterceptor
+{
+    public Task OnSessionLoaded(SessionLoadedContext ctx)
     {
-        context.Tools.Add(AIFunctionFactory.Create((string city) =>
-        {
-            return $"The weather in {city} is sunny, 72°F.";
-        }, "GetWeather", "Gets the current weather for a city"));
+        if (ctx.Session.Settings.Profile == "shopping")
+            ctx.AddTool(AIFunctionFactory.Create((string item) => carts.Add(ctx.Session.SessionId, item), "add_to_cart"));
 
         return Task.CompletedTask;
     }
 }
 
-builder.Services.AddSingleton<IContextProvider, MyToolProvider>();
+opts.AddInterceptor<CartTools>();
 ```
 
-Or register `AITool` instances directly in DI (picked up by `ContextProvider`):
+## Built-in tools
 
-```csharp
-// These tools are all automatically discovered and included in AI chat requests
-
-// Shiny.DI source-generated tools
-builder.Services.AddGeneratedAITools();
-
-// Shiny.DocumentDb tools
-builder.Services.AddDocumentStoreAITools(tools => { /* ... */ });
-
-// Your own custom tools
-builder.Services.AddSingleton<AITool>(sp =>
-{
-    return AIFunctionFactory.Create((string city) =>
-    {
-        return $"The weather in {city} is sunny, 72°F.";
-    }, "GetWeather", "Gets the current weather for a city");
-});
-```
-
-## Built-in: Chat History Lookup
-
-When an `IMessageStore` is registered, the built-in `ContextProvider` automatically adds a `ChatLookupAITool` to every request:
-
-```csharp
-opts.SetMessageStore<MyMessageStore>();
-```
-
-This gives the AI the ability to search past conversations. Users can ask questions like:
-- "What did we discuss yesterday?"
-- "Find the conversation where we talked about deployment"
-- "What was the recipe you gave me last week?"
-
-The tool exposes these search parameters to the AI:
-
-| Parameter | Type | Description |
+| Tool | Registered by | Notes |
 |---|---|---|
-| `messageContains` | `string?` | Text to search for in messages |
-| `fromDate` | `DateTimeOffset?` | Start of date range |
-| `toDate` | `DateTimeOffset?` | End of date range |
-| `limit` | `int?` | Maximum results to return |
+| `ask_user` | always | asks the user a typed question and ends the turn. See [Questions](/aiconversation/structured-turns) |
+| `memory` | on by default | the assistant's private notes. See [Assistant Memory](/aiconversation/memory) |
+| `search_conversations`, `read_conversation` | `opts.AddConversationSearch()` | search past conversations, below |
 
-## Custom Tools
+## Conversation search
 
-You can register any number of custom tools. They're standard `Microsoft.Extensions.AI` tools:
+[Memory](/aiconversation/memory) is what the assistant chose to keep. Conversation search covers everything else: the raw transcript of the user's other conversations and the [compacted](/aiconversation/compaction) part of the current one. It answers questions like "what was that recipe we talked about last month?" or "what did I say the plumber was called?".
 
 ```csharp
-// Function-based tool
-builder.Services.AddSingleton<AITool>(sp =>
-    AIFunctionFactory.Create(
-        async (string query, CancellationToken ct) =>
-        {
-            var db = sp.GetRequiredService<IDatabase>();
-            var results = await db.Search(query, ct);
-            return string.Join("\n", results);
-        },
-        "SearchDatabase",
-        "Searches the application database"
-    )
-);
+opts.AddConversationSearch();                // every session
+opts.AddConversationSearch("assistant");     // only sessions with these profiles
 ```
 
-:::note
-All registered `IContextProvider` implementations are executed in sequence, each adding their tools to the shared `AiContext`. The aggregated tools are then included in the chat request.
+It adds two silent tools:
+
+| Tool | Parameters | Returns |
+|---|---|---|
+| `search_conversations` | `query`, `scope` (`all` / `current` / `others`), `from`, `to`, `limit` (default 10) | ranked snippets with session id, title, sequence, role and date |
+| `read_conversation` | `sessionId`, `aroundSequence`, `before` (default 5), `after` (default 5) | the messages around a hit |
+
+The two-step shape keeps results small: search returns snippets and the model reads only what it needs.
+
+- Messages of the current session that are **still in the prompt** are excluded, since the model already has them; compacted ones are included.
+- Only user and assistant text is searched. Tool calls and model-only parts are not.
+- Sessions with `AiSessionSettings.ExcludeFromSearch = true` never show up in search or `read_conversation` (use it for private conversations). Deleted sessions disappear immediately.
+- Results are wrapped in `<conversation_excerpt>` blocks marked as past conversation data, not instructions, and capped at about 2K tokens per call.
+- The tool description nudges the model to save what it finds to memory, so the next lookup is free.
+
+Ranking comes from the store: the [SQLite store](/aiconversation/message-store#sqlite-store) uses full-text search with stemming; the in-memory store does simple term matching.
+
+## Session titles
+
+```csharp
+opts.AddSessionTitles();
+```
+
+After a session's first exchange, the session's model is asked for a 2 to 6 word title, which is saved with `SetTitle` (and published as a `TitleChanged` event). It runs in the background, so the next turn never waits for it, and only while the session has no title. Set your own with `session.SetTitle(...)` at any time.
+
+## Long-term memory
+
+```csharp
+opts.AddLongTermMemory(sessionCount: 3);              // every session
+opts.AddLongTermMemory(3, "assistant");               // only these profiles
+```
+
+When a session is loaded, the rolling [compaction](/aiconversation/compaction) summaries of the user's most recently active **other** sessions are added as a system prompt, wrapped in `<past_conversations>` and marked as data. Sessions with no summary yet, and sessions with `ExcludeFromSearch`, are skipped.
+
+:::note[Coming from 2.x]
+`IContextProvider` / `AiContext` are replaced by `ISessionInterceptor`, and the `ChatLookupAITool` that came with `IMessageStore` is replaced by conversation search. The voice-selection tools (list voices, play a sample, change voice) come back with the upcoming Voice package.
 :::

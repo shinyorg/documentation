@@ -1,0 +1,112 @@
+---
+title: Context & Compaction
+description: Track how full the model's context window is and fold older messages into a rolling summary
+---
+
+Sessions never end, so a long conversation eventually gets bigger than the model's context window. The library **reports** how full the window is and gives you **compaction** to shrink it. Automatic compaction is only a safety net, so a request never fails for being too big.
+
+## How full is the context?
+
+`session.Context` is a `ContextSnapshot`:
+
+| Field | Meaning |
+|---|---|
+| `CurrentTokens` | input + output of the **last** model request (or an estimate) |
+| `MaxTokens` | the context window, from `AiSessionSettings.ContextWindow` or `IChatClientProvider.ContextWindow`; null when unknown |
+| `PercentUsed` | `CurrentTokens / MaxTokens` |
+| `Pressure` | `Normal`, `Warning` (75%) or `Critical` (90%); null when `MaxTokens` is unknown |
+| `IsEstimate` | true when the provider reported no usage, and right after loading or compacting |
+
+The session emits `ContextPressureChanged` when the level changes, and the first `Snapshot` of every subscription carries it too. **The library shows nothing**: your app decides whether to warn ("this conversation is getting long"), offer a compact or new-session button, or ignore it.
+
+```csharp
+await foreach (var e in session.GetEvents(ct))
+{
+    if (e is ContextPressureChanged { Context.Pressure: ContextPressure.Warning })
+        ShowBanner("This conversation is getting long. Compact it or start a new one?");
+}
+```
+
+See [Getting Started](/aiconversation/#usage-and-context) for the difference between `Usage` (billing) and `Context` (window size).
+
+## Compacting
+
+```csharp
+await session.Compact();
+```
+
+Compaction runs on the session's turn queue, so it never overlaps a turn: it waits for the active turn to finish first. The session's state is `Compacting` while it runs.
+
+**Rolling summary.** The previous summary plus the oldest messages are folded into **one new summary**:
+
+- A new `Role = Summary` message is stored (a history marker for the UI), and the header's `Summary` is replaced with the new text. The prompt always holds at most one summary, at the top.
+- The folded messages (and the previous summary message) are marked `Compacted` with `CompactedIntoMessageId`. They stay in the store, so history and [conversation search](/aiconversation/ai-tools#conversation-search) still see them; they're just no longer sent to the model.
+- The newest `KeepRecentMessages` messages are kept. A turn's tool calls and results live in one message, so a call is never split from its result.
+- The reply that asked the current [pending questions](/aiconversation/structured-turns) is never compacted.
+- A `ContextCompacted` event is published, then `ISessionInterceptor.OnCompacted` runs.
+
+**Hard-trim fallback.** If summarizing fails, the oldest messages are marked compacted anyway and the previous summary is kept. `ContextCompacted.WasHardTrim` is true and `Summary` is null. Compaction degrades; it never fails a turn.
+
+**Memory flush first.** When [assistant memory](/aiconversation/memory) is on and `FlushToMemory` is true, the model gets one silent request with only the `memory` tool before anything is summarized: "older messages are about to be summarized, save what you'll need". Memory is the durable layer and the summary is the lossy one. Nothing from that request is stored except the memory writes and its token usage.
+
+## Automatic compaction
+
+Set per session in `AiSessionSettings.Compaction` (persisted with the session):
+
+```csharp
+var session = await sessions.Start(new AiSessionSettings
+{
+    ContextWindow = 128_000,
+    Compaction = new CompactionSettings
+    {
+        AutoCompactThreshold = 0.95,   // null turns automatic compaction off
+        KeepRecentMessages = 10,
+        MaxMessages = null,            // hard cap for when the window is unknown
+        FlushToMemory = true
+    }
+});
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `AutoCompactThreshold` | `0.95` | compact when `PercentUsed` reaches it; `null` disables |
+| `KeepRecentMessages` | `10` | newest messages that are never compacted |
+| `MaxMessages` | `null` | compact when the prompt holds more messages than this, whether or not the window is known |
+| `FlushToMemory` | `true` | let the model save notes to memory before summarizing |
+
+The check runs **after** a turn completes (in the background, so the next voice turn doesn't wait) and again **before** a turn is sent, so a request is never sent over the threshold. Apps that warn at 75% and let the user act will rarely hit it.
+
+With no known context window there is no pressure and no threshold-based compaction; `MaxMessages` is the only automatic bound.
+
+## Custom summaries
+
+The default `ChatClientContextCompactor` asks the session's own model for a third-person summary under 300 words that keeps names, preferences, facts, decisions, open tasks and unanswered questions. Replace it with your own `IContextCompactor` (a cheaper model, a different prompt):
+
+```csharp
+public class MyCompactor(IChatClient cheapModel) : IContextCompactor
+{
+    public async Task<string> Summarize(string? previousSummary, IReadOnlyList<AiMessageDocument> messages, CancellationToken ct)
+    {
+        // fold previousSummary + messages into one summary
+    }
+}
+
+opts.SetContextCompactor<MyCompactor>();
+```
+
+Throwing (or returning an empty string) triggers the hard-trim fallback.
+
+## Reacting to compaction
+
+```csharp
+public class SummaryLogger : ISessionInterceptor
+{
+    public Task OnCompacted(CompactionContext ctx)
+    {
+        // ctx.Summary is the new Summary message (null after a hard trim)
+        return Task.CompletedTask;
+    }
+}
+```
+
+The rolling summaries also feed [long-term memory](/aiconversation/ai-tools#long-term-memory) for other sessions.
