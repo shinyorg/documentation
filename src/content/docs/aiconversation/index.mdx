@@ -1,6 +1,6 @@
 ---
 title: AI Conversations | Getting Started
-description: A centralized AI conversation service with chat, speech, wake word, and message persistence for .NET MAUI and Blazor
+description: Session-based AI conversations for .NET - streaming replies, typed questions, persisted and resumable sessions, token usage and context tracking
 ---
 import NugetBadge from '/src/components/NugetBadge.tsx';
 import LibBuilder from '../../../components/Boilerplate/LibBuilder';
@@ -10,13 +10,13 @@ import { Steps } from '@astrojs/starlight/components';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
 import AiSkill from '/src/components/AiSkill.astro';
 
-Shiny.AiConversation is a centralized AI conversation service that combines [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI) chat completions with [Shiny.Speech](https://www.nuget.org/packages/Shiny.Speech) for speech recognition, text-to-speech, wake word detection, and audio feedback — all behind a single `IAiConversationService` interface.
+Shiny.AiConversation builds conversations with an AI on top of [Microsoft.Extensions.AI](https://www.nuget.org/packages/Microsoft.Extensions.AI). You start a **session**, send it input, and get back a **turn**: the reply streams in as it is generated, tool calls run, and when the AI needs something from the user it asks a typed question instead of leaving you to guess from the wording.
 
-Building a conversational AI experience in a mobile or web app typically means stitching together many concerns yourself: managing chat client authentication, wiring up speech-to-text and text-to-speech, handling microphone permissions, coordinating state between listening/thinking/responding phases, playing audio cues, persisting message history, and exposing tools for the AI to call. Each of these is a separate library with its own lifecycle and threading model.
+Sessions are persisted and never end. Like a chat window, a session keeps growing and can be picked up again at any time, even after the app restarts. The library tracks what each session costs (token usage) and how full the model's context window is, so your UI can warn the user before a long conversation gets too big.
 
-Shiny.AiConversation collapses all of that into a single service registration and one interface. By default, it resolves `IChatClient` directly from your DI container — just register your chat client and the library handles the rest. For advanced scenarios (on-demand authentication, token refresh), you can implement `IChatClientProvider`. Either way, the library manages the entire flow — from capturing the user's voice, streaming it through speech recognition, sending the transcript to the chat model, reading the response aloud, and optionally persisting the conversation. The entire flow is observable through a simple `Status` property so your UI always knows what's happening.
-
-This means you can go from zero to a fully functional voice-enabled AI assistant with wake word support, audio feedback, and chat history in under 50 lines of registration code — and swap AI backends (OpenAI, Azure, Ollama, GitHub Copilot) without changing your app logic.
+:::note[v3]
+Version 3 replaces the single `IAiConversationService` with sessions. The core package no longer depends on Shiny.Speech or Shiny.Audio, so text chat works without any audio packages. Voice (wake word, push-to-talk, barge-in, text-to-speech) comes back in a separate Voice package, and the MAUI chat control moves to the new session API. Both are being rebuilt on the session API now.
+:::
 
 | | |
 |---------|---------|
@@ -29,40 +29,28 @@ This means you can go from zero to a fully functional voice-enabled AI assistant
 
 | Feature | Description |
 | --- | --- |
-| **Access checking** | `RequestAccess()` verifies speech-to-text permissions before starting voice features |
-| **Text chat** | send messages via `TalkTo()` and receive streaming AI responses |
-| **Voice chat** | `ListenAndTalk()` captures speech and sends it to the AI in one call |
-| **Wake word** | hands-free activation with `StartWakeWord("Hey Copilot")` that listens continuously |
-| **Text-to-speech** | AI responses can be read aloud automatically |
-| **Audio feedback** | configurable sound effects for thinking, responding, ok, cancel, and error states |
-| **Acknowledgement modes** | `None`, `AudioBlip`, `LessWordy`, or `Full` text-to-speech |
-| **Context providers** | pluggable `IContextProvider` visitor pattern for populating an `AiContext` per request. Each provider's `Apply(AiContext)` method receives a mutable context containing system prompts, AI tools, quiet words, speech-to-text options, and text-to-speech options. A built-in `ContextProvider` handles time-based prompts, acknowledgement-aware voice prompts, and DI-registered `AITool` instances. Register additional providers to inject custom prompts, tools, or override speech settings. |
-| **Message persistence** | optional `IMessageStore` for chat history storage and retrieval |
-| **AI chat lookup tool** | automatically available when an `IMessageStore` is registered, lets the AI search its own conversation history |
-| **Structured turns** | the AI answers with a typed `AiTurn` (`Reply` + `Questions`), so "keep listening" is a real signal rather than a guess at the wording; falls back to plain text on any provider that can't produce it |
-| **Conversation continuation** | while a turn carries questions the microphone stays open for the answer, bounded by `FollowUpTimeout` |
-| **Multiple choice** | questions can carry a fixed set of answers, rendered as tappable buttons by `AiChatView` |
-| **Voice interruption** | configurable quiet words (e.g., "stop", "cancel") immediately silence TTS; any other speech during TTS interrupts and continues the conversation with the new utterance |
-| **Speech options** | configurable `SpeechToTextOptions` and `TextToSpeechOptions` (culture, silence timeout, voice, speech rate, etc.) |
-| **State tracking** | observable `Status` property (`Idle`, `Listening`, `Thinking`, `Responding`) |
-| **Pluggable providers** | default resolves `IChatClient` from DI; optionally implement `IChatClientProvider` for custom auth (OpenAI, Copilot, Ollama, etc.) |
-| **AOT compatible** | fully trimmer-safe with `IsAotCompatible` enabled |
-| **Cross-platform** | works on MAUI (Android, iOS, Windows) and Blazor (Server, WASM) |
+| **Sessions** | `IAiSessionManager` starts, loads, queries and deletes sessions. Every load reads the store and returns a fresh instance |
+| **Streaming** | replies stream as `TextDelta` events while the model is still generating |
+| **Typed questions** | the built-in `ask_user` tool gives the session `PendingQuestions`, with optional multiple-choice answers |
+| **One active turn** | sending while a turn is running supersedes it, and an interrupted reply is stored as what the user actually heard |
+| **Persistence** | the user message is stored before the model is called and the reply is stored as it streams, so a failure or crash still leaves an honest record |
+| **Usage & context** | cumulative `SessionUsage`, plus a `ContextSnapshot` with `ContextPressure` (Normal / Warning / Critical) |
+| **Interceptors** | `ISessionInterceptor` adds tools and system prompts per session or per turn, optionally scoped to a session `Profile` |
+| **One event stream** | `session.GetEvents()` is an `IAsyncEnumerable` that starts with a `Snapshot`. No Rx, no C# events |
+| **Pluggable providers** | resolves `IChatClient` from DI by default; implement `IChatClientProvider` for custom auth |
+| **AOT compatible** | source-generated JSON for every stored type, `IsAotCompatible` enabled |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────┐
-│     IAiConversationService      │  ← Your app talks to this
-├─────────────────────────────────┤
-│  IChatClientProvider            │  ← Default resolves IChatClient from DI
-│  ISpeechToTextService           │  ← From Shiny.Speech
-│  ITextToSpeechService           │  ← From Shiny.Speech
-│  IAudioPlayer                   │  ← From Shiny.Speech
-│  IMessageStore?                 │  ← Optional persistence (you implement)
-│  IEnumerable<IContextProvider>  │  ← System prompts & tools (pluggable)
-└─────────────────────────────────┘
+IAiSessionManager ── Start / Get ──► IAiSession ── Send ──► IAiTurn
+        │                               │  ▲
+        ▼                               │  └── ISessionInterceptor (tools, prompts)
+IAiSessionStore  ◄──────────────────────┘
+IChatClientProvider ──► IChatClient (Microsoft.Extensions.AI)
 ```
+
+See [Architecture](/aiconversation/architecture) for the details.
 
 ## Setup
 
@@ -79,178 +67,212 @@ This means you can go from zero to a fully functional voice-enabled AI assistant
 
 2. Register a chat client
 
-   The simplest approach is to register an `IChatClient` in DI — the library resolves it automatically:
+   The simplest approach is to register an `IChatClient` in DI. The library resolves it automatically:
 
    ```csharp
    builder.Services.AddChatClient(new OpenAIClient("your-api-key").GetChatClient("gpt-4o").AsIChatClient());
    ```
 
-   Or use one of the built-in provider packages:
+   Or use one of the provider packages:
 
    | Package | Description |
    |---|---|
    | `Shiny.AiConversation.OpenAi` | Static OpenAI-compatible client (OpenAI, Azure, Ollama) |
+   | `Shiny.AiConversation.GithubCopilot` | GitHub Copilot from a personal access token |
    | `Shiny.AiConversation.Maui.GithubCopilot` | GitHub Copilot with device code auth (MAUI only) |
 
-   Building the UI in MAUI? `Shiny.AiConversation.Maui` gives you a ready-made chat screen — see [MAUI Chat UI](/aiconversation/chat-view).
+   For other backends, implement `IChatClientProvider`. See [Chat Client Provider](/aiconversation/chat-client-provider).
 
-   ```csharp
-   // OpenAI
-   opts.AddStaticOpenAIChatClient("your-api-key", "https://api.openai.com/v1", "gpt-4o");
+3. Register AI Conversation
 
-   // GitHub Copilot (MAUI only — handles auth, token storage, everything)
-   opts.AddGithubCopilotChatClient();
-   ```
-
-   For other backends, implement `IChatClientProvider` — see [Chat Client Provider](/aiconversation/chat-client-provider).
-
-3. Register the service in your app
-
-   **MAUI (MauiProgram.cs):**
    ```csharp
    builder.Services.AddShinyAiConversation(opts =>
    {
-       // Optional: add message store, configure settings
+       // all optional
+       opts.AddStaticOpenAIChatClient("your-api-key", "https://api.openai.com/v1", "gpt-4o");
+       opts.SetSessionStore<MySessionStore>();          // default: in-memory
+       opts.AddInterceptor<MyInterceptor>();             // tools + system prompts
+       opts.AddTool(AIFunctionFactory.Create(GetWeather, "get_weather"));
+       opts.AddTool(cookingTimer, AiToolFlags.None, "cooking");   // only for "cooking" sessions
    });
    ```
 
-   **Blazor (Program.cs):**
-   ```csharp
-   builder.Services.AddShinyAiConversation(opts =>
-   {
-       // Optional: add message store, configure settings
-   });
-   ```
-
-4. Add custom system prompts (optional)
-
-   System prompts, tools, and speech settings are supplied by `IContextProvider` implementations using a visitor pattern. A `ContextProvider` is auto-registered. Add your own:
+4. Start a session and send to it
 
    ```csharp
-   public class MyContextProvider : IContextProvider
-   {
-       public Task Apply(AiContext context)
-       {
-           context.SystemPrompts.Add("You are a helpful assistant.");
-           // context.Tools.Add(...) to add AI tools
-           // context.Acknowledgement is available to adjust behavior per mode
-           // context.QuietWords — modify quiet words for voice interruption
-           // context.SpeechToTextOptions — set/override speech recognition options
-           // context.TextToSpeechOptions — set/override text-to-speech options
-           return Task.CompletedTask;
-       }
-   }
-
-   // Register in DI (multiple providers are supported, executed in sequence)
-   builder.Services.AddShinyAiConversation(opts =>
-   {
-       opts.AddContextProvider<MyContextProvider>();
-   });
-   ```
-
-5. Use the service
-
-   ```csharp
-   public class ChatViewModel(IAiConversationService aiService)
+   public class ChatViewModel(IAiSessionManager sessions)
    {
        public async Task Send(string message)
        {
-           aiService.AiResponded += response =>
-           {
-               if (response.Response.Text is { } text)
-                   Console.WriteLine($"AI: {text}");
-           };
+           await using var session = await sessions.GetLatest() ?? await sessions.Start();
 
-           await aiService.TalkTo(message, CancellationToken.None);
+           var turn = session.Send(AiInput.Text(message));
+           await foreach (var e in turn.Events)
+           {
+               if (e is TextDelta delta)
+                   Console.Write(delta.Text);
+           }
+
+           var result = await turn.Completion;
+           Console.WriteLine($"\n{result.Outcome}: {result.Reply?.Text}");
        }
    }
    ```
 </Steps>
 
-## Quick Example
+## Sessions
 
 ```csharp
-// Check access before using voice features
-var access = await aiService.RequestAccess();
-if (access != AccessState.Available)
-    return; // Speech is not available
+// new session, optionally with persisted settings
+var session = await sessions.Start(new AiSessionSettings
+{
+    Profile = "cooking",          // interceptors use this to pick tools and prompts
+    ContextWindow = 128_000,      // falls back to IChatClientProvider.ContextWindow
+    Tags = ["kitchen"]
+});
 
-// Text chat
-await aiService.TalkTo("What is .NET MAUI?", cancellationToken);
+// continue where the user left off
+var latest = await sessions.GetLatest();
 
-// Voice chat (push-to-talk)
-await aiService.ListenAndTalk(cancellationToken);
+// load a specific one (a new instance every call; you own it and dispose it)
+var again = await sessions.Get(session.SessionId);
 
-// Hands-free wake word
-await aiService.StartWakeWord("Hey Copilot");
-// ... user says "Hey Copilot, what's the weather?"
-// Service automatically captures and sends to AI
-aiService.StopWakeWord();
+// list headers without loading them, most recently active first
+var recent = await sessions.Query(new SessionQuery(Text: "recipe", Take: 20));
 
-// Chat history (requires IMessageStore)
-var history = await aiService.GetChatHistory(limit: 50);
-await aiService.ClearChatHistory();
-
-// Acknowledgement modes
-aiService.Acknowledgement = AiAcknowledgement.Full;      // Read response aloud
-aiService.Acknowledgement = AiAcknowledgement.LessWordy;  // Concise TTS
-aiService.Acknowledgement = AiAcknowledgement.AudioBlip;   // Sound effects only
-aiService.Acknowledgement = AiAcknowledgement.None;        // Silent
+// remove a session and all of its messages
+await sessions.Delete(session.SessionId);
 ```
 
-## Platform Notes
+The manager is stateless. It keeps no sessions in memory, so `Get` always returns a new instance rehydrated from the store. Disposing an instance releases that instance only; the session stays in the store.
 
-:::caution[Android Speech Recognition]
-Android's native speech recognition engine works in short recording segments — it automatically stops listening after a period of silence and must restart for the next segment. This creates brief pauses during continuous listening (wake word, `ListenAndTalk`) that are noticeable compared to iOS, which streams continuously.
-
-If smooth, uninterrupted speech recognition is important for your app, consider using the [ElevenLabs](https://shinylib.net/speech/elevenlabs) cloud provider via [Shiny.Speech](https://shinylib.net/speech), which transcribes captured audio without relying on the native engine's start/stop behavior.
+A session can also be renamed or reconfigured:
 
 ```csharp
-builder.Services.AddElevenLabsSpeechToText("your-api-key");
+await session.SetTitle("Weeknight dinners");
+await session.UpdateSettings(s => s with { ContextWindow = 200_000 });
 ```
 
-**Avoid Azure on Android:** the [Azure AI Speech](https://shinylib.net/speech/azure) provider does **not** currently support Android's 16 KB memory page size. On devices that use 16 KB pages (Android 15+ on supported hardware), the Azure native libraries fail to load — prefer ElevenLabs on Android.
-:::
+## Turns
 
-## Platform Permissions
+`Send` returns an `IAiTurn` immediately. A session has at most one active turn: sending again supersedes the running one.
 
-Since AI Conversations uses Shiny.Speech for voice features, you must declare speech and microphone permissions.
+| Member | Description |
+|---|---|
+| `Events` | the turn's events in order. Enumerating again replays them from the start |
+| `Completion` | an `AiTurnResult` with `Outcome`, the stored `Reply`, `Questions`, `Usage` and `Error`. Never faults |
+| `Interrupt(spokenText)` | stops the turn because the user interrupted. Pass how far text-to-speech got so the model is told what was actually heard |
 
-**Android** — Add to `AndroidManifest.xml`:
-```xml
-<uses-permission android:name="android.permission.RECORD_AUDIO" />
-<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+Turn events: `TurnStarted`, `TextDelta`, `ToolCallStarted`, `ToolCallCompleted`, `QuestionsAsked`, then one of `TurnCompleted`, `TurnInterrupted` or `TurnFailed`.
+
+`AiTurnOutcome` is `Completed`, `AwaitingUser`, `Interrupted`, `Superseded` or `Failed`. Interruption and cancellation are normal outcomes, not errors.
+
+## Questions and answers
+
+When the AI needs something from the user it calls the built-in `ask_user` tool. The turn ends with `AwaitingUser`, and the session's `PendingQuestions` holds the questions:
+
+```csharp
+var result = await session.Send(AiInput.Text("Order me a coffee")).Completion;
+
+if (result.Outcome == AiTurnOutcome.AwaitingUser)
+{
+    var question = session.PendingQuestions[0];   // "What size?" with choices Small / Large
+    if (question.HasChoices)
+        await session.Send(AiInput.Answer(question, "large")).Completion;
+    else
+        await session.Send(AiInput.Text("A large one")).Completion;
+}
 ```
-`MODIFY_AUDIO_SETTINGS` is required for the TTS audio-level Visualizer and for the native STT beep suppression.
 
-**iOS** — Add to `Info.plist`:
-```xml
-<key>NSSpeechRecognitionUsageDescription</key>
-<string>This app uses speech recognition</string>
-<key>NSMicrophoneUsageDescription</key>
-<string>This app uses the microphone for speech recognition</string>
+See [Questions](/aiconversation/structured-turns).
+
+## Session events
+
+`GetEvents()` is a hot broadcast. Each call gets its own subscription, and the first item is always a `Snapshot` (state, pending questions, usage and context), so a page that subscribes late still knows where things are.
+
+```csharp
+await foreach (var e in session.GetEvents(cancellationToken))
+{
+    switch (e)
+    {
+        case Snapshot s:                    Render(s.State, s.PendingQuestions); break;
+        case MessageAdded m:                AddBubble(m.Message); break;
+        case MessageUpdated m:              UpdateBubble(m.Message); break;
+        case TurnEventOccurred { Event: TextDelta d }: AppendToStreamingBubble(d.Text); break;
+        case StateChanged s:                ShowTyping(s.State is AiSessionState.Thinking or AiSessionState.Responding); break;
+        case ContextPressureChanged c:      WarnIfLong(c.Context.Pressure); break;
+        case SessionError err:              ShowError(err.Error); break;
+    }
+}
 ```
 
-**Windows** — Add the `Microphone` capability to your `Package.appxmanifest`:
-```xml
-<Capabilities>
-    <DeviceCapability Name="microphone" />
-</Capabilities>
+The subscription ends when the token is cancelled or the session instance is disposed. A slow subscriber never stalls the conversation: when its queue fills, streamed text deltas are dropped first.
+
+`AiSessionState` is `Idle`, `Thinking`, `Responding`, `AwaitingUser` or `Compacting`.
+
+## History
+
+```csharp
+var page = await session.GetMessages(beforeSequence: null, count: 30);   // newest page
+if (page.HasMore)
+    page = await session.GetMessages(page.Messages[0].Sequence, 30);     // older
 ```
+
+Each `AiMessageDocument` carries its `Role`, `Source` (typed, voice, choice answer, model, …), `Status` (`Complete`, `Streaming`, `Interrupted`, `Failed`), ordered `Parts` and a plain `Text` for display.
+
+## Usage and context
+
+Two different numbers:
+
+| | `session.Usage` (`SessionUsage`) | `session.Context` (`ContextSnapshot`) |
+|---|---|---|
+| Meaning | everything billed in this session | how full the context window is right now |
+| Fields | `InputTokens`, `OutputTokens`, `CachedInputTokens`, `ReasoningTokens`, `TotalTokens`, `RequestCount` | `CurrentTokens`, `MaxTokens`, `PercentUsed`, `Pressure`, `IsEstimate`, `MeasuredAt` |
+| Updated | after every model request, including each tool-loop round trip | after every turn |
+
+`CurrentTokens` is the input plus output of the **last** request in the turn, which is the true size of what the provider last saw. When the provider reports no usage, it is estimated and `IsEstimate` is true.
+
+`Pressure` is `Normal`, `Warning` (75% by default) or `Critical` (90% by default), set with `AiSessionSettings.ContextWarningThreshold` / `ContextCriticalThreshold`. It is null when the context window is unknown. The library shows nothing; your app decides whether to warn the user or offer to start a new session.
+
+## Interceptors
+
+`ISessionInterceptor` replaces `IContextProvider`. Tools are never persisted, so interceptors run on every load and rebuild them:
+
+```csharp
+public class CookingInterceptor(IRecipeService recipes) : ISessionInterceptor
+{
+    public Task OnSessionLoaded(SessionLoadedContext ctx)
+    {
+        if (ctx.Session.Settings.Profile == "cooking")
+        {
+            ctx.SystemPrompts.Add("You are a friendly cooking assistant.");
+            ctx.AddTool(AIFunctionFactory.Create(recipes.Find, "find_recipe"));
+        }
+        return Task.CompletedTask;
+    }
+
+    public async Task OnBeforeTurn(TurnContext ctx)
+    {
+        // per-turn context (RAG, location, ...) applies to this turn only
+        ctx.SystemPrompts.Add(await recipes.GetPantrySummary());
+    }
+
+    public Task OnAfterTurn(TurnContext ctx, AiTurnResult result) => Task.CompletedTask;
+}
+```
+
+A built-in interceptor adds every tool registered with `opts.AddTool(...)` (and any `AITool` in DI) plus the current time to each turn. An exception in an interceptor is logged and never fails the turn.
 
 ## Dependencies
-
-All required dependencies are pulled in transitively by the `Shiny.AiConversation` package — you only need to install the one package.
 
 | Package | Purpose |
 |---|---|
 | `Microsoft.Extensions.AI` | `IChatClient` abstraction for AI chat completions |
-| `Shiny.Speech` | Speech-to-text, text-to-speech, and audio playback |
 
 ## Samples
 
-* [Sample MAUI App](https://github.com/shinyorg/speech/tree/main/samples/MauiSample) — Full chat app with GitHub Copilot authentication, settings, and aura visualization
-* [Sample Blazor WASM App](https://github.com/shinyorg/speech/tree/main/samples/BlazorSample) — Blazor WebAssembly app with static OpenAI provider
+* [Sample MAUI App](https://github.com/shinyorg/speech/tree/main/samples/MauiSample) — chat app with GitHub Copilot authentication, settings, and aura visualization (being moved to v3 sessions)
+* [Sample Blazor WASM App](https://github.com/shinyorg/speech/tree/main/samples/BlazorSample) — Blazor WebAssembly app with static OpenAI provider (being moved to v3 sessions)
 
 ## AI Coding Assistant
 
@@ -258,8 +280,7 @@ All required dependencies are pulled in transitively by the `Shiny.AiConversatio
 
 ## Next Steps
 
-- [Chat Client Provider](/aiconversation/chat-client-provider) — How to implement `IChatClientProvider` for different AI backends
-- [Message Store](/aiconversation/message-store) — Persist and query chat history
-- [Acknowledgements & Sound](/aiconversation/acknowledgements) — Configure audio feedback and text-to-speech modes
-- [Wake Word](/aiconversation/wake-word) — Hands-free voice activation
-- [AI Tools](/aiconversation/ai-tools) — Register AI tools including the built-in chat history lookup
+- [Architecture](/aiconversation/architecture) — sessions, turns, persistence and recovery
+- [Questions](/aiconversation/structured-turns) — the `ask_user` tool and pending questions
+- [Chat Client Provider](/aiconversation/chat-client-provider) — implement `IChatClientProvider` for other AI backends
+- [Session Store](/aiconversation/message-store) — persist sessions with `IAiSessionStore`

@@ -3,7 +3,7 @@ title: Chat Client Provider
 description: How to implement IChatClientProvider for different AI backends
 ---
 
-The `IChatClientProvider` interface is the bridge between the AI conversation service and your AI backend.
+The `IChatClientProvider` interface is the bridge between AI sessions and your AI backend.
 
 ## Default Behavior
 
@@ -20,31 +20,33 @@ builder.Services.AddShinyAiConversation(opts =>
 
 If no `IChatClient` is registered and no custom provider is set, an `InvalidOperationException` is thrown at runtime.
 
-## Structured output support
+## Optional members
 
-Providers also declare how their endpoint can be asked for a [structured turn](/aiconversation/structured-turns).
-`StructuredOutputMode` is a default interface member, so you only override it when the default is wrong
-for your endpoint:
+`IChatClientProvider` has two default interface members. Override them only when you know better than the default:
 
 ```csharp
 public class MyChatClientProvider : IChatClientProvider
 {
     public Task<IChatClient> GetChatClient(CancellationToken cancelToken = default) => ...;
 
-    public AiStructuredOutputMode StructuredOutputMode => AiStructuredOutputMode.Json;
+    // the model's context window in tokens; enables ContextPressure for every session
+    public int? ContextWindow => 128_000;
+
+    // true when the endpoint accepts images inside tool results
+    public bool SupportsImagesInToolResults => true;
 }
 ```
 
-| Mode | Request | Use for |
+| Member | Default | Used for |
 |------|---------|---------|
-| `JsonSchema` *(default)* | Native schema-constrained response format | OpenAI and compatible endpoints |
-| `Json` | JSON response format, shape described in the prompt | GitHub Copilot, models without schema support |
-| `Prompt` | Shape in the prompt only, no format constraint | Endpoints that reject both of the above |
-| `None` | Plain text — opts out entirely | Providers that can't do any of it |
+| `ContextWindow` | `null` (unknown) | `ContextSnapshot.MaxTokens` when `AiSessionSettings.ContextWindow` is not set. With no window, sessions report raw token counts but no pressure level |
+| `SupportsImagesInToolResults` | `false` | the camera tool (coming in a later release) |
 
-Both GitHub Copilot providers default to `Json` because the Copilot proxy passes `json_schema` support
-through per-model. A wrong value degrades rather than breaks — the service retries unstructured and falls
-back to plain text.
+`StructuredOutputMode` is gone in v3. Questions come from the built-in [`ask_user` tool](/aiconversation/structured-turns), and every provider that supports tool calls supports that.
+
+## Function invocation
+
+The session runs the tool loop itself, because it needs to see each tool call, end the turn when `ask_user` is called, and read the usage of each request separately. If the client you return has no function invocation, the session wraps it with `UseFunctionInvocation()` for you. A client that already has it (like the built-in providers below) is used as-is.
 
 ## Built-in Providers
 
@@ -70,6 +72,17 @@ builder.Services.AddShinyAiConversation(opts =>
 ```
 
 Works great for Blazor WASM, server apps, or any MAUI app where you have an API key up front.
+
+### Shiny.AiConversation.GithubCopilot
+
+A static GitHub Copilot provider that exchanges a personal access token (PAT) for a short-lived Copilot token and refreshes it as needed.
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.AddStaticGithubCopilotChatClient("github-pat", "gpt-4o");
+});
+```
 
 ### Shiny.AiConversation.Maui.GithubCopilot
 
@@ -115,10 +128,12 @@ For scenarios not covered by the built-in providers, implement `IChatClientProvi
 public interface IChatClientProvider
 {
     Task<IChatClient> GetChatClient(CancellationToken cancelToken = default);
+    int? ContextWindow => null;
+    bool SupportsImagesInToolResults => false;
 }
 ```
 
-The service calls `GetChatClient()` before each chat request, so your implementation can handle token refresh, re-authentication, or client rotation.
+Sessions call `GetChatClient()` at the start of each turn, so your implementation can handle token refresh, re-authentication, or client rotation.
 
 ## Registration
 

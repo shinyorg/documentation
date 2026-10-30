@@ -1,200 +1,106 @@
 ---
-title: Message Store
-description: Persist and query chat history with IMessageStore
+title: Session Store
+description: Persist AI sessions and their messages with IAiSessionStore
 ---
 
-The `IMessageStore` interface provides optional chat history persistence. When configured, every user message and AI response is automatically stored.
+`IAiSessionStore` persists sessions. It is the only source of truth: the session manager keeps nothing in memory, so every `Get` reads the store.
 
-## Interface
-
-```csharp
-public interface IMessageStore
-{
-    Task Store(string? userTriggeringMessage, string? assistantMessage, ChatResponse response, CancellationToken cancellationToken);
-    Task Clear(DateTimeOffset? beforeDate = null);
-    Task<IReadOnlyList<AiChatMessage>> Query(
-        string? messageContains = null,
-        DateTimeOffset? fromDate = null,
-        DateTimeOffset? toDate = null,
-        int? limit = null,
-        CancellationToken cancellationToken = default
-    );
-}
-```
-
-The `Store` method is called once after the AI finishes responding, with the triggering user message, the AI's display text, and the complete `ChatResponse`.
-
-:::caution
-Persist `assistantMessage`, **not** `response.Text`. With [structured turns](/aiconversation/structured-turns)
-enabled (the default), `response.Text` is the raw JSON envelope — storing it would put JSON into your chat
-history and feed it back into later prompts through the [chat lookup tool](/aiconversation/ai-tools).
-`assistantMessage` is the parsed reply, or the raw text when the turn was unstructured. `response` is still
-passed for metadata such as token usage.
-:::
-
-## Registration
+The default is `InMemoryAiSessionStore`, which is fine for tests and for apps that don't need history to survive a restart. A SQLite document store package (replacing `Shiny.AiConversation.MessageStores.SqliteDocDb`) is coming in the next phase of v3. Until then, implement the interface below to persist sessions.
 
 ```csharp
 builder.Services.AddShinyAiConversation(opts =>
 {
-    opts.SetChatClientProvider<MyChatClientProvider>();
-    opts.SetMessageStore<MyMessageStore>(addAiLookupTool: true);
+    opts.SetSessionStore<MySessionStore>();
 });
 ```
 
-The `addAiLookupTool` parameter (default `true`) registers a `ChatLookupAITool` that allows the AI to search its own conversation history when answering questions like "What did we talk about yesterday?"
+## Two document types
 
-## AiChatMessage
+| Document | Shape | Written |
+|---|---|---|
+| `AiSessionDocument` (header) | small, updated in place: title, settings, rolling summary, pending questions, usage, context size, message count | after every turn, and on `SetTitle` / `UpdateSettings` |
+| `AiMessageDocument` | append-only, one per message, ordered by `Sequence` | user message before the model is called; assistant message as `Streaming`, then finalized |
+
+A turn never rewrites a growing document: messages are appended, and the assistant message is updated once when the turn ends.
 
 ```csharp
-public record AiChatMessage(
-    string Id,
-    string Message,
+public record AiMessageDocument(
+    string MessageId,
+    string SessionId,
+    long Sequence,                 // allocated by the store
+    int SchemaVersion,
     DateTimeOffset Timestamp,
-    ChatMessageDirection Direction  // User or AI
+    MessageRole Role,              // User | Assistant | Tool | System | Summary
+    MessageSource Source,          // Typed | Voice | ChoiceAnswer | Model | ...
+    MessageStatus Status,          // Complete | Streaming | Interrupted | Failed
+    IReadOnlyList<MessagePart> Parts,
+    string? Text,                  // display text, for search and UI
+    string? SpokenText,            // what was heard, when interrupted
+    UsageSnapshot? Usage,
+    bool Compacted,
+    string? CompactedIntoMessageId,
+    string RunId                   // the process run that wrote it (crash recovery)
 );
 ```
 
-## Querying History
+`MessagePart` is polymorphic (`TextPart`, `ToolCallPart`, `ToolResultPart`, `AnswerPart`), with a `kind` discriminator in JSON.
 
-The service exposes history through `IAiConversationService`:
+## Interface
 
 ```csharp
-// Get recent messages
-var recent = await aiService.GetChatHistory(limit: 50);
+public interface IAiSessionStore
+{
+    Task CreateSession(AiSessionDocument session, CancellationToken ct = default);
+    Task SaveSession(AiSessionDocument session, long expectedVersion, CancellationToken ct = default);
+    Task<AiSessionDocument?> GetSession(string sessionId, CancellationToken ct = default);
+    Task<IReadOnlyList<AiSessionDocument>> QuerySessions(SessionQuery query, CancellationToken ct = default);
+    Task DeleteSession(string sessionId, CancellationToken ct = default);
 
-// Search by content
-var results = await aiService.GetChatHistory(messageContains: "weather");
+    Task<AiMessageDocument> AppendMessage(AiMessageDocument message, CancellationToken ct = default);
+    Task UpdateMessage(AiMessageDocument message, CancellationToken ct = default);
+    Task<IReadOnlyList<AiMessageDocument>> GetMessages(MessageQuery query, CancellationToken ct = default);
+    Task<IReadOnlyList<MessageSearchHit>> SearchMessages(MessageSearchQuery query, CancellationToken ct = default);
 
-// Filter by date range
-var today = await aiService.GetChatHistory(
-    startDate: DateTimeOffset.Now.Date,
-    endDate: DateTimeOffset.Now
-);
-
-// Clear all history
-await aiService.ClearChatHistory();
-
-// Clear history older than 30 days
-await aiService.ClearChatHistory(beforeDate: DateTimeOffset.Now.AddDays(-30));
+    Task Purge(DateTimeOffset before, CancellationToken ct = default);
+}
 ```
 
-:::note
-`GetChatHistory()` and `ClearChatHistory()` throw `InvalidOperationException` if no `IMessageStore` is registered.
+## Implementation rules
+
+| Method | Must |
+|---|---|
+| `CreateSession` | throw when the id already exists |
+| `SaveSession` | replace the header **only if** the stored `Version` equals `expectedVersion`, otherwise throw `SessionConflictException`. The caller has already set the new version on the document |
+| `QuerySessions` | filter by `Text` (title / summary), `From` / `To` (last activity), `Tags`, `Profile`; order by `LastActivity` descending; apply `Skip` / `Take` |
+| `DeleteSession` | delete the header and all of its messages |
+| `AppendMessage` | allocate `Sequence` (unique and increasing per session) and return the message with it set |
+| `UpdateMessage` | replace the message with the same `MessageId` |
+| `GetMessages` | return messages in sequence order; with a `Limit` and `BeforeSequence` (or no cursor), the **newest** `Limit` before the cursor; with `AfterSequence`, the oldest after it; honour `IncludeCompacted` |
+| `SearchMessages` | rank user and assistant message `Text` against the query; skip sessions with `Settings.ExcludeFromSearch` |
+| `Purge` | delete sessions whose last activity is before the date |
+
+The version check and the sequence allocation are what make two live instances of one session safe. See [Architecture](/aiconversation/architecture#two-instances-of-one-session). A store backed by a database should do both atomically (a conditional update or a transaction).
+
+## Serialization
+
+Serialize documents with the source-generated `AiConversationJsonContext`. It is AOT and trim safe, writes camel-case names and string enums, and handles the `MessagePart` hierarchy:
+
+```csharp
+var json = JsonSerializer.Serialize(message, AiConversationJsonContext.Default.AiMessageDocument);
+var header = JsonSerializer.Deserialize(json, AiConversationJsonContext.Default.AiSessionDocument);
+```
+
+Every document has a `SchemaVersion`, so a store can migrate older rows when it reads them.
+
+## Reading history
+
+Apps read history through the session rather than the store:
+
+```csharp
+var page = await session.GetMessages(beforeSequence: null, count: 30);   // newest page
+var older = await session.GetMessages(page.Messages[0].Sequence, 30);
+```
+
+:::note[Coming from 2.x]
+`IMessageStore`, `AiChatMessage` and `ChatMessageDirection` are gone. Version 2 history has no sessions and is not imported; v3 starts fresh.
 :::
-
-## Example: In-Memory Store
-
-```csharp
-public class InMemoryMessageStore : IMessageStore
-{
-    readonly List<AiChatMessage> messages = [];
-    readonly object sync = new();
-
-    public Task Store(string? userTriggeringMessage, string? assistantMessage, ChatResponse response, CancellationToken cancellationToken)
-    {
-        // assistantMessage, NOT response.Text - the latter is the raw structured turn envelope
-        if (assistantMessage is not { } text)
-            return Task.CompletedTask;
-
-        lock (sync)
-        {
-            messages.Add(new AiChatMessage(
-                Guid.NewGuid().ToString(),
-                text,
-                DateTimeOffset.UtcNow,
-                ChatMessageDirection.AI
-            ));
-        }
-        return Task.CompletedTask;
-    }
-
-    public Task Clear(DateTimeOffset? beforeDate = null)
-    {
-        lock (sync)
-        {
-            if (beforeDate.HasValue)
-                messages.RemoveAll(m => m.Timestamp <= beforeDate.Value);
-            else
-                messages.Clear();
-        }
-        return Task.CompletedTask;
-    }
-
-    public Task<IReadOnlyList<AiChatMessage>> Query(
-        string? messageContains = null,
-        DateTimeOffset? fromDate = null,
-        DateTimeOffset? toDate = null,
-        int? limit = null,
-        CancellationToken cancellationToken = default)
-    {
-        lock (sync)
-        {
-            IEnumerable<AiChatMessage> query = messages.OrderBy(m => m.Timestamp);
-
-            if (!String.IsNullOrWhiteSpace(messageContains))
-                query = query.Where(m => m.Message.Contains(messageContains, StringComparison.OrdinalIgnoreCase));
-            if (fromDate.HasValue)
-                query = query.Where(m => m.Timestamp >= fromDate.Value);
-            if (toDate.HasValue)
-                query = query.Where(m => m.Timestamp <= toDate.Value);
-            if (limit.HasValue)
-                query = query.Take(limit.Value);
-
-            return Task.FromResult<IReadOnlyList<AiChatMessage>>(query.ToList().AsReadOnly());
-        }
-    }
-}
-```
-
-## Example: DocumentDB Store
-
-The MAUI sample uses [Shiny.DocumentDb](https://www.nuget.org/packages/Shiny.DocumentDb.Sqlite) for SQLite-backed persistence:
-
-```csharp
-public class DocumentDbMessageStore(IDocumentStore store) : IMessageStore
-{
-    public Task Store(string? userTriggeringMessage, string? assistantMessage, ChatResponse response, CancellationToken cancellationToken)
-    {
-        // assistantMessage, NOT response.Text - the latter is the raw structured turn envelope
-        if (assistantMessage is not { } text)
-            return Task.CompletedTask;
-
-        return store.Insert(
-            new AiChatMessage(Guid.NewGuid().ToString(), text, DateTimeOffset.UtcNow, ChatMessageDirection.AI),
-            cancellationToken: cancellationToken
-        );
-    }
-
-    public Task Clear(DateTimeOffset? beforeDate = null)
-    {
-        var query = store.Query<AiChatMessage>();
-        if (beforeDate.HasValue)
-            query = query.Where(x => x.Timestamp <= beforeDate.Value);
-        return query.ExecuteDelete();
-    }
-
-    public Task<IReadOnlyList<AiChatMessage>> Query(
-        string? messageContains = null,
-        DateTimeOffset? fromDate = null,
-        DateTimeOffset? toDate = null,
-        int? limit = null,
-        CancellationToken cancellationToken = default)
-    {
-        var query = store.Query<AiChatMessage>().OrderBy(x => x.Timestamp);
-
-        if (!String.IsNullOrWhiteSpace(messageContains))
-            query = query.Where(x => x.Message.Contains(messageContains));
-        if (fromDate.HasValue)
-            query = query.Where(x => x.Timestamp >= fromDate.Value);
-        if (toDate.HasValue)
-            query = query.Where(x => x.Timestamp <= toDate.Value);
-        if (limit.HasValue)
-            query = query.Paginate(0, limit.Value);
-
-        return query.ToList(cancellationToken);
-    }
-}
-```
-
-You could also implement `IMessageStore` with Entity Framework Core, Cosmos DB, or any other storage backend.

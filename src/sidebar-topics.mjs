@@ -555,15 +555,15 @@ export const sidebarTopics = [
         label: 'AI Conversations',
         jumpTo: true,
         items:[
-          { label: 'Getting Started', link: 'aiconversation/', dateCreated: '2026-05-06', dateUpdated: '2026-05-06' },
-          { label: 'Architecture', link: 'aiconversation/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
-          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider', dateCreated: '2026-05-06', dateUpdated: '2026-05-06' },
-          { label: 'Message Store', link: 'aiconversation/message-store', dateCreated: '2026-05-06', dateUpdated: '2026-05-06' },
-          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements', dateCreated: '2026-05-06', dateUpdated: '2026-05-06' },
-          { label: 'Structured Turns & Questions', link: 'aiconversation/structured-turns', dateCreated: '2026-07-31', dateUpdated: '2026-07-31' },
-          { label: 'Wake Word', link: 'aiconversation/wake-word', dateCreated: '2026-05-06', dateUpdated: '2026-05-06' },
-          { label: 'AI Tools', link: 'aiconversation/ai-tools', dateCreated: '2026-05-06', dateUpdated: '2026-05-06' },
-          { label: 'MAUI Chat UI', link: 'aiconversation/chat-view', dateCreated: '2026-07-31', dateUpdated: '2026-07-31' },
+          { label: 'Getting Started', link: 'aiconversation/', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'Architecture', link: 'aiconversation/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-10-29' },
+          { label: 'Chat Client Provider', link: 'aiconversation/chat-client-provider', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'Session Store', link: 'aiconversation/message-store', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'Acknowledgements & Sound', link: 'aiconversation/acknowledgements', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'Questions', link: 'aiconversation/structured-turns', dateCreated: '2026-07-31', dateUpdated: '2026-10-29' },
+          { label: 'Wake Word', link: 'aiconversation/wake-word', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'AI Tools', link: 'aiconversation/ai-tools', dateCreated: '2026-05-06', dateUpdated: '2026-10-29' },
+          { label: 'MAUI Chat UI', link: 'aiconversation/chat-view', dateCreated: '2026-07-31', dateUpdated: '2026-10-29' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },
@@ -584,7 +584,7 @@ export const sidebarTopics = [
           { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper', dateCreated: '2026-07-30', dateUpdated: '2026-07-30' },
           { label: 'Custom Provider', link: 'speech/custom-provider', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
-          { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' }
+          { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-10-29' }
         ]
       },
       {
