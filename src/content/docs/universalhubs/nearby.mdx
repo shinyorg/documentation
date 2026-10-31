@@ -1,0 +1,134 @@
+---
+title: Nearby
+description: Android, iOS and macOS devices host and join universal hubs over Google's Nearby Connections - no shared network needed, beside BLE and Wi-Fi.
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| Nearby | <NugetDownloads name="Shiny.UniversalHubs.Nearby" /> |
+
+`Shiny.UniversalHubs.Nearby` adds Google's **[Nearby Connections](https://developers.google.com/nearby/connections/overview)**
+as another transport, beside BLE, Wi-Fi and [Multipeer](/universalhubs/multipeer). Like Multipeer it needs no network
+and picks the radio itself: Bluetooth, BLE, Wi-Fi LAN, Wi-Fi Direct or a hotspot. Unlike Multipeer it runs on
+**Android**, so two Android phones on a plane get more than BLE's bandwidth.
+
+The same library runs on iOS and macOS. Android, iPhone and Mac players join the same host, in the same hub, with the
+same groups and pushes.
+
+## Setup
+
+```bash
+dotnet add package Shiny.UniversalHubs.Nearby
+```
+
+```csharp
+// host - one Nearby service id per app
+builder.Services.AddUniversalServer(server => server
+    .Nearby("com.mycompany.mygame")
+    .AddHub<GameHub>(GameCharacteristicUuid, "_mygame._tcp"));
+
+// client - inside AddUniversalHubClient's options, beside Multipeer if you use it
+builder.Services.AddUniversalHubClient<IGameHub>(GameCharacteristicUuid, "_mygame._tcp", o =>
+{
+    o.ServiceUuid = ServiceUuid;
+    o.Multipeer("mygame-mc");
+    o.Nearby("com.mycompany.mygame");
+});
+```
+
+Register it in shared code. `HubTransports.All` includes Nearby, so `Start()` hosts over it and `DiscoverAll()` /
+`Connect()` use it. Where Nearby Connections doesn't exist (Windows, Linux, Mac Catalyst, Android without Google Play
+services) it is skipped quietly.
+
+### The service id
+
+- Any 1 to 64 printable ASCII characters. Conventionally your app's reverse-DNS name.
+- **One per app.** Nearby allows one advertisement and one discovery per app, so the host and every hub client use the
+  same service id and the same `NearbyStrategy`. A mismatch throws when Nearby starts.
+
+### Android
+
+Android needs Google Play services. The package adds Nearby's permissions to your manifest and asks for the runtime ones
+(Bluetooth and nearby Wi-Fi devices on Android 12 and later, location before that) when Nearby first starts. If they're
+refused, Nearby is skipped and the other transports carry on.
+
+### iOS and macOS
+
+The package carries Google's NearbyConnections as a native framework, so there's nothing to add but Info.plist entries.
+Nearby advertises over Bonjour as `_` + the first 6 bytes of SHA-256 of the service id in upper-case hex + `._tcp`.
+`NearbyProtocol.BonjourServices(serviceId)` returns it.
+
+```xml
+<key>NSBluetoothAlwaysUsageDescription</key>
+<string>Bluetooth is used to talk to nearby devices</string>
+<key>NSLocalNetworkUsageDescription</key>
+<string>The local network is used to talk to nearby devices</string>
+<key>NSBonjourServices</key>
+<array>
+    <string>_mygame._tcp</string>         <!-- the hub's mDNS service type, as before -->
+    <string>_C06804260E63._tcp</string>   <!-- Nearby: NearbyProtocol.BonjourServices("com.mycompany.mygame") -->
+</array>
+```
+
+### Options
+
+| Host (`NearbyHostOptions`) | Default | |
+|---|---|---|
+| `EndpointName` | the BLE `LocalName` | The name the host advertises. Cut to fit the endpoint info |
+| `Strategy` | `Cluster` | `Cluster` lets a device host and visit at once. `Star` (one host, many clients) gets faster upgrades. Clients must match |
+
+| Client (`NearbyClientOptions`) | Default | |
+|---|---|---|
+| `EndpointName` | the hub client name | The name this device connects under, which the host sees as `connection.Nearby.EndpointName` |
+| `ConnectTimeout` | 15 seconds | How long the host gets to accept before the next transport is tried |
+| `Strategy` | `Cluster` | Must match the host |
+
+## Which Devices Reach Which
+
+| | No network | Same Wi-Fi network |
+|---|---|---|
+| Android ↔ Android | Yes: Bluetooth, Wi-Fi Direct, hotspot | Yes |
+| Android ↔ iPhone / Mac | Not promised | Yes, over Wi-Fi LAN |
+| iPhone ↔ iPhone / Mac | Yes, but [Multipeer](/universalhubs/multipeer) is tried first | Yes |
+
+Android and Apple devices only share the mediums Google's library supports on both. Over BLE they may find each other
+with no network (the package turns on Google's BLE v2), but that isn't verified yet. Wi-Fi Aware stays off: on iOS it
+needs the devices paired through Apple's own Wi-Fi Aware pairing first.
+
+## Discovery and Connecting
+
+- `DiscoverAll()` merges Nearby hosts with the other transports by name. `HubHostInfo.Nearby` is set while the host is
+  seen over Nearby, and `Transports` includes `Nearby`.
+- The advertisement lists every running hub, so a client only sees hosts running its hub.
+- `Connect()` tries `Prefer` first, then **Wi-Fi, Multipeer, Nearby, BLE**. `Prefer = Allowed = HubTransports.Nearby`
+  uses only Nearby.
+- `client.Transport` is `HubTransports.Nearby` while connected over it.
+
+## In the Hub
+
+```csharp
+public override Task OnConnectedAsync(HubConnection connection)
+{
+    // connection.Id: nb:{id}
+    // connection.Transport: HubTransports.Nearby
+    // connection.Nearby?.EndpointName: the name the client connected under
+    return Task.CompletedTask;
+}
+```
+
+Everything else is the same hub: `Clients`, groups, `MaxClients` (counted across every transport), `ValidateClient`,
+`Context.Abort`, `IHubContext`.
+
+## What's Different from Wi-Fi
+
+- **One connection per pair of devices.** Nearby refuses a second connection between the same two devices, so every hub
+  session is a channel inside one connection, in either direction. A phone in a host's chat and its game, or two phones
+  visiting each other's chats, share it. It hangs up two seconds after its last channel closes.
+- **Values travel as binary**, as over BLE and Multipeer. Any serializer works.
+- **Messages over 32 KB** (Nearby's payload limit) travel in pieces and arrive whole.
+- **Files** are Nearby file payloads, under the same `EnableFileTransfers` and `AuthorizeFile` rules as Wi-Fi.
+- **Media channels** ride the channel as ordered messages, so [calls](/blehubs/files#media-channels) work. **Renames work.**
+- **No resume.** A dropped connection is a `ClientTimeout`; reconnect as you would over BLE.
+
+See [How It Works](/universalhubs/how-it-works#nearby) for the wire protocol.

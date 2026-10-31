@@ -40,8 +40,8 @@ builder.Services.AddUniversalServer(server => server
 - **The HttpServer** binds every interface on a free port, and mDNS tells clients which port. If you already
   registered the server with `AddShinyHttpServer`, its address and port are left alone.
 - **`MaxClients` and `ValidateClient`** are counted and checked across both transports.
-- **Registration rules.** `AddUniversalServer` can only be called once, needs at least one hub, and refuses the same
-  hub twice. It doesn't start anything: `IUniversalHubHost` starts and stops both transports.
+- **Registration rules.** `AddUniversalServer` can only be called once, needs at least one hub (or
+  [`AllowDynamicHubs`](#dynamic-hubs)), and refuses the same hub twice. It doesn't start anything: `IUniversalHubHost` starts and stops both transports.
 
 ### UniversalHubHostOptions
 
@@ -157,18 +157,78 @@ builder.Services.AddUniversalServer(server => server
 Put authentication in front of anything you share on the internet.
 :::
 
+## Dynamic Hubs
+
+A **dynamic hub** is defined while the app runs, by a downloaded web app or a script, say, rather than compiled into
+it. It is served over every transport beside the compiled hubs, and clients can't tell the difference. Turn them on in
+the builder:
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .AllowDynamicHubs(o =>
+    {
+        o.ServiceTypes.Add("_myapp._tcp");      // the mDNS types dynamic hubs may use
+        o.MaxHubs = 6;                          // the default
+    })
+    .AddHub<ChatHub>(ChatCharacteristicUuid, "_mychat._tcp"));   // optional - a server may have only dynamic hubs
+```
+
+Then add, start and remove them through `IDynamicHubs`:
+
+```csharp
+public class Tables(IDynamicHubs hubs)
+{
+    public async Task Open(IDynamicHubHandler handler)
+    {
+        var hub = hubs.Add(new DynamicHubDefinition("game", GameCharacteristicUuid, "_myapp._tcp") { MaxClients = 6 }, handler);
+        await hub.Start();                                          // like StartHub - a transport that can't start is skipped
+        await hub.Clients.All.Send("Opened", [JsonSerializer.SerializeToUtf8Bytes(DateTime.UtcNow)]);
+    }
+
+    public Task Close() => hubs.Remove("game", "The table closed");   // its clients are told why
+}
+```
+
+| Type | |
+|---|---|
+| `DynamicHubOptions` | `ServiceTypes` (empty allows only `UniversalHubHostOptions.ServiceType`) and `MaxHubs` (6) |
+| `DynamicHubDefinition` | `Name`, `CharacteristicUuid`, `ServiceType`, `MaxClients` (8), `AllowTunnel` (`false`) |
+| `IDynamicHubs` | `Hubs`, `Find(name)`, `Add(definition, handler)`, `Remove(name, reason)`. `Add` throws when the name or characteristic is taken, the service type isn't allowed, or `MaxHubs` are already added |
+| `IDynamicHub` | `Start`, `Stop`, `RunningTransports`, `Connections`, `Groups`, `Clients`, `Disconnect`: a compiled hub's `IHubContext`, without the types |
+| `IDynamicHubHandler` | `GetMethodKind(method)` (`Invoke`, `Stream` or `NotFound`), `Invoke`, `Stream`, `OnConnectedAsync`, `OnDisconnectedAsync`, `OnRenamedAsync` |
+| `DynamicHubCall` | The `Connection`, the `Method`, the `Arguments`, `ConnectionAborted`, and `Abort(reason)` to end the session after the reply |
+| `DynamicHubPush` | `hub.Clients.All` / `Client(id)` / `Group(name)` / …, then `Send(eventName, arguments)` |
+
+- **Values stay serialized.** Arguments, results, stream items and push arguments are the bytes the caller's
+  `IBleHubSerializer` wrote. That is JSON with the default serializer, which Wi-Fi clients need anyway. Nothing on the
+  host needs their types.
+- **Methods are found by name.** `NotFound` answers the caller `HubMethodNotFound` without reaching the handler.
+- **Errors.** A thrown exception reaches the caller with its class name and message. Throw a `BleHubRemoteException`
+  to choose the type, for example to relay an error from whatever runs the hub.
+- **Service types and `MaxHubs` are fixed in the app**, because the platforms fix them when the app is built: iOS lists
+  every mDNS type in `NSBonjourServices`. An mDNS TXT record lists about six hubs per service type.
+- **Bluetooth.** Every hub is a characteristic in the one GATT service. A hub added while that service is up rebuilds it
+  when it first starts, and the other hubs' BLE clients are asked to reconnect then. Add dynamic hubs before
+  starting if that matters. A removed hub's characteristic stays in a running service, refusing handshakes, until the
+  next rebuild.
+- **Tunnels.** With dynamic hubs on, a tunnel reaches only hubs that allow it. Any other path under the endpoint is
+  closed to it.
+
+[Shiny.AppDeviceBridge's Hubs bridge](/appdevicebridge/hubs/) is built on dynamic hubs: the web app defines them and
+answers every call.
+
 ## Disconnect Reasons
 
 Every disconnect carries a `HubDisconnect`: a `HubDisconnectReason` you can switch on, plus an optional message. It
-means the same thing on both transports, and the host and the client see the same value:
+means the same thing on every transport, and the host and the client see the same value:
 
-| Reason | BLE | HTTP |
-|---|---|---|
-| `ClientDisconnect` | the client called `Disconnect()` | the client closed its line |
-| `ClientTimeout` | an unsubscribe without a goodbye, or the client sweep | the line dropped and its resume window ran out |
-| `ServerDisconnect` | `Context.Abort` / `IHubContext.Disconnect` | the same |
-| `ServerShutdown` | `IUniversalHubHost.Stop`, `StopHub`, `IHubContext.Stop` | the same |
-| `ConnectionFailed` | the link failed | the line faulted |
+| Reason | BLE | HTTP | Multipeer / Nearby |
+|---|---|---|---|
+| `ClientDisconnect` | the client called `Disconnect()` | the client closed its line | the client said goodbye |
+| `ClientTimeout` | an unsubscribe without a goodbye, or the client sweep | the line dropped and its resume window ran out | the session ended without a goodbye |
+| `ServerDisconnect` | `Context.Abort` / `IHubContext.Disconnect` | the same | the same |
+| `ServerShutdown` | `IUniversalHubHost.Stop`, `StopHub`, `IHubContext.Stop` | the same | the same |
+| `ConnectionFailed` | the link failed | the line faulted | the connect failed |
 
 - **Host:** `UniversalHub.OnDisconnectedAsync(connection, disconnect)` and `IHubContext.ClientDisconnected` carry it.
 - **Client:** `Disconnected`, `StatusChanged` (`e.Disconnect`) and `BleHubDisconnectedException.Disconnect` carry it.

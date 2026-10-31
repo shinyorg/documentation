@@ -205,3 +205,63 @@ Programmatic pairing is only available on Android.
 var rssi = await peripheral.ReadRssiAsync();
 Console.WriteLine($"RSSI: {rssi} dBm");
 ```
+
+## Native Platform Objects
+
+Diagnostics and inspection tools (a debug overlay, an agent such as MAUI DevFlow) can get the platform object behind the manager or a peripheral without casting to each platform's class:
+
+```csharp
+object? central = bleManager.GetNativeObject();
+object? device = peripheral.GetNativeObject();
+
+// or typed, in platform code
+var cb = peripheral.GetNativeObject<CoreBluetooth.CBPeripheral>();
+```
+
+| Platform | `IBleManager` | `IPeripheral` |
+|---|---|---|
+| iOS, Mac Catalyst, macOS | `CBCentralManager` (null until Bluetooth is first used) | `CBPeripheral` |
+| Android | `BluetoothManager` | `BluetoothDevice` |
+| Windows | `BluetoothAdapter` of the selected radio (null until a radio is resolved) | `BluetoothLEDevice` (null once the connection is cancelled) |
+| Linux | BlueZ adapter object path, e.g. `/org/bluez/hci0` (null until the bus is first used) | BlueZ device object path, e.g. `/org/bluez/hci0/dev_AA_BB_CC_DD_EE_FF` |
+| Blazor WebAssembly | null | null |
+
+Reading these never creates anything: on Apple it doesn't create the `CBCentralManager` or raise the Bluetooth permission prompt. They come from `INativeBleManager` and `INativePeripheral`, and `GetNativeObject()` returns null when the platform has neither.
+
+To find out when the manager's object appears, subscribe to `WhenNativeObjectLoaded()`. It emits the object straight away if it already exists, then again when the platform creates it. That happens the first time the app uses Bluetooth on Apple and Linux, and each time a radio is selected on Windows. Subscribing doesn't create the object, and on Blazor WebAssembly the observable completes without emitting.
+
+```csharp
+bleManager
+    .WhenNativeObjectLoaded()
+    .Subscribe(native => inspector.Attach(native));
+```
+
+The observable wraps the `INativeBleManager.NativeObjectLoaded` event. If you use the event directly, hook it before reading `NativeObject`, because it never fires on Android: the `BluetoothManager` exists from the moment the manager is constructed. An exception thrown by a handler is logged and doesn't affect the Bluetooth call that created the object.
+
+Each platform class also has typed properties. Android has `Native` and `Gatt`. Apple has `Manager` and `Native`, and reading `Manager` does create the central. Windows has `SelectedRadio`, `SelectedAdapter`, `Watcher`, `Native` and `DeviceInfo`. Linux has `Connection`, `AdapterObjectPath` and `ObjectPath`.
+
+### Supplying your own native manager
+
+:::danger[Experts only]
+Do this only if you know the platform's Bluetooth stack in depth. Shiny assumes it created the native object itself. An object configured differently, with another delegate, dispatch queue, restore identifier, connection or adapter, can silently break scanning, connections, background restoration and `IBleDelegate`. This is an escape hatch, not a configuration option, and problems it causes aren't treated as Shiny bugs.
+:::
+
+`SetNativeObjectAsync` hands Shiny a native object you created yourself. Call it before the app first uses Bluetooth: once the manager exists it throws `InvalidOperationException`, and the wrong type throws `ArgumentException`. It raises `NativeObjectLoaded` and logs a warning.
+
+```csharp
+// before anything scans, connects or requests access
+await bleManager.SetNativeObjectAsync(myCentralManager);
+```
+
+| Platform | Accepts | Typed method on `BleManager` | Notes |
+|---|---|---|---|
+| iOS, Mac Catalyst | `CBCentralManager` | `SetManager(central)` | Shiny becomes its delegate. With an `IBleDelegate` registered, create it with a restore identifier, or background restoration is lost. |
+| macOS | `CBCentralManager` | `SetManager(central)` | Shiny becomes its delegate. |
+| Android | `BluetoothManager` | `SetNative(manager)` | Only before the first scan or peripheral. |
+| Windows | `BluetoothAdapter` | `SetAdapterAsync(adapter)` | Must support Low Energy, and can't be set while scanning. It selects where access and radio state come from. The advertisement watcher always scans on the system default adapter. |
+| Linux | Adapter object path string, or `DBusConnection` | `SetConnection(connection, adapterObjectPath)` | Use the path to pick another adapter, such as `/org/bluez/hci1`. The connection must already be connected, and Shiny won't dispose it. |
+| Blazor WebAssembly | — | — | Throws `NotSupportedException`. |
+
+:::caution
+Use the native object to inspect, not to run GATT. Shiny is the `CBPeripheral` delegate and the Android `BluetoothGattCallback`, and replacing either breaks every Shiny operation on that peripheral.
+:::

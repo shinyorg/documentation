@@ -156,6 +156,15 @@ public override Task OnRenamedAsync(string? previousName)
 An exception thrown by a hub method is sent back to the caller as a `BleHubRemoteException` (with `RemoteErrorType` and
 `Message`). The connection stays up.
 
+`RemoteErrorType` is the exception's class name, unless the hub throws a `BleHubRemoteException` itself: then the caller
+gets its `RemoteErrorType`, on every transport. That is how a hub relaying someone else's error keeps that error's type:
+
+```csharp
+throw new BleHubRemoteException("GameRule", "Not your turn");   // the caller's RemoteErrorType is "GameRule"
+```
+
+`BleHubRemoteException.TypeOf(exception)` gives the type a caller is told, for transports of your own.
+
 ## Outside a Hub: IHubContext
 
 Inject `IHubContext<THub>` anywhere: services, view models, timers.
@@ -204,3 +213,20 @@ iOS can't force a central (client) off a peripheral (host). So `Stop`, `Disconne
 leave, and the client library always complies. A client that silently drops is removed when it unsubscribes, or by a
 periodic sweep (`BleHubHostOptions.ClientSweepInterval`, 10s by default).
 :::
+
+## Handler Hubs
+
+A **handler hub** has no compiled hub class: its methods are dispatched by name to an `IBleHubHandler`, and values stay
+exactly as the caller's `IBleHubSerializer` wrote them, so the host never needs their types. It is an advanced seam,
+hidden from IntelliSense, that Universal Hubs' [dynamic hubs](/universalhubs/hosting#dynamic-hubs) are built on.
+Prefer those unless you're writing a transport or host of your own.
+
+- **Registration.** `AddBleHubServer(server => server.AllowHandlerHubs())` lets the server start with no compiled hubs.
+- **`IBleHubHandlerHost`** adds hubs while the app runs: `Add(characteristicUuid, name, options, handler)` returns an
+  `IBleHubHandle` (`Start`, `Stop`, `Clients`, `Groups`, `ConnectedClients`, `Disconnect`, `TransportEndpoint`), and
+  `Remove(characteristicUuid, reason)` stops and forgets one.
+- **The one service.** A hub added while the GATT service is up rebuilds it when it first starts, and the other hubs'
+  BLE clients are asked to reconnect then. A removed hub's characteristic refuses handshakes until the next rebuild.
+- **Serialized values.** `BleHubArgumentReader.ReadSerialized()` reads an argument as the caller's bytes, and
+  `BleHubArgumentWriter.WriteSerialized(bytes)` adds one already serialized:
+  `push.Send(name, push.CreateArguments().WriteSerialized(value))`.

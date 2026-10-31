@@ -39,7 +39,7 @@ public class JoinViewModel(IUniversalHubClient<IGameHub> client)
         {
             // host.Key: stable across both transports
             // host.Name, host.HostId, host.Rssi (when seen over BLE)
-            // host.Transports: Ble, Http or both - None means it has gone
+            // host.Transports: Ble, Http, Multipeer, Nearby or several - None means it has gone
         });
 }
 ```
@@ -56,18 +56,18 @@ public class JoinViewModel(IUniversalHubClient<IGameHub> client)
 ```csharp
 await client.Connect(host, new HubConnectOptions("Allan") { Prefer = HubTransports.Http });
 
-// client.Transport is Http or Ble (None while disconnected)
+// client.Transport is Http, Multipeer, Nearby or Ble (None while disconnected)
 await client.Hub.MakeMove(4);
 ```
 
 `HubConnectOptions` carries what the client tells the host about itself (`Name`, `AppVersion`, `Properties`) and
 which transports it may use:
 
-- **`Prefer`** (Wi-Fi by default) is tried first when the host is reachable both ways. The other transport is the
-  fallback.
+- **`Prefer`** (Wi-Fi by default) is tried first when the host is reachable more than one way. The rest follow in the
+  order Wi-Fi, [Multipeer](/universalhubs/multipeer), [Nearby](/universalhubs/nearby), BLE.
 - **`Allowed`** limits which transports may be used at all.
 - **Refusals aren't retried.** A host that refuses the client (full, `ValidateClient`, hub not running) is not tried
-  again on the other transport.
+  again on another transport.
 - **No migration.** The transport is chosen at connect. A connection doesn't move between Wi-Fi and BLE mid-session.
 
 ## Resume
@@ -100,3 +100,27 @@ var result = await client.UploadFile(avatarPath, "avatar-allan.jpg", progress);
 ```
 
 See [BluetoothLE Hubs file transfers](/blehubs/files) for the host's file settings, which both transports share.
+
+## Dynamic Hub Clients
+
+To join a hub whose contract isn't compiled into the app (a [dynamic hub](/universalhubs/hosting#dynamic-hubs), or any
+hub a downloaded web app or script names), register `IDynamicHubClients` and create clients while the app runs:
+
+```csharp
+builder.Services.AddDynamicHubClients(o => o.ServiceUuid = ServiceUuid);   // what every client shares
+
+using var client = dynamicHubClients.Create(GameCharacteristicUuid, "_mygame._tcp");
+client.Hub.Pushed += (name, args) => { /* each argument serialized */ };
+await client.Connect(host, new HubConnectOptions("Allan"));             // host from client.DiscoverAll()
+
+ReadOnlyMemory<byte> result = await client.Hub.Invoke("MakeMove", [Encoding.UTF8.GetBytes("4")]);
+await foreach (var item in client.Hub.Stream("Watch", [])) { }
+```
+
+`Create(characteristicUuid, mdnsServiceType)` returns a new, disconnected `IUniversalHubClient<IDynamicHubCalls>` that
+discovers and connects like any client above; dispose it when done. `IDynamicHubCalls` calls by name, with values as
+serialized bytes (JSON with the default serializer): `Invoke` (an empty result for a method with none), `Stream` and the
+`Pushed` event, raised in order. It works against compiled and dynamic hubs alike.
+
+The options delegate runs again for each client, with `ServiceType` set from `Create`. Add-on transports
+(`o.Multipeer("mygame-mc")`, `o.Nearby("com.mycompany.mygame")`) are registered once.

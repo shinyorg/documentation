@@ -85,17 +85,11 @@ const announcementConfig = {
       title: 'HTTP Server v2',
       description: '[Resumable Uploads](/httpserver/tus), [OAuth Loopingback](/httpserver/oauth-loopback), [NEW Switchboard SignalR-like Framework](/httpserver/switchboard), [Webhooks](/httpserver/webhooks), [CalDAV](/httpserver/caldav), & [Scalar Support](/httpserver/openapi#an-api-reference-page-with-scalar)'
     },
+
     {
-      id: 'blehubs-10',
-      title: 'BLE Hubs 1.0',
-      description: 'Think SignalR for BLE!',
-      href: '/blehubs/',
-      cta: 'Hub it up!',
-    },
-    {
-      id: 'unihub-10',
-      title: 'UniHub 1.0',
-      description: 'Universal Hubs - SignalR Styled Hub BLE or HTTP - Why not both!?',
+      id: 'unihub-15',
+      title: 'Universal Hubs 1.5',
+      description: 'Universal Hubs - Peer Nearby Connectivity - Dynamic Hub Registration',
       href: '/universalhubs/',
       cta: 'YES PLEASE!',
     }       

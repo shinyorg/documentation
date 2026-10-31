@@ -1,6 +1,6 @@
 ---
 title: How It Works
-description: The Wi-Fi wire protocol, mDNS discovery, file routes and media channels behind Universal Hubs.
+description: The Wi-Fi, Multipeer and Nearby wire protocols, discovery, file routes and media channels behind Universal Hubs.
 ---
 
 Universal Hubs adds a second transport to [BluetoothLE Hubs](/blehubs/how-it-works). The hub logic (dispatch,
@@ -10,6 +10,8 @@ transport seams:
 - **Host:** each hub's `IHubContext<THub>.TransportEndpoint` accepts clients from another transport, so BLE and Wi-Fi
   clients are registered in the same hub.
 - **Client:** `BleHubClient.ConnectExternal` runs the same generated proxy over a Switchboard line instead of GATT.
+
+[Multipeer](#multipeer) and [Nearby](#nearby) plug into the same seams and share one peer-to-peer wire.
 
 ## Wire Protocol
 
@@ -37,6 +39,10 @@ The hub's own methods are not Switchboard methods. Reserved methods carry them b
   sees nothing. `OnDisconnectedAsync` runs only when the line is gone for good.
 - **Versioning.** `UniversalHubProtocol.Version` (currently 2) covers the reserved method names, envelopes, handshake
   records, TXT keys and file routes. The handshake refuses a mismatch.
+- **[Dynamic hubs](/universalhubs/hosting#dynamic-hubs)** share one Switchboard at `{Endpoint}/{hub}`, mapped behind
+  the compiled hubs' literal routes, and each line's handshake picks its hub from the path. Clients reach a dynamic hub
+  at the same path as a compiled one, with no protocol change; an unknown one refuses the handshake with "Hub not
+  found". With dynamic hubs on, a tunnel can't reach any other path under the endpoint.
 
 ## Discovery
 
@@ -99,11 +105,65 @@ The channel is yours: blehubs and this library move whole packets in order and n
 signalling and media, and the host relays calls between its clients. Video is latest-wins, and audio is PCM16 over
 Wi-Fi and IMA ADPCM over Bluetooth.
 
+## Multipeer
+
+[Multipeer](/universalhubs/multipeer) uses the same seams as Wi-Fi, with the peer-link wire it shares with
+[Nearby](#nearby).
+
+- **One `MCSession` per hub connection.** The host accepts every invitation into a new, encrypted session. No 8-peer
+  limit, and clients never connect to each other.
+- **Discovery.** One advertisement per host under the Multipeer service type. Its `discoveryInfo` has the same keys as
+  the mDNS TXT record (`proto`, `hostId`, `name`, `hubs`) and is replaced when the running hubs change. The host's peer
+  id is kept across launches, so a relaunched host isn't listed twice.
+- **Messages** are reliable and ordered:
+
+  ```
+  [0] version  [1] kind  [2..5] message id  [6] name length  [7..] name  [...] payload
+  ```
+
+  | Kind | Direction | Carries |
+  |---|---|---|
+  | `Handshake` / `HandshakeReply` | client → host → client | the hub's characteristic UUID; the reply has the host's name and id, and whether files and media channels are available |
+  | `Invoke`, `Stream`, `Cancel` | client → host | the method and its arguments |
+  | `Completion`, `StreamItem`, `StreamEnd`, `Error` | host → client | results, items, and errors with their type and message |
+  | `Push` | host → client | the event and its arguments |
+  | `Rename`, `HostRenamed` | both | a new name |
+  | `Disconnect` | both | why the hub ended the session, or that the client is leaving |
+  | `FileRequest`, `FileReply`, `FileDone` | both | file transfers (the file itself is a Multipeer resource) |
+  | `MediaOpen`, `MediaOpened`, `MediaPacket`, `MediaClose` | both | the media channel |
+
+- **Values** are the bytes `IBleHubSerializer` wrote, never JSON envelopes, so any serializer works.
+- **Errors** keep the same types and wording as BLE and Wi-Fi.
+- **Disconnects.** Each side says goodbye before ending the session. A session that ends without one is a
+  `ClientTimeout`. There is no resume.
+- **Versioning.** `PeerProtocol.Version` (currently 1) covers the message layout, kinds, control records,
+  advertisement keys and file resource names, for Multipeer and Nearby alike. The handshake refuses a mismatch.
+
+## Nearby
+
+[Nearby](/universalhubs/nearby) carries the same messages as Multipeer, over Google's Nearby Connections. What's
+different is underneath them:
+
+- **One connection per pair of devices, many channels.** Nearby allows one connection between two devices, and one
+  advertisement and one discovery per app. So each device keeps one connection per remote device and carries every hub
+  session as a channel inside it, opened from either end. Two hubs on one host, or two phones visiting each other, share
+  one connection. It hangs up two seconds after its last channel closes.
+- **Discovery.** One advertisement per host. Its endpoint info (at most 131 bytes) is the protocol version, the host id,
+  a 4-byte tag per running hub (the start of SHA-256 of its characteristic UUID) and the host's name, cut to fit.
+  Clients only list hosts running their hub.
+- **Frames.** Each Nearby payload is one frame: a kind (`Message`, `Part`, `Last`, `Open`, `Close`, `FileName`), a bit
+  for which end opened the channel, and the channel's number. A message over Nearby's 32 KB payload limit travels as
+  `Part`s and a `Last`, never interleaved with another message on its channel.
+- **Files** are Nearby file payloads. A `FileName` frame ties each one to its channel and name; it may arrive before or
+  after the file.
+- **Versioning.** `PeerProtocol.Version` covers the endpoint info and frames too. `NearbyFrameKind` values never change.
+
 ## Best Practices
 
 - **Set your own service UUID and mDNS service types**, so other apps' hosts stay out of your scans.
 - **Give hosts distinct names.** Discovery merges BLE and mDNS results by name.
 - **Persist `HostId`** if clients should recognize a host across app restarts.
 - **Keep BLE as the fallback.** Plane, hotel and public Wi-Fi usually block device-to-device traffic.
+  [Multipeer](/universalhubs/multipeer) (Apple devices) and [Nearby](/universalhubs/nearby) work there too.
 - **Test on real devices**, both ways round (an iOS host with an Android client, and the reverse), on Wi-Fi and with
   Wi-Fi off.

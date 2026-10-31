@@ -1,0 +1,263 @@
+---
+title: Hubs
+description: Universal Hubs whose logic lives in a Shiny.AppDeviceBridge web app - the app serves them to nearby devices over Bluetooth LE, Wi-Fi and Multipeer, and every call is answered by the page or background.js
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Hubs" />
+
+The hubs bridge lets the web app host [Universal Hubs](/universalhubs/): real-time hubs that other devices join over
+Bluetooth LE, Wi-Fi (mDNS) and Multipeer, with methods, streams, pushes and groups. The app serves them on the bridge's
+own HTTP server, but the hub's **logic lives in the downloaded web app**. Every call a client makes reaches the web app
+as the native call `hub:{name}`: the page while it is open, otherwise `background.js`. So a hub's behavior ships with a
+[web app update](/appdevicebridge/updates/), with no new app build.
+
+Clients are ordinary Universal Hubs clients (`AddUniversalHubClient<IGameHub>`) on other devices. They can't tell a web
+app hub from a compiled one.
+
+## Platforms
+
+| Transport | Platforms |
+| --- | --- |
+| Wi-Fi (mDNS) | Every head |
+| Bluetooth LE | Android, iOS and Mac Catalyst (Universal Hubs registers the platform BLE hosting there); Windows and macOS once the app calls `services.AddBluetoothLeHosting()` |
+| Multipeer | Apple platforms, with [Shiny.UniversalHubs.Multipeer](/universalhubs/multipeer/) in the app |
+
+Without BLE hosting (Windows or macOS without `AddBluetoothLeHosting()`, and Linux), `AddHubsBridge` registers a
+fallback that reports BLE hosting as unsupported, so starting a hub on `All` skips BLE and runs it over Wi-Fi and
+Multipeer instead of failing. A transport that can't start (Bluetooth off, no network, a transport the platform lacks) is skipped as long as another
+one starts. When none does, `start` answers `503`. A host without `AddHubsBridge` answers `501`.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Hubs
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddHubsBridge(server => server
+        .ServiceUuid("…")                                            // optional - clients must use the same one
+        .AllowDynamicHubs(o => o.ServiceTypes.Add("_myapp._tcp"))),  // the mDNS types web app hubs may use
+    webApp => { /* … */ }
+);
+```
+
+`configure` is Universal Hubs' own [`AddUniversalServer`](/universalhubs/hosting/) builder, so compiled hubs of the
+app's own can sit beside the web app's. The service types and the hub limit are fixed here, in the app, because the
+platforms fix them when the app is built: iOS lists every mDNS type in `NSBonjourServices`. See
+[Dynamic hubs](/universalhubs/hosting/#dynamic-hubs). The hubs share the bridge's server and never start or stop it.
+
+| Client | C# | TypeScript |
+| --- | --- | --- |
+| `IHubsBridge` | `AddHubsBridgeClient()` (or `AddWebAppHub<THub>()`, which adds it) | `HubsBridge` |
+
+### Platform setup
+
+The same as any [Universal Hubs host](/universalhubs/#platform-setup):
+
+- **iOS and macOS:** list every allowed service type in `NSBonjourServices` (and, for Multipeer, its `_x._tcp` and
+  `_x._udp`), and set `NSLocalNetworkUsageDescription` and `NSBluetoothAlwaysUsageDescription`.
+- **Android:** the [BLE permissions](/blehubs/#platform-setup), plus `CHANGE_WIFI_MULTICAST_STATE` for mDNS.
+- **Wi-Fi clients** reach the hubs only when the server listens beyond loopback (`http.Options.Address = IPAddress.Any`).
+  See [Security](#security).
+
+## From Blazor
+
+Derive from `WebAppHub` and map each method by the name the clients' contract uses. Values are read and written
+through source-generated JSON metadata, so there's no reflection:
+
+```csharp
+public sealed class GameHub(GameEngine engine) : WebAppHub
+{
+    protected override void Map(WebAppHubMethods methods) => methods
+        .Invoke("MakeMove", GameJson.Default.Int32, GameJson.Default.MoveResult, this.MakeMove)
+        .Invoke("Kick", GameJson.Default.String, reason => { this.Abort(reason); return Task.CompletedTask; })
+        .Stream("Watch", GameJson.Default.GameState, engine.Changes);
+
+    public override Task OnConnectedAsync(HubConnectionInfo connection)
+        => engine.IsFull ? throw new HubException("GameFull", "The table is full") : Task.CompletedTask;
+
+    async Task<MoveResult> MakeMove(int cell)
+    {
+        if (!engine.IsTurn(this.Connection.Id))
+            throw new HubException("GameRule", "Not your turn");    // the client sees GameRule
+
+        var result = engine.Move(this.Connection.Id, cell);
+        await this.PushAsync("StateChanged", GameJson.Default.GameState, engine.State);
+        return result;
+    }
+}
+```
+
+```csharp
+// Program.cs
+builder.Services
+    .AddWebAppHostClient()
+    .AddWebAppHub<GameHub>(new("game", "6e400010-b5a3-f393-e0a9-e50e24dcca9e", "_myapp._tcp") { MaxClients = 6 });
+
+// once the page is up - every time it loads
+var hubs = services.GetRequiredService<WebAppHubs>();
+await hubs.DefineAsync();
+await hubs.StartAsync("game");
+```
+
+| Member | |
+| --- | --- |
+| `WebAppHubMethods` | `Invoke` with 0–2 typed arguments, with or without a result; `Stream` with 0–1; and raw `JsonElement` overloads for anything else |
+| `Connection` | The caller (`HubConnectionInfo`: `Id`, `Transport`, `Name`, `AppVersion`, `Properties`, `ConnectedAt`) |
+| `OnConnectedAsync`, `OnDisconnectedAsync`, `OnRenamedAsync` | Throw from `OnConnectedAsync` or `OnRenamedAsync` to refuse |
+| `Abort(reason)` | Ends the caller's session once the reply is sent |
+| `PushAsync`, `AddToGroupAsync`, `RemoveFromGroupAsync`, `DisconnectAsync` | Pushes and groups for this hub; `Bridge` is the `IHubsBridge` for anything else |
+| `WebAppHubOptions` | `Name`, `CharacteristicUuid`, `ServiceType`, `MaxClients` (8), `AllowTunnel` (`false`) |
+| `WebAppHubs` | `DefineAsync()` defines every registered hub and takes its calls; `StartAsync(name, transports)`, `StopAsync(name, reason)` |
+
+One instance serves every call, and calls can overlap, so keep per-caller state keyed by `Connection.Id`.
+`WebAppHub` takes its calls through `IWebAppNativeCalls` (in `Shiny.AppDeviceBridge.Client`), which the Blazor package's
+`WebAppNativeCalls` implements.
+
+## From a JavaScript page
+
+A page without the C# client imports `hostHub` from the bridge. Each function is a method, an async generator is a
+stream, and the `on…` handlers are the lifecycle:
+
+```js
+import { hostHub, HubError } from "/_bridge/hubs/client.js";
+
+const game = await hostHub(
+    { name: "game", characteristicUuid: "6e400010-b5a3-f393-e0a9-e50e24dcca9e", serviceType: "_myapp._tcp", maxClients: 6 },
+    {
+        async MakeMove(cell) {
+            if (!isTurn(this.connection.id)) throw new HubError("GameRule", "Not your turn");
+            return { accepted: true, cell };
+        },
+        async *Watch() { for await (const state of changes()) yield state; },
+        Kick(reason) { this.abort(reason); },
+        onConnected(connection) { if (full()) throw new HubError("GameFull", "The table is full"); },
+        onDisconnected(connection, reason, message) { },
+    });
+
+await game.start();                                       // or start("Http"), …
+await game.push("StateChanged", [state], { groups: ["red"] });
+```
+
+The handle also has `stop`, `remove`, `connections`, `disconnect`, `addToGroup`, `removeFromGroup`, `group` and `off`.
+A TypeScript page can use `HubsBridge` from `@shinyorg/appdevicebridge` for the same routes and answer the
+`hub:{name}` calls itself.
+
+## How a call reaches the web app
+
+Each call is the native call `hub:{name}` carrying a `HubCall`, answered with a `HubCallReply`. `WebAppHub` and
+`client.js` do this for you; `background.js` answers the same way while no page is open:
+
+```js
+// background.js
+appdevicebridge.on("hub:game", call => {
+    if (call.kind === "Invoke" && call.method === "Ping") return { result: "pong" };
+    return {};
+});
+```
+
+| `kind` | Reply |
+| --- | --- |
+| `Invoke` | `{ result }`, or `{ error: { type, message } }`. `abort` and `abortReason` end the caller's session after the reply |
+| `Stream` | `{}` once it has started. Post each item to `POST /_bridge/hubs/streams/{streamId}`, then `POST …/{streamId}/end` (with an `error` or without). Both answer `410` once the caller has gone, and the `hubs.stream` event says so too |
+| `Connected` | `{}`, or an `error` to refuse the client |
+| `Disconnected` | `{}`. The client's groups are still intact |
+| `Renamed` | `{}`, or an `error` to refuse the new name |
+
+- **Methods not in the definition** are answered `HubMethodNotFound` without reaching the web app.
+- **Errors keep their type.** A `HubError` (JavaScript), `HubException` (C#) or `{ error: { type, message } }` reaches
+  the client as a `BleHubRemoteException` with that `RemoteErrorType`. Anything else carries its class name.
+- **No page and no `background.js` handler:** connections are refused and calls fail with `HubUnavailable`.
+- **Pushes** go to every client, or to a target's `connections` and `groups`, less its `except`. Groups exist while
+  they have members.
+
+## Defining again
+
+The page defines its hubs every time it loads. Defining with the same characteristic, service type, `MaxClients` and
+`AllowTunnel` keeps the hub and its clients; only the method list may change. Changing any of those replaces the hub,
+and its clients are disconnected. `define` answers `400` for a service type the app doesn't allow, and `409` when the
+name or characteristic is taken or the app's hub limit (`MaxHubs`, 6 by default) is reached.
+
+## Clients on other devices
+
+Clients are plain Universal Hubs clients with a `[BleHubClient]` contract whose names match the hub's methods and
+events:
+
+```csharp
+builder.Services.AddUniversalHubClient<IGameHub>("6e400010-b5a3-f393-e0a9-e50e24dcca9e", "_myapp._tcp");
+```
+
+:::caution[JSON names must agree]
+Arguments and results cross as JSON, so the client's serializer and the page must spell properties the same way. A
+JavaScript page writes `{ accepted, cell }`, so register a camelCase source-generated context on the client
+(`[JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.CamelCase)]`).
+:::
+
+## Joining hubs
+
+The web app can also join hubs on other devices, compiled or dynamic, with no contract compiled in, through Universal
+Hubs' [dynamic hub clients](/universalhubs/client#dynamic-hub-clients). Methods and events go by name, and values cross
+as JSON. What the clients share (the hosts' BLE `ServiceUuid`, timeouts, Multipeer) is `AddHubsBridge`'s second
+parameter:
+
+```csharp
+bridge.AddHubsBridge(
+    server => server.AllowDynamicHubs(o => o.ServiceTypes.Add("_myapp._tcp")),
+    clients => clients.Multipeer("myapp-mc"));
+```
+
+```ts
+const hubs = new HubsBridge();
+const client = await hubs.createClient({ characteristicUuid: "6e400010-…", serviceType: "_myapp._tcp" });
+
+await hubs.onHost(host => { /* host.name, host.transports (None = gone), host.rssi */ });
+await hubs.onPush(push => { /* push.clientId, push.event, push.arguments */ });
+await hubs.discover(client.id, { transports: "All" });
+
+await hubs.connect(client.id, { host: "Kitchen", name: "Allan", prefer: "Http", allowed: "All" });
+const { result, error } = await hubs.invoke(client.id, { method: "Send", arguments: ["hi"] });
+```
+
+| Route | |
+| --- | --- |
+| `POST clients` | A client for a hub: `{ characteristicUuid, serviceType }`. At most 8 at once (`409 too_many_clients`) |
+| `POST clients/{id}/discover` | Looks on `transports` until stopped (`DELETE`), the client is removed, or nothing listens to `hubs.client.host`. Listen first, or it answers `409 not_listening` |
+| `POST clients/{id}/connect` | `host` (a discovered host's name, `404` if unseen) or `url` (Wi-Fi only), plus `name`, `prefer`, `allowed` and `properties`. A refusal answers `409 refused` with the host's reason |
+| `POST clients/{id}/invoke` | `{ method, arguments }`. A hub's own failure is the result's `error` (`{ type, message }`), not an HTTP failure. `409 not_connected` before connecting |
+| `POST clients/{id}/streams` | The same body; items and the end arrive as `hubs.client.stream`. `DELETE clients/{id}/streams/{streamId}` stops it |
+| `POST clients/{id}/disconnect`, `DELETE clients/{id}` | Disconnect, or disconnect and forget |
+
+Events: `hubs.client.host` (found, changed or gone), `hubs.client.push`, `hubs.client.status` (connected or
+disconnected, and why) and `hubs.client.stream`. `IHubsBridge` in C# and `HubsBridge` in TypeScript have every route.
+`clients` is a reserved hub name. The platform setup is the same as hosting, since discovery browses the same mDNS and
+Multipeer types.
+
+The sample's Hubs page (`samples/Sample.Blazor/Pages/Hubs.razor`, with `ChatHub.cs`) does both: it serves a chat hub on
+the transports you tick, and joins one by a discovered host (choosing the transports to look on, `Prefer` and
+`Allowed`) or by address. `samples/Sample.App/SampleConfiguration.cs` registers `AddHubsBridge` with Multipeer and
+binds the server to `IPAddress.Any`. In a debug build that also puts the bridges on the network, as the sample notes.
+
+## Security
+
+:::caution[The bridge policy doesn't cover hub clients]
+The hub routes live at `/hubs`, outside the bridge prefix, so [the bridge policy](/appdevicebridge/security/) does not
+apply to them. Each hub's own rules do: `MaxClients`, the web app's `onConnected` refusal and `AllowTunnel` (off by
+default). Wi-Fi clients reach them only when the app binds beyond loopback, while `/_bridge`, including these
+management routes, stays on-device only. Arguments from remote devices reach web app code, so treat them as untrusted.
+:::
+
+## Requests
+
+<BridgeApi bridges={["HubsBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["HubsBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["HubsBridge"]} show="types" />

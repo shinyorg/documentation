@@ -272,13 +272,15 @@ export const sidebarTopics = [
       {
         label: 'Universal Hubs',
         jumpTo: true,
-        dateUpdated: '2026-10-23',
+        dateUpdated: '2026-10-30',
         items: [
-          { label: 'Getting Started', link: 'universalhubs/', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
-          { label: 'Hosting', link: 'universalhubs/hosting', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
-          { label: 'Connecting Clients', link: 'universalhubs/client', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' },
-          { label: 'How It Works', link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-10-23' },
-          { label: 'Release Notes', link: 'universalhubs/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-10-12' }
+          { label: 'Getting Started', link: 'universalhubs/', dateCreated: '2026-10-12', dateUpdated: '2026-10-31' },
+          { label: 'Hosting', link: 'universalhubs/hosting', dateCreated: '2026-10-12', dateUpdated: '2026-10-31' },
+          { label: 'Connecting Clients', link: 'universalhubs/client', dateCreated: '2026-10-12', dateUpdated: '2026-10-31' },
+          { label: 'Multipeer', link: 'universalhubs/multipeer', dateCreated: '2026-10-30', dateUpdated: '2026-10-30' },
+          { label: 'Nearby', link: 'universalhubs/nearby', dateCreated: '2026-10-31', dateUpdated: '2026-10-31' },
+          { label: 'How It Works', link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-10-31' },
+          { label: 'Release Notes', link: 'universalhubs/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-10-31' }
         ]
       },
       {
@@ -814,6 +816,7 @@ export const sidebarTopics = [
               { label: 'GPS & Motion', link: 'appdevicebridge/gps', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Health', link: 'appdevicebridge/health', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'HTTP Transfers', link: 'appdevicebridge/http-transfers', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Hubs', link: 'appdevicebridge/hubs', showNew: true, dateCreated: '2026-10-31', dateUpdated: '2026-10-31' },
               { label: 'In-App Purchases', link: 'appdevicebridge/inapppurchases', showNew: true, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Live Activities', link: 'appdevicebridge/liveactivities', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Maps & Directions', link: 'appdevicebridge/maps', showNew: false, dateCreated: '2026-09-22', dateUpdated: '2026-10-06' },
@@ -884,8 +887,8 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/cameraview/', dateCreated: '2026-06-13', dateUpdated: '2026-06-13' },
           { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers', dateCreated: '2026-06-13', dateUpdated: '2026-06-13' },
-          { label: 'Effects & Filters', link: 'controls/cameraview/effects', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
           { label: 'Long-Range Barcode Scanning', link: 'controls/cameraview/long-range-barcode', platform: 'maui', dateCreated: '2026-10-30', dateUpdated: '2026-10-30' },
+          { label: 'Effects & Filters', link: 'controls/cameraview/effects', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
           { label: 'Face Masks', link: 'controls/cameraview/face-masks', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
           { label: 'AI Document Scanner', link: 'controls/cameraview/ai', dateCreated: '2026-06-30', dateUpdated: '2026-06-30' },
           { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
@@ -1319,6 +1322,7 @@ export const sidebarTopics = [
           { label: 'Gauge', link: 'controls/gauge/', dateCreated: '2026-10-30', jumpTo: true, dateUpdated: '2026-10-30' },
           { label: 'Confetti', link: 'controls/confetti/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'Marquee', link: 'controls/marquee/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
+          { label: 'Scratch Card', link: 'controls/scratch-card/', dateCreated: '2026-10-31', jumpTo: true, dateUpdated: '2026-10-31' },
           { label: 'Border Animations', link: 'controls/border-animations/', dateCreated: '2026-10-14', jumpTo: true, dateUpdated: '2026-10-14' },
           { label: 'AnimatedBackground', link: 'controls/animated-background/', dateCreated: '2026-10-15', jumpTo: true, dateUpdated: '2026-10-15' },
           { label: 'VideoText', link: 'controls/video-text/', dateCreated: '2026-10-14', jumpTo: true, dateUpdated: '2026-10-14' },
