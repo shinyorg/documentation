@@ -1,0 +1,170 @@
+---
+title: Barcodes
+description: Scan QR codes and barcodes with the device's camera from a Shiny.AppDeviceBridge web app, including long-range scanning with auto-zoom for codes across an aisle
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Barcodes" />
+
+The barcodes bridge turns the device's camera into a barcode scanner for the page. When the page asks, the device shows
+a full-screen scanner over the web app, and the codes it reads come back to the page. It's built on the modal scanner
+in [Shiny Controls' media service](/controls/cameraview/media-service/), including its
+[long-range mode](/controls/cameraview/long-range-barcode/), which reads codes the platform scanners miss, such as a shelf label
+across an aisle, and can zoom in on them by itself.
+
+This is the camera of the device running the app. A page that wants the camera of the machine *showing* it uses the
+browser's own `BarcodeDetector`. To drive the device's camera from somewhere else, with a viewfinder, see
+[Device Camera](/appdevicebridge/camera/).
+
+## Platforms
+
+| Platform | Reads codes with |
+| --- | --- |
+| iOS, Mac Catalyst, macOS | Apple Vision |
+| Android | ML Kit |
+| Windows | ZXing.Net |
+| Linux | nothing: every route answers `501` |
+
+`LongRange` mode works on every platform except Linux. Its own decoder reads the 1D codes, and the platform's scanner
+reads the rest.
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Barcodes
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddBarcodesBridge(),
+    webApp => { /* … */ }
+);
+```
+
+`AddBarcodesBridge()` calls `UseShinyCamera()` for you. Declare the camera permission:
+
+- **iOS and Mac Catalyst:** `NSCameraUsageDescription` in `Info.plist`. On macOS, also the camera entitlement when sandboxed.
+- **Android:** `<uses-permission android:name="android.permission.CAMERA" />`.
+- **Windows:** the `webcam` capability.
+
+The scanner asks for the permission itself the first time. A refusal comes back as `reason: "PermissionDenied"`, not
+as an error.
+
+## From the page
+
+```ts
+import { BarcodesBridge } from "@shinyorg/appdevicebridge";
+
+const barcodes = new BarcodesBridge();
+
+// one code, of any kind
+const { barcodes: [code], reason } = await barcodes.scan({});
+if (code)
+    lookup(code.value, code.format);
+```
+
+`scan` answers when the scanner closes, with every code it read and why it closed. In Blazor, register
+`AddBarcodesBridgeClient()` and inject `IBarcodesBridge`.
+
+### Many codes
+
+`maxResults: 0` keeps the scanner open until the person taps ✓, `timeoutSeconds` passes without a read, or the page
+calls `stopScan()`. Listen for `barcodes.detected` to show each code as it's read:
+
+```ts
+const off = await barcodes.onDetected(code => addRow(code.value));
+
+const result = await barcodes.scan({
+    maxResults: 0,
+    formats: ["Ean13", "UpcA"],
+    instructions: "Scan each item, then tap ✓"
+});
+
+await off();
+```
+
+`filterDuplicates` (on by default) reports each symbology and value once per scan.
+
+## Long range
+
+```ts
+await barcodes.scan({
+    mode: "LongRange",
+    autoZoom: true,
+    formats: ["Ean13", "UpcA", "Code128"]
+});
+```
+
+In `Standard` mode, the platform's scanner reads the whole frame, every frame. That's the quickest read of a code held
+up to the lens. But Vision and ML Kit shrink the frame before they look at it, so a code a few metres away loses its
+bars. `LongRange` mode finds codes in the full-resolution frame first. It reads 1D codes (EAN/UPC, Code 128, Code 39,
+ITF) with a blur-tolerant decoder down to about a pixel per bar. 2D codes go to the platform's scanner cut out and
+enlarged, and codes are tracked across frames. With `autoZoom`, a code that's been found but is too small to read pulls
+the camera in until it can be read. A pinch takes back control at once. A big, close code can read a frame or two later
+than in `Standard` mode, so `Standard` is still the default.
+
+Narrowing `formats` is the biggest speed-up. A list with only 1D formats skips the platform's scanner altogether.
+
+The remaining settings tune long range and are ignored in `Standard` mode. Leave them out to use the scanner's
+defaults:
+
+| Field | Range | Default | Meaning |
+| --- | --- | --- | --- |
+| `maxAutoZoom` | 1–10 | 4 | The furthest auto-zoom goes, as a multiple of the starting zoom |
+| `fullFrameInterval` | 0–30 | 3 | Run the platform's scanner over the whole frame every this many frames, to catch close codes and Code 93 / Codabar. 0 never does |
+| `maxNativeCropsPerFrame` | 0–8 | 2 | Candidates handed to the platform's scanner per frame, cut out and enlarged |
+| `uncheckedConfirmations` | 1–10 | 2 | Frames a code without a check digit (Code 39, short ITF) must read on before it's reported |
+
+## The request
+
+Every field is optional. `{}` reads one code of any kind and waits as long as the person takes.
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `formats` | all | `QrCode`, `Aztec`, `DataMatrix`, `Pdf417`, `Code128`, `Code39`, `Code93`, `Codabar`, `Ean8`, `Ean13`, `UpcA`, `UpcE`, `Itf` |
+| `mode` | `Standard` | `Standard` or `LongRange` |
+| `autoZoom` | `false` | `LongRange` only: zoom in on codes too small to read |
+| `maxResults` | 1 | Close after this many codes. 0 keeps scanning until the person, the timeout or the page ends it. At most 1000 |
+| `filterDuplicates` | `true` | Report each symbology and value once per scan |
+| `timeoutSeconds` | none | Close after this long without a read. Each code restarts the clock. At most 3600 |
+| `scanWindow` | whole frame | `{ x, y, width, height }` from 0 to 1. Only read codes inside it. The scanner shows it as an aiming guide |
+| `torchOn` | `false` | Start with the torch lit, where there is one |
+| `title`, `instructions` | none | Shown on the scanner. At most 256 characters each |
+
+## The result
+
+`{ barcodes, reason }`. Each code has its `value`, its `format`, and its `bounds` in the upright camera image (0 to 1).
+
+| `reason` | Meaning |
+| --- | --- |
+| `MaxResults` | `maxResults` codes were read. A one-code scan that finds one ends this way |
+| `Done` | The person tapped ✓ |
+| `Dismissed` | The person closed the scanner |
+| `Timeout` | Nothing was read within `timeoutSeconds` |
+| `Stopped` | The page called `stopScan()` |
+| `PermissionDenied` | The camera permission was refused, so the scanner never opened |
+| `CameraUnavailable` | The app had no window to show the scanner on |
+
+Aborting the request (an `AbortSignal`, or a cancelled token in C#) closes the scanner.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `400` | `bad_request` | A field is out of range, `formats` includes `Unknown`, or the body isn't a scan request |
+| `409` | `scan_in_progress` | Another scan is running. The device runs one at a time |
+| `501` | `not_supported` | Linux, or the app didn't register the bridge |
+
+## Requests
+
+<BridgeApi bridges={["BarcodesBridge"]} show="requests" />
+
+## Events
+
+<BridgeApi bridges={["BarcodesBridge"]} show="events" />
+
+## Types
+
+<BridgeApi bridges={["BarcodesBridge"]} show="types" />

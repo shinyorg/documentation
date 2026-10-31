@@ -798,6 +798,7 @@ export const sidebarTopics = [
               { label: 'App Links', link: 'appdevicebridge/app-links', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'App & Device', link: 'appdevicebridge/app', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-12' },
               { label: 'Audio', link: 'appdevicebridge/audio', showNew: true, dateCreated: '2026-10-30', dateUpdated: '2026-10-30' },
+              { label: 'Barcodes', link: 'appdevicebridge/barcodes', showNew: true, dateCreated: '2026-10-31', dateUpdated: '2026-10-31' },
               { label: 'Beacons', link: 'appdevicebridge/beacons', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Biometrics', link: 'appdevicebridge/biometrics', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
               { label: 'Bluetooth LE', link: 'appdevicebridge/bluetoothle', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
