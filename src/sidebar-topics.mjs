@@ -884,6 +884,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'controls/cameraview/', dateCreated: '2026-06-13', dateUpdated: '2026-06-13' },
           { label: 'Frame Analyzers', link: 'controls/cameraview/analyzers', dateCreated: '2026-06-13', dateUpdated: '2026-06-13' },
           { label: 'Effects & Filters', link: 'controls/cameraview/effects', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
+          { label: 'Long-Range Barcode Scanning', link: 'controls/cameraview/long-range-barcode', platform: 'maui', dateCreated: '2026-10-30', dateUpdated: '2026-10-30' },
           { label: 'Face Masks', link: 'controls/cameraview/face-masks', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
           { label: 'AI Document Scanner', link: 'controls/cameraview/ai', dateCreated: '2026-06-30', dateUpdated: '2026-06-30' },
           { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
