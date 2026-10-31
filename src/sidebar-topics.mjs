@@ -1329,7 +1329,14 @@ export const sidebarTopics = [
           { label: 'Range Pickers', link: 'controls/range-pickers/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'SecurityPin', link: 'controls/securitypin/', dateCreated: '2026-04-16', dateUpdated: '2026-04-16', jumpTo: true },
           { label: 'PasswordStrength', link: 'controls/passwordstrength/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },
-          { label: 'Toast', link: 'controls/toast/', dateCreated: '2026-05-03', dateUpdated: '2026-05-03', jumpTo: true },
+          {
+            label: 'Toast',
+            jumpTo: true,
+            items: [
+              { label: 'Getting Started', link: 'controls/toast/', dateCreated: '2026-05-03', dateUpdated: '2026-10-31' },
+              { label: 'Snackbar', link: 'controls/toast/snackbar', dateCreated: '2026-10-31', dateUpdated: '2026-10-31' },
+            ]
+          },
           { label: 'Modal', link: 'controls/modal/', dateCreated: '2026-08-28', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-07' },
         ]
       },
