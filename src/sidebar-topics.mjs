@@ -1314,6 +1314,7 @@ export const sidebarTopics = [
           { label: 'Avatar & AvatarGroup', link: 'controls/avatar/', dateCreated: '2026-10-15', jumpTo: true, dateUpdated: '2026-10-15' },
           { label: 'ProgressBar', link: 'controls/progressbar/', dateCreated: '2026-05-04', dateUpdated: '2026-05-04', jumpTo: true },
           { label: 'ProgressLine', link: 'controls/progressline/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },
+          { label: 'Gauge', link: 'controls/gauge/', dateCreated: '2026-10-30', jumpTo: true, dateUpdated: '2026-10-30' },
           { label: 'Confetti', link: 'controls/confetti/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'Marquee', link: 'controls/marquee/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'Border Animations', link: 'controls/border-animations/', dateCreated: '2026-10-14', jumpTo: true, dateUpdated: '2026-10-14' },

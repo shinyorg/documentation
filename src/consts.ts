@@ -995,6 +995,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "hideFromAppBuilder": true
     },
     {
+        "id": "gauge",
+        "nuget": "Shiny.Maui.Controls",
+        "blazorNuget": "Shiny.Blazor.Controls",
+        "description": "Gauge",
+        "category": "controls",
+        "version": VERSIONS.shinyControls,
+        "hideFromAppBuilder": true
+    },
+    {
         "id": "quick-entry",
         "nuget": "Shiny.Maui.Controls.Desktop",
         "blazorNuget": "Shiny.Blazor.Controls",

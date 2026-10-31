@@ -397,6 +397,10 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyapp', paramId: 'shinycontrols' },
         { kind: 'shinyblazor', paramId: 'shinycontrols' },
     ],
+    gauge: [
+        { kind: 'shinyapp', paramId: 'shinycontrols' },
+        { kind: 'shinyblazor', paramId: 'shinycontrols' },
+    ],
     'quick-entry': [
         { kind: 'shinyapp', paramId: 'shinydesktopcontrols' },
         { kind: 'shinyblazor', paramId: 'shinycontrols' },
