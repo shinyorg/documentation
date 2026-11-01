@@ -72,7 +72,7 @@ call.
 | Provider | Set with | ETag | Notes |
 |---|---|---|---|
 | In-memory (default) | — | version counter | Lost when the process ends |
-| Files | `actors.UseFileStorage(dir)` | content hash | `{dir}/{actor}/{hash(id)}[.{state}].json`. Atomic replace, and a lock file makes it safe across processes. Reminders go in `reminders.json`. |
+| Files | `actors.UseFileStorage(dir)` | content hash | `{dir}/{actor}/{hash(id)}[.{state}].json`. Atomic replace, and a lock file (kept under `{actor}/.locks`) makes it safe across processes. Reminders go in `reminders.json`. |
 | Shiny.DocumentDb | `actors.UseDocumentDb(...)` | document version | `Shiny.Actors.DocumentDb`. Any DocumentDb backend, with state, reminders and event logs together. |
 
 ### Shiny.DocumentDb
@@ -87,11 +87,17 @@ builder.Services.AddShinyActors(x => x.UseDocumentDb(
 ));
 ```
 
-- **A store you already have:** `UseDocumentDb(store)`, plus `MapActorDocuments()` on that store's options.
+- **A store you already have:** `UseDocumentDb(store)`, plus `MapActorDocuments()` on that store's options. To build
+  one you own, `ActorDocumentStore.Create(provider)` sets it up for actor documents.
 - **A store that only exists in the container** (Blazor's IndexedDB, for example): `UseDocumentDb()` with no arguments.
+- **Conflicts on every backend.** State writes and event appends are conditional on all of them, IndexedDB included.
+  Two browser tabs appending to the same log can't both win, even after a trim.
+- **Cleared state** leaves a small tombstone, so an ETag from before the clear can never match a later write. Purge old
+  ones now and then with `DocumentDbActorStateProvider.PurgeTombstonesAsync(clearedBefore)`. Keep the cutoff hours or
+  days in the past.
 
 <Aside type="caution" title="SQLitePCLRaw advisory">
-Shiny.DocumentDb.Sqlite 14.0.0 pulls in `SQLitePCLRaw` 2.1.11, which has a high-severity advisory
+Shiny.DocumentDb.Sqlite 14.1.0 still pulls in `SQLitePCLRaw` 2.1.11, which has a high-severity advisory
 (GHSA-2m69-gcr7-jv3q). Pin 2.1.12 or later for each platform: `SQLitePCLRaw.lib.e_sqlite3.android` on Android,
 `.ios` on iOS, and the plain `SQLitePCLRaw.lib.e_sqlite3` elsewhere. Don't add the plain one to an Android target.
 Its Linux `libe_sqlite3.so` shadows Android's, and the app crashes at startup (`libc.so.6 not found`).

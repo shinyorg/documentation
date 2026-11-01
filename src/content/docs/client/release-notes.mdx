@@ -10,6 +10,28 @@ Every package in the [Shiny client repository](https://github.com/shinyorg/shiny
 
 ## v6
 
+### 6.5.3 - TBD
+
+#### Data Sync
+<RN type="fix">**A retry scheduled for later is now sent when it is due.** On the HttpClient engine (the Android foreground service, Windows, Linux, macOS and Blazor) the outbox loop ended as soon as the only ops left were waiting out their backoff, so a retry wasn't sent until something else restarted the loop: a new `Queue`, a connectivity change or an app restart. The loop now sleeps until the earliest `NextAttemptAt` (at most 60 seconds per sleep), wakes early when a new op is queued, and ends once every op has been sent or has used up `MaxAttempts`. On Android the foreground-service notification stays up while it waits, about 30 seconds in total with the default `MaxAttempts` and `RetryBaseDelay`.</RN>
+<RN type="fix" platform="Apple">**Retries on iOS, Mac Catalyst and tvOS now back off and stop.** Attempts were never counted, so `MaxAttempts` and the exponential backoff never applied and a failing op retried every `RetryBaseDelay` forever. Each upload task now counts as one attempt. A retry is handed to the background `NSURLSession` straight away with `EarliestBeginDate` set, instead of waiting in-process, where it was lost if the app was suspended or terminated. A conflict resolved with `KeepLocal` is now actually sent again, `UseMerged` raises `UpdateReceived` with `Pending` like the other platforms, and an op with no upload task can now be canceled.</RN>
+<RN type="fix">**`CancelAll()` and `CancelAll<T>()` now report what they removed.** Like `Cancel(id)`, they raise `UpdateReceived` with `SyncOperationState.Canceled` and an `OutboxCanceled` activity event for each op. Before, they emptied the outbox silently on Android and the HttpClient engine.</RN>
+<RN type="feature">**See how a conflict was resolved, and the server's copy.** The new `SyncEventType.OutboxConflictResolved` fires once the endpoint's `ConflictPolicy` or a delegate has decided, with the decision in `SyncEvent.Resolution`. `OutboxConflict` and `OutboxConflictResolved` both carry `SyncEvent.RemotePayload`, the server's copy sent with the `409` / `412`. `SyncOperationResult` gains the same `RemotePayload` and `Resolution` properties for `UpdateReceived` subscribers. See [Observing conflicts](/client/datasync/conflict-resolution#observing-conflicts).</RN>
+<RN type="feature">
+**A conflict delegate can pass with `ConflictResolution.Abstain`.** Delegates are still asked in registration order and the first real answer still wins, but a delegate that returns `Abstain` (new `ConflictAction.Abstain`) hands the decision to the next one. Returning `null` now does the same instead of throwing. If every delegate abstains, the server's copy wins. See [More than one delegate](/client/datasync/conflict-resolution#more-than-one-delegate).
+
+```csharp
+public Task<ConflictResolution> OnConflict(SyncOperation op, string remotePayload)
+{
+    logger.LogInformation("Conflict on {Entity}", op.EntityIdentifier);
+    return Task.FromResult(ConflictResolution.Abstain); // let the next delegate decide
+}
+```
+</RN>
+<RN type="feature">**`InboxPullStarted` says what started the pull.** The new `SyncEvent.Trigger` is a `SyncPullTrigger`: `Manual` (app code called `PullAll` or `PullNow<T>`), `Job` (the scheduled `SyncJob`) or `Connectivity` (a regained connection, HttpClient engine only). `PullAll` and `PullNow<T>` keep their signatures. See [What started a pull](/client/datasync/#what-started-a-pull).</RN>
+
+**Behavior changes.** These fixes change what an app sees. Failing ops now actually retry and then reach `OnError`, where before they could sit in the outbox (HttpClient engine) or retry forever (Apple). On Android the sync notification stays up during backoff. `CancelAll` and `CancelAll<T>` now raise one `OutboxCanceled` and one `UpdateReceived(Canceled)` per op. A conflict now raises an extra `OutboxConflictResolved` event, and a `null` from `OnConflict` now means "abstain" instead of an error. `SyncEventType` and `ConflictAction` have new values, so a switch expression over either without a `default` branch now gets a compiler warning.
+
 ### 6.5.2 - Ocotober 31, 2026
 
 #### BluetoothLE

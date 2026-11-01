@@ -750,6 +750,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'mauishell/', dateCreated: '2025-06-03', dateUpdated: '2025-06-03' },
           { label: 'Navigation', link: 'mauishell/navigation', dateCreated: '2026-02-25', dateUpdated: '2026-02-25' },
           { label: 'Navigation Interceptors', link: 'mauishell/interceptors', dateCreated: '2026-09-06', dateUpdated: '2026-09-06' },
+          { label: 'Observing Navigation', link: 'mauishell/observers', dateCreated: '2026-10-31', dateUpdated: '2026-10-31' },
           { label: 'Dialogs', link: 'mauishell/dialogs', dateCreated: '2026-03-11', dateUpdated: '2026-03-11' },
           { label: 'ViewModel Lifecycle', link: 'mauishell/lifecycle', dateCreated: '2026-02-25', dateUpdated: '2026-02-25' },
           { label: 'Source Generation', link: 'mauishell/sourcegen', dateCreated: '2026-02-25', dateUpdated: '2026-02-25' },

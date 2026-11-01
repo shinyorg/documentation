@@ -33,6 +33,9 @@ all up, so `AddShinyActors()` already knows every actor in the app.
 - **`[OneWay]`:** the call is queued and the caller returns straight away. It must not return a value.
 - **Cancellation:** a `CancellationToken` parameter flows to the actor. A caller that cancels stops waiting even while
   its call is still queued.
+- **Timeouts:** a call that hasn't finished after `CallTimeout` (30 seconds, queueing included) throws
+  `TimeoutException`, and its token is cancelled. It is measured on the real clock, so a test advancing a fake
+  `TimeProvider` doesn't trip it. Set it to `Timeout.InfiniteTimeSpan` to wait forever.
 - **One class per interface.** If two classes implement the same interface, pick one with
   `actors.AddActor<IFoo, Foo>()`.
 - **Libraries.** Actors in a library nothing else in the app touches can be loaded with `actors.AddAssembly(assembly)`.
@@ -70,9 +73,16 @@ public class SessionActor : Actor<SessionState>, ISession
   `OnActivateAsync`.
 - **Deactivation** happens after `IdleTimeout` (5 minutes by default) with no calls, when the actor asks for it with
   `DeactivateOnIdle()`, or at shutdown. `DeactivationReason` is `Idle`, `Requested` or `Shutdown`.
-  `DeactivationTimeout` (30 seconds) bounds how long `OnDeactivateAsync` may take.
+  `DeactivationTimeout` (30 seconds) bounds how long `OnDeactivateAsync` may take: its token is cancelled then, and
+  a handler that ignores the token is let go shortly after, without auto-saving its half-changed state, so it can't
+  hold up shutdown.
 - **Calls during shutdown.** While an actor is shutting down, a call from one of its own running calls is still
-  taken. Any other call is handed to the next activation, in order.
+  taken. Any other call is handed to the next activation, ahead of anything sent later. Ticks of the old instance's
+  timers and events for its stream subscriptions end with it.
+- **Failed activations.** If activation throws, every queued call fails with it, and timers or subscriptions
+  `OnActivateAsync` had started are disposed. A single failure is retried on the next call. After two in a row, calls
+  fail straight away for `ActivationRetryBackoff` (1 second, doubling per further failure up to 32×), so a broken
+  actor isn't rebuilt and its state re-read on every call.
 - **Everything at once.** `ActorSystem.DeactivateAllAsync()` deactivates every actor, running each one's
   `OnDeactivateAsync`. `DeactivateAsync<TActor>(id)` deactivates one.
 
@@ -116,8 +126,10 @@ For something that must survive deactivation and restarts, use a [reminder](/act
 |---|---|---|
 | `IdleTimeout` | 5 minutes | How long an actor may sit without calls before it is deactivated |
 | `DeactivationTimeout` | 30 seconds | How long `OnDeactivateAsync` may take |
+| `CallTimeout` | 30 seconds | How long a caller waits for a call, queueing included, before `TimeoutException` |
+| `ActivationRetryBackoff` | 1 second | How long calls fail fast after an actor fails to activate twice in a row. `Zero` turns it off |
 | `DefaultAutoSave` | `None` | The [auto-save](/actors/state/#auto-save) mode for actors without `[AutoSave]` |
-| `MailboxCapacity` | unbounded | Bounds each actor's mailbox. Callers wait for room |
+| `MailboxCapacity` | unbounded | Bounds each actor's queue. Callers wait for room |
 | `TimeProvider` | system | Replace it to control time, as [`ActorTestHost`](/actors/testing/) does |
 
 ```csharp

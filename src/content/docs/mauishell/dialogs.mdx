@@ -391,6 +391,77 @@ public class MySheetPresenter(IMainThread mainThread) : ViewDialogPresenter(main
 awaiting the result, and tearing the dialog down all stay in the navigator, so a custom presenter
 never reimplements any of that.
 
+### Observing dialogs
+
+`IDialogObserver` is told when a `ShowDialog` dialog is presented and how it closed. The
+`PresentedDialog` it receives can also close the dialog, which is how a test or an automation tool
+answers a dialog without tapping it.
+
+```csharp
+public class AutoAnswer : IDialogObserver
+{
+    public void OnDialogShown(PresentedDialog dialog)
+    {
+        if (dialog.ViewModel is PickColorViewModel)
+            dialog.TryComplete("red");          // the ShowDialog caller receives "red"
+    }
+
+    public void OnDialogClosed(PresentedDialog dialog, DialogClosed result)
+        => Console.WriteLine($"{dialog.ViewModelType.Name}: {(result.IsCancelled ? "cancelled" : result.Value)}");
+}
+```
+
+```csharp
+builder.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .AddDialogObserver<AutoAnswer>()
+);
+
+// or, from a library
+builder.Services.AddSingleton<IDialogObserver, AutoAnswer>();
+```
+
+`AddDialogObserver<T>()` registers a singleton, and `AddDialogObserver(instance)` takes an
+instance. Both methods on the interface have default implementations.
+
+| `PresentedDialog` | Description |
+|:--|:--|
+| `Id` | Unique for the life of the app |
+| `ViewModel` / `ViewModelType` | The dialog ViewModel (an `IDialogAware<T>`) and its type |
+| `ResultType` | The `T` of `IDialogAware<T>`, which is what `TryComplete` accepts |
+| `Page` | The page the presenter is showing |
+| `ShownAt` | When the dialog was presented |
+| `IsOpen` | False once the dialog has closed and the observers have been told |
+| `TryComplete(value)` | Closes the dialog with `value`, exactly as if the ViewModel raised `Completed` |
+| `TryCancel()` | Closes the dialog as cancelled, exactly as if the ViewModel raised `Cancelled` |
+
+The first result wins: `TryComplete` and `TryCancel` return `false` when the dialog already has one.
+A value that is not a `ResultType` throws `ArgumentException` and leaves the dialog open. `null` is a
+valid value only when `T` can hold it.
+
+| `DialogClosed` | Description |
+|:--|:--|
+| `IsCancelled` | True when the ViewModel or the user cancelled, the dialog was dismissed, or it failed |
+| `Value` | The value returned to the caller; null when cancelled |
+| `Exception` | Set when the dialog did not close normally: the presenter faulted, or the caller's `CancellationToken` fired (an `OperationCanceledException`) |
+| `Duration` | How long the dialog was open |
+
+`DialogObservers` (namespace `Shiny.Infrastructure`, registered in DI) has `Open`, the dialogs
+currently on screen, oldest first. A test can answer whichever dialog is up without holding on to
+the `PresentedDialog` from `OnDialogShown`:
+
+```csharp
+var dialogs = services.GetRequiredService<DialogObservers>();
+dialogs.Open.Single().TryComplete("blue");
+```
+
+`Open` is tracked only while at least one dialog observer is registered. With none, it is always
+empty and `ShowDialog` works exactly as before.
+
+Callbacks run synchronously, and an observer that throws is logged and ignored. Only `ShowDialog`
+dialogs are reported. Alerts, confirms, prompts and action sheets from `IDialogs` belong to whichever
+`IDialogs` implementation is registered; decorate `IDialogs` to observe those.
+
 ## Common Patterns
 
 ### Navigation Confirmation

@@ -1,0 +1,204 @@
+---
+title: Shell | Observing Navigation
+description: See every navigation and how it ended with INavigationObserver - analytics, diagnostics and tests
+---
+
+`INavigationObserver` is told when every navigation starts and how it finished. It sees navigation
+from every source: `INavigator` calls, the tab, flyout and back navigation Shell handles itself, app
+links and app shortcuts. It is meant for analytics, diagnostics, test harnesses and developer tools.
+
+An observer cannot change a navigation. Registering one does not turn on the
+[interceptor](/mauishell/interceptors) pipeline either, so an app with no interceptors navigates
+exactly as it did before.
+
+```csharp
+public interface INavigationObserver
+{
+    // A navigation has started; no interceptor has run yet
+    void OnNavigationStarted(NavigationStarted navigation) { }
+
+    // A navigation has finished
+    void OnNavigationFinished(NavigationFinished navigation) { }
+}
+```
+
+Both methods have default implementations, so implement only the one you need.
+
+## Logging every navigation
+
+```csharp
+public class NavigationAnalytics(ILogger<NavigationAnalytics> logger) : INavigationObserver
+{
+    public void OnNavigationStarted(NavigationStarted nav)
+        => logger.LogInformation("#{Id} {Source} {Type} '{From}' -> '{To}'",
+            nav.Id, nav.Source, nav.NavigationType, nav.FromUri, nav.Uri);
+
+    public void OnNavigationFinished(NavigationFinished result)
+        => logger.LogInformation("#{Id} {Outcome} at '{Uri}' in {Ms}ms (cancelled by {By}, {Redirects} redirect(s))",
+            result.Navigation.Id, result.Outcome, result.Uri, result.Duration.TotalMilliseconds,
+            result.CancelledBy?.GetType().Name, result.Redirects.Count);
+}
+```
+
+```csharp
+// MauiProgram.cs
+builder.UseShinyShell(x => x
+    .AddGeneratedMaps()
+    .AddNavigationObserver<NavigationAnalytics>()
+);
+
+// or, from a library that does not own UseShinyShell
+builder.Services.AddSingleton<INavigationObserver, NavigationAnalytics>();
+```
+
+`AddNavigationObserver<T>()` registers the observer as a singleton. There is also an
+`AddNavigationObserver(instance)` overload. To use any other lifetime, register
+`INavigationObserver` with the service collection yourself. Observers are resolved once, on the first
+navigation.
+
+Because an observer is just an `INavigationObserver` in the service collection, a library can watch
+an app it does not configure. Developer tools such as the DevFlow Shell plugin use it to see every
+navigation the app makes.
+
+## What is reported
+
+Every `OnNavigationStarted` is followed by exactly one `OnNavigationFinished`, and that call carries
+the same `NavigationStarted` instance.
+
+| Source | What started it |
+|:--|:--|
+| `Navigator` | An `INavigator` call: `NavigateTo` (route or ViewModel), the navigation builder, `GoBack`, `PopToRoot` and `SwitchShell` |
+| `Shell` | Navigation Shell started on its own: a tab or flyout item, the back button or back gesture. `ShellSource` says which |
+| `AppLink` | An inbound [app link](/mauishell/applinks) |
+| `Shortcut` | A home screen [app shortcut](/mauishell/appshortcuts) |
+
+`ShowDialog` is not navigation and is not reported. Use a
+[dialog observer](/mauishell/dialogs#observing-dialogs) for dialogs.
+
+| Outcome | Meaning |
+|:--|:--|
+| `Completed` | The navigation reached its destination |
+| `Cancelled` | Something said no. `CancelledBy` is the `INavigationInterceptor` that cancelled, or the `INavigationConfirmation` ViewModel that refused. It is null when Shell, or a `Shell.Navigating` handler outside Shiny, cancelled a Shell-driven navigation |
+| `Redirected` | An interceptor sent the navigation somewhere else, and it got there. `Uri` is where it ended up and `Redirects` is how |
+| `Failed` | The navigation threw: an interceptor failed, Shell rejected the route, or the caller's `CancellationToken` fired (`Exception` is then an `OperationCanceledException`) |
+
+### NavigationStarted
+
+| Property | Type | Description |
+|:--|:--|:--|
+| `Id` | `long` | Unique for the life of the app |
+| `Source` | `NavigationSource` | `Navigator`, `Shell`, `AppLink` or `Shortcut` |
+| `NavigationType` | `NavigationType` | `Push`, `SetRoot`, `GoBack`, `PopToRoot` or `SwitchShell` |
+| `Direction` | `NavigationDirection` | `Forward`, `Back` or `Root`, from `NavigationType` |
+| `Uri` | `string` | The requested destination. For Shell-driven navigation, Shell's target location |
+| `FromUri` | `string?` | Shell's location when the navigation started, or null when there is no Shell yet |
+| `FromViewModel` | `object?` | The ViewModel of the page being left |
+| `Parameters` | `IReadOnlyDictionary<string, object>` | The navigation arguments, as they were when the navigation started |
+| `ShellSource` | `ShellNavigationSource?` | For `Shell` navigation, what Shell says it was doing, eg. `ShellSectionChanged` for a tab tap or `Pop` for back |
+| `StartedAt` | `DateTimeOffset` | When the navigation started |
+
+### NavigationFinished
+
+| Property | Type | Description |
+|:--|:--|:--|
+| `Navigation` | `NavigationStarted` | The navigation this finishes |
+| `Outcome` | `NavigationOutcome` | `Completed`, `Cancelled`, `Redirected` or `Failed` |
+| `Uri` | `string` | Where it settled: the redirect target after a redirect, Shell's location after a completed Shell-driven navigation, otherwise the requested URI. For a cancelled navigation this is the destination that was refused, and the user is still at `Navigation.FromUri` |
+| `Redirects` | `IReadOnlyList<NavigationRedirect>` | Every redirect, in order. Each has `FromUri`, `ToUri` and the `Interceptor` that made it. Empty when there were none |
+| `CancelledBy` | `object?` | For `Cancelled`, the interceptor or `INavigationConfirmation` ViewModel that refused |
+| `Exception` | `Exception?` | For `Failed`, what was thrown |
+| `Duration` | `TimeSpan` | Time from start to finish, interceptors included |
+
+## Timing and threading
+
+Callbacks run synchronously, usually on the main thread, in the middle of navigation. Keep them fast
+and hand anything slow, such as an HTTP call to an analytics service, off elsewhere. An observer that
+throws is logged and ignored. It never affects the navigation or the other observers.
+
+When each navigation is finished depends on where it came from:
+
+- **`INavigator` calls, app links and shortcuts** finish when Shell's `GoToAsync` returns, or as soon
+  as an interceptor cancels.
+- **Shell-driven navigation** (tab, flyout, back) that Shiny lets through finishes when Shell raises
+  `Navigated`.
+- If Shell, or another `Shell.Navigating` handler, cancels a Shell-driven navigation, it is reported
+  `Cancelled` on the next dispatcher turn. If that handler cancelled through a deferral, Shiny is not
+  told, so the navigation is reported `Cancelled` when the next Shell-driven navigation starts.
+
+### Navigations in flight
+
+`NavigationObservers` (namespace `Shiny.Infrastructure`, registered in DI) lists the navigations that
+have started and not yet finished. A test can use it to wait for navigation to settle:
+
+```csharp
+var observers = services.GetRequiredService<NavigationObservers>();
+var busy = observers.InFlight.Count > 0;
+```
+
+`InFlight` is tracked only while at least one observer is registered. With none, it is always empty.
+
+## Asserting on outcomes in a test
+
+A recording observer turns "did the guard do its job?" into a plain assertion. Register an instance
+in the app your test runs, navigate, and check what it saw:
+
+```csharp
+public class NavigationRecorder : INavigationObserver
+{
+    public List<NavigationStarted> Started { get; } = new();
+    public List<NavigationFinished> Finished { get; } = new();
+
+    public void OnNavigationStarted(NavigationStarted navigation) => this.Started.Add(navigation);
+    public void OnNavigationFinished(NavigationFinished navigation) => this.Finished.Add(navigation);
+}
+```
+
+```csharp
+[Fact]
+public async Task SignedOutUser_IsSentToLogin()
+{
+    var recorder = new NavigationRecorder();
+
+    // however your device or integration test boots the app - here, your own
+    // MauiProgram overload that lets a test add services
+    var app = MauiProgram.CreateMauiApp(services => services.AddSingleton<INavigationObserver>(recorder));
+    var navigator = app.Services.GetRequiredService<INavigator>();
+
+    var navigated = await navigator.NavigateTo<AccountViewModel>();
+
+    Assert.True(navigated); // a redirect still navigates
+    var result = Assert.Single(recorder.Finished);
+    Assert.Equal(NavigationOutcome.Redirected, result.Outcome);
+
+    var redirect = Assert.Single(result.Redirects);
+    Assert.IsType<AuthNavigationInterceptor>(redirect.Interceptor);
+    Assert.Equal(result.Uri, redirect.ToUri);
+}
+```
+
+A guard that cancels shows up the same way, with `Outcome == NavigationOutcome.Cancelled` and
+`CancelledBy` set to the interceptor instance.
+
+## Observer or interceptor?
+
+Don't add an interceptor that always returns `Continue` just to watch navigation. It switches on the
+interceptor pipeline (a Shell deferral on tab and back navigation, and the destination ViewModel
+resolved early), and it still only sees a navigation starting, never how it ended. An observer does
+neither.
+
+| | Sees Shell-driven navigation | Sees the outcome | Can cancel or redirect |
+|:--|:--|:--|:--|
+| `INavigationObserver` | ✅ | ✅ | ❌ |
+| [`INavigationInterceptor`](/mauishell/interceptors) | ✅ | ❌ | ✅ |
+| [`Navigating` / `Navigated` events](/mauishell/navigation#navigation-events) | ❌ only navigation Shiny performs | ❌ | ❌ |
+
+If you run `NavigationInterceptorPipeline` yourself, the `NavigationInterception` it returns now
+says who decided: `CancelledBy` is the interceptor that cancelled, and `Redirects` is the redirect
+chain.
+
+## Behavior notes
+
+- With no observer registered, nothing changes. Shiny does no observer work at all.
+- `ShinyShellNavigator`'s constructor gained `NavigationObservers` and `DialogObservers` parameters.
+  This only matters if you construct it by hand, for example in a test. Apps that use
+  `UseShinyShell` are unaffected.

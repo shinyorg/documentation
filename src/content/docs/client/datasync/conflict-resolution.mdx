@@ -15,7 +15,7 @@ opts.RegisterEndpoint<Project>(url, ep =>
 
 | Policy | Behavior |
 |---|---|
-| `AskDelegate` (default) | Calls `IDataSyncDelegate.OnConflict(op, remotePayload)`. |
+| `AskDelegate` (default) | Calls `IDataSyncDelegate.OnConflict(op, remotePayload)` on each registered delegate until one decides. See [More than one delegate](#more-than-one-delegate). |
 | `ServerWins` | Drops the local op, dispatches the remote payload through `OnReceived` as an `Update`. |
 | `ClientWins` | Re-queues the local op as-is. The server should ultimately accept it (e.g. drop the ETag check). |
 
@@ -57,20 +57,54 @@ public Task<ConflictResolution> OnConflict(SyncOperation op, string remotePayloa
 | `ConflictResolution.AcceptRemote` | Same as `ServerWins` — the remote payload is dispatched as an `Update` and the local op is removed. |
 | `ConflictResolution.KeepLocal` | Re-queues the local op as-is. |
 | `ConflictResolution.UseMerged(string mergedPayload)` | Replaces the op's `Payload` with `mergedPayload` and re-queues. |
+| `ConflictResolution.Abstain` | No opinion. The next registered delegate is asked. If every delegate abstains, the server's copy wins, as with `AcceptRemote`. |
+
+## More than one delegate
+
+You can register more than one `IDataSyncDelegate`. For a conflict, they are asked in registration order, and the **first real answer wins**: once a delegate returns `AcceptRemote`, `KeepLocal` or `UseMerged`, that resolution is applied and later delegates are not called.
+
+A delegate that has no opinion returns `ConflictResolution.Abstain`, and the next delegate is asked. Returning `null` counts as abstaining too. (Before 6.5.3 a `null` result threw inside the engine and the op went down the error and retry path.) A delegate that throws is logged and skipped the same way. If every delegate abstains, the server's copy wins.
+
+```csharp
+// A logging delegate that never decides. It only sees the conflict if it is
+// registered before the delegate that does decide.
+public Task<ConflictResolution> OnConflict(SyncOperation op, string remotePayload)
+{
+    logger.LogInformation("Conflict on {Entity}", op.EntityIdentifier);
+    return Task.FromResult(ConflictResolution.Abstain);
+}
+```
+
+Because the first real answer stops the loop, an abstaining delegate registered *after* the deciding one is never called. To watch conflicts without depending on registration order, use the `Activity` events below.
 
 ## Observing conflicts
 
-Conflict moments fire on the unified `Activity` stream:
+To see conflicts without deciding them (for logging, telemetry or a status bar), subscribe to the `Activity` stream. Two events cover a conflict:
+
+| Event | When | Carries |
+|---|---|---|
+| `OutboxConflict` | The server answered `409` / `412`. | `Operation`, `StatusCode`, `RemotePayload` (the server's copy sent with the conflict). |
+| `OutboxConflictResolved` | The endpoint's `ConflictPolicy` or a delegate has decided, before the op's next event. | The same, plus `Resolution` (the `ConflictResolution` that was applied). |
 
 ```csharp
 sync.Activity += (s, evt) =>
 {
-    if (evt.Type == SyncEventType.OutboxConflict)
-        Log.Warn($"{evt.EndpointKey} conflict for {evt.Operation?.EntityIdentifier} (HTTP {evt.StatusCode})");
+    switch (evt.Type)
+    {
+        case SyncEventType.OutboxConflict:
+            Log.Warn($"{evt.EndpointKey} conflict for {evt.Operation?.EntityIdentifier} (HTTP {evt.StatusCode}). Server has: {evt.RemotePayload}");
+            break;
+
+        case SyncEventType.OutboxConflictResolved:
+            Log.Info($"{evt.Operation?.EntityIdentifier} resolved with {evt.Resolution?.Action}");
+            break;
+    }
 };
 ```
 
-The typed `UpdateReceived` event also fires the operation as `SyncOperationState.ConflictPending` so a status bar can flag it.
+`OutboxConflictResolved` fires under every policy, so a `ServerWins` endpoint reports `AcceptRemote` and a `ClientWins` endpoint reports `KeepLocal`. This works however many delegates you register and in whatever order.
+
+The typed `UpdateReceived` event carries the same information on `SyncOperationResult.RemotePayload` and `SyncOperationResult.Resolution`. The update that applies the resolution has both: `Completed` for `AcceptRemote`, `Pending` when the local change is sent again. On the HttpClient engine (Android, Windows, Linux, macOS, Blazor) the operation also fires as `SyncOperationState.ConflictPending`, with `RemotePayload` set, so a status bar can flag it.
 
 ## Choosing a policy
 
@@ -80,6 +114,7 @@ The typed `UpdateReceived` event also fires the operation as `SyncOperationState
 | Mobile-first workflow where the user expects their edit to win | `ClientWins` (or `KeepLocal` from the delegate). |
 | Real conflicts (two editors, both with local changes) | `AskDelegate` with a merge implementation. |
 | You can't merge but want to log and skip | `AskDelegate` returning `AcceptRemote`. |
+| A library or diagnostics delegate that should never decide | Return `Abstain`, or better, listen to the `OutboxConflict` / `OutboxConflictResolved` events. |
 
 ## ETags and precondition headers
 

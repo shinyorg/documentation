@@ -317,3 +317,68 @@ public static MauiApp CreateMauiApp()
 ```
 
 All `[ShellMap]` decorated ViewModels are automatically registered — no manual `.Add()` calls needed.
+
+`AddGeneratedMaps()` also describes every `[ShellMap]` route for the [route registry](#listing-routes-at-runtime):
+it calls `builder.AddRouteInfo(...)` with the route's description and `[ShellProperty]` parameters.
+
+## Listing routes at runtime
+
+`IRouteRegistry` lists every route the app has mapped. It lets code that does not configure the app,
+such as a library, a test or a diagnostics tool, see where the app can navigate. `UseShinyShell`
+registers it.
+
+```csharp
+public interface IRouteRegistry
+{
+    // Every mapped route, in the order it was mapped
+    IReadOnlyList<RouteRegistration> Routes { get; }
+
+    // By route name (not a URI - no "//" or segments), or null
+    RouteRegistration? GetRoute(string route);
+
+    // The route mapped to a ViewModel type, or null
+    RouteRegistration? GetRouteForViewModel(Type viewModelType);
+}
+```
+
+```csharp
+public class RouteDump(IRouteRegistry routes, ILogger<RouteDump> logger)
+{
+    public void Log()
+    {
+        foreach (var route in routes.Routes)
+            logger.LogInformation("{Route}: {Page} / {ViewModel} - {Description} ({Params})",
+                route.Route, route.PageType.Name, route.ViewModelType.Name, route.Description,
+                route.Parameters == null ? "unknown" : String.Join(", ", route.Parameters.Select(p => $"{p.TypeName} {p.ParameterName}")));
+    }
+}
+```
+
+| `RouteRegistration` | Type | Description |
+|:--|:--|:--|
+| `Route` | `string` | The route name, as passed to `NavigateTo` |
+| `PageType` | `Type` | The page |
+| `ViewModelType` | `Type` | The ViewModel bound to the page |
+| `IsRegisteredWithShell` | `bool` | True when the route is registered with Shell and pushed. False for a `ShellContent` declared in AppShell XAML (`registerRoute: false`), reached with an absolute `//` route |
+| `Description` | `string?` | The `[ShellMap]` description. Null when there is none or the route was mapped by hand |
+| `Parameters` | `IReadOnlyList<GeneratedRouteParameter>?` | The ViewModel's `[ShellProperty]` parameters (name, description, type name, required). Null when the route was mapped by hand, which is different from an empty list (no parameters) |
+
+Routes from `AddGeneratedMaps()` are fully described, with no need for the
+[AI extensions](/mauishell/ai). A route mapped by hand with `Add<TPage, TViewModel>()` has a null
+`Description` and `Parameters` unless you describe it yourself:
+
+```csharp
+builder.UseShinyShell(x => x
+    .Add<ReportPage, ReportViewModel>("report")
+    .AddRouteInfo(new GeneratedRouteInfo(
+        "report",
+        "Shows a monthly report",
+        [new GeneratedRouteParameter("Month", "The month to show", "int", true)]
+    ))
+);
+```
+
+`GeneratedRouteInfo` and `GeneratedRouteParameter` are in the `Shiny.Infrastructure` namespace. The
+order of `Add` and `AddRouteInfo` does not matter, but route info for a route that is never mapped is
+not listed. Routes declared only in AppShell XAML, with no Shiny mapping, belong to Shell and are not
+listed either.

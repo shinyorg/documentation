@@ -24,6 +24,27 @@ public sealed class AuditFilter : IActorCallFilter
 - `ctx.Result` can be read and replaced after `next`.
 - An actor that implements `IActorCallFilter` itself filters its own calls, innermost.
 
+## Dead letters
+
+Nobody waits on a one-way call, so when one fails it is only logged. An `IActorDeadLetterObserver` hears about it,
+along with stream events an actor threw on and one-way work that never ran because its actor failed to activate:
+
+```csharp
+actors.AddDeadLetterObserver<ParkFailures>();   // or AddDeadLetterObserver(instance)
+
+public sealed class ParkFailures(ILogger<ParkFailures> logger) : IActorDeadLetterObserver
+{
+    public ValueTask OnDeadLetterAsync(ActorDeadLetter letter, CancellationToken ct)
+    {
+        // letter.ActorName, ActorId, Label ("Notify", "stream"), Arguments, Exception
+        logger.LogWarning(letter.Exception, "{Actor}/{Id} dropped {Label}", letter.ActorName, letter.ActorId, letter.Label);
+        return default;
+    }
+}
+```
+
+Observers run off the actor's turn. One that throws is logged, and the others still run.
+
 ## Request context
 
 ```csharp
@@ -33,6 +54,10 @@ await actors.Get<IWallet>("allan").Deposit(10);   // the actor, and anything it 
 
 `ActorRequestContext` values flow into the call, onward to the actors it calls, and across
 [remote calls](/actors/remoting/) in the `x-actor-context` header.
+
+A remote caller controls that header completely. On a server, set anything you authorize on (like `"user"` above) with
+[`MapRequestContext`](/actors/remoting/#authorization), which takes it from the authenticated user and drops what the
+caller sent.
 
 ## Telemetry
 

@@ -68,16 +68,44 @@ await RegisterReminderAsync("standup", TimeSpan.FromHours(1),
 
 Each such reminder becomes an OS-scheduled local notification on iOS, Android, Mac and Windows:
 
-- It's moved when the reminder advances, cancelled when it's removed, and re-synced at startup.
+- A repeating reminder keeps its next few occurrences scheduled (`UpcomingOccurrences`, 3 by default), topped up
+  each time it fires, so the OS keeps showing them even if the app doesn't run for a while.
+- Removing the reminder cancels the occurrences still pending. A notification the OS has already shown stays in
+  Notification Center until the user dismisses it, even after the reminder fires in-process.
+- A failing reminder's retries don't post new notifications. Neither do runs that only re-sync at startup.
 - The OS shows it on time whether or not the app is running.
 - Tapping it opens the app, where the overdue reminder fires.
+
+```csharp
+x.UseReminderNotifications(o => o.UpcomingOccurrences = 5);
+```
+
+### Handling taps
+
+An actor that implements `IReminderNotificationHandler` hears about taps on its reminders' notifications, as a normal
+turn. It's activated if it needs to be:
+
+```csharp
+public class StandupActor : Actor, IStandup, IRemindable, IReminderNotificationHandler
+{
+    public ValueTask OnReminderNotificationTappedAsync(ReminderNotificationTap tap, CancellationToken ct)
+    {
+        // tap.Reminder, tap.DueAt (the occurrence), tap.ActionIdentifier (null for a plain tap), tap.Text
+        return default;
+    }
+}
+```
+
+`UseReminderNotifications()` registers the delegate that routes them next to the app's own `INotificationDelegate`s.
+Notifications that aren't for reminders are left alone.
 
 `Channel` is an Android notification channel the app has created. Without it, the default channel is used.
 
 ## Observing reminders
 
 `IActorReminderObserver` is told about every reminder that is scheduled (registered, advanced, or loaded at startup)
-and every one that is removed. That's how the notifications package works, and you can use it to mirror reminders
+and every one that is removed, one at a time and in the order they happened. Retries of a failed delivery aren't
+reported. That's how the notifications package works, and you can use it to mirror reminders
 anywhere else:
 
 ```csharp

@@ -22,11 +22,11 @@ If you've been waiting for "EF Sync, but for mobile that actually survives suspe
 
 | Component | Description |
 | --- | --- |
-| **An outbox** | `Queue<T>(verb, entity)` writes a `SyncOperation` to a persistent repository. The transport drains it as soon as connectivity is available, retries transient failures with exponential backoff, and persists the next-attempt time so a process restart resumes the wait window mid-air. |
+| **An outbox** | `Queue<T>(verb, entity)` writes a `SyncOperation` to a persistent repository. The transport drains it as soon as connectivity is available, retries transient failures with exponential backoff, sends each retry when it is due, and persists the next-attempt time so a process restart resumes the wait window mid-air. |
 | **An inbox** | `PullNow<T>()` and `PullAll()` fetch deltas keyed by an opaque cursor. A single call drains the full delta set (the engine re-pulls while `hasMore: true`), then optionally fetches tombstones, all on the same cursor stream. |
 | **A scheduled job** | `AddDataSync` auto-registers a `SyncJob` with the [Shiny Jobs](/client/jobs/) scheduler so periodic pulls keep running while the app is backgrounded. No `AddJob` call required. |
 | **A connectivity loop** | every transport listens on `IConnectivity.Changed`. A network transition `offline → online` immediately drains the outbox and runs `PullAll`. |
-| **One activity stream** | every lifecycle moment (queued, started, sent, failed, conflict, retry-scheduled, canceled, pull-started, item-received, pull-completed, pull-failed, tombstones-applied) surfaces through a single `Activity` event. |
+| **One activity stream** | every lifecycle moment (queued, started, sent, failed, conflict, conflict-resolved, retry-scheduled, canceled, pull-started, item-received, pull-completed, pull-failed, tombstones-applied) surfaces through a single `Activity` event. |
 
 ## Platform behavior at a glance
 
@@ -216,7 +216,47 @@ sync.Activity += (s, evt) =>
     Console.WriteLine($"{evt.Type} {evt.EndpointKey} items={evt.ItemCount} status={evt.StatusCode}");
 ```
 
-`Activity` fires `SyncEvent` records for `OutboxQueued`, `OutboxStarted`, `OutboxSent`, `OutboxFailed`, `OutboxConflict`, `OutboxRetryScheduled`, `OutboxCanceled`, `InboxPullStarted`, `InboxItemReceived`, `InboxPullCompleted`, `InboxPullFailed`, and `TombstonesApplied`. It's the right hook for telemetry, status bars, and toast notifications. The typed events (`PendingCountChanged` / `UpdateReceived` / `PullCompleted`) are kept for fine-grained subscribers.
+`Activity` fires a `SyncEvent` for each of these moments. `Type` says which, and every event has `EndpointKey`. The other properties are set when they apply:
+
+| `SyncEventType` | When | Also set |
+|---|---|---|
+| `OutboxQueued` | An op was written to the outbox. | `Operation` |
+| `OutboxStarted` | An op is being sent. | `Operation` |
+| `OutboxSent` | The server accepted the op. | `Operation`, `StatusCode` |
+| `OutboxFailed` | The op failed for good and was handed to `OnError`. | `Operation`, `StatusCode`, `Error` |
+| `OutboxConflict` | The server answered `409` / `412`. | `Operation`, `StatusCode`, `RemotePayload` |
+| `OutboxConflictResolved` | The conflict policy or a delegate decided. | `Operation`, `StatusCode`, `RemotePayload`, `Resolution` |
+| `OutboxRetryScheduled` | A transient failure; the op will be sent again after its backoff. | `Operation`, `StatusCode`, `Error` |
+| `OutboxCanceled` | The op was removed by `Cancel`, `CancelAll` or `CancelAll<T>`. | `Operation` |
+| `InboxPullStarted` | A pull began. | `Cursor`, `Trigger` |
+| `InboxItemReceived` | A pulled item was handed to the delegate. | `Item` |
+| `InboxPullCompleted` | A pull finished. | `ItemCount`, `Cursor` |
+| `InboxPullFailed` | A pull failed (network, parse error, non-2xx status). | `Error`, and `StatusCode` / `Cursor` when known |
+| `TombstonesApplied` | A tombstone fetch dispatched deletes. | `ItemCount`, `Cursor` |
+
+It's the right hook for telemetry, status bars, and toast notifications. The typed events (`PendingCountChanged` / `UpdateReceived` / `PullCompleted`) are kept for fine-grained subscribers.
+
+New event types can be added in later versions, so give a `switch` over `SyncEventType` a `default` branch. A switch expression that lists every value and has no `default` gets a compiler warning (CS8509) as soon as a new value is added.
+
+### What started a pull
+
+`InboxPullStarted` carries `Trigger`, a `SyncPullTrigger`:
+
+| Value | Meaning |
+|---|---|
+| `Manual` | App code called `PullAll` or `PullNow<T>`. |
+| `Job` | The scheduled `SyncJob` ran. |
+| `Connectivity` | The device regained an internet connection (HttpClient engine: Android, Windows, Linux, macOS, Blazor). |
+
+```csharp
+sync.Activity += (s, evt) =>
+{
+    if (evt.Type == SyncEventType.InboxPullStarted && evt.Trigger == SyncPullTrigger.Job)
+        Log.Info($"Background pull for {evt.EndpointKey}");
+};
+```
+
+On Apple, a pull that goes on to fetch more pages keeps the trigger of its first page.
 
 ## Cancelling work
 
@@ -226,7 +266,9 @@ await sync.CancelAll<TodoItem>();  // every queued op for one endpoint
 await sync.CancelAll();            // entire outbox (in-flight inbox pulls are left alone)
 ```
 
-On Apple these translate to `NSURLSessionTask.Cancel()` on the upload task with the matching `TaskDescription`, so an in-flight background upload also stops.
+Every op that is removed raises `UpdateReceived` with `SyncOperationState.Canceled` and an `OutboxCanceled` activity event, whether it was canceled on its own or by `CancelAll` / `CancelAll<T>`.
+
+On Apple these translate to `NSURLSessionTask.Cancel()` on the upload task with the matching `TaskDescription`, so an in-flight background upload also stops. An op with no upload task is removed directly.
 
 ## How the pieces fit together
 

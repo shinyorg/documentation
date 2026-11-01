@@ -33,16 +33,49 @@ builder.Services.AddShinyActors(actors => actors.ServeOverHttp(
 
 Already building the server yourself? `server.MapActors(expose => ...).RequireAuthorization()` does the mapping alone.
 
+### Authorization
+
+Route policies decide who reaches the actor routes at all. Past that, each exposure takes an `authorize` callback that
+decides each call by user, actor id or method, and each stream publish or subscribe by user and key. A refusal answers
+401 to an anonymous caller and 403 to an authenticated one:
+
+```csharp
+expose
+    .Expose<IWallet>(call => call.ActorId == call.User.Identity?.Name)                       // your own wallet only
+    .Expose<IAdmin>(call => call.User.IsInRole("admin") || call.Method.Name == nameof(IAdmin.Status))
+    .ExposeStream<ChatMessage>(s => s.Access == ActorStreamAccess.Subscribe || s.User.Identity?.IsAuthenticated == true)
+    .MapRequestContext("user", user => user.Identity?.IsAuthenticated == true ? user.Identity.Name : null);
+```
+
+<Aside type="caution" title="Request context comes from the caller">
+`ActorRequestContext` values arrive in the `x-actor-context` header, which the caller controls completely. Trust them
+for correlation, never for identity. `MapRequestContext("user", ...)` makes a key server-owned: whatever the caller
+sent for it is dropped, and it's set from the authenticated `HttpContext.User`. `MapRequestContext((http, ctx) => ...)`
+can add, replace or remove any key. Anything a [call filter](/actors/filters/) authorizes on must be set this way.
+</Aside>
+
+| Option | Default | |
+|---|---|---|
+| `Prefix` | `/actors` | Where the routes live. `/` or empty serves them from the root |
+| `StreamHeartbeat` | 15 seconds | An SSE comment on idle stream subscriptions, so proxies don't drop them. `null` turns it off |
+| `IncludeExceptionDetails` | off | Sends the exception type and message to callers. Development only |
+
 ## Client
 
 The client is in the core package and uses a plain `HttpClient`:
 
 ```csharp
-IActorSystem actors = new RemoteActorSystem(new HttpClient { BaseAddress = new("http://192.168.1.20:8080/actors/") });
+using var actors = new RemoteActorSystem(new Uri("http://192.168.1.20:8080/actors/")) { CallTimeout = TimeSpan.FromSeconds(10) };
 
 await actors.Get<ICounter>("bob").Increment();
 await foreach (var order in actors.GetStream<OrderPlaced>("store-1").ReadAllAsync(ct)) { ... }
 ```
+
+- **`HttpClient`.** `new RemoteActorSystem(uri)` creates one and disposes it with the system. Pass your own
+  (`new RemoteActorSystem(httpClient)`) to share it; it's then yours to dispose.
+- **`CallTimeout`** fails a call that takes longer with `TimeoutException`, apart from `HttpClient.Timeout` (which also
+  surfaces as `TimeoutException`). Streams aren't affected.
+- **Equality.** Two remote proxies for the same system, actor and id are equal, like local ones.
 
 ## How it works
 
@@ -50,7 +83,8 @@ await foreach (var order in actors.GetStream<OrderPlaced>("store-1").ReadAllAsyn
 |---|---|
 | Wire | `POST {prefix}/call/{actor}/{id}/{method}`, with a JSON array of arguments in and a JSON result out. Streams: `POST`/`GET` (SSE) `{prefix}/streams/{type}/{key}`. |
 | JSON | Every `JsonSerializerContext` in a project with actors is registered automatically, and primitives are built in. A type crossing the wire without metadata fails at `MapActors`, not on the first call. |
-| Errors | `RemoteActorException.StatusCode`: 400 bad arguments, 401/403 auth, 404 not exposed, 409 deadlock, 500 the actor threw. Exception details stay hidden unless `IncludeExceptionDetails` is on. |
+| Errors | `RemoteActorException.StatusCode`: 400 bad or missing arguments (including `null` for a non-nullable parameter), 401/403 auth (and an `UnauthorizedAccessException` the actor or a filter throws), 404 not exposed or not implemented, 409 deadlock, 499 the caller went away, 500 the actor threw, 502 a remote call the actor made failed, 504 timeout. Exception details stay hidden unless `IncludeExceptionDetails` is on. |
+| Deadlocks | The caller's call chain travels in `x-actor-chain`, so a cycle across processes (`A -> remote B -> A`) fails with 409 instead of hanging. |
 | Ids | Any string. Ids that aren't plain are sent as `~base64url`, because `%2F` and `..` don't survive every proxy. |
 | Remote streams | `ReadAllAsync` and `Subscribe` reconnect with backoff (1s, up to 30s). Durable streams resume from the last sequence seen. Others miss what was published meanwhile. |
 | Tracing & context | `traceparent` and `x-actor-context` headers carry the caller's trace and `ActorRequestContext`. |
@@ -70,13 +104,18 @@ address:
 ```csharp
 builder.Services.AddShinyActors(x => x.UseDiscovery());
 
-// server side
-await using var published = await mdns.PublishActorsAsync(DeviceInfo.Current.Name, port);
+// server side: advertised while the actor server is running, withdrawn when it stops
+builder.Services.AddShinyActors(x => x.UseDiscovery().AdvertiseOverMdns(DeviceInfo.Current.Name));
+// ...or by hand: await using var published = await mdns.PublishActorsAsync(DeviceInfo.Current.Name, port);
 
 // client side
 await foreach (var peer in mdns.BrowseActorPeersAsync(ct))
     if (peer.IsAvailable) actors = peer.Connect(http => http.DefaultRequestHeaders.Add("X-Api-Key", code));
 ```
+
+`Connect()` returns a `RemoteActorSystem` that owns its `HttpClient`, so dispose it when you're done with the peer.
+`Connect(httpClient)` uses one of yours instead. Inject `ActorAdvertisement` to show the advertised name, or react to
+`Changed`.
 
 - The server must listen on the LAN (`Address = IPAddress.Any`). Shiny.Net.HttpServer binds to loopback by default.
 - On Apple platforms, add `_shinyactors._tcp` to `NSBonjourServices`, plus an `NSLocalNetworkUsageDescription`.

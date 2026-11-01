@@ -22,6 +22,9 @@ The outbox and inbox share a single background `NSURLSession` (`HttpMaximumConne
 - `OnBeforeSend` (and `ISyncInterceptor.BeforePush`) receive a stub `HttpRequestMessage` with headers only — there is no body to inspect. Signers that hash the body (AWS SigV4) won't work on Apple; either validate server-side or use `AddHttpClientDataSync<TDelegate>` to opt out of NSURLSession.
 - `PullAll` is fire-and-forget. The returned `Task` completes once the background tasks are kicked off, not when the downloads finish — subscribe to `PullCompleted` to know when work actually completed.
 - Tombstone tasks use the `tombstone:{endpointKey}` task description so they round-trip across app suspension just like the main pull.
+- A retry is handed to the background session as soon as it is scheduled, with the upload task's `EarliestBeginDate` set to the backoff time. The system starts it when it is due, even if the app is suspended or has been terminated by the system by then. See [Retries and backoff](#retries-and-backoff).
+- A conflict resolved with `KeepLocal` sends the op again as a new upload task, and `UseMerged` raises `UpdateReceived` with `Pending` before re-sending, as the HttpClient engine does.
+- `Cancel`, `CancelAll` and `CancelAll<T>` cancel the matching upload tasks. An op that has no upload task (for example one an earlier version left `Pending`) is removed directly and still raises `OutboxCanceled`.
 
 ### Required Info.plist keys
 
@@ -43,6 +46,7 @@ The outbox runs inside a Shiny-managed foreground service (the same service used
 
 - The inbox runs in-process; it does **not** survive being swept by the OS. Pending pulls resume on the next launch.
 - A regained network connection triggers an immediate outbox drain + `PullAll` via `IConnectivity.Changed`.
+- The service stays up while an op waits out its retry backoff, so the notification stays visible during that time too. With the defaults (`MaxAttempts = 5`, `RetryBaseDelay = 2s`) an op that keeps failing holds it for about 30 seconds of waiting before it is handed to `OnError`. The service stops once every op has been sent or has used up its attempts.
 - `Batch = true` is honoured — the HttpClient path coalesces queued ops into a single `POST /batch` per endpoint.
 
 ## Windows / Linux / macOS / base .NET
@@ -69,6 +73,19 @@ builder.Services.AddBlazorDataSync<MyDataSyncDelegate>(opts =>
 - The named HttpClient is still `RestSyncTransport.HttpClientName` (`"Shiny.Data.Sync"`); configure base address and handlers with `AddHttpClient(...).ConfigureHttpClient(...)`.
 - CORS applies — see [Server API Contracts → CORS for Blazor](/client/datasync/server-contracts#cors-for-blazor).
 
+## Retries and backoff
+
+A transient failure (`0` for no network, `408`, `429`, `5xx`) schedules a retry after `RetryBaseDelay * 2^(attempts - 1)`, capped at 60 seconds. The time is saved on the op as `NextAttemptAt`, and each retry raises `OutboxRetryScheduled`. After `MaxAttempts` sends the op goes to `IDataSyncDelegate.OnError` and leaves the outbox. With the defaults that is retries after 2, 4, 8 and 16 seconds.
+
+How the retry gets sent depends on the engine:
+
+| Engine | How a scheduled retry is sent |
+|---|---|
+| HttpClient (Android foreground service, Windows, Linux, macOS, Blazor) | The outbox loop keeps running while an op is waiting. It sleeps until the earliest `NextAttemptAt` (at most 60 seconds per sleep), sends the op, and stops once every op has been sent or has used up `MaxAttempts`. A newly queued op wakes it early, so new work never waits behind another op's backoff. `CancelAll()` stops it. |
+| Apple `NSURLSession` | Each finished upload task counts as one attempt. The retry is created straight away as a new upload task with `EarliestBeginDate` set, so iOS sends it when it is due, even while the app is suspended. |
+
+Before 6.5.3, the HttpClient loop ended when the only ops left were waiting for a retry, so a retry wasn't sent until something else started the loop (a new `Queue`, a connectivity change or an app restart). On Apple, attempts were never counted, so a failing op retried forever at `RetryBaseDelay` without backing off, and a retry waited in-process and was lost if the app was suspended or killed.
+
 ## Forcing the HttpClient path on a native target
 
 If you want the cross-platform `HttpClient` engine even on a native target (for testing, to skip the NSURLSession constraints, or because a custom interceptor needs the request body), register explicitly:
@@ -87,14 +104,14 @@ You give up the survives-app-kill guarantee on iOS / Mac Catalyst.
 Every transport hooks `IConnectivity.Changed` (registered automatically by `AddDataSync`):
 
 - A network transition from offline → online drains the outbox immediately.
-- The same transition kicks off a `PullAll` — respecting each endpoint's `MinPullInterval`.
+- The same transition kicks off a `PullAll` — respecting each endpoint's `MinPullInterval`. On the HttpClient engine its `InboxPullStarted` events carry `Trigger = SyncPullTrigger.Connectivity`.
 - A transition online → offline simply pauses the loop; in-flight requests are allowed to fail naturally and retry on backoff.
 
 `UseMeteredConnection = false` on an endpoint additionally requires the connection to be unmetered (typically WiFi) before its outbox runs.
 
 ## Periodic background sync
 
-`AddDataSync` registers a `SyncJob` with the Shiny job scheduler (`WithInternet(InternetAccess.Any)`). On iOS this runs through `BGTaskScheduler`; on Android through `WorkManager`; on Windows through COM-activated background tasks; everywhere else through the in-process Shiny job runner. The job calls `PullAll` and drains any backlogged outbox ops — no manual `AddJob` registration needed.
+`AddDataSync` registers a `SyncJob` with the Shiny job scheduler (`WithInternet(InternetAccess.Any)`). On iOS this runs through `BGTaskScheduler`; on Android through `WorkManager`; on Windows through COM-activated background tasks; everywhere else through the in-process Shiny job runner. The job calls `PullAll` and drains any backlogged outbox ops — no manual `AddJob` registration needed. Pulls it starts report `Trigger = SyncPullTrigger.Job` on `InboxPullStarted`.
 
 To turn it off (e.g. because you trigger pulls only on push), remove the job after the fact:
 
