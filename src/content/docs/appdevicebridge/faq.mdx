@@ -1,0 +1,186 @@
+---
+title: FAQ
+description: Is downloading a web app into a native app allowed on the App Store, Google Play and the Microsoft Store? Guideline 2.5.2, section 3.3.1(B), and how other frameworks do the same thing
+---
+
+import { Aside } from '@astrojs/starlight/components';
+
+## Is this allowed on the App Store?
+
+Yes. Apps built with AppDeviceBridge go through App Store review like any other app. The native app, including every
+bridge it can call, is a normal binary that Apple reviews. What gets updated over the air is the web app: HTML, CSS,
+JavaScript and WebAssembly running in WebKit, inside the app's own container. Apple's developer agreement explicitly
+allows that.
+
+The question usually arrives as a quote of guideline 2.5.2 alone. Here's the whole picture.
+
+### What guideline 2.5.2 says
+
+> Apps should be self-contained in their bundles, and may not read or write data outside the designated container area,
+> nor may they download, install, or execute code which introduces or changes features or functionality of the app,
+> including other apps.
+>
+> — [App Store Review Guidelines, 2.5.2](https://developer.apple.com/app-store/review/guidelines/#software-requirements)
+
+Read on its own, that sounds like a ban. But the guidelines aren't the only document an app is bound by. Every developer
+also signs the Apple Developer Program License Agreement, which spells out exactly what kind of downloaded code is allowed.
+
+### What the developer agreement says
+
+> Except as set forth in the next paragraph, an Application may not download or install executable code. Interpreted code
+> may be downloaded to an Application but only so long as such code: (a) does not change the primary purpose of the
+> Application by providing features or functionality that are inconsistent with the intended and advertised purpose of
+> the Application (b) does not bypass signing, sandbox, or other security features of the OS; and (c) for Applications
+> distributed on the App Store, does not create a store or storefront for other Applications.
+>
+> — [Apple Developer Program License Agreement, 3.3.1(B) "Executable Code"](https://developer.apple.com/support/terms/apple-developer-program-license-agreement/)
+
+*Executable* code means compiled native code: a dylib, a framework, machine code. That stays forbidden, and AppDeviceBridge
+never downloads it. *Interpreted* code is allowed, under three conditions:
+
+| Condition | How AppDeviceBridge meets it |
+| --- | --- |
+| **(a) Doesn't change the primary purpose** | Partly the library, partly you. A web update can only use native features the reviewed binary already has. *What* you ship over the air is your call, and that's where apps get into trouble. See [Can I ship new features over the air?](#can-i-ship-new-features-over-the-air) |
+| **(b) Doesn't bypass signing, sandbox or OS security** | The web app runs in WKWebView, inside the app's sandbox and container. Bridges are compiled into the signed binary. Downloads are verified (an ECDSA signature, SHA-256 and size) and never become native code. |
+| **(c) Isn't a store for other apps** | It updates *your* web app, the one app the binary was reviewed with. It isn't a catalog of third-party apps. |
+
+Guideline 4.7 covers the case where an app *does* host other people's HTML5 mini apps. That's allowed too, with extra
+rules about content moderation, privacy and payments. AppDeviceBridge isn't built for that, and if your app becomes that,
+4.7 applies to you.
+
+### Where the line is drawn in the library
+
+The design keeps everything Apple reviews in the binary:
+
+- **Native capability ships only in the store build.** A bridge is a compiled package registered at startup, so a web
+  update can't add a bridge, a permission or an entitlement.
+- **The web app can't outrun the native app.** A release declares `minimumHostVersion`, and a native app too old for it
+  never receives it. When the native app has to move, the server says so through
+  [native app updates](/appdevicebridge/updates/#native-app-updates): the app stops at its splash screen and sends the
+  user to the store. New native features always go through review.
+- **There's always a reviewed build.** The baseline web app is compiled into the binary, so what the reviewer sees is
+  what the app runs offline and on first launch.
+- **Downloads are signed.** A release that isn't signed with your key is refused, so nobody else can push code into
+  your app.
+
+## Can I ship new features over the air?
+
+This is the honest gray area, and it applies to every framework on this page. An over-the-air update *does* put things in
+front of users that App Review never saw. Apple's own documents pull in two directions:
+
+- **The developer agreement (3.3.1(B))** lets interpreted code add features, as long as they aren't "inconsistent with
+  the intended and advertised purpose of the Application".
+- **Guideline 2.5.2**, read literally, forbids code that "introduces or changes features or functionality".
+- **Guideline 2.3.1(a)** asks that "All new features, functionality, and product changes must be described with
+  specificity in the Notes for Review section". An over-the-air update skips that step.
+- **Guideline 2.5.19** is the hard line: "Don't include any hidden, dormant, or undocumented features in your app."
+
+In practice, Apple has long tolerated over-the-air fixes and improvements within the purpose it reviewed. Expo's guidance
+for React Native says the same: "changes to your app's behavior usually need to be reviewed." Apple can still reject an
+app that ships substantial new functionality this way. So treat it as a sliding scale:
+
+| Over the air | Example | Standing |
+| --- | --- | --- |
+| **Fine** | Bug fixes, copy and content, styling, layout, performance, a refined screen | The case 3.3.1(B) exists for. Every framework does this daily. |
+| **Judgment call** | A new screen or workflow that fits what the app already does, using bridges the app already has | Allowed by 3.3.1(B)'s wording, and commonly shipped. The bigger it is, the better it goes in a store build. |
+| **Store build** | A major feature, anything that changes what the app is, or anything needing a new bridge, permission or entitlement | Submit it and describe it in Notes for Review. Native changes can't go over the air anyway. |
+| **Never** | Features built into the submitted app and turned on after approval, behavior that differs for reviewers, a different app in the same shell | 2.5.19 and 2.3.1. Grounds for removal and account termination, whatever the framework. |
+
+The habit that keeps you in the first two rows: **when a web release adds something significant, ship a store build with
+that web app as its new baseline**, and describe it in Notes for Review. The reviewer then sees the feature, and the
+update mechanism goes back to doing what it's for: fixes and refinements between releases.
+
+## What about `background.js`?
+
+`background.js` handles native calls when no page is open. It runs in [Jint](https://github.com/sebastienros/jint), a
+JavaScript interpreter written in .NET, rather than in WebKit. Section 3.3.1(B) allows *interpreted* code, not just code
+run by WebKit, and the same conditions apply. `background.js` can only call the bridges the binary already has, from inside
+the sandbox. React Native's JavaScript engine and Shorebird's Dart interpreter also run downloaded code outside WebKit,
+and both pass review routinely.
+
+## Is this allowed on Google Play?
+
+Yes, and Google says so directly:
+
+> Likewise, an app may not download executable code (such as dex, JAR, .so files) from a source other than Google Play.
+> This restriction does not apply to code that runs in a virtual machine or an interpreter where either provides
+> indirect access to Android APIs (such as JavaScript in a webview or browser).
+>
+> — [Google Play Device and Network Abuse policy](https://support.google.com/googleplay/android-developer/answer/9888379)
+
+## Is this allowed on the Microsoft Store?
+
+Yes. Microsoft's rule is aimed at the same thing Apple's is: code that changes what the app *is*.
+
+> Your product must not attempt to fundamentally change or extend its described functionality or introduce features or
+> functionality that are in violation of Store Policies through any form of dynamic inclusion of code. Your product should
+> not, for example, download a remote script and subsequently execute that script in a manner that is not consistent with
+> the described functionality
+>
+> — [Microsoft Store Policies, 10.2.2](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies#102-security)
+
+Downloaded script is allowed when it runs consistently with the app's described functionality, so the
+[same sliding scale](#can-i-ship-new-features-over-the-air) applies: fixes and refinements over the air, anything that
+fundamentally changes or extends the app through a new Store submission. The WebView on Windows is WebView2, which is
+Chromium, and that's also the engine Microsoft requires of apps that browse the web (10.2.1).
+
+<Aside type="caution" title="Games">
+Policy 10.2.5 requires games, and any product offered on Xbox, to be "installed and updated only through the Store",
+in-product offerings included. If your app is a game in the Microsoft Store, don't update it over the air: ship the web
+app as the baseline and update through the Store.
+</Aside>
+
+Two smaller points. Policy 10.3.2 requires a product that needs a server to have that server working during
+certification. A host with a baseline doesn't need the release server to start, but keep it up while you're in review.
+And the Store's product page link (`ms-windows-store://pdp/?productid=…`, or `IAppStore` with `WindowsProductId`) is
+what [native app updates](/appdevicebridge/updates/#native-app-updates) open on Windows.
+
+## Doesn't every JavaScript framework do this?
+
+Yes. Downloading the interpreted part of an app between store releases is how the major cross-platform frameworks ship
+fixes, and has been for years:
+
+| Framework | How the UI updates without a store release | Runs in |
+| --- | --- | --- |
+| **Apache Cordova / PhoneGap** | The web bundle (HTML, CSS, JavaScript), through live-update plugins | The WebView |
+| **Ionic (Capacitor)** | The web bundle, through Ionic's Appflow Live Updates (no longer sold to new customers, supported until the end of 2027), [Capgo](https://capgo.app) or [Capawesome Cloud](https://cloud.capawesome.io) | The WebView |
+| **React Native** | The JavaScript bundle, through Expo's [EAS Update](https://docs.expo.dev/eas-update/faq/), and Microsoft's CodePush before App Center was retired in March 2025 | Hermes or JavaScriptCore |
+| **NativeScript** | The JavaScript bundle, through NativeScript's own [AppSync](https://blog.nativescript.org/enable-live-updates-of-your-ios-and-android-apps-using-nativescript-appsync/) service | NativeScript's JavaScript runtime |
+| **Flutter** | Dart code, through [Shorebird](https://shorebird.dev) | Shorebird's Dart interpreter on iOS |
+| **Hotwire Native** (Basecamp) | Nothing to download: every screen is HTML rendered by your server, so [each deploy changes the app's UI](https://native.hotwired.dev/overview/how-it-works) | The WebView |
+| **AppDeviceBridge** | The web app: HTML, JavaScript and WebAssembly, signed and verified | WKWebView, and Jint for `background.js` |
+
+They all draw the line in the same place. Native code, plugins, permissions and SDK upgrades need a store release. The
+interpreted layer can update in between, as long as the app stays the app that was reviewed. Their own guidance on the gray
+area matches [ours](#can-i-ship-new-features-over-the-air): fixes and refinements over the air, significant feature
+changes through review.
+
+## To the trolls
+
+If you've come to tell us this breaks guideline 2.5.2:
+
+1. **Don't use it if you don't trust us.** Nobody's making you. Blazor Hybrid compiles everything into the binary, and
+   [we compare the two honestly](/appdevicebridge/vs-blazor-hybrid/).
+2. **Read the whole rule.** 2.5.2 bans downloading code that changes what the app is. The developer agreement you signed
+   allows interpreted code that doesn't. The full explanation, with both quotes, is [above](#is-this-allowed-on-the-app-store).
+3. **We've been using this for years.** So has the industry: Cordova, Capacitor, React Native and Flutter apps update this
+   way in the App Store every day.
+
+And to be fair to the question: over-the-air updates can be *abused* to get around review, in this library or any
+other. That's a choice an app makes, and [we tell you where the line is](#can-i-ship-new-features-over-the-air).
+
+## Does the native app ever need a store update?
+
+Yes, whenever native code changes: a new bridge, a new permission or entitlement, a Shiny or .NET upgrade, a fix in
+native code. Ship the store build, then raise the platform's minimum in the release server's `hosts` so older native apps
+are sent to the store instead of receiving web releases they can't run. See
+[native app updates](/appdevicebridge/updates/#native-app-updates).
+
+<Aside>
+This page explains how AppDeviceBridge is designed to fit the stores' published rules. It isn't legal advice, and the
+stores' rules and how they apply them can change. Check the current
+[App Store Review Guidelines](https://developer.apple.com/app-store/review/guidelines/),
+[Apple Developer Program License Agreement](https://developer.apple.com/support/terms/apple-developer-program-license-agreement/),
+[Google Play policies](https://support.google.com/googleplay/android-developer/answer/9888379) and
+[Microsoft Store Policies](https://learn.microsoft.com/en-us/windows/apps/publish/store-policies) for your app.
+</Aside>

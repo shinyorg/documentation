@@ -64,7 +64,11 @@ and shows it in `WebAppHostView`. One delegate registers the bridges alone; a se
 | `UseBaseline(...)` | | The zip compiled into the app, served offline on first launch. |
 | `UpdateProvider` | none | Where releases come from: the release server, GitHub releases, or your own. See [Updates](/appdevicebridge/updates/). |
 | `CheckTimeout` | 5 s | After this, the installed version is shown anyway. |
-| `BlockOnRequiredUpdateFailure` | `false` | By default, a required download that fails midway is treated as offline. |
+| `BlockOnRequiredUpdateFailure` | `true` | A required update that fails to install stops the splash screen with the error and **Try again**. Turn it off to serve the installed build and retry next launch. |
+| `Culture` | `CurrentUICulture` | Sent with every update check, so release notes come back in the user's language. |
+| `WaitForPageReady` | `true` | Keep the splash screen up until the page posts `host/ready`, which the Blazor client does by itself. Off hides it when the WebView finishes navigating. |
+| `PageReadyTimeout` | 15 s | The longest the splash screen waits for that signal. |
+| `OpenStore` | none | Opens the store for a native app update. By default, Shiny's `IAppStore` when registered, then the server's store URL. |
 | `ApplyOptionalUpdatesImmediately` | `false` | Swap to an optional update and reload as soon as it lands. |
 | `DevServer` | none | Take pages from `dotnet watch` in development. See below. |
 | `ServeWebAppRemotely` | `false` | Serve the pages to other machines too, when the server is bound past loopback. |
@@ -73,6 +77,60 @@ and shows it in `WebAppHostView`. One delegate registers the bridges alone; a se
 | `ContentTypeOverrides` | empty | Content types by extension (`.bcmap`, `.pfb`, …) for files the built-in map doesn't know. |
 | `Variants(...)`, `SelectVariant` | none | Several builds in one package at the same URLs, chosen per request. See [Client variants](#client-variants). |
 | `BackgroundScript` | `background.js` | What takes native calls with no page open. |
+
+## The splash screen
+
+`WebAppHostView` keeps a splash screen over the WebView from launch until the page has rendered:
+
+1. **Checking for updates**, for up to `CheckTimeout`.
+2. **A required web app update** installs here, before anything is shown, with its version, its release notes and a
+   progress bar. If it fails, the splash screen stops with the error and **Try again**.
+3. **A required native app update** stops here with a message, the store build's release notes, and **Update**, which opens
+   the store. Nothing behind it loads. See [Native app updates](/appdevicebridge/updates/#native-app-updates).
+4. **The page loads** behind the splash screen, which comes down when the page posts `POST /_bridge/host/ready`, or after
+   `PageReadyTimeout`. The Blazor client sends `ready` by itself once Blazor has started. Any other page calls
+   `new HostBridge().ready()` when its first screen is drawn.
+
+Replace the look with `SplashTemplate`, bound to a `WebAppSplashContext`, and change the words with `SplashText`:
+
+```xml
+<webview:WebAppHostView>
+    <webview:WebAppHostView.SplashTemplate>
+        <DataTemplate x:DataType="webview:WebAppSplashContext">
+            <Grid BackgroundColor="{StaticResource Brand}" RowDefinitions="*,Auto,Auto,Auto,Auto,*" Padding="32" RowSpacing="12">
+                <Image Grid.Row="1" Source="logo.png" HeightRequest="96" />
+                <Label Grid.Row="2" Text="{Binding Message}" HorizontalTextAlignment="Center" />
+                <ProgressBar Grid.Row="3" Progress="{Binding Progress}" IsVisible="{Binding IsProgressVisible}" />
+                <VerticalStackLayout Grid.Row="4" Spacing="8">
+                    <Label Text="{Binding ReleaseNotes}" IsVisible="{Binding HasReleaseNotes}" />
+                    <Button Text="Update" Command="{Binding OpenStoreCommand}" IsVisible="{Binding CanOpenStore}" />
+                    <Button Text="Try again" Command="{Binding RetryCommand}" IsVisible="{Binding CanRetry}" />
+                </VerticalStackLayout>
+            </Grid>
+        </DataTemplate>
+    </webview:WebAppHostView.SplashTemplate>
+</webview:WebAppHostView>
+```
+
+| `WebAppSplashContext` | |
+| --- | --- |
+| `State` | The host's `WebAppHostState`: `CheckingForUpdate`, `Downloading`, `Failed`, `HostUpdateRequired`, … |
+| `Message` | What is happening, or why the app stopped, from `SplashText`. |
+| `ReleaseNotes`, `HasReleaseNotes`, `UpdateVersion` | The required update's notes and version, for either app. |
+| `Progress`, `IsProgressVisible` | A required download's progress, 0 to 1. |
+| `IsBusy` | Show a spinner. |
+| `IsStopped` | The app can't go on until the user acts. |
+| `CanRetry`, `RetryCommand` | Start again. |
+| `CanOpenStore`, `OpenStoreCommand`, `HostUpdate` | The native app update and the way to the store. |
+
+On the maui-labs macOS (AppKit) head, a change to `IsVisible` isn't applied to the native view, so a template's
+`IsVisible` bindings won't show or hide anything there. The built-in splash adds and removes its pieces instead, and the
+host removes the whole splash from the view when it comes down. A template meant for that head should do the same, or use
+`Opacity`.
+
+`SplashDismissed` is raised when the splash screen comes down. Outside the view, `WebAppHost.StartAsync()` throws
+`WebAppHostUpdateRequiredException` for a required native app update, and `WebAppUnavailableException` when no web app
+can be shown.
 
 ## Mount points
 
@@ -295,3 +353,6 @@ The downloaded content is HTML and JavaScript that runs in WebKit. Guideline 2.5
 the app's primary purpose. Keep native capabilities in the binary (bridges ship with the app), ship a
 complete baseline, and use `minimumHostVersion` rather than shipping web features the installed app
 can't support.
+
+The [FAQ](/appdevicebridge/faq/) has the full explanation: both rules quoted, what Google Play says, and how Cordova,
+Capacitor, React Native and Flutter do the same thing.

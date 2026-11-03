@@ -787,8 +787,9 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'appdevicebridge/', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
           { label: 'vs. Blazor Hybrid', link: 'appdevicebridge/vs-blazor-hybrid', showNew: false, dateCreated: '2026-09-19', dateUpdated: '2026-09-19' },
-          { label: 'Hosting', link: 'appdevicebridge/hosting', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
-          { label: 'Updates', link: 'appdevicebridge/updates', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
+          { label: 'FAQ', link: 'appdevicebridge/faq', showNew: true, dateCreated: '2026-11-03', dateUpdated: '2026-11-03' },
+          { label: 'Hosting', link: 'appdevicebridge/hosting', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-11-03' },
+          { label: 'Updates', link: 'appdevicebridge/updates', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-11-03' },
           { label: 'Security', link: 'appdevicebridge/security', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
           { label: 'Typed Clients', link: 'appdevicebridge/clients', showNew: false, dateCreated: '2026-09-16', dateUpdated: '2026-09-16' },
           {

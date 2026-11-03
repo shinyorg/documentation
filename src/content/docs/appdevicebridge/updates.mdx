@@ -1,9 +1,10 @@
 ---
 title: Updates
-description: Where web app releases come from — a signed ASP.NET Core release server, GitHub releases, or a provider of your own — and the rules the device follows to install them
+description: Where web app releases come from — a signed ASP.NET Core release server, GitHub releases, or a provider of your own — the rules the device follows to install them, native app store updates, localized release notes, and background updates
 ---
 
 import BridgeApi from '/src/components/BridgeApi.astro';
+import NugetBadge from '/src/components/NugetBadge.astro';
 
 ## Update providers
 
@@ -33,24 +34,39 @@ on assets uploaded since mid-2025). Beyond that, trust rests on HTTPS to GitHub 
 the repository. Drafts are never offered. Only the newest 100 releases are read, and GitHub Enterprise
 Server URLs work too. Unauthenticated API calls are limited to 60 an hour per IP address.
 
-Anything else — a manifest file, an endpoint of your own — is two methods:
+Anything else — a manifest file, an endpoint of your own — is two methods, and an optional third:
 
 ```csharp
 public interface IUpdateProvider
 {
-    // Null when there is nothing newer. currentAppVersion is null when no build is bundled or installed.
-    Task<UpdateInfo?> GetUpdateInfoAsync(Version currentHostVersion, WebAppVersion? currentAppVersion, CancellationToken ct);
+    // UpdateOffer.None when there is nothing newer. request.AppVersion is null when no build is bundled or installed.
+    Task<UpdateOffer> CheckAsync(UpdateRequest request, CancellationToken ct);
     Task<Stream> DownloadAsync(UpdateInfo update, CancellationToken ct);
+
+    // A plain GET for an OS background transfer (Shiny.AppDeviceBridge.AutoUpdate). Null: download in-process instead.
+    UpdateDownloadRequest? GetDownloadRequest(UpdateInfo update) => null;
 }
+
+public sealed record UpdateRequest(Version HostVersion, WebAppVersion? AppVersion, CultureInfo Culture);
+public sealed record UpdateOffer(UpdateInfo? WebApp = null, HostUpdateInfo? Host = null);
 
 public class UpdateInfo   // derive to carry a download URL
 {
     public required WebAppVersion Version { get; set; }
     public bool IsOptional { get; set; }       // false installs before the app shows
-    public string? WhatsNew { get; set; }
+    public string? WhatsNew { get; set; }      // in request.Culture when you have it
     public DateTimeOffset? ReleaseDate { get; set; }
     public long? FileSize { get; set; }        // checked when set
     public string? Sha256 { get; set; }        // checked when set
+}
+
+public sealed class HostUpdateInfo         // a native app update, from the store
+{
+    public bool IsRequired { get; init; }      // stops the app at its splash screen
+    public string? MinimumVersion { get; init; }
+    public string? LatestVersion { get; init; }
+    public Uri? StoreUri { get; init; }
+    public string? WhatsNew { get; init; }
 }
 ```
 
@@ -76,8 +92,9 @@ Publishing a release means copying a file:
 
 ```
 /srv/webapps/field-app/
-    app.json              { "minimumVersion": "1.2.0" }
+    app.json              { "minimumVersion": "1.2.0", "hosts": { … } }
     1.2.0.zip
+    1.2.0.json            { "releaseNotes": { "*": "Faster sync.", "fr": "Synchronisation plus rapide." } }
     1.3.0-beta.1.zip
     1.3.0-beta.1.json     { "channel": "beta", "minimumHostVersion": "2.1", "platforms": ["ios", "android"] }
 ```
@@ -93,13 +110,83 @@ openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt 
 openssl ec -in private.pem -pubout > public.pem
 ```
 
+### Release notes in the user's language
+
+The host sends its UI culture with every check (`culture=fr-CA`, from `webApp.Culture`). `releaseNotes` is a string, or an
+object keyed by culture. The server answers with the culture itself, then its parents (`fr-CA`, then `fr`), then `*`, then
+the first language given. Release notes aren't signed, so they change without re-signing. A store of your own sets
+`WebAppReleaseEntry.ReleaseNotes` to a `WebAppLocalizedText`.
+
+## Native app updates
+
+The web app updates over the air, but the native app only through its store. `hosts` in `app.json` sets a rule per platform
+(`ios`, `android`, `maccatalyst`, `macos`, `windows`, `linux`, or `*` for the rest):
+
+```json
+{
+  "hosts": {
+    "ios":     { "minimumVersion": "2.0", "latestVersion": "2.3", "storeUrl": "https://apps.apple.com/app/id123456789" },
+    "android": { "minimumVersion": "2.0", "latestVersion": "2.3", "storeUrl": "https://play.google.com/store/apps/details?id=com.acme.field" },
+    "*":       { "latestVersion": "2.3", "releaseNotes": { "*": "New scanner support.", "fr": "Prise en charge des scanners." } }
+  }
+}
+```
+
+| Native app | Result |
+| --- | --- |
+| **Below `minimumVersion`** | **Required.** The splash screen stops with a message, the release notes, and **Update**, which opens the store. No web app download starts. |
+| **Below `latestVersion`** | **Optional.** The app starts as usual. The page sees `storeUpdate` in `GET /_bridge/host` and can offer `POST /_bridge/host/open-store`. |
+| **Otherwise** | Nothing is sent. |
+
+**Update** uses Shiny's `IAppStore` when the app registers it (`AddAppSupportBridge(store => store.AppleAppId = "…")`), then
+the server's `storeUrl`, or `webApp.OpenStore` to decide yourself. Only `https` and the stores' own schemes (`itms-apps`,
+`market`, `ms-windows-store`, …) are opened. A required native app update is remembered on the device, so going offline
+doesn't get around it. It's forgotten once the native app reaches the minimum, or the server stops requiring it. A version
+in the policy that doesn't parse is ignored, so a typo can't lock everyone out. The rule isn't signed; it rests on HTTPS to
+the server.
+
+## Background updates
+
+<NugetBadge name="Shiny.AppDeviceBridge.AutoUpdate" />
+
+`Shiny.AppDeviceBridge.AutoUpdate` keeps the web app current while the app is closed:
+
+```csharp
+bridge.AddWebAppAutoUpdate();
+bridge.AddWebAppAutoUpdate(o =>
+{
+    o.RequiredInternetAccess = InternetAccess.Unmetered;   // Wi-Fi only (default: Any)
+    o.RequireCharging = false;
+    o.UseMeteredConnection = true;
+});
+```
+
+A Shiny.Jobs job checks the provider whenever the OS runs it. Any newer release, optional or required, downloads as a
+Shiny.Net.Http background transfer, which survives the app being suspended or killed. When it lands, possibly in a later
+process, it's verified exactly like a foreground download (newer, size, SHA-256, archive), then served from the next
+launch. A required update found later is then already on the device, so nobody waits at the splash screen. While the app is
+open, optional updates found at startup go the same way instead of downloading in-process. Required updates found at
+startup still install on the splash screen, where the user is waiting for them.
+
+The release server's releases and public GitHub repositories download in the background. A provider without
+`GetDownloadRequest`, or GitHub with a `Token` (the token would follow the redirect to GitHub's storage), downloads
+in-process during the job instead. `AddHttpTransfersBridge` and `AddWebAppAutoUpdate` share one transfer manager in either
+order. Implement `IWebAppUpdateDownloader` to hand releases to a downloader of your own.
+
+Setup is Shiny's. On iOS, add `BGTaskSchedulerPermittedIdentifiers` (`com.shiny.jobnet`, plus `com.shiny.jobpowernet` with
+`RequireCharging`), the `processing` background mode, and forward `HandleEventsForBackgroundUrl` to Shiny. On Android, add
+`FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_DATA_SYNC`. It runs on Android, iOS, Mac Catalyst, macOS (managed transfers),
+Windows and Linux (managed transfers). Jobs run in the background on Android and iOS, and while the app runs elsewhere.
+
 ## Update rules
 
 | Situation | Result |
 | --- | --- |
 | **Nothing installed** | any compatible release is required. |
 | **Below `minimumVersion`** | required, and it installs before the app shows. |
-| **Newer release available** | optional. It downloads in the background and applies next launch, or when the page calls `POST /_bridge/host/apply-update`. |
+| **Below `minimumVersion`, and the download fails** | the splash screen stops with the error and **Try again**. With `BlockOnRequiredUpdateFailure = false`, the installed build is served and the update retried next launch. |
+| **Newer release available** | optional. It downloads in the background and applies next launch, or when the page calls `POST /_bridge/host/apply-update`. `GET /_bridge/host` carries its `pendingReleaseNotes`. |
+| **Native app below the platform's `minimumVersion`** | the splash screen stops with **Update**. See [Native app updates](#native-app-updates). |
 | **Release needs a newer native app** | skipped. Set `minimumHostVersion` when a web build depends on bridge endpoints older apps don't have. |
 | **Offline or server down** | the newer of the bundled and installed builds is served. |
 
