@@ -1,0 +1,166 @@
+---
+title: Uno Platform Hosting
+description: Run Shiny in an Uno Platform app on Android, iOS, Windows, desktop and WebAssembly with Shiny.Hosting.Uno
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Hosting.Uno" />
+
+`Shiny.Hosting.Uno` does for an [Uno Platform](https://platform.uno) app what `UseShiny()` does for MAUI. Shiny runs inside the Uno.Extensions.Hosting container, so view models and your own services inject Shiny's services like any other. On Android the host is built before any activity exists, so background work keeps running. It works with both of Uno's renderers, Skia and native. `Shiny.Hosting.Uno.WebAssembly` adds what the WebAssembly head needs.
+
+## Starting Shiny
+
+Your `App` implements `IShinyUnoApplication`. Its static `ConfigureApp` holds everything the Uno template does between `this.CreateBuilder(args)` and `NavigateAsync`. `UseShiny` goes on the host builder in there, with Shiny's modules registered in its callback or in your own `ConfigureServices`, since it's the same container. In `OnLaunched`, call `this.GetShinyBuilder(args)` where the template calls `this.CreateBuilder(args)`. The rest stays the same: `builder.Window`, `NavigateAsync`, Toolkit navigation and the extended splash screen.
+
+```csharp
+public partial class App : Application, IShinyUnoApplication
+{
+    public App() => this.InitializeComponent();
+
+    protected Window? MainWindow { get; private set; }
+    protected IHost? Host { get; private set; }
+
+    // runs once per process - on Android from Application.OnCreate, so nothing here touches UI
+    public static void ConfigureApp(IApplicationBuilder builder) => builder
+        .UseToolkitNavigation()
+        .Configure(host => host
+            .UseNavigation(RegisterRoutes)
+            .UseShiny(services =>
+            {
+                services.AddConnectivity();
+                services.AddJobs();
+                services.AddNotifications<MyNotificationDelegate>();
+            })
+        );
+
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        var builder = this.GetShinyBuilder(args);   // in place of this.CreateBuilder(args)
+        this.MainWindow = builder.Window;
+        this.Host = await builder.NavigateAsync<Shell>();
+    }
+}
+```
+
+`UseShiny` starts Shiny through Uno's `IServiceInitialize` as soon as the container is built, whether or not the host is ever started. On the Skia desktop and WebAssembly heads (plain `net10.0`), Shiny gives the app `NetPlatform` and the plain .NET version of each module. Shiny's main thread on those heads, and on the Windows head, is Uno's `DispatcherQueue`.
+
+`GetShinyBuilder` hands back an `IApplicationBuilder` that Shiny implements itself. It does what Uno's builder does, with two differences: it can be built before Uno has created the App or a window, and `Build()` only builds once, so `NavigateAsync` gets back the host that is already running.
+
+<Aside type="caution">
+Use `Configure(host => ...)` in `ConfigureApp`, not `Configure((host, window) => ...)`. On Android the host is built before Uno has created a window, so the window overload throws there. Uno.Extensions navigation attaches the `Window` to the services itself, as a scoped `Window` you can resolve. Uno's own `ApplicationBuilder` creation hook doesn't fire for Shiny's builder either. Uno's development tooling uses that hook to add logging.
+</Aside>
+
+### Android
+
+Uno only calls `OnLaunched` once an activity starts. With the Skia renderer it doesn't even create the App until then. So when Android starts the process in the background for a job, a push or a geofence, a host built in `OnLaunched` would never exist. Build it from your `NativeApplication` instead:
+
+```csharp
+[Application(Label = "My App", Theme = "@style/AppTheme")]
+public class Application : Microsoft.UI.Xaml.NativeApplication
+{
+    public Application(IntPtr javaReference, JniHandleOwnership transfer)
+        : base(() => new App(), javaReference, transfer) { }
+
+    public override void OnCreate()
+    {
+        base.OnCreate();
+        this.StartShiny<App>();
+    }
+}
+```
+
+Then forward the activity events Shiny needs from your `ApplicationActivity`. MAUI does this through its lifecycle events.
+
+```csharp
+[Activity(MainLauncher = true, LaunchMode = LaunchMode.SingleTop, ConfigurationChanges = global::Uno.UI.ActivityHelper.AllConfigChanges)]
+public class MainActivity : Microsoft.UI.Xaml.ApplicationActivity
+{
+    protected override void OnCreate(Bundle? bundle)
+    {
+        base.OnCreate(bundle);
+        Host.Lifecycle.OnActivityOnCreate(this, bundle);
+    }
+
+    protected override void OnNewIntent(Intent? intent)
+    {
+        base.OnNewIntent(intent);
+        Host.Lifecycle.OnNewIntent(this, intent);
+    }
+
+    protected override void OnActivityResult(int requestCode, [GeneratedEnum] Result resultCode, Intent? data)
+    {
+        base.OnActivityResult(requestCode, resultCode, data);
+        Host.Lifecycle.OnActivityResult(this, requestCode, resultCode, data);
+    }
+
+    public override void OnRequestPermissionsResult(int requestCode, string[] permissions, [GeneratedEnum] Permission[] grantResults)
+    {
+        base.OnRequestPermissionsResult(requestCode, permissions, grantResults);
+        Host.Lifecycle.OnRequestPermissionsResult(this, requestCode, permissions, grantResults);
+    }
+}
+```
+
+<Aside type="caution">
+Without this forwarding, every Shiny permission request on Android waits forever and notification taps never reach your delegate. Shiny doesn't ship base classes for these two because `NativeApplication` and `ApplicationActivity` are different types under Uno's Skia and native renderers. A base class built against one of them would fail to load under the other.
+</Aside>
+
+With the Skia renderer, Uno doesn't move its window into a new activity. Shiny's default `LaunchActivityFlags` for a notification (`NewTask | ClearTask`) recreate the activity, which leaves a blank screen when the notification is tapped. Send an `AndroidNotification` that brings the running activity forward instead:
+
+```csharp
+await notifications.Send(new AndroidNotification
+{
+    Title = "Hello",
+    Message = "Tap me",
+    LaunchActivityFlags = ActivityFlags.NewTask | ActivityFlags.ClearTop | ActivityFlags.SingleTop
+});
+```
+
+### iOS
+
+No Shiny code is needed in the iOS head. Uno calls `OnLaunched` from `didFinishLaunching`, including when iOS launches the app in the background, and Shiny picks up foreground and background changes and notification taps on its own.
+
+Uno's `Application` is the app delegate. If the app uses push, `[Export]` these on your `App`, and only then:
+
+```csharp
+#if __IOS__
+[Export("application:didRegisterForRemoteNotificationsWithDeviceToken:")]
+public void RegisteredForRemoteNotifications(UIApplication application, NSData deviceToken)
+    => Shiny.Hosting.Host.Lifecycle.OnRegisteredForRemoteNotifications(deviceToken);
+
+[Export("application:didFailToRegisterForRemoteNotificationsWithError:")]
+public void FailedToRegisterForRemoteNotifications(UIApplication application, NSError error)
+    => Shiny.Hosting.Host.Lifecycle.OnFailedToRegisterForRemoteNotifications(error);
+
+[Export("application:didReceiveRemoteNotification:fetchCompletionHandler:")]
+public void DidReceiveRemoteNotification(UIApplication application, NSDictionary userInfo, Action<UIBackgroundFetchResult> completionHandler)
+    => Shiny.Hosting.Host.Lifecycle.OnDidReceiveRemoteNotification(userInfo, completionHandler);
+#endif
+```
+
+<Aside>
+Implementing these methods tells Apple your app uses push, and App Review flags an app that has them without using push. That's why Shiny doesn't ship them.
+</Aside>
+
+### WebAssembly
+
+<NugetBadge name="Shiny.Hosting.Uno.WebAssembly" />
+
+Shiny's browser modules (battery, connectivity, screen, BluetoothLE, GPS, push and the rest) are written against Blazor's `IJSRuntime`, and Uno's WebAssembly head has no Blazor. Reference `Shiny.Hosting.Uno.WebAssembly` from that head only, and call `UseShinyWebAssembly()` next to `UseShiny()`:
+
+```csharp
+.Configure(host => host
+    .UseNavigation(RegisterRoutes)
+#if __WASM__
+    .UseShinyWebAssembly()
+#endif
+    .UseShiny(services => services.AddConnectivity().AddBattery())
+)
+```
+
+It registers an `IJSRuntime` built on the .NET WebAssembly runtime's own JS interop and Microsoft.JSInterop's JS dispatcher. It covers in-process and asynchronous calls, module imports, JS object references and `DotNetObjectReference` callbacks. Shiny's scripts are served from `_content/Shiny.*/` as static web assets, the same as in Blazor. It also holds the first navigation until the browser monitors have loaded, which is what `await services.UseShiny()` does in a Blazor app, so the first page reads real values instead of `Unknown`. Outside the browser it does nothing.
+
+## Sample
+
+[`samples/Sample.Uno`](https://github.com/shinyorg/shiny/tree/v6/samples/Sample.Uno) is one Uno single project with Android, iOS, Skia desktop and WebAssembly heads, using the Skia renderer, Uno.Extensions navigation and the Toolkit extended splash. It shows the platform, when Shiny started compared with when the page was created, connectivity and battery. On Android and iOS it requests notification permission, sends a notification and shows the tap.

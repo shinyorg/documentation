@@ -158,9 +158,9 @@ It registers `BleObdConfiguration`, `IObdDeviceScanner`, `IObdTransport` and `IO
 singletons — an OBD adapter is a single physical resource, and a scoped registration would leave two
 consumers fighting over one link. Everything uses `TryAdd`.
 
-### iOS and Android
+### iOS, Android, Mac Catalyst, macOS, Windows and Blazor WebAssembly
 
-The BLE manager is registered for you:
+One call — it registers the Shiny.BluetoothLE manager for you as well:
 
 ```csharp
 using Shiny;
@@ -174,32 +174,29 @@ builder.Services.AddShinyObdBluetoothLE(new BleObdConfiguration
 });
 ```
 
-### Linux, Blazor WebAssembly, Windows and Apple desktop
+There is no separate `AddBluetoothLE()` to remember. Shiny's `AddBluetoothLE()` is idempotent, so an
+app that already calls it (as earlier versions of this page told you to) keeps working unchanged.
 
-Add your platform package's `AddBluetoothLE()` call as well. **Order does not matter** — DI resolves
-lazily, so either call may come first.
+### Linux
 
-```csharp
-// Linux (Shiny.BluetoothLE.Linux) — BlueZ over D-Bus
-services.AddBluetoothLE();
-services.AddShinyObdBluetoothLE(new BleObdConfiguration { DeviceNameFilter = "OBDCheck" });
+The BlueZ manager ships in the separate `Shiny.BluetoothLE.Linux` package — kept apart so its D-Bus
+dependency never reaches a WebAssembly app. Install **`Shiny.Obd.Ble.Linux`** and make one call; it
+registers the BlueZ manager and the whole OBD BLE stack:
+
+```bash
+dotnet add package Shiny.Obd.Ble.Linux
 ```
 
 ```csharp
-// Blazor WebAssembly (Shiny.BluetoothLE.Blazor) — Web Bluetooth
-builder.Services.AddBluetoothLE();
-builder.Services.AddShinyObdBluetoothLE();
+// Linux — BlueZ over D-Bus
+services.AddShinyObdLinuxBluetoothLE(new BleObdConfiguration { DeviceNameFilter = "OBDCheck" });
 ```
 
-:::note[Why you have to make that second call]
-`Shiny.BluetoothLE.Linux` and `Shiny.BluetoothLE.Blazor` both ship a `net10.0` assembly declaring
-`Shiny.AddBluetoothLE(IServiceCollection)`. A package referencing both would make **every** call to it
-ambiguous (CS0121), so `Shiny.Obd.Ble` references neither — only your app knows which platform it is
-running on.
-
-Forget the call and resolving `IObdTransport` throws an `ObdException` naming the exact package to
-install, rather than a bare "unable to resolve service for type IBleManager".
-:::
+Don't reference `Shiny.Obd.Ble.Linux` from a Blazor WebAssembly or mobile project. Registering by hand
+still works too — `services.AddLinuxBluetoothLE()` plus `services.AddShinyObdBluetoothLE()`, in either
+order. Forget the BlueZ manager and resolving `IObdDeviceScanner` or `IObdTransport` throws an
+`ObdException` naming the package to install, rather than a bare "unable to resolve service for type
+IBleManager".
 
 :::caution[Blazor WebAssembly]
 Web Bluetooth needs a **user gesture** (a click) to start scanning, is **Chrome/Edge only**, and

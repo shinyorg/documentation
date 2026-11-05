@@ -65,6 +65,8 @@ export const sidebarTopics = [
         jumpTo: true,
         items:[
           { label: 'Getting Started', link: 'client/core/', dateCreated: '2026-09-11', dateUpdated: '2026-09-11' },
+          { label: 'Avalonia Hosting', link: 'client/core/avalonia', dateCreated: '2026-11-03', dateUpdated: '2026-11-03' },
+          { label: 'Uno Platform Hosting', link: 'client/core/uno', dateCreated: '2026-11-05', dateUpdated: '2026-11-05' },
           { label: 'Platform', link: 'client/core/platform', dateCreated: '2026-09-11', dateUpdated: '2026-10-12' },
           { label: 'Screen Posture', link: 'client/core/screen-posture', dateCreated: '2026-10-25', dateUpdated: '2026-10-25' },
           { label: 'Lifecycle Hooks', link: 'client/core/lifecycle', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
@@ -1093,8 +1095,9 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/tabbedpage/', dateCreated: '2026-08-25', dateUpdated: '2026-10-25' },
           { label: 'Tab Headers', link: 'controls/tabbedpage/tab-headers', dateCreated: '2026-10-25', dateUpdated: '2026-10-25' },
-          { label: 'Shell', link: 'controls/tabbedpage/shell', dateCreated: '2026-08-25', dateUpdated: '2026-08-25' },
-          { label: 'Properties & Events', link: 'controls/tabbedpage/properties', dateCreated: '2026-08-25', dateUpdated: '2026-10-25' },
+          { label: 'Hiding the Bar', link: 'controls/tabbedpage/hiding', dateCreated: '2026-11-04', dateUpdated: '2026-11-04' },
+          { label: 'Shell', link: 'controls/tabbedpage/shell', dateCreated: '2026-08-25', dateUpdated: '2026-11-04' },
+          { label: 'Properties & Events', link: 'controls/tabbedpage/properties', dateCreated: '2026-08-25', dateUpdated: '2026-11-04' },
         ]
       },
       {

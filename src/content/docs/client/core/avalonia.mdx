@@ -1,0 +1,138 @@
+---
+title: Avalonia Hosting
+description: Run Shiny in an Avalonia app on Android, iOS and desktop with Shiny.Hosting.Avalonia
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+import { Aside } from '@astrojs/starlight/components';
+
+<NugetBadge name="Shiny.Hosting.Avalonia" />
+
+`Shiny.Hosting.Avalonia` does for an [Avalonia](https://avaloniaui.net) app what `UseShiny()` does for MAUI: it builds and runs the Shiny host while Avalonia starts, and gets the platform events Shiny needs from Avalonia's activity. It needs Avalonia 12 or later.
+
+## Starting Shiny
+
+`AppBuilder.UseShiny(...)` runs the Shiny host after Avalonia sets up its platform services and before your `Application` is created. That means `Host.Current` is ready in `Initialize()` and `OnFrameworkInitializationCompleted()`.
+
+Avalonia has no DI container of its own, so the container Shiny builds is the app's container. Register your own services in the same callback and resolve them through `Host.ServiceProvider`. Keep the registrations in one method that every head calls:
+
+```csharp
+public static class ShinyStartup
+{
+    public static void Configure(HostBuilder builder)
+    {
+        builder.Services.AddSingleton<MyService>();
+        builder.Services.AddConnectivity();
+#if PLATFORM
+        builder.Services.AddNotifications<MyNotificationDelegate>();
+#endif
+    }
+}
+```
+
+### Desktop
+
+Call it on the builder in `Program.cs`:
+
+```csharp
+public static AppBuilder BuildAvaloniaApp() => AppBuilder
+    .Configure<App>()
+    .UsePlatformDetect()
+    .UseShiny(ShinyStartup.Configure);
+```
+
+A desktop head targets plain `net10.0`, so Shiny gives it `NetPlatform` and the plain .NET version of each module, the same as any other desktop .NET app. `UseShiny` points Shiny's main thread at Avalonia's `Dispatcher.UIThread`. A head that targets `net10.0-windows10.0.19041.0` gets `WindowsPlatform` instead.
+
+### Android
+
+Override `CustomizeAppBuilder` on your Avalonia application class. Avalonia runs it from `Application.OnCreate`, so Shiny is running even when Android starts the process in the background for a job, a push or a geofence, with no activity.
+
+```csharp
+[Application]
+public class MainApplication : AvaloniaAndroidApplication<App>
+{
+    public MainApplication(IntPtr handle, JniHandleOwnership ownership) : base(handle, ownership) { }
+
+    protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
+        => base.CustomizeAppBuilder(builder).UseShiny(ShinyStartup.Configure);
+}
+
+[Activity(
+    MainLauncher = true,
+    LaunchMode = LaunchMode.SingleTop,
+    Theme = "@style/Theme.AppCompat.DayNight.NoActionBar"
+)]
+public class MainActivity : ShinyAvaloniaMainActivity { }
+```
+
+`ShinyAvaloniaMainActivity` is an `AvaloniaMainActivity` that forwards `OnCreate`, `OnNewIntent`, `OnActivityResult` and `OnRequestPermissionsResult` to Shiny, which MAUI does through its lifecycle events.
+
+<Aside type="caution">
+Without this forwarding, every Shiny permission request on Android waits forever and notification taps never reach your delegate. If your activity can't derive from `ShinyAvaloniaMainActivity`, override the same four methods and forward each one to `Host.Lifecycle`.
+</Aside>
+
+Because the process can start with no activity, set `MainViewFactory` in `OnFrameworkInitializationCompleted` instead of creating your view straight away:
+
+```csharp
+public override void OnFrameworkInitializationCompleted()
+{
+    switch (this.ApplicationLifetime)
+    {
+        case IClassicDesktopStyleApplicationLifetime desktop:
+            desktop.MainWindow = new MainWindow();
+            break;
+
+        case IActivityApplicationLifetime activity:
+            activity.MainViewFactory = () => new MainView();
+            break;
+
+        case ISingleViewApplicationLifetime singleView:
+            singleView.MainView = new MainView();
+            break;
+    }
+    base.OnFrameworkInitializationCompleted();
+}
+```
+
+### iOS
+
+Override `CustomizeAppBuilder` on your app delegate. Avalonia runs it from `didFinishLaunching`. Shiny picks up foreground and background changes and notification taps on its own, with no more code.
+
+```csharp
+[Register("AppDelegate")]
+public class AppDelegate : AvaloniaAppDelegate<App>
+{
+    protected override AppBuilder CustomizeAppBuilder(AppBuilder builder)
+        => base.CustomizeAppBuilder(builder).UseShiny(ShinyStartup.Configure);
+
+    // only if you use Shiny.Net.Http background transfers
+    [Export("application:handleEventsForBackgroundURLSession:completionHandler:")]
+    public void HandleEventsForBackgroundUrl(UIApplication application, string sessionIdentifier, Action completionHandler)
+        => Host.Lifecycle.OnHandleEventsForBackgroundUrl(sessionIdentifier, completionHandler);
+}
+```
+
+If the app uses push, add these to the same delegate, and only then:
+
+```csharp
+[Export("application:didRegisterForRemoteNotificationsWithDeviceToken:")]
+public void RegisteredForRemoteNotifications(UIApplication application, NSData deviceToken)
+    => Host.Lifecycle.OnRegisteredForRemoteNotifications(deviceToken);
+
+[Export("application:didFailToRegisterForRemoteNotificationsWithError:")]
+public void FailedToRegisterForRemoteNotifications(UIApplication application, NSError error)
+    => Host.Lifecycle.OnFailedToRegisterForRemoteNotifications(error);
+
+[Export("application:didReceiveRemoteNotification:fetchCompletionHandler:")]
+public void DidReceiveRemoteNotification(UIApplication application, NSDictionary userInfo, Action<UIBackgroundFetchResult> completionHandler)
+    => Host.Lifecycle.OnDidReceiveRemoteNotification(userInfo, completionHandler);
+```
+
+<Aside>
+Implementing these methods tells Apple your app uses push, and App Review flags an app that has them without using push. That's why Shiny doesn't ship a base delegate with them in it.
+</Aside>
+
+Avalonia's app delegate handles `continueUserActivity` itself and Avalonia 12 apps are scene-based, so Shiny's `IIosLifecycle.IContinueActivity` handlers aren't called in an Avalonia app.
+
+## Sample
+
+[`samples/Sample.Avalonia`](https://github.com/shinyorg/shiny/tree/v6/samples/Sample.Avalonia) is one project with desktop, Android and iOS heads. It shows the platform, app-data folder and connectivity, and on Android and iOS it requests notification permission, sends a notification and shows the tap.
