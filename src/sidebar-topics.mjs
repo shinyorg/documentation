@@ -411,6 +411,23 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Audio',
+        jumpTo: true,
+        items: [
+          { label: 'Getting Started', link: 'audio/', showNew: false, dateCreated: '2026-07-09', dateUpdated: '2026-11-05' },
+          { label: 'Microphone Capture', link: 'audio/capture', showNew: false, dateCreated: '2026-11-05', dateUpdated: '2026-11-05' },
+          { label: 'Playback & Volume', link: 'audio/playback', showNew: false, dateCreated: '2026-11-05', dateUpdated: '2026-11-05' },
+          { label: 'Recording', link: 'audio/recording', showNew: false, dateCreated: '2026-08-02', dateUpdated: '2026-11-05' },
+          { label: 'Real-time Effects', link: 'audio/effects', showNew: false, dateCreated: '2026-08-02', dateUpdated: '2026-11-05' },
+          { label: 'Live Monitor', link: 'audio/monitor', showNew: false, dateCreated: '2026-07-09', dateUpdated: '2026-11-05' },
+          { label: 'Devices & Routes', link: 'audio/devices', showNew: false, dateCreated: '2026-07-09', dateUpdated: '2026-11-05' },
+          { label: 'Full-Duplex Calls', link: 'audio/duplex', showNew: false, dateCreated: '2026-10-30', dateUpdated: '2026-11-05' },
+          { label: 'Linux', link: 'audio/linux', showNew: false, dateCreated: '2026-07-30', dateUpdated: '2026-11-05' },
+          { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
+          { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-11-05' }
+        ]
+      },
+      {
         label: 'Gamepads',
         jumpTo: true,
         dateUpdated: '2026-09-21',
@@ -594,8 +611,6 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'speech/', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' },
           { label: 'Architecture', link: 'speech/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
-          { label: 'Audio (Monitor & Devices)', link: 'speech/audio', dateCreated: '2026-07-09', dateUpdated: '2026-07-09' },
-          { label: 'Effects & Recording', link: 'speech/audio-effects', dateCreated: '2026-08-02', dateUpdated: '2026-08-02' },
           { label: 'Emotion & Tone', link: 'speech/emotion', dateCreated: '2026-08-05', dateUpdated: '2026-08-05' },
           { label: 'Azure AI Speech', link: 'speech/azure', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' },
           { label: 'ElevenLabs', link: 'speech/elevenlabs', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' },

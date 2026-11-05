@@ -1,0 +1,95 @@
+---
+title: Live Monitor
+description: Route the microphone straight to the speaker or a Bluetooth speaker in near real time with IAudioMonitor — a PA or megaphone.
+---
+
+`IAudioMonitor` sends the microphone straight to the current audio output in near real time, like a
+PA system or megaphone. A typical use is talking into the phone and hearing it from a Bluetooth
+speaker. `IAudioSource` gives you PCM to process yourself. The monitor instead connects input to
+output inside the platform's own audio engine, so nothing goes through your code.
+
+Available on **iOS, Mac Catalyst, macOS, Android and Linux**. `IAudio.Monitor` throws
+`PlatformNotSupportedException` on Windows and in the browser.
+
+## Starting and stopping
+
+```csharp
+using Shiny;
+using Shiny.Audio;
+
+public partial class MicViewModel(IAudio audio) : ObservableObject
+{
+    [ObservableProperty] double level;   // bind to a level meter
+
+    public async Task Toggle()
+    {
+        var monitor = audio.Monitor;
+        if (monitor.IsMonitoring)
+        {
+            await monitor.Stop();
+            return;
+        }
+
+        if (await monitor.RequestAccess() != AccessState.Available)
+            return;
+
+        monitor.InputLevelChanged += (_, l) =>
+            MainThread.BeginInvokeOnMainThread(() => Level = l);
+
+        // No Processing, so it can reach a Bluetooth A2DP speaker (see below)
+        await monitor.Start(new AudioMonitorOptions { Gain = 1.0 });
+    }
+}
+```
+
+Output goes to the current route: the **built-in speaker**, a **wired output**, or a connected
+**Bluetooth speaker** (A2DP) while the phone's own mic captures. You can change `Gain` (0.0–1.0)
+while it runs. `InputLevelChanged` reports a normalized level for a meter.
+
+| `AudioMonitorOptions` | Default | |
+|---|---|---|
+| `Gain` | `1.0` | Initial output level, from 0.0 (mute) to 1.0 (unity) |
+| `Processing` | `null` | Echo cancellation, noise suppression and gain control. Read the iOS caution below first |
+| `DuckOtherAudio` | `false` | Keep other audio, such as music, playing at a lower volume instead of interrupting it, so you can talk over it. iOS adds `DuckOthers` to the session and Android takes transient `MayDuck` audio focus |
+| `InputDevice` | `null` | Preferred mic, from [`IAudioDevices.GetInputs()`](/audio/devices) |
+| `OutputDevice` | `null` | Preferred output, from `IAudioDevices.GetOutputs()` |
+
+| Member | |
+|---|---|
+| `RequestAccess()` | Asks for the mic permission |
+| `Start(options, ct)` / `Stop()` | Starts the monitor, or stops it and restores the audio session |
+| `IsMonitoring` | `true` while running |
+| `Gain` | Output level, adjustable live |
+| `SetInputDevice(device)` | Switches the mic, live. `null` uses the OS default |
+| `SetOutputDevice(device)` | Switches the output, live, where the platform allows. See [Devices & Routes](/audio/devices#selecting-a-route) |
+| `InputLevelChanged` | Input level, 0.0–1.0 |
+
+:::caution[On iOS you get a Bluetooth speaker **or** echo cancellation, not both]
+Turning on `AudioProcessingOptions` (echo cancellation) engages iOS's voice-processing unit, which
+forces Bluetooth onto the low-quality **HFP** call profile. A Bluetooth *speaker* (A2DP, no mic)
+can't use HFP, so the audio falls back to the phone. **Leave processing off to reach a Bluetooth
+speaker.** Only turn it on when the output is the phone's own speaker and feedback is a problem.
+:::
+
+:::caution[Feedback]
+When the output is the phone speaker, the mic can hear it and howl. Keep some distance, lower
+`Gain`, or turn on echo cancellation. Always **stop the monitor when the page is dismissed** and
+when the app goes to the background.
+:::
+
+**AirPlay (HomePod, Apple TV) can't carry a live mic.** iOS only allows AirPlay for playback, not
+while recording. Use Bluetooth for a wireless live PA.
+
+## How it works
+
+| Platform | Implementation |
+|---|---|
+| iOS / Mac Catalyst | `AVAudioEngine` (input node → main mixer → output) in a `PlayAndRecord` session. It doesn't use `DefaultToSpeaker`, so it follows a Bluetooth or wired route, and it uses `Default` mode unless processing is requested. The engine rebuilds on route changes, so monitoring moves to a newly connected output. The audio session is saved at start and restored on `Stop` |
+| macOS | The same engine, without `AVAudioSession` |
+| Android | `AudioRecord` → `AudioTrack` |
+| Linux | A PulseAudio/ALSA capture stream fed into a playback stream. See [Linux](/audio/linux) |
+
+:::note[Effects aren't applied to the monitor]
+`IAudioMonitor` doesn't run an [`AudioEffectChain`](/audio/effects). Effects apply to `IAudioSource`
+capture and to `IAudioRecorder`.
+:::

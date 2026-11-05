@@ -381,6 +381,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'tvos', 'windows', 'linux', 'macos'],
             },
             {
+                label: 'Audio',
+                tagline: 'Microphone capture, playback, recording, effects and call audio',
+                summary: 'One API for the microphone and the speaker on every platform: 16 kHz PCM capture, overlapping playback, WAV recording, live voice effects, a mic-to-speaker monitor, audio routes and echo-cancelled full-duplex call audio.',
+                highlights: [
+                    'Overlapping clips, each stoppable on its own',
+                    'WAV recording with live pitch, echo and reverb',
+                    'Wired, Bluetooth and built-in route detection',
+                    'Echo-cancelled full-duplex audio for calls',
+                ],
+                packages: ['Shiny.Audio', 'Shiny.Audio.Linux'],
+                frameworks: ['dotnet', 'maui', 'blazor'],
+                os: ['android', 'ios', 'macos', 'windows', 'web', 'linux'],
+            },
+            {
                 label: 'Gamepads',
                 tagline: 'Read game controllers, with rumble, battery, motion and light bars',
                 summary: 'Sticks, triggers and buttons from one API on every platform, named by position so "A" is the bottom face button on an Xbox, PlayStation and Nintendo pad alike.',

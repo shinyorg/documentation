@@ -1,0 +1,167 @@
+---
+title: Playback & Volume
+description: Play overlapping audio clips with IAudioPlayer, stop each one on its own, meter the output and read or set the system volume.
+---
+
+`IAudioPlayer` plays audio from a URL, a local file or a `Stream`. It is a **singleton**, and clips
+play **concurrently**: starting one doesn't stop the others. Background music, a sound effect and a
+voice line can overlap, and you can still cancel each one on its own.
+
+## Playing a clip
+
+```csharp
+using Shiny.Audio;
+
+// Wait for it to finish
+await player.PlayAsync("https://example.com/clip.mp3");
+await player.PlayAsync(Path.Combine(FileSystem.AppDataDirectory, "ping.mp3"));
+await player.PlayAsync(mp3Stream);
+
+// Or keep a handle and carry on
+IAudioPlayback playback = await player.StartAsync("https://example.com/theme.mp3");
+```
+
+A string source is either an absolute `http`/`https` URL or a local file path. Each platform loads
+it in its own way, so you never have to build a platform file URI. `StartAsync` returns as soon as
+the clip is playing. `PlayAsync` is `StartAsync` followed by waiting on that clip's `Completion`, so
+it only waits for **its own** clip.
+
+## Concurrent clips
+
+```csharp
+public class SoundboardViewModel(IAudioPlayer player)
+{
+    IAudioPlayback? music;
+
+    public async Task StartMusic(CancellationToken ct)
+        => music = await player.StartAsync("https://example.com/theme.mp3", ct);
+
+    // Plays over the music instead of interrupting it
+    public Task Ping(CancellationToken ct)
+        => player.PlayAsync(Path.Combine(FileSystem.AppDataDirectory, "ping.mp3"), ct);
+
+    public Task StopMusic()      => music?.StopAsync() ?? Task.CompletedTask;  // effects keep playing
+    public Task StopEverything() => player.StopAsync();
+}
+```
+
+| Member | Meaning |
+| --- | --- |
+| `IAudioPlayer.StartAsync(stream \| source, ct)` | Starts a clip and returns its `IAudioPlayback` |
+| `IAudioPlayer.PlayAsync(stream \| source, ct)` | `StartAsync` plus `await Completion`. Waits for **this** clip only |
+| `IAudioPlayer.Active` | Everything currently playing, oldest first |
+| `IAudioPlayer.IsPlaying` | `true` while at least one clip is playing |
+| `IAudioPlayer.StopAsync()` | Stops **every** clip this player started |
+| `IAudioPlayback.StopAsync()` | Stops **one** clip. The rest keep playing |
+| `IAudioPlayback.Completion` | Completes when that clip ends, is stopped or is cancelled |
+| `IAudioPlayback.Id` / `Source` / `IsPlaying` | Identity, the URL or path (`null` for a stream), and live state |
+
+A `CancellationToken` passed to `StartAsync` or `PlayAsync` stops **that clip only**, and the clip
+completes normally: `Completion` does not throw `OperationCanceledException`. It only faults when the
+platform reports a playback error. `IAudioPlayback` is `IAsyncDisposable`, and disposing a handle
+stops its clip.
+
+:::note[Want one clip at a time?]
+Call `await player.StopAsync()` before playing. Cloud text-to-speech in [Shiny.Speech](/speech/)
+works this way, but stops only its own utterance and leaves the rest of your app's audio alone.
+:::
+
+### Formats
+
+Playback uses the platform decoder, so anything the OS can decode will play: MP3, WAV, AAC/M4A and
+more on Apple, Android and Windows, and whatever the browser supports in WebAssembly. **Linux decodes
+MP3 and WAV only**. See [Linux](/audio/linux).
+
+:::caution[Streams are for clips, not live audio]
+`StartAsync(Stream)` expects a complete clip. Apple buffers the whole stream and Android copies it to
+a file before playback starts. For PCM arriving from a network in real time, use
+[`IAudioDuplex`](/audio/duplex).
+:::
+
+## Output level meter
+
+`AudioLevelChanged` reports a normalized `0.0`–`1.0` output level during playback, on the same scale
+as the [mic meter](/audio/capture#metering-the-microphone). Only some platforms can measure
+playback, so check `IsPlayerAnalysisSupported` first:
+
+```csharp
+if (player.IsPlayerAnalysisSupported)
+{
+    player.AudioLevelChanged += (_, level) =>
+        MainThread.BeginInvokeOnMainThread(() => Level = level);
+}
+```
+
+There is one level stream per player, not one per clip. While clips overlap, it reports the
+**loudest**, which is what a meter should show.
+
+| Platform | Supported | How |
+|---|---|---|
+| iOS / Mac Catalyst / macOS | ✅ | `AVAudioPlayer.MeteringEnabled` |
+| Android | ✅ | `Visualizer` attached to each clip's audio session (needs `MODIFY_AUDIO_SETTINGS`) |
+| Linux | ✅ | Measured from the decoded PCM |
+| Windows | ❌ | |
+| Browser | ❌ | |
+
+## Volume
+
+`IAudioPlayer.Volume` is the **device media volume**, the level the hardware buttons control,
+normalized from `0.0` to `1.0`. **Reading it works on every platform, but setting it is limited by
+platform.** Always check `IsVolumeControlSupported` before setting it.
+
+```csharp
+public partial class VolumeViewModel : ObservableObject
+{
+    readonly IAudioPlayer player;
+
+    public VolumeViewModel(IAudioPlayer player)
+    {
+        this.player = player;
+        Volume = player.Volume;                        // reading works everywhere
+
+        player.VolumeChanged += (_, v) =>              // hardware buttons, OS UI or a successful set
+            MainThread.BeginInvokeOnMainThread(() => Volume = v);
+    }
+
+    [ObservableProperty] float volume;                 // bind to a Slider
+    public bool CanSet => player.IsVolumeControlSupported;
+
+    partial void OnVolumeChanged(float value)
+    {
+        if (player.IsVolumeControlSupported)           // the iOS / Mac Catalyst setter throws
+            player.Volume = value;
+    }
+}
+```
+
+| Platform | Read | Set | `VolumeChanged` source | Backing API |
+|---|---|---|---|---|
+| Android | ✅ | ✅ | system settings observer | `AudioManager` `STREAM_MUSIC` (in integer steps, so set values are rounded) |
+| Windows | ✅ | ✅ | endpoint volume callback | WASAPI `IAudioEndpointVolume` (default render endpoint) |
+| macOS | ✅ | ✅ † | CoreAudio property listener | Main volume of the default output device |
+| iOS / Mac Catalyst | ✅ | ❌ | KVO on `outputVolume` | `AVAudioSession.OutputVolume` (read-only) |
+| Browser (WASM) | ✅ | ✅ | raised when you set it | `HTMLAudioElement.volume`. Applies to the app only, **not** the OS volume |
+| Linux | ✅ | ✅ ‡ | PulseAudio subscription | Default sink volume |
+
+- **iOS / Mac Catalyst** have no supported API for changing the system volume, so the setter throws
+  `NotSupportedException`. Let the user adjust it with the hardware buttons or an `MPVolumeView`.
+- † **macOS** can be set when the default output device has a settable main volume. Most built-in
+  and USB devices do, and some HDMI or aggregate devices don't. `IsVolumeControlSupported` tells you
+  which case you're in.
+- ‡ **Linux** can be set on PulseAudio/PipeWire. On the ALSA fallback, `IsVolumeControlSupported` is
+  `false`.
+- The **browser** doesn't give apps access to the OS volume, so `Volume` is the app's own
+  media-element volume. It can be set, and it persists across clips.
+- Switch to the UI thread in `VolumeChanged` before touching bound properties.
+
+`Volume` is separate from any per-request volume on a text-to-speech call.
+
+## Platform notes
+
+| Platform | Player |
+|---|---|
+| iOS / Mac Catalyst / macOS | `AVAudioPlayer`, one per clip |
+| Android | `MediaPlayer`, one per clip |
+| Windows | `MediaPlayer`, one per clip |
+| Browser | `HTMLAudioElement`, one per clip |
+| Linux | Managed MP3/WAV decoder into a PulseAudio/ALSA stream |

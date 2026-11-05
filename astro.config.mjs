@@ -56,9 +56,9 @@ const announcementConfig = {
       cta: 'See the plans',
     },
     {
-      id: 'client-v65',
+      id: 'speech-v30',
       title: 'AI Conversations, Speech, & Audio Release',
-      description: 'Have a full conversation with AI, use speech commands, and interact with audio content seamlessly.'
+      description: '[Have a full conversation with AI](/aiconversation), [use speech commands](/speech), and [interact with audio content seamlessly](/audio).'
     },     
     {
       id: 'client-v64',
@@ -68,7 +68,7 @@ const announcementConfig = {
     {
       id: 'client-v65',
       title: 'Shiny Client v6.5',
-      description: '[Biometrics](/client/biometrics), [NFC](/client/nfc), & [Classic Bluetooth](/client/bluetooth)'
+      description: '[Biometrics](/client/biometrics), [NFC](/client/nfc), [Classic Bluetooth](/client/bluetooth), [Uno Support](/client/core/uno), & [Avalonia Support](/client/core/avalonia)'
     },     
     {
       id: 'controls-21',
@@ -371,6 +371,9 @@ export default defineConfig({
       '/data/documentdb/release-notes': '/documentdb/release-notes',
 
 
+      // Audio split out of Speech into its own section
+      '/speech/audio': '/audio/',
+      '/speech/audio-effects': '/audio/effects',
       // Legacy redirects (pre-flat paths)
       '/tableview/': '/controls/tableview/',
       '/tableview/cells': '/controls/tableview/cells',

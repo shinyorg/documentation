@@ -1,0 +1,128 @@
+---
+title: Devices & Routes
+description: List microphones and outputs with IAudioDevices, show where audio is flowing, tell wired from Bluetooth from built-in, and react to plug and unplug.
+---
+
+`IAudioDevices` lists the audio inputs and outputs the OS can see, reports which ones are in use, and
+raises `Changed` when the route changes, for example when a Bluetooth speaker connects or headphones
+are unplugged.
+
+Available on **iOS, Mac Catalyst, macOS, Android, Windows and Linux**. `IAudio.Devices` throws
+`PlatformNotSupportedException` in the browser.
+
+## Showing where audio is going
+
+Its most reliable use, on every platform, is **showing the current route** and updating it when the
+route changes, for example "Output: JBL Flip 5 · Bluetooth":
+
+```csharp
+using Shiny.Audio;
+
+var devices = audio.Devices;
+
+string input  = devices.CurrentInput?.Name  ?? "—";   // .Type: BuiltInMic, Bluetooth, ...
+string output = devices.CurrentOutput?.Name ?? "—";   // .Type: BuiltInSpeaker, BluetoothA2dp, ...
+
+devices.Changed += (_, _) => Refresh();               // route added, removed or switched
+```
+
+| Member | |
+|---|---|
+| `GetInputs()` | Capture devices: built-in mic, headset mics, USB mics, ... |
+| `GetOutputs()` | Render devices: speaker, headphones, Bluetooth, HDMI, ... |
+| `CurrentInput` / `CurrentOutput` | The route in use, or `null` |
+| `Changed` | Raised when the input or output route changes. It can come from a platform thread |
+| `ShowOutputPicker()` | Reserved for a system route picker. It does nothing today. See [iOS](#ios-output-routes-belong-to-the-system) |
+
+Each `AudioDevice` has an `Id` (a stable platform identifier), a `Name` ("JBL Flip 5", "iPhone
+Microphone"), `Io` (`Input` or `Output`), a normalized `Type` and `IsCurrent`.
+
+`AudioDeviceType` values: `BuiltInMic`, `BuiltInSpeaker`, `BuiltInReceiver`, `WiredHeadset`,
+`WiredHeadphones`, `Bluetooth` (HFP/SCO, can have a mic), `BluetoothA2dp` (stereo, output only),
+`Usb`, `CarAudio`, `Hdmi`, `AirPlay` and `Unknown`.
+
+## Wired, Bluetooth or built-in?
+
+Rather than matching enum values by hand, use the classification helpers. Each one exists on both
+`AudioDevice` and `AudioDeviceType`:
+
+```csharp
+var output = audio.Devices.CurrentOutput;
+
+if (output?.IsWired() == true)      { /* 3.5mm jack, Lightning or USB-C */ }
+if (output?.IsBluetooth() == true)  { /* HFP/SCO or A2DP */ }
+if (output?.IsBuiltIn() == true)    { /* phone speaker or earpiece, nothing attached */ }
+
+// Is the audio private to the user? For example, before reading a message aloud.
+if (output?.IsHeadphones() == true)
+    await audio.Player.PlayAsync(messageUrl);
+
+// Will capture come from the accessory, or from the phone's own mic?
+bool accessoryMic = output?.HasMicrophone() == true;
+```
+
+| Helper | True for |
+| --- | --- |
+| `IsWired()` | `WiredHeadphones`, `WiredHeadset`, `Usb` |
+| `IsBluetooth()` | `Bluetooth` (HFP/SCO), `BluetoothA2dp` |
+| `IsBuiltIn()` | `BuiltInMic`, `BuiltInSpeaker`, `BuiltInReceiver` |
+| `IsHeadphones()` | `WiredHeadphones`, `WiredHeadset`, `Bluetooth`, `BluetoothA2dp` |
+| `HasMicrophone()` | `WiredHeadset`, `Bluetooth` |
+
+:::caution[`IsWired()` deliberately includes USB]
+On phones without a 3.5mm jack, wired headphones *are* USB-C, and neither platform reports them as a
+`Wired*` type (Android reports `UsbHeadset`/`UsbDevice`, iOS reports `PortUsbAudio`). Including `Usb`
+is what makes "are wired headphones plugged in?" give the right answer on modern hardware. The
+downside is that a USB audio interface or DAC also counts. Use `IsHeadphones()` when you specifically
+mean something worn on the head, accepting that it misses USB-C earbuds.
+
+`HasMicrophone()` leaves out `Usb` for the opposite reason: neither platform says whether a USB route
+has a mic based on the output device alone. Look in `GetInputs()` for a matching `Usb` entry instead.
+
+**Bluetooth can't be narrowed further.** A paired A2DP device could be earbuds or a room speaker, and
+no platform API tells them apart, so `IsHeadphones()` treats all Bluetooth as private.
+:::
+
+`Changed` fires on plug and unplug on every supported platform, so you can combine it with these
+helpers. For example, you could pause playback when headphones are removed.
+
+## Selecting a route
+
+Selecting a route is much more limited by platform than listing them.
+
+**Microphone:** pass an input from `GetInputs()` to
+[`AudioCaptureOptions.InputDevice`](/audio/capture#choosing-the-microphone),
+`AudioRecordingOptions.InputDevice`, [`AudioDuplexOptions.InputDevice`](/audio/duplex#choosing-the-microphone)
+or `IAudioMonitor.SetInputDevice`. This works on every platform that has `IAudioDevices`.
+
+**Output:** only the [live monitor](/audio/monitor) has an output selector:
+
+```csharp
+await audio.Monitor.SetInputDevice(chosenInput);    // Android, iOS, Linux
+await audio.Monitor.SetOutputDevice(chosenOutput);  // Android and Linux. iOS: built-in speaker toggle only
+```
+
+| Platform | Lists inputs | Lists outputs | Choose the mic | Choose the output |
+|---|---|---|---|---|
+| Android | ✅ | ✅ | ✅ | ✅ (monitor) |
+| iOS / Mac Catalyst | ✅ | Current route only | ✅ preferred input | Built-in speaker on/off |
+| macOS | ✅ | ❌ | ✅ capture, recorder, duplex | ❌ |
+| Windows | ✅ | ✅ | ✅ capture, recorder | ❌ |
+| Linux | ✅ | ✅ | ✅ | ✅ (monitor) |
+
+### iOS: output routes belong to the system
+
+Apple deliberately doesn't let apps list or freely choose **output** routes. On iOS, `GetOutputs()`
+returns only the *current* output, and `SetOutputDevice` can only switch the built-in speaker on or
+off. AirPlay and Bluetooth output are chosen in the system route picker (`AVRoutePickerView`). There
+is no API for routing to a particular HomePod or speaker from code. The picker is a view, so host an
+`AVRoutePickerView` in your own UI. `ShowOutputPicker()` can't display it on its own and does nothing.
+
+**Input can be chosen** on iOS (`AVAudioSession.SetPreferredInput`).
+
+### Windows and Linux
+
+**Windows** lists devices through the Windows device enumeration API and classifies them by name
+(Bluetooth, HDMI, USB, headset, headphones, otherwise built-in). The input `Id` it returns is what
+`AudioGraph` uses to open that mic for capture. **Linux** lists PulseAudio/PipeWire sources and
+sinks, or ALSA devices on the fallback. `Changed` fires on PulseAudio/PipeWire only, because ALSA has no change notification.

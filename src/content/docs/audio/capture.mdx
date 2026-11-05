@@ -1,0 +1,196 @@
+---
+title: Microphone Capture
+description: Stream 16 kHz mono PCM from the microphone with IAudioSource, choose the mic, apply platform voice processing and meter the input level.
+---
+
+`IAudioSource` opens the microphone and gives you a `Stream` of raw PCM: **16 kHz, 16-bit
+signed little-endian, mono**. Every backend converts to that one format, so the bytes you read are the
+same on iOS, Android, Windows, macOS, Linux and the browser. Most speech services accept it as-is.
+
+`IAudioSource` is **transient**. Resolve one per capture session, either by injecting it or through
+`IAudio.Source`, and keep that instance until you stop.
+
+## Capturing
+
+```csharp
+using Shiny;
+using Shiny.Audio;
+
+public class MicStreamer(IAudio audio)
+{
+    public async Task Stream(CancellationToken ct)
+    {
+        var source = audio.Source;
+        if (await source.RequestAccess() != AccessState.Available)
+            return;
+
+        var pcm = await source.StartCaptureAsync(cancellationToken: ct);
+        try
+        {
+            var buffer = new byte[3200];   // 100 ms at 16 kHz × 2 bytes
+            int read;
+            while ((read = await pcm.ReadAsync(buffer, ct)) > 0)
+            {
+                // send / analyse buffer[0..read]
+            }
+        }
+        finally
+        {
+            await source.StopCaptureAsync();
+        }
+    }
+}
+```
+
+The stream is a `PipeStream`: the platform's capture thread writes into it and you read from it.
+`ReadAsync` waits for data and returns `0` once capture stops, so a read loop ends cleanly when you
+call `StopCaptureAsync()`. Read promptly, because the platform keeps producing audio whether you
+read it or not.
+
+| Member | |
+|---|---|
+| `RequestAccess()` | Asks for the runtime mic permission. Returns `AccessState.Available` on platforms that don't prompt |
+| `StartCaptureAsync(AudioCaptureOptions, ct)` | Starts capture and returns the PCM stream |
+| `StartCaptureAsync(AudioProcessingOptions?, ct)` | Shorthand when you only need voice processing |
+| `StopCaptureAsync()` | Stops capture and completes the stream |
+| `InputLevelChanged` | Mic level from 0.0 to 1.0, about 20 times a second |
+
+## Capture options
+
+```csharp
+var pcm = await source.StartCaptureAsync(new AudioCaptureOptions
+{
+    Processing  = AudioProcessingOptions.VoiceChat,   // platform AEC / NS / AGC
+    InputDevice = chosenMic,                          // from IAudioDevices.GetInputs(); null = default
+    Effects     = chain                               // optional AudioEffectChain, see Effects
+}, ct);
+```
+
+| `AudioCaptureOptions` | Default | |
+|---|---|---|
+| `Processing` | `null` (raw) | The platform's echo cancellation, noise suppression and gain control. See below |
+| `InputDevice` | `null` (system default) | The microphone to use. See below |
+| `Effects` | `null` | A live DSP chain applied before the stream and the meter. See [Effects](/audio/effects) |
+
+`AudioCaptureOptions.None` captures raw audio with no processing and no effects.
+
+## Choosing the microphone
+
+Pass any input from [`IAudioDevices.GetInputs()`](/audio/devices) as `InputDevice`:
+
+```csharp
+var mics = audio.Devices.GetInputs();
+var usb  = mics.FirstOrDefault(d => d.Type == AudioDeviceType.Usb);
+
+var pcm = await audio.Source.StartCaptureAsync(new AudioCaptureOptions { InputDevice = usb }, ct);
+```
+
+**macOS, Windows and Linux** capture from that exact device. **iOS, Mac Catalyst and Android** set
+it as the *preferred* input, and the OS has the final say. If the device has been disconnected
+since you listed it, capture falls back to the default mic instead of failing.
+
+## Voice processing (`AudioProcessingOptions`)
+
+The three standard voice-processing features are built into each platform. `AudioProcessingOptions`
+turns them on through one cross-platform record:
+
+| Flag | What it does |
+|---|---|
+| `EchoCancellation` | Removes what the device's own speaker is playing from the mic. This lets you keep the mic open while text-to-speech plays (barge-in) |
+| `NoiseSuppression` | Reduces steady background noise such as fans, traffic and hum |
+| `AutomaticGainControl` | Evens out quiet and loud speakers |
+| `AllowBluetooth` | Default `true`. Set it to `false` to keep capture off a Bluetooth headset mic (iOS / Mac Catalyst) |
+
+Presets: `AudioProcessingOptions.VoiceChat` (all three), `.None` (raw), and `.Analysis` (raw, no
+Bluetooth). See [below](#capturing-for-a-model-not-a-listener).
+
+| Effect | iOS / macOS | Android | Windows | Browser | Linux |
+|---|---|---|---|---|---|
+| Echo cancellation | ✅ Voice-Processing I/O | ✅ `AcousticEchoCanceler` + `VOICE_COMMUNICATION` | ⚠️ `Communications` pipeline | ✅ WebRTC AEC3 | ⚠️ `module-echo-cancel` if loaded |
+| Noise suppression | ✅ (bundled) | ✅ `NoiseSuppressor` | ⚠️ best-effort | ✅ | ❌ |
+| Automatic gain control | ✅ (bundled) | ✅ `AutomaticGainControl` | ⚠️ best-effort | ✅ | ❌ |
+
+- **Every flag is best-effort.** A platform or device that can't apply one ignores it rather than
+  failing.
+- **Apple can't separate the three.** Its voice-processing unit has a single switch, so setting any
+  flag turns on all three there.
+- **The canceller hears the real speaker output**, so it removes *any* sound the device is
+  playing, including audio from other apps.
+
+## Capturing for a model, not a listener
+
+If the captured audio goes to a **model** rather than a person, such as speaker recognition, wake
+words or anything that produces an embedding, capture with `AudioProcessingOptions.Analysis`:
+
+```csharp
+var pcm = await source.StartCaptureAsync(AudioProcessingOptions.Analysis, ct);
+```
+
+That means no processing and `AllowBluetooth = false`, and both parts matter:
+
+- **Echo cancellation, noise suppression and gain control adapt as they run.** They are designed to
+  remove speaker and channel characteristics, which are exactly what a speaker embedding measures.
+  Because they adapt each session, two recordings of the same person come out different.
+- **A Bluetooth mic runs over HFP at 8 kHz narrowband.** Sounds like /s/, /ʃ/ and /f/ sit above
+  that range, so the bandwidth you record would depend on whatever happens to be paired.
+
+On iOS and Mac Catalyst, requesting no processing puts the session in `Measurement` mode (the least
+input processing the system offers) instead of `VoiceChat`. `AllowBluetooth = false` also removes
+the Bluetooth options from the session category. Android's raw mic source and Windows capture never
+switch to a Bluetooth mic on their own, so `Analysis` changes nothing there.
+
+:::tip[Capture enrollment and matching the same way]
+An embedding captures the channel as well as the voice. If a template was recorded with different
+capture settings than the sample you compare it to, there is a built-in offset that no matching
+threshold can correct.
+:::
+
+None of this applies to transcription. For speech-to-text, processing usually helps.
+
+## Metering the microphone
+
+`InputLevelChanged` reports a normalized `0.0`–`1.0` level while capture is running. Use it for a
+record-button meter, a "we can hear you" indicator or a silence detector. The level is computed from
+the captured PCM itself, so it works on **every** platform with no capability check.
+
+```csharp
+public partial class RecorderViewModel(IAudio audio) : ObservableObject
+{
+    [ObservableProperty] double level;   // bind to a progress bar
+
+    public async Task Start(CancellationToken ct)
+    {
+        var source = audio.Source;
+        source.InputLevelChanged += (_, l) =>
+            MainThread.BeginInvokeOnMainThread(() => Level = l);
+
+        var pcm = await source.StartCaptureAsync(cancellationToken: ct);
+        // ...
+    }
+}
+```
+
+The event is raised on the capture thread and limited to about 20 updates per second, holding the
+peak in between. Switch to the UI thread before touching bound properties. When effects are set,
+they run before the level is measured, so the meter shows what you will actually hear.
+
+If you buffer the PCM yourself, you can use the same calculation:
+
+```csharp
+var level = AudioLevel.FromPcm16(buffer.AsSpan(0, read));   // 0.0 - 1.0
+```
+
+`AudioLevel` converts RMS to dBFS against a -50 dB noise floor (`FromRms`, `FromPcm16` and
+`FromSamples` are all public). Every meter in the library uses it, so mic and playback meters
+use the same scale.
+
+## Platform notes
+
+| Platform | Capture path |
+|---|---|
+| iOS / Mac Catalyst | `AVAudioEngine` input tap in a `PlayAndRecord` session, converted to 16 kHz with `AVAudioConverter` |
+| macOS | `AVAudioEngine` on the chosen CoreAudio device. No `AVAudioSession` |
+| Android | `AudioRecord` on the raw `MIC` source, or `VOICE_COMMUNICATION` when processing is requested |
+| Windows | `AudioGraph` device input node. It only offers raw or default processing, so the flags can't be set individually |
+| Browser | `getUserMedia` + Web Audio, downsampled to 16 kHz mono |
+| Linux | PulseAudio/PipeWire (`pa_simple`) or ALSA. See [Linux](/audio/linux) |

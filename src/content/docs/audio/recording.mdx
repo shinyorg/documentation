@@ -1,0 +1,107 @@
+---
+title: Recording
+description: Record the microphone to a 16 kHz mono WAV file with IAudioRecorder, keep a raw and a processed take, and read or write WAV yourself.
+---
+
+`IAudioRecorder` records the microphone to a WAV file. It runs the capture session and reads the
+stream for you, so you don't have to pump PCM from [`IAudioSource`](/audio/capture) yourself. Output
+is 16 kHz mono PCM16 WAV. It can record through a live [effect chain](/audio/effects) and keep a raw
+and a processed take of the same recording.
+
+`IAudioRecorder` is **transient**, like `IAudioSource`. Use one instance per recording. It builds on
+whichever `IAudioSource` is registered, so it works everywhere capture works, including Linux.
+
+```csharp
+using Shiny.Audio;
+using Shiny;   // AccessState
+
+var recorder = audio.Recorder;      // transient — one per recording
+
+if (await recorder.RequestAccess() != AccessState.Available)
+    return;
+
+recorder.InputLevelChanged += (_, level) => { /* VU of the signal being written */ };
+
+await recorder.StartAsync(new AudioRecordingOptions
+{
+    Path = null,                    // null → timestamped file under the app's local data dir
+    Mode = AudioRecordMode.Both,    // Wet (default) | Dry | Both
+    Effects = chain,
+    MaxDuration = TimeSpan.FromMinutes(5)
+});
+
+// ... adjust the chain live while it records ...
+
+var recording = await recorder.StopAsync();
+if (recording != null)
+    await audio.Player.PlayAsync(recording.Path);
+```
+
+`StopAsync()` returns `null` when nothing was captured, and it doesn't leave an empty, unplayable file
+behind. Always check for `null`.
+
+| `AudioRecordingOptions` | Default | |
+|---|---|---|
+| `Path` | `null` | Where to write the WAV file. `null` creates a timestamped file in `AudioRecorder.DefaultDirectory` (`LocalApplicationData/shiny.audio/recordings`). Parent folders are created as needed |
+| `Mode` | `Wet` | `Wet`, `Dry` or `Both`. See below |
+| `Effects` | `null` | An [`AudioEffectChain`](/audio/effects). Keep the reference, because changes apply live to the rest of the recording. Ignored for `Dry` |
+| `InputDevice` | `null` | The mic, from [`IAudioDevices.GetInputs()`](/audio/devices). `null` uses the default |
+| `Processing` | `null` | [Platform voice processing](/audio/capture#voice-processing-audioprocessingoptions) for the capture session |
+| `MaxDuration` | `null` | Stop automatically after this long. `null` records until you stop it |
+
+While recording, `IsRecording` is `true`, `Elapsed` reports how much audio has been written, and
+`InputLevelChanged` reports the level of the signal *being written*, with effects included, so a
+meter matches the file. Calling `StartAsync` while a recording is running throws.
+
+The returned `AudioRecording` has `Path`, `DryPath` (only for `Both`), `Duration`, `SampleRate`
+(16000), `Channels` (1) and `SizeInBytes`.
+
+## What gets written
+
+| `Mode` | Result |
+| --- | --- |
+| `Wet` | The processed take — what the effect chain produced. The default. |
+| `Dry` | The untouched microphone. The effect chain is ignored. |
+| `Both` | Two files. `AudioRecording.Path` is the processed one, `AudioRecording.DryPath` the raw one. |
+
+Recording always captures **dry** from the source and applies the chain in the recorder's own loop.
+That is what makes `Both` possible without splitting the capture stream — `PipeStream` is
+single-reader, so there is nothing to tee.
+
+## Re-rendering a dry take
+
+Because `Dry` and `Both` keep the clean recording, you can try different settings later instead of
+asking someone to perform it again:
+
+```csharp
+AudioEffectProcessor.ProcessFile(
+    recording.DryPath!,
+    "take-cathedral.wav",
+    AudioEffectPresets.Create(AudioEffectPreset.Cathedral)
+);
+
+// Or over samples already in memory:
+AudioEffectProcessor.Process(pcm16Samples, chain, sampleRate: 16000);
+```
+
+## WAV I/O
+
+`WavWriter` and `WavReader` are public if you want to handle PCM ↔ WAV yourself. The writer streams —
+it emits the header with placeholder sizes and patches them on close — so a long recording never sits
+in memory.
+
+```csharp
+await using var writer = new WavWriter(File.Create(path), sampleRate: 16000, channels: 1);
+writer.Write(pcmSamples);                       // ReadOnlySpan<short> or ReadOnlySpan<byte>
+
+var bytes = WavWriter.CreateFile(pcmBytes);     // whole file in memory, for short clips
+```
+
+The reader walks the RIFF chunk list rather than assuming a 44-byte header, so files carrying
+`LIST`/`fact` chunks parse correctly; non-PCM formats throw `NotSupportedException`.
+
+:::note[WAV only]
+There is no AAC/MP3 encoder. Compressed output would need a different native encoder on every
+platform — `AVAssetWriter`, `MediaCodec`, Media Foundation — and Linux has none at all.
+:::
+

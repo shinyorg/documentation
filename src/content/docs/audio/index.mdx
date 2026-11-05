@@ -1,0 +1,214 @@
+---
+title: Getting Started
+description: Cross-platform microphone capture, concurrent playback, recording, live effects, a mic monitor, audio routes and full-duplex call audio for .NET.
+---
+import LibBuilder from '../../../components/Boilerplate/LibBuilder';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="speech" /> |
+| Core | <NugetDownloads name="Shiny.Audio" /> |
+| Linux | <NugetDownloads name="Shiny.Audio.Linux" /> |
+
+<PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos", "windows", "web", "linux"]} />
+
+`Shiny.Audio` gives you one API for the microphone and the speaker across Android, iOS, Mac Catalyst,
+macOS, Windows, the browser (Blazor WebAssembly) and Linux. It works on its own, and it is also the
+audio layer under [Shiny.Speech](/speech/) and [AI Conversations](/aiconversation/).
+
+## Features
+* **Microphone capture** (`IAudioSource`). The mic arrives as a pull stream of 16 kHz, 16-bit mono PCM, with the platform's echo cancellation, noise suppression and gain control available as options
+* **Concurrent playback** (`IAudioPlayer`). Play an MP3 or WAV from a URL, a file or a stream. Clips overlap, and each returns a handle you can stop on its own
+* **Level meters** on capture and playback, all normalized to the same 0.0–1.0 scale
+* **System volume**. Read it everywhere and set it where the platform allows, with a change event that also fires for the hardware buttons
+* **WAV recording** (`IAudioRecorder`), including a raw and a processed take of the same recording
+* **Real-time effects** (`AudioEffectChain`): pitch, echo, reverb, chorus, filters, distortion, noise gate and presets. You can change them while audio is flowing
+* **Live mic monitor** (`IAudioMonitor`). Send the mic straight to the speaker or a Bluetooth speaker, like a PA system
+* **Audio routes** (`IAudioDevices`). List microphones and outputs, see which are in use, tell wired from Bluetooth from built-in, and react to plug and unplug
+* **Full-duplex call audio** (`IAudioDuplex`). Echo-cancelled capture and live network playback on one session, with a jitter buffer
+* **One facade** (`IAudio`) that exposes all of the above. Each service can also be injected on its own
+* **Linux** over PulseAudio/PipeWire with an ALSA fallback (`Shiny.Audio.Linux`)
+
+## Packages
+
+| Package | Purpose |
+|---|---|
+| `Shiny.Audio` | Capture, playback, recording, effects, monitor, devices and duplex, with native implementations for iOS, Mac Catalyst, macOS, Android, Windows and the browser |
+| `Shiny.Audio.Linux` | The Linux backend. It ships separately because it includes a managed MP3 decoder. See [Linux](/audio/linux) |
+
+:::tip[Already using Shiny.Speech?]
+`Shiny.Speech` references `Shiny.Audio`, so you already have it. `AddSpeechServices()` registers
+capture and playback. Call `AddAudioServices()` as well if you want the recorder, monitor, devices,
+duplex and the `IAudio` facade.
+:::
+
+## Setup
+
+<LibBuilder componentName="audio" client:load />
+
+:::caution[`UseShiny()` is required on MAUI]
+Android permission requests and current-activity tracking come from
+[Shiny.Core](/client/core/)'s `AndroidPlatform`. Reference **`Shiny.Hosting.Maui`** and call
+**`.UseShiny()`** on your `MauiAppBuilder`:
+
+```csharp
+builder
+    .UseMauiApp<App>()
+    .UseShiny();
+```
+:::
+
+```csharp
+using Shiny;
+
+builder.Services.AddAudioServices();
+// Registers IAudioSource, IAudioPlayer, IAudioRecorder, IAudioMonitor, IAudioDevices, IAudioDuplex and IAudio
+```
+
+Each service also has its own registration if you only want part of it: `AddAudioSource()`,
+`AddAudioPlayer()`, `AddAudioRecorder()`, `AddAudioMonitor()`, `AddAudioDevices()` and
+`AddAudioDuplex()`. They all use `TryAdd`, so calling them more than once, or alongside
+`AddSpeechServices()`, is safe.
+
+On Linux, call `AddLinuxAudio()` **before** any of these. See [Linux](/audio/linux).
+
+### Platform permissions
+
+**Android**: add to `AndroidManifest.xml`:
+```xml
+<uses-permission android:name="android.permission.RECORD_AUDIO" />
+<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+```
+You only need `RECORD_AUDIO` if you capture. `MODIFY_AUDIO_SETTINGS` is required for the playback
+level meter (`Visualizer`) and for [full-duplex calls](/audio/duplex), which switch the call mode and
+speakerphone routing.
+
+**iOS / Mac Catalyst**: add to `Info.plist`:
+```xml
+<key>NSMicrophoneUsageDescription</key>
+<string>This app records audio from the microphone</string>
+```
+
+**macOS**: add the same `NSMicrophoneUsageDescription` key, and if the app is sandboxed, the
+`com.apple.security.device.audio-input` entitlement.
+
+**Windows**: add the microphone capability to `Package.appxmanifest`:
+```xml
+<Capabilities>
+    <DeviceCapability Name="microphone" />
+</Capabilities>
+```
+
+**Browser (Blazor WebAssembly)**: nothing to declare and **no `<script>` tag** to add. The browser
+asks for the microphone itself. The JS module ships inside the package as a static web asset
+(`_content/Shiny.Audio/shiny-audio.js`) and loads on demand.
+
+**Linux**: there is no permission prompt. Microphone access depends on file permissions and group
+membership, so `RequestAccess()` returns `Available` whenever an audio backend is present.
+
+## The `IAudio` facade
+
+Inject `IAudio` to reach everything from one place. Each member is the same service you could inject
+directly, with the same lifetime. `Player`, `Monitor`, `Devices` and `Duplex` are singletons.
+`Source` and `Recorder` are transient, so each access returns a new instance. Grab one and keep it
+for the length of a capture or recording.
+
+```csharp
+using Shiny;
+using Shiny.Audio;
+
+public class VoiceNoteViewModel(IAudio audio)
+{
+    IAudioRecorder? recorder;
+
+    public async Task Record()
+    {
+        recorder = audio.Recorder;                     // new recorder for this take
+        if (await recorder.RequestAccess() != AccessState.Available)
+            return;
+
+        await recorder.StartAsync();                   // 16 kHz mono WAV in app data
+    }
+
+    public async Task StopAndPlay()
+    {
+        var recording = await recorder!.StopAsync();
+        if (recording != null)
+            await audio.Player.PlayAsync(recording.Path);
+    }
+}
+```
+
+| Member | Service | Page |
+|---|---|---|
+| `Source` | `IAudioSource`: raw mic PCM | [Microphone Capture](/audio/capture) |
+| `Player` | `IAudioPlayer`: concurrent clips, volume | [Playback & Volume](/audio/playback) |
+| `Recorder` | `IAudioRecorder`: WAV files | [Recording](/audio/recording) |
+| `Monitor` | `IAudioMonitor`: mic to speaker | [Live Monitor](/audio/monitor) |
+| `Devices` | `IAudioDevices`: inputs, outputs, route changes | [Devices & Routes](/audio/devices) |
+| `Duplex` | `IAudioDuplex`: echo-cancelled call audio | [Full-Duplex Calls](/audio/duplex) |
+
+Accessing `Monitor`, `Devices` or `Duplex` on a platform without an implementation throws
+`PlatformNotSupportedException`. On Linux, the error message reminds you to install
+`Shiny.Audio.Linux`.
+
+## Quick examples
+
+**Play a sound** from a URL or a local path. You don't need to build a platform file URI:
+
+```csharp
+await audio.Player.PlayAsync("https://example.com/chime.mp3");
+await audio.Player.PlayAsync(Path.Combine(FileSystem.AppDataDirectory, "ping.mp3"));
+```
+
+**Capture PCM** and send it somewhere, for example to a speech API or over a socket:
+
+```csharp
+var source = audio.Source;
+var pcm = await source.StartCaptureAsync(cancellationToken: ct);   // 16 kHz / 16-bit / mono
+
+var buffer = new byte[3200];                                        // 100 ms
+int read;
+while ((read = await pcm.ReadAsync(buffer, ct)) > 0)
+    await SendAsync(buffer.AsMemory(0, read), ct);
+
+await source.StopCaptureAsync();
+```
+
+**Show where audio is going**:
+
+```csharp
+var output = audio.Devices.CurrentOutput;   // e.g. "JBL Flip 5" · BluetoothA2dp
+```
+
+## Platform support
+
+| Capability | iOS / Mac Catalyst | macOS | Android | Windows | Browser | Linux |
+|---|---|---|---|---|---|---|
+| `IAudioSource` capture + mic level | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `IAudioPlayer` playback | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ ¹ |
+| Playback level (`AudioLevelChanged`) | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| Volume: read | ✅ | ✅ | ✅ | ✅ | ✅ ² | ✅ |
+| Volume: set | ❌ | ✅ ³ | ✅ | ✅ | ✅ ² | ✅ ⁴ |
+| `IAudioRecorder` + effects | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `IAudioMonitor` | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ |
+| `IAudioDevices` | ✅ ⁵ | ✅ inputs | ✅ | ✅ | ❌ | ✅ |
+| `IAudioDuplex` | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ |
+
+¹ MP3 and WAV only.
+² The browser's own media-element volume, not the OS volume.
+³ When the default output device exposes a settable volume.
+⁴ PulseAudio/PipeWire only. Not available on the ALSA fallback.
+⁵ iOS lists only the *current* output route. See [Devices & Routes](/audio/devices).
+
+## What it is not for
+
+Capture is fixed at 16 kHz mono PCM16. That is what speech recognition, voice notes, calls and voice
+effects need. For music production or high-fidelity 48 kHz stereo recording, use the platform's
+native capture stack.
+
+<AiSkill skillName="shiny-speech" />

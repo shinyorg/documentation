@@ -47,6 +47,10 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyapp', paramId: 'shinyspeech' },
         { kind: 'shinyblazor', paramId: 'shinyspeech' },
     ],
+    audio: [
+        { kind: 'shinyapp', paramId: 'audio' },
+        { kind: 'shinyblazor', paramId: 'audio' },
+    ],
 
     // Essentials
     httpserver: [{ kind: 'shinyapp', paramId: 'httpserver' }],

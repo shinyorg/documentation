@@ -1,0 +1,92 @@
+---
+title: Linux
+description: Audio capture, playback, monitor and devices on Linux over PulseAudio/PipeWire with an ALSA fallback, via Shiny.Audio.Linux.
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+<NugetDownloads name="Shiny.Audio.Linux" />
+
+Linux support ships in a separate **`Shiny.Audio.Linux`** package. It implements capture, playback, devices and
+the live monitor over **PulseAudio/PipeWire**, falling back to **ALSA** where no sound server is running — headless
+servers, minimal containers, Raspberry Pi images.
+
+It is a separate package because it carries a managed MP3 decoder (`NLayer`): Linux has no system
+media decoder to hand a stream to, unlike `MediaPlayer` on Windows/Android or `AVAudioPlayer` on
+Apple.
+
+```bash
+dotnet add package Shiny.Audio.Linux
+```
+
+```csharp
+using Shiny;
+
+// Registers IAudioSource + IAudioPlayer + IAudioDevices + IAudioMonitor + IAudio.
+// A no-op when not running on Linux, so it is safe in shared startup code.
+builder.Services.AddLinuxAudio();
+```
+
+:::note[Recording]
+`AddLinuxAudio()` doesn't register `IAudioRecorder`. The recorder is platform-agnostic and runs on top
+of the Linux `IAudioSource`, so add `AddAudioRecorder()` (or `AddAudioServices()`) **after**
+`AddLinuxAudio()` if you record. Otherwise `IAudio.Recorder` throws. [Effects](/audio/effects) work
+unchanged.
+
+```csharp
+builder.Services.AddLinuxAudio();
+builder.Services.AddAudioServices();   // adds IAudioRecorder; the Linux registrations above win
+```
+:::
+
+:::caution[Call it first]
+`AddLinuxAudio()` must come **before** `AddAudioServices()`, `AddSpeechServices()` or any
+`AddCloudSpeechToText` / `AddCloudTextToSpeech` overload. Those all use `TryAdd`, so the first
+registration wins — and on Linux they register nothing at all.
+:::
+
+## There is no native speech on Linux
+
+Linux has no OS speech engine to wrap the way iOS, Android and Windows do, so `AddSpeechToText()`
+and `AddTextToSpeech()` register nothing there. Pair `AddLinuxAudio()` with any cloud provider —
+they are pure HTTP over the PCM stream and work unchanged:
+
+```csharp
+builder.Services.AddLinuxAudio();
+builder.Services.AddAzureSpeech("subscription-key", "region");
+```
+
+## Behaviour notes
+
+- **No resampler ships in the library.** Streams open at exactly the format required — 16 kHz mono
+  for capture, a decoded clip's own rate for playback. PulseAudio converts server-side; ALSA's
+  `default` device converts through its `plug` plugin.
+- **Playback decodes MP3 and WAV only.** That covers what Azure, OpenAI and ElevenLabs return by
+  default. Any other container throws `NotSupportedException` naming the format.
+- **Playback metering works here** (unlike Windows/Browser) because the player decodes to PCM in
+  managed code and sees every sample.
+- **Voice processing is best-effort.** PulseAudio publishes echo cancellation as a virtual source
+  from `module-echo-cancel`; when that module is loaded, `AudioProcessingOptions.EchoCancellation`
+  selects it, otherwise capture is raw.
+- **No permission prompt.** Microphone access on Linux is a filesystem/group concern, so
+  `RequestAccess()` returns `Available` whenever a backend is present.
+- **`ShowOutputPicker()` is a no-op** — there is no system route picker equivalent to iOS's
+  `AVRoutePickerView`. Routing lives in the desktop environment's sound settings. `IAudioDevices.Changed`
+  fires on PulseAudio/PipeWire only, since ALSA has no change notification.
+
+- **No full-duplex call audio.** [`IAudioDuplex`](/audio/duplex) isn't implemented on Linux.
+- **The live monitor runs in managed code.** PulseAudio's simple API and ALSA have no input-to-output
+  routing, so the monitor copies a capture stream into a playback stream itself. Latency is the two
+  stream buffers added together. That's fine for talkback or a megaphone, but not for live
+  performance monitoring.
+
+## Runtime dependencies
+
+The distro's own audio libraries — `libpulse-simple.so.0` (usually the `libpulse0` package) or
+`libasound.so.2` (usually `libasound2`). In a container, install one of them explicitly.
+
+Probe at startup when the app must degrade gracefully rather than throw on first use:
+
+```csharp
+if (!LinuxAudioServiceCollectionExtensions.IsLinuxAudioAvailable)
+    logger.LogWarning("No Linux audio backend found — voice features disabled");
+```
