@@ -1,6 +1,6 @@
 ---
 title: Tray Icon & Quick Entry
-description: System tray and menu bar icons, and a quick entry prompt summoned by a global hotkey, for a Shiny.AppDeviceBridge web app on the desktop
+description: System tray and menu bar icons, running as a tray app with the window hidden, and a quick entry prompt summoned by a global hotkey, for a Shiny.AppDeviceBridge web app on the desktop
 ---
 
 import NugetBadge from '/src/components/NugetBadge.astro';
@@ -8,7 +8,7 @@ import BridgeApi from '/src/components/BridgeApi.astro';
 
 <NugetBadge name="Shiny.AppDeviceBridge.Desktop" />
 
-The desktop package has two bridges: tray and menu bar icons with menus, badges, notifications and animation, and a quick entry prompt that opens over other applications from a global hotkey. Both hand what the user does back to the web app.
+The desktop package has three bridges: tray and menu bar icons with menus, badges, notifications and animation; the app's window, hidden so the app runs as a tray app; and a quick entry prompt that opens over other applications from a global hotkey. All hand what the user does back to the web app.
 
 ## Install and register
 
@@ -18,7 +18,7 @@ dotnet add package Shiny.AppDeviceBridge.Desktop
 
 ```csharp
 builder.UseAppDeviceBridge(
-    bridge => bridge.AddTrayIconBridge().AddQuickEntryBridge(),
+    bridge => bridge.AddTrayIconBridge().AddWindowBridge(o => o.HideOnClose = true).AddQuickEntryBridge(),
     webApp => { /* … */ }
 );
 ```
@@ -26,6 +26,7 @@ builder.UseAppDeviceBridge(
 | Client | C# | TypeScript |
 | --- | --- | --- |
 | `ITrayBridge` | `AddTrayBridgeClient()` | `TrayBridge` |
+| `IWindowBridge` | `AddWindowBridgeClient()` | `WindowBridge` |
 | `IQuickEntryBridge` | `AddQuickEntryBridgeClient()` | `QuickEntryBridge` |
 
 ## Tray icon
@@ -38,7 +39,7 @@ macOS, the status notifier area on Linux — desktop only, `501` elsewhere.
 | **Naming an icon** | use `PUT /_bridge/tray/main` rather than `POST /_bridge/tray`. The first call creates the icon and later ones adopt it, so a page reload or an applied update doesn't stack up a second icon. A `PUT` changes only the properties it sends; `""` clears `tooltip`, `title` or `badge`. |
 | **Images** | either `{ "root": "data", "path": "icons/tray.png" }` — the same file roots the files bridge takes, so the page can't point the tray at anything it couldn't already read — or `{ "data": "…" }` holding base64, with or without a `data:` URI prefix, which is how a page ships an icon it drew itself. Set `"templateImage": true` for a black-with-alpha image macOS and Linux tint for light and dark menu bars. |
 | **Menus** | each entry is `Item`, `Check`, `Separator` or `Submenu`, and its `id` is what comes back on `tray.menu`; omit it and one is assigned. Ids must be unique across the whole menu. |
-| **Clicks reach the web app either way** | `tray.click` and `tray.menu` go out as events *and* as calls the page handles when it is open and `background.js` handles when it is not — which is the case a tray menu exists for. `tray.click` isn't raised on Linux, where the app indicator handles clicks itself and opens the menu on its own (so `menu/show` is a no-op there). |
+| **Clicks reach the web app either way** | `tray.click` and `tray.menu` go out as events *and* as [native calls](/appdevicebridge/background/) the page handles while it is open. The app and its page are running whenever the icon is there, so the page handles them even with the window hidden. `tray.click` isn't raised on Linux, where the app indicator handles clicks itself and opens the menu on its own (so `menu/show` is a no-op there). |
 | **Lifetime** | icons outlive the page and are removed when the app shuts down, or by `DELETE /_bridge/tray/{id}`. `MaxIcons` (4) caps how many exist at once. |
 
 ```ts
@@ -53,6 +54,40 @@ await new TrayBridge().put("main", {
     ] }
 });
 ```
+
+## Running in the tray
+
+A tray app runs with no window and no taskbar or Dock entry — only its tray icon — until the user opens it again.
+`AddWindowBridge` does that, and the page keeps running while the window is hidden, so it still answers tray clicks and
+quick entry.
+
+```csharp
+bridge
+    .AddTrayIconBridge()
+    .AddWindowBridge(o =>
+    {
+        o.HideOnClose = true;                                                     // closing hides; Quit from the tray
+        o.StartHidden = Environment.GetCommandLineArgs().Contains("--autostart"); // a login launch lands in the tray
+    });
+```
+
+```ts
+// the tray menu's Open and Quit
+const windowBridge = new WindowBridge();
+await new TrayBridge().onMenu(async ({ itemId }) => {
+    if (itemId === "open") await windowBridge.show();
+    if (itemId === "quit") await windowBridge.quit();
+});
+```
+
+| Topic | Details |
+| --- | --- |
+| **Hidden** | off the taskbar on Windows and Linux; on macOS out of the Dock and the app switcher too, as an accessory app until it's shown again. The WebView stays loaded. |
+| **Never stranded** | closing only hides, and `POST window/hide` is only accepted (otherwise `409` `no_tray_icon`), while a tray icon from the tray bridge is showing. Set `RequireTrayIcon = false` for an app that comes back another way, such as a global hotkey of its own. |
+| **Starting hidden** | `StartHidden` hides the window as soon as the app has one; the page still loads, so it can put its tray icon up. |
+| **Quit** | `POST window/quit` answers, then quits the app. |
+| **Visibility** | `window.visibility` reports every change, including the user closing the window. |
+| **Platforms** | macOS (AppKit), Windows and Linux (GTK4). Mac Catalyst, Android and iOS report `{ "supported": false }` and answer `501`. |
 
 ## Quick entry
 
@@ -72,7 +107,7 @@ bridge.AddQuickEntryBridge(
 | --- | --- |
 | **Opening it** | the global hotkey, `POST quickentry/show` or `toggle`, or a tray click that calls one. `PUT quickentry/options` changes the hotkey (`""` removes it), size, placement and dismissal while the app runs; `hotKeyRegistered: false` in the status means another application already owns the combination. |
 | **The prompt** | `PUT quickentry/prompt` sets the placeholder, suggestions (each with an optional `value` that comes back when it's chosen), `isBusy` with `busyText`, and `response`, the text shown under the entry. Only what you send changes; `""` clears the response and `[]` the suggestions. What you set survives a window that rebuilds its prompt. |
-| **Answering** | `quickentry.submitted` goes out as an event *and* as a call the page handles when it's open and `background.js` handles when it isn't, which is the usual case for a window summoned over other applications. Set `isBusy`, do the work, then set `response`. |
+| **Answering** | `quickentry.submitted` goes out as an event *and* as a [native call](/appdevicebridge/background/) the page handles — the page is running whenever quick entry is, even with the app's window hidden. Set `isBusy`, do the work, then set `response`. Native code can also set the prompt with `QuickEntryBridge.SetPromptAsync`, below. |
 | **The glow** | `glow/show`, `glow/hide` and `glow/pulse` drive the colour wash around the screen's edge; the `glow` option lights it while the window is open or while the prompt is busy. |
 | **Custom content** | if the app replaces the prompt through `QuickEntryOptions.ContentFactory`, the prompt routes answer `409` and the window routes still work. |
 
@@ -86,17 +121,30 @@ quickEntry.onSubmitted(async ({ text, suggestion }) => {
 });
 ```
 
+Native code sets the prompt through `QuickEntryBridge.SetPromptAsync`, exactly as `PUT quickentry/prompt` does from the
+page — for example to report the result of work the app did itself:
+
+```csharp
+var quickEntry = services.GetRequiredService<QuickEntryBridge>();
+await quickEntry.SetPromptAsync(new QuickEntryPromptInput(IsBusy: true, BusyText: "Syncing…"));
+await sync.RunAsync(ct);
+await quickEntry.SetPromptAsync(new QuickEntryPromptInput(IsBusy: false, Response: "Synced."));
+```
+
+`SetPromptAsync` throws `ArgumentException` for input the page would get a `400` for, `PlatformNotSupportedException`
+where quick entry is unsupported, and returns null when the window shows custom content instead of the prompt.
+
 ## Requests
 
-<BridgeApi bridges={["TrayBridge", "QuickEntryBridge"]} show="requests" />
+<BridgeApi bridges={["TrayBridge", "WindowBridge", "QuickEntryBridge"]} show="requests" />
 
 ## Events
 
-<BridgeApi bridges={["TrayBridge", "QuickEntryBridge"]} show="events" />
+<BridgeApi bridges={["TrayBridge", "WindowBridge", "QuickEntryBridge"]} show="events" />
 
 ## Types
 
-<BridgeApi bridges={["TrayBridge", "QuickEntryBridge"]} show="types" />
+<BridgeApi bridges={["TrayBridge", "WindowBridge", "QuickEntryBridge"]} show="types" />
 
 ## Security
 

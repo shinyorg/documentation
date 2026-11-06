@@ -1,49 +1,96 @@
 ---
 title: Native Calls & Background
-description: Background jobs, GPS, geofences, push, notifications and transfers calling into the page or background.js
+description: GPS, geofences, push, notifications, transfers and other native events reaching the open page, and background work as the app's own Shiny delegates and jobs
 ---
 
-Background jobs, GPS readings, geofence transitions and pushes can call into the web app, whether or
-not a page is open.
+GPS readings, geofence transitions, pushes, notification taps, watch messages and other native events are handed to the
+page while it is open, so the web app can react to them.
 
 | Situation | What happens |
 | --- | --- |
-| **Page open and listening** | the call goes to the page. The page has 2 seconds to accept it, then posts its result. |
-| **No page, or the page doesn't accept in time** | the call runs in `background.js` from the web app's zip, inside an embedded JavaScript engine ([Jint](https://github.com/sebastienros/jint)). |
-| **Accepted by the page** | the page owns the call. A call is never run in both places. |
+| **Page open and listening** | the call goes to the page. The page has 2 seconds (`PageAcceptTimeout`) to accept it, then posts its result. |
+| **No page, or the page doesn't accept in time** | nothing in the web app runs, and the call is reported as not handled (`WebAppInvocationResult.NotHandled`, `Handled == false`). |
+| **Late accept** | a page that misses the 2 seconds can't start the call late: its accept is refused (`410`), so it never starts work after the caller was told the call wasn't handled. |
 
 ```csharp
 // in a Blazor page
-await nativeCalls.HandleAsync("job:sync", AppDeviceBridgeJsonContext.Default.JobRun, MyJson.Default.SyncResult, async job =>
-{
-    await SyncAsync();
-    return new SyncResult(RanIn: "page");
-});
+await nativeCalls.HandleAsync("gps", GpsJsonContext.Default.GpsReading, reading => SaveAsync(reading));
 ```
 
 ```js
 // in any other page
 import { on } from "/_bridge/invoke/client.js";
-on("job:sync", async ({ name }) => { /* ... */ });
+on("gps", async reading => { /* ... */ });
 ```
 
-```js
-// background.js: a classic script at the root of the zip
-appdevicebridge.on("job:sync", async ({ name }) => {
-    const token = await (await fetch("/_bridge/settings/secure/token")).json();
-    const data = await fetch("https://api.example.com/sync", { headers: { Authorization: `Bearer ${token}` } });
-    await fetch("/_bridge/files/data/content?path=sync.json", { method: "PUT", body: await data.text() });
-});
+## Background work is native code
+
+Anything that has to happen with the app in the background — logging GPS fixes, reacting to a geofence, a scheduled job,
+finishing a purchase — goes in the MAUI app the usual way: a Shiny delegate (`IGpsDelegate`, `IGeofenceDelegate`,
+`IPushDelegate`, the Shiny.Wearables, InAppPurchases and LiveActivities delegates, …) or a Shiny `IJob`. Shiny runs every
+registered delegate, so yours runs alongside the bridge's, with or without a page open.
+
+```csharp
+// in the app: registered next to AddGpsBridge(), runs whether or not a page is open
+services.AddGps<TripGpsDelegate>();
+
+sealed class TripGpsDelegate(TripStore trips) : IGpsDelegate
+{
+    public Task OnReading(GpsReading reading) => trips.AppendAsync(reading);
+}
 ```
 
-`background.js` gets `appdevicebridge.on`, `console` and `fetch` with string bodies. Relative URLs go to the
-host's own `/_bridge`, so handlers read and write the same settings and files the page uses. It has
-no DOM, no timers, and keeps no state between calls: each call runs the script's top level again,
-then the handler. It gets `BackgroundScriptTimeout` (25 s) and 64 MB.
+| Rule | Details |
+| --- | --- |
+| **Ships with the store build** | native delegates and jobs are compiled into the app, so they change when the app updates from the store, not with an over-the-air web app update. Nothing downloaded runs outside the WebView. |
+| **Shared logic** | put logic the Blazor page and the native code share in a class library both reference. Payloads are the bridges' own `.Client` contracts, so both sides can use the same types. |
+| **Both sides run** | the page's handler and the app's delegate are independent: while a page is open, both see a GPS reading or a geofence transition. Write the delegate for the closed-app case and keep the page's handler to UI. |
+
+### When only one side should act
+
+Some work must happen exactly once: a purchase to finish, a watch message to reply to, a quick entry submission to answer.
+Native code checks `WebAppInvoker.IsPageListening(name)` — whether an open page has declared a handler for the name right
+now — and leaves the work to the page when it is, or calls `InvokeAsync` itself and acts when the result isn't `Handled`.
+
+```csharp
+// in the app's own purchase delegate: the bridge hands the update to the page while it listens
+if (!invoker.IsPageListening("purchases.updated"))
+    await FulfillNativelyAsync(purchase, ct);
+```
+
+For a call your own native code makes, call `InvokeAsync` and act when the page didn't take it:
+
+```csharp
+var result = await invoker.InvokeAsync("sync.finished", report, MyJson.Default.SyncReport, ct);
+if (!result.Handled)
+    await NotifyNativelyAsync(report, ct);
+```
+
+From your own native code, `WebAppInvoker.InvokeAsync(name, payload, typeInfo)` calls the page the same way the bridges
+do, and answers with a `WebAppInvocationResult`: `Handled` (the page took it), `Succeeded`, `ResultJson` and `Error`.
+
+### Scheduled jobs
+
+A job that runs periodically is a plain Shiny `IJob` registered in the app with `services.AddJob<T>()`:
+
+```csharp
+services.AddJob<SyncJob>(job => job.WithInternet(InternetAccess.Any));
+
+sealed class SyncJob(SyncService sync) : IJob
+{
+    public Task Run(CancellationToken cancelToken) => sync.RunAsync(cancelToken);
+}
+```
+
+The OS picks when jobs run: at best every 15 minutes on Android, less predictably on iOS. On iOS, add
+`BGTaskSchedulerPermittedIdentifiers` (`com.shiny.job`, `com.shiny.jobnet`, `com.shiny.jobpower`,
+`com.shiny.jobpowernet`) and the `processing` background mode. To let an open page know a run finished, call
+`InvokeAsync` from the job; it is simply not handled when no page is open.
+
+## Sources
 
 | Source | Handler | Registered by |
 | --- | --- | --- |
-| Background job | `job:{name}` with `{ name }` | `bridge.AddWebAppJob("sync", job => job.WithInternet(InternetAccess.Any))` (Bridge.Jobs) |
 | GPS reading delivered in the background | `gps` with a reading | `AddGpsBridge()` |
 | Geofence transition | `geofence` with `{ identifier, state }` | `AddGeofenceBridge()` |
 | Region geofence entered or left | `regiongeofence` with `{ regionSet, regionId, regionName, entered, latitude, longitude, region }` | `AddRegionGeofenceBridge(…)` |
@@ -53,13 +100,11 @@ then the handler. It gets `BackgroundScriptTimeout` (25 s) and 64 MB.
 | Notification tapped | `notification.entry` with `{ id, title, message, channel, thread, data, action, text }` | `AddNotificationsBridge()` (Bridge.Notifications) |
 | Notification presented while the app is open (Apple platforms) | `notification.received` with the same shape | `AddNotificationsBridge()` |
 | HTTP transfer finished | `transfer.completed` / `transfer.failed` with the transfer | `AddHttpTransfersBridge()` (Bridge.HttpTransfers) |
-
-From your own native code, call `WebAppInvoker.InvokeAsync(name, payload, typeInfo)`.
-
-**Jobs:** the OS picks when jobs run: at best every 15 minutes on Android, less predictably on iOS.
-Jobs with the same charging and network requirements run together as one native job. On iOS, add
-`BGTaskSchedulerPermittedIdentifiers` (`com.shiny.job`, `com.shiny.jobnet`, `com.shiny.jobpower`,
-`com.shiny.jobpowernet`) and the `processing` background mode.
+| Watch message, context, transfer or file | `wearables.message` (its result is the reply), `wearables.context`, `wearables.transfer`, `wearables.file` | `AddWearablesBridge()` (Bridge.Wearables) |
+| Live activity started, changed state, or got a push token | `liveactivities.started`, `liveactivities.state`, `liveactivities.token` with `{ activityId, token }`, `liveactivities.starttoken` with `{ token }` | `AddLiveActivitiesBridge()` (Bridge.LiveActivities) |
+| Purchase renewed, refunded, approved or bought on another device | `purchases.updated` with the purchase | `AddInAppPurchasesBridge()` (Bridge.InAppPurchases) |
+| Hub call from a nearby device | `hub:{name}` with a `HubCall`, answered with a `HubCallReply` | `AddHubsBridge(…)` (Bridge.Hubs) |
+| Tray click or menu, quick entry submitted | `tray.click`, `tray.menu`, `quickentry.submitted` | `AddTrayIconBridge()`, `AddQuickEntryBridge()` (Bridge.Desktop) |
 
 **Push:** `AddPushBridge()` always adds `GET /_bridge/push` (access and token),
 `POST/DELETE /_bridge/push/registration` and `GET/PUT /_bridge/push/tags`, plus the `push.token` and
@@ -69,7 +114,8 @@ need Shiny.Push's platform setup: APNs entitlements, and `google-services.json` 
 **Notifications:** `POST /_bridge/notifications/send` takes a `message` and optionally a `title`, `channel`,
 `thread`, `data`, and one trigger: `scheduleDate`, `repeat` (`{ "intervalSeconds": 3600 }` or
 `{ "timeOfDay": "09:00:00", "dayOfWeek": "Monday" }`), or `geofence` (`{ "latitude", "longitude", "radiusMeters" }`).
-It answers `{ "id": 7 }`. Sending needs no UI, so `background.js` can notify from a job or a geofence.
+It answers `{ "id": 7 }`. Sending needs no UI, so the page can notify from a geofence or push handler. The app's own
+native code sends through Shiny.Notifications directly.
 
 | Topic | Details |
 | --- | --- |
@@ -81,7 +127,5 @@ It answers `{ "id": 7 }`. Sending needs no UI, so `background.js` can notify fro
 
 **Blazor WebAssembly:** handlers registered from the page can be C#, through `WebAppNativeCalls` in Shiny.AppDeviceBridge.Blazor.
 Payloads are the bridges' own contracts — `GpsReading` for `gps`, `PushPayload` for `push.received`,
-`TransferInfo` for `transfer.completed` — read through their JSON contexts. The
-background path can't: Jint doesn't run WebAssembly, and a hidden WebView is exactly what iOS
-suspends. Write the background handler in JavaScript that stores its results through the bridge;
-the Blazor app reads them when it next opens.
+`TransferInfo` for `transfer.completed` — read through their JSON contexts. The app's native delegates can use the same
+contracts, so a Blazor app and its native host can share one library.

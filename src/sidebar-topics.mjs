@@ -1128,6 +1128,14 @@ export const sidebarTopics = [
         ]
       },
       {
+        label: 'Page Transitions',
+        jumpTo: true,
+        dateUpdated: '2026-11-05',
+        items:[
+          { label: 'Getting Started', link: 'controls/page-transitions/', dateCreated: '2026-11-05', dateUpdated: '2026-11-05' },
+        ]
+      },
+      {
         label: 'Floating Panels',
         jumpTo: true,
         platform: 'maui',
