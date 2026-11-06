@@ -66,8 +66,12 @@ A drop-in recognition camera: preview, permission, start/stop lifecycle and the 
 | `Facing` | `CameraFacing.Front` by default. Bindable. |
 | `RecognitionEnabled` | Bindable. Turn the expensive pipeline off while leaving the preview running. |
 | `HasFace` | Whether the analyzer currently has a face. |
-| `Analyzer` | The underlying `FaceRecognitionAnalyzer`, for tuning (below). |
+| `Analyzer` | The underlying `FaceRecognitionAnalyzer`, for tuning (below). `AnalyzerReady` fires once it's attached. |
 | `EnrollAsync(id, allowDuplicate)` | One-off single-shot capture off the current frame. |
+| `FrameObserved` | Every analyzed frame as a `FaceFrameObservation`. See [Frame observations](#frame-observations). |
+| `IsActive` | Bindable, default `true`. Set `false` to stop the camera without leaving the page, and `true` to resume. |
+| `DrainAsync(timeout)` | Stop the session and wait for an in-flight recognition. Nothing from it is raised afterwards. |
+| `Guide` / `ShowGuide` | An optional target oval over the preview. Visual only; recognition still uses the whole frame. `GuideFeedbackChanged` reports fit and a correction hint, and `IsInsideGuide(observation)` applies the same geometry. |
 
 ```csharp
 void OnRecognized(object? sender, FaceRecognizedEventArgs e)
@@ -96,8 +100,23 @@ once the face has held steady, and is throttled after that.
 | `MinConfidence` | `0.7` | Detector confidence floor for the analyzer. |
 | `MatchColor` / `UnknownColor` / `UnknownText` | green / red / `"Unknown"` | Overlay appearance. |
 
-The camera pipeline runs analyzers max-one-in-flight and drops frames while busy, so the analyzer self-paces —
-it can take a whole frame interval without backing the camera up.
+The camera pipeline runs analyzers max-one-in-flight and drops frames while busy, so the analyzer self-paces.
+Recognition runs in the background, one at a time, so a slow embed doesn't hold up detection on the next frames.
+
+### Frame observations
+
+`FrameObserved` is raised for **every** analyzed frame: no face, several faces, a face outside the scan window, or
+a conversion error. Each `FaceFrameObservation` has a `Stamp` (session id, frame id, monotonic timestamp),
+`FaceCount`, the tracked face's `Bounds` and `Confidence`, a `Quality` classification with `Brightness` and
+`Sharpness`, the analysis JPEG, and an `Error` if conversion failed. `FaceRecognizedEventArgs.Stamp` identifies
+the frame a result came from, since recognition can trail the live preview.
+
+- **Several faces:** the most confident one is tracked and recognized, and `FaceCount` gives the real number. If
+  your app needs exactly one person in frame, enforce that from `FrameObserved`.
+- **Quality is informational:** it is only measured while something subscribes to `FrameObserved`, because it
+  costs a JPEG decode per frame, and it never stops recognition. `FaceRecognized` still fires for every attempt.
+  Tune the classification with `MinBrightness`, `MaxBrightness` and `MinSharpness`.
+- **Sessions:** each camera start begins a new session, and results from a stopped session are discarded.
 
 ## `FaceEnrollmentView`
 
@@ -207,6 +226,48 @@ they should *look*.
 
 Per-frame cost stays off the UI thread and single-flight: the cheap geometric gates run inline, and only once
 they pass does the control decode, measure and embed on a background thread.
+
+### Run lifecycle
+
+Each `BeginEnrollment()` starts a run. The identity and steps are fixed when the run starts, and calling it again
+mid-run cancels the old run.
+
+```csharp
+// Stop the camera and the run, wait until both have finished, then undo this run's shots
+var stored = await this.Enrollment.StopAsync();
+if (this.Enrollment.HasUncertainStorage)
+    await faces.Forget(id);                                  // a store threw: one shot may have no id
+else
+    await faces.ForgetShots(id, stored.Select(c => c.ShotId).ToArray());
+
+this.Enrollment.ResumePreview();                             // camera back on, no run started
+```
+
+`CancelEnrollmentAsync()` does the same without stopping the camera. Both wait for a store that was already under
+way, so its id is included.
+
+### Supplying your own UI
+
+The control keeps doing all the gating either way. You choose how much of its UI to show.
+
+```csharp
+enrollment.ShowGuide = true;                 // keep the oval
+enrollment.ShowInstructionBanner = false;    // supply your own text
+enrollment.GuideAlignedColor = Colors.Green;
+enrollment.GuideUnalignedColor = Colors.Gold;
+enrollment.GuideTransitionDuration = TimeSpan.FromMilliseconds(250);
+
+enrollment.Progress             += (_, p) => ShowInstruction(p.Instruction, p.StepIndex, p.StepCount);
+enrollment.CountdownChanged     += (_, c) => ShowCountdown(c.SecondsRemaining);   // 0 = waiting for a good frame
+enrollment.GuideFeedbackChanged += (_, f) => ShowAlignment(f.IsAligned, f.Hint);
+enrollment.Rejected             += (_, r) => ShowHint(r.Hint);
+enrollment.CaptureAccepted      += (_, shot) => FlashTick();
+enrollment.AcceptedHoldDuration = TimeSpan.FromMilliseconds(600);                 // let the tick be seen
+```
+
+`ShowBuiltInOverlay = false` hides both the oval and the banner. `CaptureEnabled = false` pauses capture without
+ending the run, for example while a tip is on screen. Re-enabling it restarts the current step's countdown, so
+time spent paused never counts against `StepTimeout`. `StepCountdown = TimeSpan.Zero` skips the countdown.
 
 ## Dropping to the raw analyzer
 

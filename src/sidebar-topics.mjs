@@ -230,6 +230,7 @@ export const sidebarTopics = [
           { label: 'Peripheral', link: 'client/ble/peripheral', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Services/Characteristics/Descriptors', link: 'client/ble/gatt', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'L2CAP', link: 'client/ble/l2cap', dateCreated: '2026-05-29', dateUpdated: '2026-05-29' },
+          { label: 'Firmware Updates (MCUmgr)', link: 'client/ble/mcumgr', dateCreated: '2026-11-06', dateUpdated: '2026-11-06' },
           { label: 'Background Operations', link: 'client/ble/background', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Best Practice/FAQ', link: 'client/ble/best-practices', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },

@@ -1,0 +1,185 @@
+---
+title: Firmware Updates (MCUmgr)
+description: Over-the-air firmware updates and device management for Zephyr, nRF Connect SDK, Mynewt and NuttX devices using MCUmgr / SMP over Bluetooth LE
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.BluetoothLE.McuMgr" />
+
+Devices built on **Zephyr RTOS** (including Nordic's **nRF Connect SDK**), Apache Mynewt and NuttX that boot through
+**MCUboot** take firmware updates and management commands over **MCUmgr**. Its wire protocol, SMP (Simple Management
+Protocol), runs over a single BLE GATT service. `Shiny.BluetoothLE.McuMgr` is an SMP client that sits on top of
+Shiny's `IPeripheral`. It does the job of Nordic's *nRF Connect Device Manager* libraries, from .NET.
+
+| | UUID |
+|---|---|
+| SMP service | `8d53dc1d-1db7-4cd3-868b-8a527460aa84` |
+| SMP characteristic (write without response + notify) | `da2e7828-fbce-4e01-ae9e-261174997c48` |
+
+## Setup
+
+The package has no platform code and no DI registration. It works anywhere `Shiny.BluetoothLE` provides peripherals
+(iOS, Mac Catalyst, macOS, Android, Windows, Blazor Web Bluetooth), and on Linux through `Shiny.BluetoothLE.Linux`.
+Register BLE and scan as usual (see [Getting Started](/client/ble/)), then hand the peripheral over:
+
+```csharp
+using Shiny.BluetoothLE;
+using Shiny.BluetoothLE.McuMgr;
+
+using var client = peripheral.CreateMcuMgrClient(); // connects on first use
+var echo = await client.Os.EchoAsync("ping");
+```
+
+`await peripheral.HasMcuMgrAsync()` checks whether a device exposes the SMP service.
+
+## Updating firmware
+
+```csharp
+var image = new FirmwareImage(await File.ReadAllBytesAsync("zephyr.signed.bin"));
+
+var result = await client.UpgradeFirmwareAsync(
+    image,
+    new FirmwareUpgradeOptions
+    {
+        Mode = FirmwareUpgradeMode.TestAndConfirm,
+        EstimatedSwapTime = TimeSpan.FromSeconds(10)
+    },
+    new Progress<FirmwareUpgradeProgress>(p =>
+    {
+        if (p.Stage == FirmwareUpgradeStage.Uploading && p.Upload != null)
+            Console.WriteLine($"{p.Upload.PercentComplete:P0} - {p.Upload.BytesPerSecond} B/s");
+        else
+            Console.WriteLine(p.Stage);
+    })
+);
+
+if (result.AlreadyUpToDate)
+    Console.WriteLine("Device already runs this firmware");
+```
+
+`UpgradeFirmwareAsync` runs these steps:
+
+1. **Validating**: reads the device's image state. An image the device already runs is skipped, and confirmed if it
+   is still an unconfirmed test image. An image already sitting in the secondary slot from an earlier attempt is
+   not uploaded again.
+2. **Uploading**: sends the image in chunks sized to the device's SMP buffer. If an earlier upload of the same file
+   was interrupted, the device reports how much it already has and the upload continues from there.
+3. **Testing**: marks the new image to be swapped in on the next reset.
+4. **Resetting** and **Reconnecting**: resets the device, waits `EstimatedSwapTime` while MCUboot swaps the slots,
+   then reconnects within `ReconnectTimeout` (60 seconds by default).
+5. **Confirming**: once the new image is running, confirms it so MCUboot keeps it. If the image is not running
+   after the reset, the call throws `McuMgrException`, because the bootloader rejected or reverted it.
+
+| `FirmwareUpgradeMode` | After the upload |
+|---|---|
+| `TestAndConfirm` (default) | Test, reset, reconnect, confirm. If the new firmware never comes up, MCUboot reverts on the next reset. |
+| `TestOnly` | Test and reset. The new firmware must confirm itself, or the app calls `client.Images.ConfirmRunningAsync()` later. |
+| `ConfirmOnly` | Permanent swap and reset. If the new firmware can't run, there is no way back. |
+| `UploadOnly` | Only uploads. Nothing is swapped. |
+
+### Which file to use
+
+- **Zephyr**: `build/zephyr/zephyr.signed.bin`, the signed image. `zephyr.bin` and `.hex` files are rejected with
+  `InvalidDataException`.
+- **nRF Connect SDK**: `build/dfu_application.zip`. It also carries the network core image on an nRF5340:
+
+```csharp
+await using var zip = File.OpenRead("dfu_application.zip");
+var images = await FirmwareImage.FromDfuPackageAsync(zip);
+await client.UpgradeFirmwareAsync(images);
+```
+
+To show what an update contains before starting, read the image header without a device:
+
+```csharp
+var header = McuBootImage.Parse(bytes);
+Console.WriteLine($"{header.Version} ({header.HashHex})");
+```
+
+SUIT packages (`suit-envelope`) are not MCUboot updates and are not supported.
+
+### Chunk size and throughput
+
+`FirmwareUpgradeOptions` (and `McuMgrUploadOptions` for plain uploads) control chunking:
+
+| Option | Default | |
+|---|---|---|
+| `MaxFrameSize` | `null` | Uses the device's SMP buffer size, or the BLE MTU when the device can't report one. |
+| `UseDeviceBufferSize` | `true` | Sends frames bigger than the MTU across several writes, relying on the device to reassemble them. Turn this off for firmware built without `CONFIG_MCUMGR_TRANSPORT_BT_REASSEMBLY`. |
+| `DataAlignment` | `1` | Rounds chunks to 2/4/8/16 bytes for flash drivers that need aligned writes. |
+| `FirstChunkTimeout` | 40 s | The first chunk waits while the device erases the slot. |
+| `UpgradeOnlyIfNewer` | `false` | Asks the device to reject an image that isn't newer than the running one. |
+
+On Android the transport requests an ATT MTU of 517 on connect (`BleSmpTransportOptions.RequestedMtu`). iOS, macOS
+and Windows negotiate the MTU themselves.
+
+## Other commands
+
+```csharp
+// OS - group 0
+await client.Os.ResetAsync();
+var parameters = await client.Os.GetParametersAsync();      // BufferSize, BufferCount
+var info = await client.Os.GetApplicationInfoAsync();        // uname-style
+var bootloader = await client.Os.GetBootloaderNameAsync();   // "MCUboot"
+await client.Os.EraseStorageAsync();                         // Zephyr basic group - settings/storage partition
+
+// Images - group 1
+var slots = await client.Images.GetStateAsync();
+await client.Images.ConfirmRunningAsync();
+await client.Images.EraseAsync();
+
+// File system - group 8
+await client.Files.UploadAsync("/lfs1/config.json", bytes);
+var log = await client.Files.DownloadAsync("/lfs1/log.txt");
+var sha = await client.Files.GetSha256Async("/lfs1/log.txt");
+
+// Shell - group 9
+var result = await client.Shell.ExecuteAsync("kernel", "uptime");
+
+// Statistics - group 2
+var groups = await client.Stats.ListGroupsAsync();
+var counters = await client.Stats.ReadAsync(groups[0]);
+```
+
+The firmware only answers groups compiled into it (`CONFIG_MCUMGR_GRP_IMG`, `_OS`, `_FS`, `_SHELL`, `_STAT`). A
+missing group fails with `McuMgrException.Error == McuMgrError.NotSupported`.
+
+### Custom groups
+
+Application-defined groups start at `McuMgrGroups.PerUser` (64). `SendAsync` sends any request and returns the
+decoded CBOR map:
+
+```csharp
+var response = await client.SendAsync(
+    SmpOperation.Write,
+    group: 64,
+    command: 0,
+    new Dictionary<string, object?> { ["value"] = 5 }
+);
+var answer = response.GetInt64("result");
+```
+
+## Errors
+
+- `McuMgrException.Error`: a management error (`McuMgrError`) from SMP v1 firmware, or a transport-level error.
+- `McuMgrException.GroupErrorCode` and `Group`: an SMP v2 group error. What the code means depends on the group.
+- `TimeoutException`: the device didn't answer within `McuMgrClientOptions.RequestTimeout` (10 seconds by default).
+
+The client starts with SMP v2 and falls back to v1 when the device rejects it. `client.Version` shows which one is
+in use.
+
+## Other transports
+
+`ISmpTransport` is public. To run the same client over UART, UDP or a test double, implement `MaxFrameSize`,
+`SendAsync(frame)` (return the response whose sequence byte matches the request's) and `ReconnectAsync(...)`, then
+create `new McuMgrClient(transport)`.
+
+## Notes
+
+- Use one client per peripheral. SMP has a single characteristic, and requests from one client are sent one at a
+  time.
+- Disposing the client releases its notification subscription but leaves the connection open. Your app owns it.
+- If the firmware requires an authenticated link (`CONFIG_MCUMGR_TRANSPORT_BT_PERM_RW_AUTHEN`), the OS shows its
+  pairing prompt on the first request.
+- On iOS, keep the app in the foreground during an upload. A suspended app can lose the link.
