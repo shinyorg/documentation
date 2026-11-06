@@ -8,8 +8,13 @@ import { Aside } from '@astrojs/starlight/components';
 <PlatformSupport frameworks={["maui"]} os={["android", "ios", "macos"]} />
 
 `Shiny.FaceIntelligence.Maui` targets `net10.0-android`, `net10.0-ios` and `net10.0-maccatalyst` — the camera
-frame arrives as a native buffer, so this is the one package with per-platform code. Windows is not currently
-implemented.
+frame arrives as a native buffer, so this is the one package with per-platform code.
+
+<Aside type="note" title="Windows is build-from-source only">
+When built **on a Windows machine** the project also targets `net10.0-windows10.0.19041.0`, with a converter
+for `WindowsCameraFrame`. The published NuGet package is built on macOS and does not include that target yet,
+and the Windows path has not been verified against a physical camera.
+</Aside>
 
 ```bash
 dotnet add package Shiny.FaceIntelligence.Maui
@@ -107,7 +112,17 @@ void OnEnrolled(object? sender, FaceEnrollmentResult e)
     // e.People            — one Person document per accepted shot
     // e.MinPairwiseDistance — how tightly clustered the gallery is
     // e.SkippedSteps      — steps that timed out; non-zero is normal
+    // e.Captures          — per stored shot: StepIndex, ShotId, the analysis JPEG and its size
 }
+```
+
+`Captures` lists every shot the run stored. `StepIndex` points into `Steps` and is never renumbered, so a
+skipped step shows up as a gap. `ImageData` is the upright, mirror-corrected JPEG that was actually embedded,
+not the display thumbnail. To undo just this run and keep the person's earlier enrollments, pass the ids to
+`ForgetShots`:
+
+```csharp
+await faces.ForgetShots(e.PersonIdentifier, e.Captures.Select(c => c.ShotId).ToArray());
 ```
 
 | Event | Payload |
@@ -157,6 +172,14 @@ this.Enrollment.Steps =
 ];
 ```
 
+The oval is drawn at a width ÷ height of `FaceGuide.AspectRatio` (0.78), measured in view pixels so it keeps
+its shape on any frame. Set `OvalAspectRatio` to draw a different shape. It only changes the drawing: the
+alignment gate checks the face's centre and height, not its width.
+
+```csharp
+new FaceGuide(0.50f, 0.50f, 0.55f) { OvalAspectRatio = 0.72f }
+```
+
 Moving the *target* around the frame is how the wizard gets genuine pose variation: the person physically moves,
 so the camera sees them from a different angle — verifiable, unlike an instruction to turn their head. That's
 why `FaceEnrollmentStep.Default` is a sequence of outline positions (centre, left, right, top, big, small)
@@ -180,7 +203,7 @@ they should *look*.
   arm's length — and reports it in `FaceEnrollmentResult.SkippedSteps`.
 - **Storage is incremental.** Each accepted shot is enrolled immediately rather than batched to the end, so one
   impossible step doesn't discard the five shots already captured. Consequently `CancelEnrollment()` does not
-  undo anything — use `Forget(id)` for that.
+  undo anything. Use `ForgetShots(id, result.Captures…)` to remove one run, or `Forget(id)` to remove the person.
 
 Per-frame cost stays off the UI thread and single-flight: the cheap geometric gates run inline, and only once
 they pass does the control decode, measure and embed on a background thread.
