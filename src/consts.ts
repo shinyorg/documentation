@@ -125,6 +125,15 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyClient
     },
     {
+        // SMP client over IPeripheral - no platform code or DI registration, so it rides on ble
+        "id": "ble-mcumgr",
+        "nuget": "Shiny.BluetoothLE.McuMgr",
+        "macOsSupported": true,
+        "description": "Bluetooth LE - Firmware Updates (MCUmgr)",
+        "category": "hardware",
+        "version": VERSIONS.shinyClient
+    },
+    {
         // SignalR-style hubs over BLE. Host rides on blehosting, client on ble - see IMPLIED_COMPONENTS.
         "id": "blehubs-host",
         "nuget": "Shiny.BluetoothLE.Hubs.Host",
@@ -157,6 +166,21 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyUniversalHubs
     },
     {
+        // extra transports for a Universal Hubs host and/or client
+        "id": "universalhubs-multipeer",
+        "nuget": "Shiny.UniversalHubs.Multipeer",
+        "description": "Universal Hubs - Multipeer Transport (Apple)",
+        "category": "hardware",
+        "version": VERSIONS.shinyUniversalHubs
+    },
+    {
+        "id": "universalhubs-nearby",
+        "nuget": "Shiny.UniversalHubs.Nearby",
+        "description": "Universal Hubs - Nearby Connections Transport",
+        "category": "hardware",
+        "version": VERSIONS.shinyUniversalHubs
+    },
+    {
         // iBeacon ranging/monitoring + Eddystone. Apple routes iBeacon through CoreLocation (location
         // permission); everywhere else it is a BLE scan. Android monitoring runs a connectedDevice
         // foreground service.
@@ -185,7 +209,7 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Jobs",
         "description": "Periodic Jobs",
         "category": "background",
-        "version": VERSIONS.shinyClient
+        "version": VERSIONS.shinyJobs
     },
     {
         "id": "gps",
@@ -1564,6 +1588,42 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyDocumentDb
     },
     {
+        // shinyorg/efcore - add-ons over an EF Core DbContext (the ASP.NET template's EF provider)
+        "id": "efcore-outbox",
+        "nuget": "Shiny.EntityFrameworkCore.Outbox",
+        "description": "EF Core - Transactional Outbox",
+        "category": "storage",
+        "version": VERSIONS.shinyEfCore
+    },
+    {
+        "id": "efcore-temporal",
+        "nuget": "Shiny.EntityFrameworkCore.Temporal",
+        "description": "EF Core - Temporal History",
+        "category": "storage",
+        "version": VERSIONS.shinyEfCore
+    },
+    {
+        "id": "efcore-seeding",
+        "nuget": "Shiny.EntityFrameworkCore.Seeding",
+        "description": "EF Core - Versioned Seeding",
+        "category": "storage",
+        "version": VERSIONS.shinyEfCore
+    },
+    {
+        "id": "efcore-ai",
+        "nuget": "Shiny.EntityFrameworkCore.AI",
+        "description": "EF Core - AI Tools",
+        "category": "storage",
+        "version": VERSIONS.shinyEfCore
+    },
+    {
+        "id": "efcore-mcp",
+        "nuget": "Shiny.EntityFrameworkCore.Mcp",
+        "description": "EF Core - MCP Server",
+        "category": "storage",
+        "version": VERSIONS.shinyEfCore
+    },
+    {
         "id": "reflector",
         "nuget": "Shiny.Extensions.Reflector",
         "description": "Reflector",
@@ -1633,6 +1693,14 @@ export const ShinyComponents: ShinyComponent[] = [
         "nuget": "Shiny.Mobile.InAppPurchases",
         "description": "In-App Purchases & Subscriptions",
         "category": "devicedata",
+        "version": VERSIONS.shinyClient
+    },
+    {
+        // ASP.NET side of in-app purchases - App Store / Google Play server notifications
+        "id": "inapppurchases-server",
+        "nuget": "Shiny.Mobile.InAppPurchases.Server",
+        "description": "In-App Purchases - Server (store notifications & verification)",
+        "category": "server",
         "version": VERSIONS.shinyClient
     },
     {

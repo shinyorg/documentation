@@ -38,6 +38,10 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyblazor', paramId: 'bluetoothle' },
     ],
     blehosting: [{ kind: 'shinyapp', paramId: 'blehosting' }],
+    'ble-mcumgr': [
+        { kind: 'shinyapp', paramId: 'bluetoothle' },
+        { kind: 'shinyapp', paramId: 'blemcumgr' },
+    ],
     gps: [
         { kind: 'shinyapp', paramId: 'gps' },
         { kind: 'shinyblazor', paramId: 'gps' },
@@ -164,6 +168,7 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     calendarstore: [{ kind: 'shinyapp', paramId: 'calendar' }],
     appstore: [{ kind: 'shinyapp', paramId: 'appstore' }],
     inapppurchases: [{ kind: 'shinyapp', paramId: 'inapppurchases' }],
+    'inapppurchases-server': [{ kind: 'shinyaspnet', paramId: 'inapppurchasesserver' }],
     calldirectory: [{ kind: 'shinyapp', paramId: 'calldirectory' }],
     vpn: [{ kind: 'shinyapp', paramId: 'vpn' }],
     agesignals: [{ kind: 'shinyapp', paramId: 'agesignals' }],
@@ -593,6 +598,14 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     'blehubs-client': [{ kind: 'shinyapp', paramId: 'blehubsclient' }],
     'universalhubs-host': [{ kind: 'shinyapp', paramId: 'universalhubshost' }],
     'universalhubs-client': [{ kind: 'shinyapp', paramId: 'universalhubsclient' }],
+    'universalhubs-multipeer': [
+        { kind: 'shinyapp', paramId: 'universalhubshost' },
+        { kind: 'shinyapp', paramId: 'universalhubsmultipeer' },
+    ],
+    'universalhubs-nearby': [
+        { kind: 'shinyapp', paramId: 'universalhubshost' },
+        { kind: 'shinyapp', paramId: 'universalhubsnearby' },
+    ],
     permissions: [{ kind: 'shinyapp', paramId: 'permissionsmsbuild' }],
     appdevicebridge: [
         { kind: 'shinyapp', paramId: 'appdevicebridge' },
@@ -656,6 +669,26 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
     'documentdb-mcp': [
         { kind: 'shinyaspnet', paramId: 'documentdb', value: 'sqlite' },
         { kind: 'shinyaspnet', paramId: 'documentdbmcp' },
+    ],
+    'efcore-outbox': [
+        { kind: 'shinyaspnet', paramId: 'ef', value: 'sqlserver' },
+        { kind: 'shinyaspnet', paramId: 'efoutbox' },
+    ],
+    'efcore-temporal': [
+        { kind: 'shinyaspnet', paramId: 'ef', value: 'sqlserver' },
+        { kind: 'shinyaspnet', paramId: 'eftemporal' },
+    ],
+    'efcore-seeding': [
+        { kind: 'shinyaspnet', paramId: 'ef', value: 'sqlserver' },
+        { kind: 'shinyaspnet', paramId: 'efseeding' },
+    ],
+    'efcore-ai': [
+        { kind: 'shinyaspnet', paramId: 'ef', value: 'sqlserver' },
+        { kind: 'shinyaspnet', paramId: 'efaitools' },
+    ],
+    'efcore-mcp': [
+        { kind: 'shinyaspnet', paramId: 'ef', value: 'sqlserver' },
+        { kind: 'shinyaspnet', paramId: 'efmcp' },
     ],
     'documentdb-odata': [
         { kind: 'shinyaspnet', paramId: 'documentdb', value: 'sqlite' },

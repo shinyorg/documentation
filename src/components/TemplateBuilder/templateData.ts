@@ -8,46 +8,51 @@ import type { TemplateKind } from './templateFiles';
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.12.0',
-    shinyShell: '7.0.3',
-    shinyControls: '2.2.0-beta-0001',
+    shinyShell: '7.1.0-beta-0002',
+    shinyControls: '2.4.0',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '6.5.1',
-    shinyConfiguration: '6.5.1',
-    shinyLocalization: '2.0.1',
+    shinyClient: '6.6.0-beta-0002',
+    shinyConfiguration: '6.6.0-beta-0002',
+    shinyLocalization: '2.1.2',
     shinyStores: '6.0.1',
     shinyReflector: '6.0.1',
     shinyDI: '6.0.1',
     shinySerialization: '6.0.1',
-    shinyContactStore: '6.5.1',
-    shinyCalendar: '6.5.1',
+    shinyContactStore: '6.6.0-beta-0002',
+    shinyCalendar: '6.6.0-beta-0002',
     shinySpeech: '3.0.0',
     shinyAiConversation: '3.0.0',
     shinyMusic: '4.1.0',
     shinyHealth: '2.1.0',
     shinyDocumentDb: '14.1.0',
     shinyHttpServer: '2.2.1',
-    shinyDataSync: '6.5.1',
-    shinyObd: '1.5.0',
+    /** Pinned to 6.5.2: Shiny.Jobs 6.6.0-beta-0002 was never published, and Shiny.Data.Sync 6.6.0-beta-0002 depends on it */
+    shinyDataSync: '6.5.2',
+    /** Shiny.Jobs - off the client train until a 6.6 beta of it is published (see shinyDataSync) */
+    shinyJobs: '6.5.2',
+    shinyObd: '1.5.1-beta-0002',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
-    shinyRecognition: '1.0.0-beta-0007',
+    shinyRecognition: '1.0.0-beta-0021',
     /** Shiny.AspNet.* server libraries (WebHosting, JsonPatch, Idempotency, ...) ship together. */
     shinyAspNet: '1.0.0',
     shinyExtensionsPush: '3.0.0-beta-0008',
     shinyFirestoreMobile: '4.0.1',
     /** Shiny.Push.FirebaseMessaging is off the core train */
     shinyPushFirebase: '6.0.0',
-    shinyBleHubs: '1.5.0-beta-0004',
+    shinyBleHubs: '1.5.0',
     /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
-    shinyUniversalHubs: '1.5.0-beta-0004',
-    shinyAppDeviceBridge: '2.2.0',
+    shinyUniversalHubs: '1.5.0',
+    shinyAppDeviceBridge: '3.0.0',
     shinyPermissions: '1.0.0-beta-0009',
     /** shinyorg/actors - Shiny.Actors and its add-ons ship together */
-    shinyActors: '1.0.0-beta.11',
+    shinyActors: '1.0.0-beta.12',
+    /** shinyorg/efcore - Shiny.EntityFrameworkCore.* ship together */
+    shinyEfCore: '1.0.0-beta.2',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.13.26526.5',
+    devflow: '0.1.0-preview.14.26531.2',
 
     // Microsoft + third-party
     /** The MicrosoftVersion MSBuild property - Microsoft.Extensions.* / ASP.NET Core, kept on the TFM's major */
@@ -55,7 +60,7 @@ export const VERSIONS = {
     ctMvvm: '8.4.2',
     sentry: '6.12.1',
     liveCharts: '2.0.5',
-    skia: '4.153.1',
+    skia: '4.154.0',
     skiaExtended: '3.0.0',
     userDialogs: '9.2.2',
     sqliteNetPcl: '1.11.285',
@@ -67,8 +72,8 @@ export const VERSIONS = {
     unitsNet: '5.75.1',
     sysLinqAsync: '7.0.1',
     refit: '16.4.0',
-    orleans: '10.4.0',
-    scalar: '2.18.3',
+    orleans: '10.4.2',
+    scalar: '2.19.0',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';
@@ -238,8 +243,12 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'blehosting', label: 'Bluetooth LE Hosting', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'BLE peripheral/server hosting https://shinylib.net/client/blehosting/' },
-    { id: 'jobs', label: 'Background Jobs', type: 'bool', defaultValue: false, category: 'services',
+    { id: 'blemcumgr', label: 'BLE Firmware Updates (MCUmgr)', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
+        description: 'Over-the-air firmware updates & device management for Zephyr / nRF Connect / MCUboot devices over SMP (Shiny.BluetoothLE.McuMgr) https://shinylib.net/client/ble/mcumgr/',
+        visibleWhen: (s) => !!s.bluetoothle },
+    { id: 'jobs', label: 'Background Jobs', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyJobs,
         description: 'Periodic background tasks https://shinylib.net/client/jobs/',
         visibleWhen: noDesktop },
     { id: 'gps', label: 'GPS', type: 'bool', defaultValue: false, category: 'services',
@@ -288,12 +297,20 @@ const MAUI_PARAMS: TemplateParam[] = [
     { id: 'blehubsclient', label: 'BLE Hubs - Client', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyBleHubs,
         description: 'Typed client for BLE hubs (Shiny.BluetoothLE.Hubs.Client) https://shinylib.net/blehubs/client/' },
-    { id: 'universalhubshost', label: 'Universal Hubs - Host (Preview)', type: 'bool', defaultValue: false, category: 'services',
+    { id: 'universalhubshost', label: 'Universal Hubs - Host', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyUniversalHubs,
-        description: 'The same hub over BLE and Wi-Fi at once - replaces the BLE Hubs host registration (Shiny.UniversalHubs.Host, not on nuget.org yet) https://shinylib.net/universalhubs/hosting/' },
-    { id: 'universalhubsclient', label: 'Universal Hubs - Client (Preview)', type: 'bool', defaultValue: false, category: 'services',
+        description: 'The same hub over BLE and Wi-Fi at once - replaces the BLE Hubs host registration (Shiny.UniversalHubs.Host) https://shinylib.net/universalhubs/hosting/' },
+    { id: 'universalhubsclient', label: 'Universal Hubs - Client', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyUniversalHubs,
-        description: 'Discovers hubs over BLE and mDNS, connects over Wi-Fi first with BLE fallback (Shiny.UniversalHubs.Client, not on nuget.org yet) https://shinylib.net/universalhubs/client/' },
+        description: 'Discovers hubs over BLE and mDNS, connects over Wi-Fi first with BLE fallback (Shiny.UniversalHubs.Client) https://shinylib.net/universalhubs/client/' },
+    { id: 'universalhubsmultipeer', label: 'Universal Hubs - Multipeer', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyUniversalHubs,
+        description: 'Apple MultipeerConnectivity as a hub transport - iPhone/iPad/Mac with no network needed; skipped quietly elsewhere (Shiny.UniversalHubs.Multipeer) https://shinylib.net/universalhubs/multipeer/',
+        visibleWhen: (s) => !!(s.universalhubshost || s.universalhubsclient) },
+    { id: 'universalhubsnearby', label: 'Universal Hubs - Nearby', type: 'bool', defaultValue: false, category: 'services',
+        version: VERSIONS.shinyUniversalHubs,
+        description: 'Google Nearby Connections as a hub transport - Android to Android with no network, Android to Apple over Wi-Fi (Shiny.UniversalHubs.Nearby) https://shinylib.net/universalhubs/nearby/',
+        visibleWhen: (s) => !!(s.universalhubshost || s.universalhubsclient) },
     { id: 'beacons', label: 'Beacons', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyClient,
         description: 'iBeacon ranging & monitoring plus Eddystone (Shiny.Beacons) https://shinylib.net/client/beacons/' },
@@ -705,6 +722,11 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.usehubshost = !!(s.blehubshost || s.universalhubshost);
     s.usehubsclient = !!(s.blehubsclient || s.universalhubsclient);
     s.usehubs = !!(s.usehubshost || s.usehubsclient);
+    // Multipeer / Nearby are extra Universal Hubs transports - only with a Universal Hubs host or client
+    s.universalhubsmultipeer = !!(s.universalhubs && s.universalhubsmultipeer);
+    s.universalhubsnearby = !!(s.universalhubs && s.universalhubsnearby);
+    // McuMgr is an SMP client over Shiny.BluetoothLE's IPeripheral
+    s.blemcumgr = !!(s.bluetoothle && s.blemcumgr);
     s.usedocumentdbvector = !!(s.documentdb && s.documentdbvector);
     s.uxdiversdialogs = !!(s.uxdivers && s.shinyshell);
     s.useshinymediator = !!(s.shinymediator || s.aimediator);
@@ -749,6 +771,26 @@ const ASPNET_PARAMS: TemplateParam[] = [
     { id: 'efspatial', label: 'EF Spatial (NetTopologySuite)', type: 'bool', defaultValue: false, category: 'data',
         description: 'Adds NetTopologySuite spatial support to your EF Core provider',
         visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'efoutbox', label: 'EF Transactional Outbox', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyEfCore,
+        description: 'Messages enqueued in your SaveChanges transaction, delivered by a background processor (Shiny.EntityFrameworkCore.Outbox) https://shinylib.net/efcore/outbox/',
+        visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'eftemporal', label: 'EF Temporal History', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyEfCore,
+        description: 'Versioned history, AsOf queries, restore & audit trails on any provider (Shiny.EntityFrameworkCore.Temporal) https://shinylib.net/efcore/temporal/',
+        visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'efseeding', label: 'EF Versioned Seeding', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyEfCore,
+        description: 'Seeders that run once per version, even with several instances starting together (Shiny.EntityFrameworkCore.Seeding) https://shinylib.net/efcore/seeding/',
+        visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'efaitools', label: 'EF AI Tools', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyEfCore,
+        description: 'Scoped Microsoft.Extensions.AI tools over your DbContext (Shiny.EntityFrameworkCore.AI) https://shinylib.net/efcore/ai-tools/',
+        visibleWhen: (s) => s.ef !== 'none' },
+    { id: 'efmcp', label: 'EF MCP Server', type: 'bool', defaultValue: false, category: 'data',
+        version: VERSIONS.shinyEfCore,
+        description: 'Point MCP clients at your DbContext through the same scoped tools (Shiny.EntityFrameworkCore.Mcp) https://shinylib.net/efcore/mcp/',
+        visibleWhen: (s) => s.ef !== 'none' && !(s.documentdb !== 'none' && s.documentdbmcp) },
     { id: 'documentdb', label: 'Shiny.DocumentDb Provider', type: 'choice', defaultValue: 'none', category: 'data',
         description: 'Adds Shiny.DocumentDb with the chosen storage provider https://shinylib.net/documentdb/',
         version: VERSIONS.shinyDocumentDb,
@@ -859,6 +901,9 @@ const ASPNET_PARAMS: TemplateParam[] = [
     { id: 'extensionspush', label: 'Push Notifications (Server)', type: 'bool', defaultValue: false, category: 'extensions',
         version: VERSIONS.shinyExtensionsPush,
         description: 'Send push from the server - APNs, FCM, Web Push & WNS (Shiny.Extensions.Push) https://shinylib.net/extensions-push/' },
+    { id: 'inapppurchasesserver', label: 'In-App Purchases (Server)', type: 'bool', defaultValue: false, category: 'extensions',
+        version: VERSIONS.shinyClient,
+        description: 'App Store & Google Play server notifications and purchase verification (Shiny.Mobile.InAppPurchases.Server) https://shinylib.net/client/inapppurchases/server/' },
 
     // Shiny ASP.NET
     { id: 'aspnetjsonpatch', label: 'JSON Patch', type: 'bool', defaultValue: false, category: 'aspnet',
@@ -917,6 +962,10 @@ function computeAspNetSymbols(state: TemplateState): Record<string, boolean | st
     s.efnone = s.ef === 'none';
     s.efmssql = s.ef === 'sqlserver';
     s.efpostgres = s.ef === 'postgresql';
+    // Shiny.EntityFrameworkCore add-ons need an EF provider. One MCP server per app - Document DB's wins when both are on.
+    for (const id of ['efoutbox', 'eftemporal', 'efseeding', 'efaitools', 'efmcp'])
+        s[id] = !!(s[id] && !s.efnone);
+    s.efmcp = !!(s.efmcp && !(s.documentdb !== 'none' && s.documentdbmcp));
     // Shiny.DocumentDb
     s.docdbnone = s.documentdb === 'none';
     s.usedocumentdb = s.documentdb !== 'none';
@@ -1003,7 +1052,7 @@ const BLAZOR_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyMediator,
         description: 'Dapper query requests through the mediator (Shiny.Mediator.DapperRequests) https://shinylib.net/mediator/extensions/dapper/', visibleWhen: (s) => !!s.shinymediator },
     { id: 'jobs', label: 'Background Jobs', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyClient,
+        version: VERSIONS.shinyJobs,
         description: 'In-process jobs while the tab is open (Shiny.Jobs) https://shinylib.net/client/jobs/' },
     { id: 'appdevicebridge', label: 'App Device Bridge Client', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyAppDeviceBridge,
