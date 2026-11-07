@@ -12,6 +12,22 @@ export interface WhatsNewItem {
 
 export const whatsNew: WhatsNewItem[] = [
   {
+    date: "2026-11-07",
+    title: "Accessory Setup",
+    tag: "coming in 6.6",
+    href: "/client/accessorysetup/",
+    icon: "signal",
+    description: "Let users pick your BLE device in the OS's own setup UI: the AccessorySetupKit half-sheet with your product image on iOS 18+, and the CompanionDeviceManager dialog on Android. The user's choice is the permission, so there is no MFi, no location prompt and, on iOS, no Bluetooth prompt. The accessory opens as a <code>Shiny.BluetoothLE</code> peripheral with no scan, and Android 12+ can wake the app when it comes into range.",
+  },
+  {
+    date: "2026-11-06",
+    title: "MCUmgr Firmware Updates",
+    tag: "coming in 6.6",
+    href: "/client/ble/mcumgr",
+    icon: "rocket",
+    description: "Update the firmware of Zephyr, nRF Connect SDK, Mynewt and NuttX devices over BLE. <code>UpgradeFirmwareAsync</code> runs the whole MCUboot update: it uploads in chunks sized to the device's buffer, resumes an interrupted upload, then tests, resets, reconnects and confirms. It reads nRF Connect SDK <code>dfu_application.zip</code> packages, including the nRF5340 network core image, and also covers OS, image, file, shell and stats commands.",
+  },
+  {
     date: "2026-10-30",
     title: "AI Conversation 3",
     href: "/aiconversation/",

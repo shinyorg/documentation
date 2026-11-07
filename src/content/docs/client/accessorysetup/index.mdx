@@ -1,0 +1,224 @@
+---
+title: Accessory Setup | Getting Started
+description: The system's own accessory pairing sheet for your BLE device in .NET - AccessorySetupKit on iOS 18+ and CompanionDeviceManager on Android, with no MFi and no location or general Bluetooth prompt. Picked accessories open as Shiny.BluetoothLE peripherals.
+---
+import GitHubStars from '/src/components/GitHubStars.astro';
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+import PlatformSupport from '/src/components/PlatformSupport.astro';
+import AiSkill from '/src/components/AiSkill.astro';
+
+The operating system's own "set up your accessory" UI for your Bluetooth LE device. On iOS 18+ that is
+the AccessorySetupKit half-sheet with your product image. On Android it is the CompanionDeviceManager
+dialog. The user picks the accessory in system UI, and that choice is the permission: no MFi program,
+no location prompt for scanning and, on iOS, no general Bluetooth prompt.
+
+The accessory the user picks is an ordinary [Shiny.BluetoothLE](/client/ble/) peripheral. Hand it to
+`IBleManager.GetPeripheral(accessory)` and connect, read, write and subscribe the way you always do.
+No scan is needed.
+
+| | |
+|---------|---------|
+| GitHub | <GitHubStars org="shinyorg" repo="shiny" /> |
+| Downloads | <NugetDownloads name="Shiny.BluetoothLE.AccessorySetup" /> |
+
+<PlatformSupport frameworks={["maui", "dotnet"]} os={["ios", "android"]} />
+
+<AiSkill skillName="shiny-accessorysetup" />
+
+## What each platform gives you
+
+| | iOS 18+ | Android 8+ |
+|---|---|---|
+| Framework | AccessorySetupKit | CompanionDeviceManager |
+| UI | Half-sheet with your product image | System dialog (no image) |
+| Proximity filter (`AccessoryRange.Immediate`) | ✅ | Ignored |
+| Replaces | The Bluetooth permission prompt, if the app never scans | The location permission for scanning. `BLUETOOTH_CONNECT` is still needed on Android 12+ |
+| Rename on the sheet | ✅ | ❌ |
+| Removal / rename events | ✅ | Removal by the app only |
+| Background presence (appeared / disappeared) | ❌ | Android 12+ |
+| MFi or store registration | None | None |
+
+:::note[Not the AirPods popup]
+The automatic popup AirPods get is Apple-only proximity pairing. Google's equivalent, Fast Pair, needs
+firmware support and Google registration. This package shows the picker when your app asks: the app
+must be in the foreground and call `ShowPicker`.
+:::
+
+There is no Mac Catalyst, macOS, Windows or Linux implementation: Apple ships AccessorySetupKit for iOS
+only. The `net10.0` target carries the contracts so shared code compiles, but nothing is registered
+there. See [Falling back to a scan](/client/accessorysetup/platform/#falling-back-to-a-scan).
+
+## Setup
+
+```bash
+dotnet add package Shiny.BluetoothLE.AccessorySetup
+```
+
+```csharp
+using Shiny;
+
+builder.Services.AddAccessorySetup();   // or AddAccessorySetup<MyAccessoryDelegate>()
+```
+
+`AddAccessorySetup()` registers Shiny.BluetoothLE (`AddBluetoothLE()`) as well, so `IBleManager` is ready to talk
+to picked accessories. If you need a BLE delegate or an Apple configuration, call
+`AddBluetoothLE<TDelegate>()` or `AddBluetoothLE(config)` yourself, before or after. Both are kept.
+
+Then add the [Info.plist and AndroidManifest entries](/client/accessorysetup/platform/). On iOS the
+picker refuses a filter that Info.plist does not declare.
+
+## Pick an accessory
+
+```csharp
+using Shiny.BluetoothLE;
+using Shiny.BluetoothLE.AccessorySetup;
+
+public class PairingViewModel(IAccessorySetupManager setup, IBleManager ble)
+{
+    public async Task Pair()
+    {
+        if (!setup.IsSupported)
+            return; // iOS < 18, or an Android device without companion_device_setup - fall back to a scan
+
+        var accessory = await setup.ShowPicker(new AccessoryPickerItem(
+            "Shiny Sensor",
+            new AccessoryDiscoveryFilter
+            {
+                ServiceUuid = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+                Range = AccessoryRange.Immediate        // iOS: only when held next to the phone
+            })
+        {
+            ProductImage = "sensor.png",                // iOS: bundle image name or file path, transparent PNG
+            AllowRename = true                          // iOS: let the user name it on the sheet
+        });
+
+        if (accessory == null)
+            return; // the user dismissed the sheet, or nothing was found - not an error
+
+        var peripheral = ble.GetPeripheral(accessory);  // no scan needed
+        await peripheral!.ConnectAsync();
+    }
+}
+```
+
+`ShowPicker` returns `null` when the user dismisses the sheet or nothing is found. It throws an
+`AccessorySetupException` only for a real failure (see [Errors](#errors)).
+
+`GetPeripheral` returns `null` when the accessory has no Bluetooth identity, or Bluetooth no longer
+knows it. Pick it again in that case.
+
+### Offering several kinds of accessory
+
+Pass a list of `AccessoryPickerItem`s. iOS offers each match with its own name and image. Android lists
+every match in one dialog.
+
+```csharp
+var accessory = await setup.ShowPicker(
+    [
+        new AccessoryPickerItem("Thermometer", new AccessoryDiscoveryFilter { ServiceUuid = "1809" }) { ProductImage = "thermo.png" },
+        new AccessoryPickerItem("Scale", new AccessoryDiscoveryFilter { CompanyIdentifier = 0x0059 }) { ProductImage = "scale.png" }
+    ],
+    new AccessoryPickerOptions
+    {
+        DiscoveryTimeout = TimeSpan.FromSeconds(30),   // iOS 26+
+        AndroidSingleDevice = false                    // true: "pair with this device?" for the first match only
+    }
+);
+```
+
+Only set `AndroidSingleDevice` when exactly one accessory is expected nearby. With several, the user
+cannot choose which one is paired.
+
+## Discovery filters
+
+`AccessoryDiscoveryFilter` describes what the advertisement must contain. Filters are validated before
+the picker opens, and an invalid one throws `AccessorySetupException` with `InvalidRequest`.
+
+| Property | Meaning | Rules |
+|---|---|---|
+| `ServiceUuid` | An advertised service UUID (`180D` or a full 128-bit UUID) | This or `CompanyIdentifier` is required |
+| `ServiceData` / `ServiceDataMask` | Service data advertised under `ServiceUuid` | Needs `ServiceUuid`. The mask is the same length as the data |
+| `CompanyIdentifier` | Bluetooth SIG company id in the manufacturer data | This or `ServiceUuid` is required |
+| `ManufacturerData` / `ManufacturerDataMask` | Manufacturer data after the 2 company-id bytes | Needs `CompanyIdentifier`. The mask is the same length as the data |
+| `NameSubstring` | Text the advertised local name must contain (case sensitive) | Optional |
+| `Range` | `Default` or `Immediate` (held next to the phone) | iOS only. Android ignores it |
+| `RequiresPairing` | The accessory needs LE bonding, so the sheet runs it during setup | iOS only. Android bonds on first encrypted access as usual |
+
+A null mask compares every bit.
+
+## Managing accessories
+
+```csharp
+// everything the user has granted this app
+var accessories = await setup.GetAccessories();
+
+// revoke one - iOS shows its own confirmation; the app loses access until it is picked again
+await setup.Remove(accessories[0]);
+```
+
+Each `SetupAccessory` carries:
+
+| Property | Meaning |
+|---|---|
+| `Identifier` | Stable id for the grant: the Bluetooth identifier on iOS, the association id on Android 13+, the MAC address on older Android |
+| `DisplayName` | The name the user sees, when the platform reports one |
+| `PeripheralUuid` | The Shiny.BluetoothLE peripheral id, used by `GetPeripheral` |
+| `State` | `Unauthorized`, `AwaitingAuthorization` (iOS) or `Authorized` |
+| `MacAddress` | Android only. iOS never exposes one |
+
+## The delegate
+
+`IAccessorySetupDelegate` hears about grants that change outside your own calls. Every method has a
+no-op default, so implement only what you need. Register it with `AddAccessorySetup<TDelegate>()`. You
+can register more than one, and every delegate runs.
+
+```csharp
+public class MyAccessoryDelegate : IAccessorySetupDelegate
+{
+    public Task OnAccessoryAdded(SetupAccessory accessory) => Task.CompletedTask;
+
+    // also raised when the user removes it in Settings > Privacy & Security > Accessories (iOS)
+    public Task OnAccessoryRemoved(SetupAccessory accessory) => Task.CompletedTask;
+
+    // iOS: renamed, or its state changed
+    public Task OnAccessoryChanged(SetupAccessory accessory) => Task.CompletedTask;
+
+    // Android 12+: in or out of range - the system starts the app for this if it is not running
+    public Task OnPresenceChanged(SetupAccessory accessory, bool isNearby) => Task.CompletedTask;
+}
+```
+
+### Background presence (Android 12+)
+
+Android can wake your app whenever an accessory comes into or leaves range, even when the app is not
+running. Ask for it per accessory:
+
+```csharp
+if (setup.IsPresenceSupported)
+    await setup.StartObservingPresence(accessory);   // StopObservingPresence(accessory) to undo
+```
+
+Events arrive in `OnPresenceChanged` through `ShinyCompanionDeviceService`, which the package declares
+for you. The manifest needs `REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE` (see
+[Platform Setup](/client/accessorysetup/platform/#android)). `IsPresenceSupported` is always `false`
+on iOS, where `StartObservingPresence` throws `NotSupported`.
+
+## Errors
+
+`AccessorySetupException.Code` says what went wrong:
+
+| Code | Cause |
+|---|---|
+| `NotSupported` | The OS or device has no accessory setup API (`IsSupported` is false), or presence was requested where it isn't available |
+| `PickerAlreadyActive` | A picker is already showing |
+| `Restricted` | The user or a device management profile restricted accessory setup |
+| `InvalidRequest` | A bad filter, a filter missing from Info.plist (iOS), or a permission missing from the manifest (Android) |
+| `NotAssociated` | The accessory is not, or no longer, granted to the app |
+| `Failed` | The platform failed the operation. The inner exception has the reason |
+
+## Don't
+
+- Don't create your own `ASAccessorySession` or call `CompanionDeviceManager.Associate` alongside this
+  package. It owns the session.
+- Don't treat a `null` result from `ShowPicker` as an error.
+- Don't expect presence events on iOS.

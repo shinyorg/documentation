@@ -49,13 +49,6 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
-      id: 'commercial-support',
-      title: 'Commercial Support',
-      description: 'Guaranteed response times on Shiny bug fixes, straight from the maintainers. Plans from US$1,500 a year.',
-      href: 'https://shinysoft.biz/support/?utm_source=shinylib&utm_medium=banner&utm_campaign=support',
-      cta: 'See the plans',
-    },
-    {
       id: 'speech-v30',
       title: 'AI Conversations, Speech, & Audio Release',
       description: '[Have a full conversation with AI](/aiconversation), [use speech commands](/speech), and [interact with audio content seamlessly](/audio).'
@@ -69,23 +62,12 @@ const announcementConfig = {
       id: 'client-v65',
       title: 'Shiny Client v6.5',
       description: '[Biometrics](/client/biometrics), [NFC](/client/nfc), [Classic Bluetooth](/client/bluetooth), [Uno Support](/client/core/uno), & [Avalonia Support](/client/core/avalonia)'
-    },     
-    {
-      id: 'controls-21',
-      title: 'Shiny Controls v2',
-      description: '[Foldables](/controls/foldables), [MediaElement Encoder Support](/controls/mediaelement), [Document SDK](/controls/office-shell/documents), [Tray Icon Improvements](/controls/trayicon), & [Notch View](/controls/notch)'
-    },      
-    {
-      id: 'docdb-v14',
-      title: 'Document DB 14',
-      description: '[Joins](/documentdb/querying#joins) & [Easy Doc Metadata!](/documentdb/metadata)'
     },
     {
-      id: 'httpserver-v20',
-      title: 'HTTP Server v2',
-      description: '[Resumable Uploads](/httpserver/tus), [OAuth Loopingback](/httpserver/oauth-loopback), [NEW Switchboard SignalR-like Framework](/httpserver/switchboard), [Webhooks](/httpserver/webhooks), [CalDAV](/httpserver/caldav), & [Scalar Support](/httpserver/openapi#an-api-reference-page-with-scalar)'
+      id: 'client-v66',
+      title: 'Shiny Client v6.6',
+      description: '[Accessory Setup](/client/accessorysetup), [McuMgr BLE Protocol](/client/mcumgr-ble-protocol)'
     },
-
     {
       id: 'unihub-15',
       title: 'Universal Hubs 1.5',

@@ -196,6 +196,20 @@ export const categories: CategoryCopy[] = [
                 os: ['android', 'ios', 'macos', 'windows', 'linux'],
             },
             {
+                label: 'Accessory Setup',
+                tagline: 'The system pairing sheet for your BLE accessory',
+                summary: 'Let users pick your BLE device in the OS\'s own setup UI - AccessorySetupKit on iOS 18+, CompanionDeviceManager on Android - with no MFi and no location or general Bluetooth prompt. The picked accessory opens as a Shiny.BluetoothLE peripheral.',
+                highlights: [
+                    'AccessorySetupKit half-sheet with your product image',
+                    'No location or Bluetooth prompt to find the device',
+                    'Picked accessories open as IPeripheral - no scan',
+                    'Background presence events on Android 12+',
+                ],
+                packages: ['Shiny.BluetoothLE.AccessorySetup'],
+                frameworks: ['dotnet', 'maui'],
+                os: ['ios', 'android'],
+            },
+            {
                 label: 'Classic Bluetooth',
                 tagline: 'RFCOMM serial connections, discovery and pairing over classic Bluetooth',
                 summary: 'Talk to the classic Bluetooth (BR/EDR) devices BLE never replaced, such as SPP serial adapters, printers and scanners. Connect to a service or host one, and read and write the connection as a Stream.',

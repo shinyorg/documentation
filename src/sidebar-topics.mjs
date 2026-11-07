@@ -221,6 +221,10 @@ export const sidebarTopics = [
     label: 'Hardware & Connectivity',
     link: '/client/ble/',
     icon: 'link',
+    featuredInHomenav: [
+      { label: 'Accessory Setup', link: 'client/accessorysetup/', dateCreated: '2026-11-07', dateUpdated: '2026-11-07', note: 'The system pairing sheet for your BLE accessory' },
+      { label: 'Firmware Updates (MCUmgr)', link: 'client/ble/mcumgr', dateCreated: '2026-11-06', dateUpdated: '2026-11-06', note: 'MCUboot firmware upgrades over BLE' },
+    ],
     items: [
       {
         label: 'BluetoothLE',
@@ -236,6 +240,16 @@ export const sidebarTopics = [
           { label: 'Best Practice/FAQ', link: 'client/ble/best-practices', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
+        ]
+      },
+      {
+        label: 'Accessory Setup',
+        jumpTo: true,
+        dateUpdated: '2026-11-07',
+        items: [
+          { label: 'Getting Started', link: 'client/accessorysetup/', showNew: true, dateCreated: '2026-11-07', dateUpdated: '2026-11-07' },
+          { label: 'Platform Setup', link: 'client/accessorysetup/platform', dateCreated: '2026-11-07', dateUpdated: '2026-11-07' },
+          { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2026-11-07', dateUpdated: '2026-11-07' }
         ]
       },
       {

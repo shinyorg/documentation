@@ -1,0 +1,102 @@
+---
+title: Accessory Setup | Platform Setup
+description: Info.plist and AndroidManifest entries for Shiny.BluetoothLE.AccessorySetup, and how to fall back to a normal BLE scan where the system picker isn't available
+---
+
+## iOS
+
+AccessorySetupKit needs iOS 18 or later. Every filter you pass to `ShowPicker` has to be declared in
+Info.plist, or the picker refuses the request and `ShowPicker` throws `InvalidRequest`.
+
+```xml
+<key>NSAccessorySetupSupports</key>
+<array>
+    <string>Bluetooth</string>
+</array>
+
+<!-- every AccessoryDiscoveryFilter.ServiceUuid -->
+<key>NSAccessorySetupBluetoothServices</key>
+<array>
+    <string>6E400001-B5A3-F393-E0A9-E50E24DCCA9E</string>
+</array>
+
+<!-- when a filter sets CompanyIdentifier, also declare NSAccessorySetupBluetoothCompanyIdentifiers listing each one -->
+
+<!-- every AccessoryDiscoveryFilter.NameSubstring, when you use them -->
+<key>NSAccessorySetupBluetoothNames</key>
+<array>
+    <string>Shiny</string>
+</array>
+```
+
+### Skipping the Bluetooth prompt
+
+Leave `NSBluetoothAlwaysUsageDescription` out of Info.plist, and never call `IBleManager.Scan`, and the
+app never shows the Bluetooth permission prompt. CoreBluetooth then only sees the accessories the user
+picked, which is all `GetPeripheral` needs.
+
+If the app also has to scan for other devices, add `NSBluetoothAlwaysUsageDescription` back. The
+prompt then appears as it would without this package.
+
+:::tip[Product images]
+`AccessoryPickerItem.ProductImage` is an image name in the app bundle (as `UIImage.FromBundle` takes
+it) or a file path. Use a transparent PNG. Without one the sheet shows a generic Bluetooth symbol.
+:::
+
+## Android
+
+CompanionDeviceManager is available from Android 8. Background presence needs Android 12.
+
+```xml
+<uses-feature android:name="android.software.companion_device_setup" android:required="false" />
+
+<!-- GATT on Android 12+ still needs this runtime permission -->
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+
+<!-- only if you call StartObservingPresence -->
+<uses-permission android:name="android.permission.REQUEST_OBSERVE_COMPANION_DEVICE_PRESENCE" />
+```
+
+`required="false"` keeps the app installable on devices without the feature. On those,
+`IsSupported` is `false`.
+
+The picker doesn't replace `BLUETOOTH_CONNECT`: the association covers discovery, not the GATT
+connection. Request it before connecting, through Shiny.BluetoothLE's access request.
+
+`ShinyCompanionDeviceService` is declared by the package and merged into your manifest. You don't add
+it yourself.
+
+The picker's result comes back as an activity result, so the host has to forward
+`OnActivityResult` to Shiny. MAUI hosting does this already. Native Android hosts derive their
+activity from `ShinyAndroidActivity`.
+
+## Falling back to a scan
+
+Outside iOS and Android, `AddAccessorySetup()` registers only Bluetooth LE, and `IsSupported` is `false` on
+iOS 17 and older and on Android devices without `companion_device_setup`. Shared code can resolve the
+manager as optional and scan when it isn't there:
+
+```csharp
+public class PairingViewModel(IBleManager ble, IAccessorySetupManager? setup = null)
+{
+    public async Task<IPeripheral?> FindSensor()
+    {
+        if (setup?.IsSupported == true)
+        {
+            var accessory = await setup.ShowPicker(new AccessoryPickerItem(
+                "Shiny Sensor",
+                new AccessoryDiscoveryFilter { ServiceUuid = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E" }
+            ));
+            return accessory == null ? null : ble.GetPeripheral(accessory);
+        }
+
+        // no system picker - request access and scan as usual
+        await ble.RequestAccessAsync();
+        // ble.Scan(new ScanConfig("6E400001-B5A3-F393-E0A9-E50E24DCCA9E")) ...
+        return null;
+    }
+}
+```
+
+The scan path needs the usual [BluetoothLE platform setup](/client/ble/), including
+`NSBluetoothAlwaysUsageDescription` on iOS.
