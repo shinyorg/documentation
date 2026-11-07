@@ -476,6 +476,13 @@ export default defineConfig({
         { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean.' } },
         { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png?v=5' } },
         { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Shiny.NET — the hard parts of your app, already solved. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean.' } },
+        {
+          tag: 'script',
+          attrs: {
+            defer: true,
+            src: 'https://shinysoft.biz/api/chat/widget.js?site=shinylib.net'
+          }
+        },
         // Adding google analytics
         {
           tag: 'script',
