@@ -138,7 +138,8 @@ export const sidebarTopics = [
                 { label: 'App Functions', link: 'mediator/extensions/appfunctions', dateCreated: '2026-09-30', dateUpdated: '2026-09-30' },
                 { label: 'MAUI', link: 'mediator/extensions/maui', dateCreated: '2025-01-22', dateUpdated: '2025-01-22' },
                 { label: 'Blazor', link: 'mediator/extensions/blazor', dateCreated: '2025-01-22', dateUpdated: '2025-01-22' },
-                { label: 'Uno Platform', link: 'mediator/extensions/unoplatform', dateCreated: '2025-02-08', dateUpdated: '2025-02-08' },
+                { label: 'Uno Platform', link: 'mediator/extensions/unoplatform', dateCreated: '2025-02-08', dateUpdated: '2026-11-07' },
+                { label: 'Avalonia', link: 'mediator/extensions/avalonia', dateCreated: '2026-11-07', dateUpdated: '2026-11-07' },
                 { label: 'ASP.NET Core', link: 'mediator/extensions/aspnet', dateCreated: '2024-07-05', dateUpdated: '2024-07-05' },
                 { label: 'Prism', link: 'mediator/extensions/prism', dateCreated: '2024-06-30', dateUpdated: '2024-06-30' },
                 { label: 'Dapper', link: 'mediator/extensions/dapper', dateCreated: '2025-01-22', dateUpdated: '2025-01-22' }

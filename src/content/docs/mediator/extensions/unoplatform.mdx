@@ -5,29 +5,106 @@ import NugetBadge from '/src/components/NugetBadge.tsx';
 
 The **Uno Platform** is an [Open-source platform](https://github.com/unoplatform/uno) for building single codebase native mobile, web, desktop, and embedded apps quickly.
 
-With **Uno Platform + Mediator**, you can now take advantage of all our offline, persistent cache, and other app-building
-middleware.
+With **Uno Platform + Mediator**, your pages and view models can handle events without being registered in dependency injection, handlers marked `[MainThread]` run on the UI thread,
+and you get all of the offline, persistent cache, and other app-building middleware.
 
 Visit their [website](https://platform.uno/) and [documentation](https://aka.platform.uno/uno-docs-intro) for more details.
 
-:::note
-We currently do not support event collector for Uno Platform. This is planned for a future release.
-:::
-
 ## Setup
 1. Install <NugetBadge name="Shiny.Mediator.Uno" showLabel={true} /> to your project.
-2. In your `App.xaml.cs` file, add the following:
+2. In your `App.xaml.cs` file, register the mediator on the Uno application builder:
     ```csharp
-    builder.Services.AddShinyMediator(cfg => cfg.UseUno());
+    protected override async void OnLaunched(LaunchActivatedEventArgs args)
+    {
+        var builder = this.CreateBuilder(args)
+            .AddShinyMediator(cfg => cfg.AddUnoPersistentCache())
+            .Configure(host => host
+                // your other host configuration
+            );
+
+        MainWindow = builder.Window;
+        Host = await builder.NavigateAsync<Shell>();
+    }
     ```
+    `AddShinyMediator` on the application builder also hands `builder.Window` to the mediator. The window is needed for the event collector,
+    error dialogs, and `[MainThread]`.
 3. Start making calls to the mediator as you normally would.
 
+### Without Uno.Extensions hosting
+If you build your own service collection, pass your window to `UseUno`:
+
+```csharp
+services.AddShinyMediator(cfg => cfg.UseUno(MainWindow));
+```
+
+If you only have an `IHostBuilder`, `host.AddShinyMediator()` registers everything, but no window is tracked. Add it yourself once it exists:
+
+```csharp
+Host.Services.GetRequiredService<UnoWindowTracker>().Add(MainWindow);
+```
+
+Use the same call for any secondary window that should take part. A window stops being tracked when it closes.
+
+:::danger
+Do not register your view model or page in dependency injection against an event handler, or with
+`AddSingletonAsImplementedInterfaces` or `AddScopedAsImplementedInterfaces`. That creates new instances of those
+types instead of firing against the instance attached to your page. Event collectors exist for exactly this case.
+:::
+
+## Event Collector
+`UseUno` installs the Uno event collector. When an event is published, the collector walks the visual tree of every tracked window, including open popups,
+on the UI thread. Any `FrameworkElement`, or its `DataContext`, that implements `IEventHandler<TEvent>` takes part in the publish.
+A view model shared by many elements is called once.
+
+```csharp
+public partial class MainViewModel : ObservableObject, IEventHandler<OrderShipped>
+{
+    [MainThread]
+    public Task Handle(OrderShipped @event, IMediatorContext context, CancellationToken ct)
+    {
+        this.Status = $"Order {@event.OrderId} shipped";
+        return Task.CompletedTask;
+    }
+}
+```
+
+A publish from a background thread waits up to 5 seconds (`UnoEventCollector.UiThreadTimeout`) for the UI thread to collect handlers. If the UI thread is
+blocked, view handlers are skipped and a warning is logged.
+
 ## Middleware Support
+The Mediator Uno Platform extension installs default middleware, which you can opt out of. To skip it, pass `false` for
+`includeStandardMiddleware` (`UseUno(false)` or `AddShinyMediator(includeStandardMiddleware: false)`).
 
-The Mediator Uno Platform extension comes with a lot of preinstalled default middleware (that you can opt out of).  If you choose to opt-out of this middleware being installed,
-simply pass false to the first argument in `UseUno`.
-
-* [User Notification Errors](/mediator/exceptionhandlers)
+* [Main Thread](/mediator/middleware/mainthread) - runs on the tracked window's `DispatcherQueue`
+* [User Notification Errors](/mediator/exceptionhandlers) - shown in a `ContentDialog` on the main window
 * [Offline](/mediator/middleware/offline)
 * [Replay Stream](/mediator/middleware/replay)
-* [Persistent Caching](/mediator/middleware/caching)
+* [Persistent Caching](/mediator/middleware/caching) - call `AddUnoPersistentCache()`; files are stored in `ApplicationData.Current.LocalFolder`
+
+## Connectivity Broadcaster
+Publishes a `ConnectivityChanged` event whenever internet availability changes (from `NetworkInformation`). It requires Uno.Extensions hosting,
+which initializes it once the host is built.
+
+```csharp
+builder.AddShinyMediator(cfg => cfg.AddConnectivityBroadcaster());
+
+public partial class MyViewModel : Shiny.Mediator.IConnectivityEventHandler
+{
+    [MainThread]
+    public Task Handle(ConnectivityChanged @event, IMediatorContext context, CancellationToken ct)
+    {
+        this.IsOnline = @event.Connected;
+        return Task.CompletedTask;
+    }
+}
+```
+
+## Replacing Infrastructure
+Every infrastructure service is registered with `TryAdd`. To replace one, register your own before calling `UseUno`.
+
+| Service | Default |
+|---------|---------|
+| `IMainThreadDispatcher` | `UnoMainThreadDispatcher` (window `DispatcherQueue`) |
+| `IAlertDialogService` | `AlertDialogService` (`ContentDialog`) |
+| `IInternetService` | `InternetService` (`NetworkInformation`) |
+| `IStorageService` | `StorageService` (`ApplicationData.LocalFolder`) |

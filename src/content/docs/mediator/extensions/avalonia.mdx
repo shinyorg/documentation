@@ -1,0 +1,104 @@
+---
+title: Avalonia
+---
+import NugetBadge from '/src/components/NugetBadge.tsx';
+
+[Avalonia](https://avaloniaui.net/) is an open-source, cross-platform UI framework for .NET that runs on Windows, macOS, Linux, iOS, Android, and the browser.
+
+With **Avalonia + Mediator**, your windows, user controls, and view models can handle events without being registered in dependency injection, handlers marked `[MainThread]`
+run on the UI thread, and you get all of the offline, persistent cache, and other app-building middleware.
+
+## Setup
+1. Install <NugetBadge name="Shiny.Mediator.Avalonia" showLabel={true} /> to your project.
+2. Register the mediator where you build your service provider, typically in `App.axaml.cs`:
+    ```csharp
+    public override void OnFrameworkInitializationCompleted()
+    {
+        var services = new ServiceCollection();
+        services.AddShinyMediator(cfg => cfg
+            .UseAvalonia()
+            .AddAvaloniaPersistentCache()
+        );
+        services.AddTransient<MainWindowViewModel>();
+        var provider = services.BuildServiceProvider();
+
+        if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
+        {
+            desktop.MainWindow = new MainWindow
+            {
+                DataContext = provider.GetRequiredService<MainWindowViewModel>()
+            };
+        }
+        else if (ApplicationLifetime is ISingleViewApplicationLifetime singleView)
+        {
+            singleView.MainView = new MainView
+            {
+                DataContext = provider.GetRequiredService<MainWindowViewModel>()
+            };
+        }
+        base.OnFrameworkInitializationCompleted();
+    }
+    ```
+    If you use `Microsoft.Extensions.Hosting`, call `AddShinyMediator` on `builder.Services` the same way.
+3. Start making calls to the mediator as you normally would.
+
+There is nothing to hand over. The integration finds your windows (desktop) or main view (mobile and browser) through `Application.Current.ApplicationLifetime`.
+
+:::danger
+Do not register your view model or view in dependency injection against an event handler, or with
+`AddSingletonAsImplementedInterfaces` or `AddScopedAsImplementedInterfaces`. That creates new instances of those
+types instead of firing against the instance attached to your view. Event collectors exist for exactly this case.
+:::
+
+## Event Collector
+`UseAvalonia` installs the Avalonia event collector. When an event is published, the collector walks the logical tree of every open window
+(or the main view in a single-view app) on the UI thread. Any control, or its `DataContext`, that implements `IEventHandler<TEvent>` takes part in the publish.
+A view model shared by many controls is called once.
+
+```csharp
+public partial class MainWindowViewModel : ObservableObject, IEventHandler<OrderShipped>
+{
+    [MainThread]
+    public Task Handle(OrderShipped @event, IMediatorContext context, CancellationToken ct)
+    {
+        this.Status = $"Order {@event.OrderId} shipped";
+        return Task.CompletedTask;
+    }
+}
+```
+
+A publish from a background thread waits up to 5 seconds (`AvaloniaEventCollector.UiThreadTimeout`) for the UI thread to collect handlers. If the UI thread is
+blocked, view handlers are skipped and a warning is logged. To search other roots, subclass `AvaloniaEventCollector`, override `GetRoots()`, and register
+your subclass as the `IEventCollector`.
+
+## Middleware Support
+The Mediator Avalonia extension installs default middleware, which you can opt out of by passing `false` to `UseAvalonia`.
+
+* [Main Thread](/mediator/middleware/mainthread) - runs on `Dispatcher.UIThread`
+* [User Notification Errors](/mediator/exceptionhandlers) - see Alert Dialogs below
+* [Offline](/mediator/middleware/offline)
+* [Replay Stream](/mediator/middleware/replay)
+* [Persistent Caching](/mediator/middleware/caching) - call `AddAvaloniaPersistentCache()`; files are stored under `LocalApplicationData/<your app>/mediator`
+
+## Alert Dialogs
+Avalonia has no built-in message box. The default `IAlertDialogService` shows a small modal window over the active window on desktop, and a centered flyout
+over the main view on mobile and in the browser. It uses your app's theme. To use a dialog library instead, register your own implementation before `UseAvalonia`:
+
+```csharp
+services.AddSingleton<IAlertDialogService, MyDialogService>();
+services.AddShinyMediator(cfg => cfg.UseAvalonia());
+```
+
+## Network Availability
+The default `IInternetService` uses `System.Net.NetworkInformation.NetworkChange`. It reports whether a network interface is up, not whether the internet can
+be reached through it. In the browser, the network is always reported as available. Register your own `IInternetService` for a stronger check, such as a ping to your API.
+
+## Replacing Infrastructure
+Every infrastructure service is registered with `TryAdd`. To replace one, register your own before calling `UseAvalonia`.
+
+| Service | Default |
+|---------|---------|
+| `IMainThreadDispatcher` | `AvaloniaMainThreadDispatcher` (`Dispatcher.UIThread`) |
+| `IAlertDialogService` | `AlertDialogService` (modal window / flyout) |
+| `IInternetService` | `InternetService` (`NetworkChange`) |
+| `IStorageService` | `StorageService` (`LocalApplicationData`) |
