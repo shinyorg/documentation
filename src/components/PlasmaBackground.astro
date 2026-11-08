@@ -1,10 +1,12 @@
 ---
 /**
- * PlasmaBackground — a slow, faint plasma wash in the brand colors behind every page.
+ * PlasmaBackground — a faint, slowly drifting lens flare in the brand colors behind every page.
+ * (The file keeps its old name so the `data-plasma` toggle and stored preference carry over.)
  *
- * A tiny WebGL fragment shader draws into a canvas at 1/4 of the viewport's size and CSS stretches
- * it to full screen: plasma is all low-frequency, so the bilinear upscale is invisible and the GPU
- * cost stays tiny. It is capped at ~30fps, stops while the tab is hidden, and
+ * A tiny WebGL fragment shader draws into a canvas at 1/2 of the viewport's size and CSS stretches
+ * it to full screen. The light source wanders across the top of the page and leans toward the mouse;
+ * the ghosts, halo and streak all follow it along the flare axis through the screen center.
+ * It is capped at ~30fps, stops while the tab is hidden, and
  * draws a single still frame under `prefers-reduced-motion`. No WebGL → no background, nothing else.
  *
  * Starlight renders our components inside `<main>` or the fixed header, both of which can form
@@ -28,28 +30,55 @@
     if (!gl) return;
 
     var vert = 'attribute vec2 p;void main(){gl_Position=vec4(p,0.,1.);}';
-    // Domain-warped plasma: each pass bends the coordinates by the other axis, which folds straight
-    // sine bands into the swirling, filamented look of real plasma. The palette cycles through the
-    // brand colors along the warped field, and a second field picks out the bright filaments.
+    // Lens flare. `l` is the light source in centered, aspect-corrected coordinates (y up, the
+    // short axis spans -.5..+.5). Like a real lens, every artifact sits on the line from the light
+    // through the screen center: ghosts are reflections at -k * l, so they swing across the page
+    // as the light moves. Layers: soft core + bloom, slowly turning starburst rays, an anamorphic
+    // horizontal streak, a chromatic halo ring, and a chain of ghost discs in the brand colors.
     var frag = [
       'precision mediump float;',
-      'uniform vec2 r;uniform float t;',
+      'uniform vec2 r;uniform float t;uniform vec2 l;',
+      'const vec3 purple=vec3(.416,.239,.941),green=vec3(.059,.749,.478),lime=vec3(.651,.851,0.);',
+      // soft disc with a slightly brighter rim, like an aperture ghost
+      'float ghost(vec2 p,vec2 c,float rad){',
+      '  float d=length(p-c);',
+      '  float disc=smoothstep(rad,rad*.55,d);',
+      '  float rim=exp(-pow((d-rad*.92)/(rad*.12),2.));',
+      '  return disc*.55+rim*.45;',
+      '}',
       'void main(){',
-      '  vec2 p=gl_FragCoord.xy/r.y*4.5;',
-      '  for(int i=1;i<6;i++){',
-      '    float f=float(i);',
-      '    p.x+=.7/f*sin(f*p.y+t+.3*f)+.5;',
-      '    p.y+=.6/f*cos(f*p.x+t*.83+.5*f)-.5;',
-      '  }',
-      '  float v=.5+.5*sin(p.x+p.y+t*.4);',
-      // Shiny vivid purple / green / lime, cycled
-      '  vec3 purple=vec3(.416,.239,.941),green=vec3(.059,.749,.478),lime=vec3(.651,.851,0.);',
-      '  float w1=.5+.5*cos(6.2832*v),w2=.5+.5*cos(6.2832*(v-.333)),w3=.5+.5*cos(6.2832*(v-.667));',
-      '  vec3 col=(purple*w1*1.4+green*w2+lime*w3*.6)/(w1*1.4+w2+w3*.6);',
-      '  float glow=.5+.5*sin(p.x*1.6-p.y*1.2-t*.6);',
-      '  glow=glow*glow;',
-      '  float alpha=.2+.8*glow;',
-      '  gl_FragColor=vec4(col*alpha,alpha);',
+      '  vec2 p=(gl_FragCoord.xy-.5*r)/r.y;',
+      '  vec2 d=p-l;',
+      '  float dist=length(d);',
+      '  vec3 col=vec3(0.);',
+      // core + wide bloom
+      '  float core=exp(-dist*14.);',
+      '  float bloom=exp(-dist*3.2);',
+      '  col+=mix(lime,vec3(1.),.35)*core*1.1+purple*bloom*.4;',
+      // starburst: two interleaved ray sets turning in opposite directions
+      '  float a=atan(d.y,d.x);',
+      '  float rays=pow(abs(sin(a*5.+t*.07)),40.)+.6*pow(abs(sin(a*8.-t*.05+1.3)),60.);',
+      '  col+=mix(green,lime,.5)*rays*exp(-dist*4.5)*.9;',
+      // anamorphic streak
+      '  float streak=exp(-abs(d.y)*90.)*exp(-abs(d.x)*1.4);',
+      '  col+=mix(purple,vec3(.75,.7,1.),.4)*streak*1.1;',
+      // chromatic halo ring around the light
+      '  float h=.36;',
+      '  col+=purple*exp(-pow((dist-h-.012)*55.,2.))*.35;',
+      '  col+=green*exp(-pow((dist-h)*55.,2.))*.35;',
+      '  col+=lime*exp(-pow((dist-h+.012)*55.,2.))*.3;',
+      // ghosts along the flare axis (through the center, opposite the light)
+      '  col+=green *ghost(p,l*-.25,.035)*.55;',
+      '  col+=purple*ghost(p,l*-.55,.09)*.40;',
+      '  col+=lime  *ghost(p,l*-.80,.05)*.45;',
+      '  col+=purple*ghost(p,l*-1.15,.16)*.28;',
+      '  col+=green *ghost(p,l*-1.55,.07)*.40;',
+      '  col+=lime  *ghost(p,l*.45,.025)*.50;',
+      // big faint wash at the far end of the axis
+      '  col+=mix(purple,green,.5)*exp(-length(p+l*1.9)*5.)*.25;',
+      '  col=min(col,vec3(1.));',
+      '  float alpha=clamp(max(col.r,max(col.g,col.b)),0.,1.);',
+      '  gl_FragColor=vec4(col,alpha);',
       '}',
     ].join('\n');
 
@@ -76,8 +105,10 @@
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     var uRes = gl.getUniformLocation(prog, 'r');
     var uTime = gl.getUniformLocation(prog, 't');
+    var uLight = gl.getUniformLocation(prog, 'l');
 
-    var SCALE = 4;
+    // Half resolution: the streak and rays are thin enough that 1/4 would visibly blur them.
+    var SCALE = 2;
     function resize() {
       var w = Math.max(1, Math.ceil(window.innerWidth / SCALE));
       var h = Math.max(1, Math.ceil(window.innerHeight / SCALE));
@@ -90,12 +121,40 @@
 
     // Random phase so every page load starts somewhere different.
     var offset = Math.random() * 1000;
+    // The light drifts on a slow Lissajous path across the upper part of the page and leans toward
+    // the pointer, eased so the flare swings smoothly rather than snapping.
+    var pointer = null;
+    var light = null;
+    var lastMs = 0;
+    function lightTarget(t, aspect) {
+      var x = Math.sin(t * 0.9) * 0.42 * aspect;
+      var y = 0.2 + Math.cos(t * 1.37) * 0.14;
+      if (pointer && !still.matches) {
+        x += (pointer[0] * aspect - x) * 0.12;
+        y += (pointer[1] - y) * 0.12;
+      }
+      return [x, y];
+    }
     function draw(ms) {
       resize();
+      var t = offset + ms * 0.00003;
+      var aspect = canvas.width / canvas.height;
+      var target = lightTarget(t, aspect);
+      var k = light ? Math.min(1, (ms - lastMs) / 3000) : 1;
+      light = light || target;
+      light = [light[0] + (target[0] - light[0]) * k, light[1] + (target[1] - light[1]) * k];
+      lastMs = ms;
       gl.uniform2f(uRes, canvas.width, canvas.height);
-      gl.uniform1f(uTime, offset + ms * 0.00035);
+      gl.uniform1f(uTime, t * 3);
+      gl.uniform2f(uLight, light[0], light[1]);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     }
+
+    window.addEventListener('pointermove', function (e) {
+      if (e.pointerType !== 'mouse') return;
+      pointer = [e.clientX / window.innerWidth - 0.5, 0.5 - e.clientY / window.innerHeight];
+    }, { passive: true });
+    document.documentElement.addEventListener('pointerleave', function () { pointer = null; });
 
     var still = window.matchMedia('(prefers-reduced-motion: reduce)');
     var raf = 0;
@@ -141,7 +200,7 @@
     height: 100vh;
     z-index: -1;
     pointer-events: none;
-    opacity: 0.22;
+    opacity: 0.2;
   }
 
   :root[data-plasma='off'] .shiny-plasma {
@@ -149,7 +208,7 @@
   }
 
   :root[data-theme='dark'] .shiny-plasma {
-    opacity: 0.2;
+    opacity: 0.3;
   }
 
   @media print {
