@@ -618,6 +618,7 @@ export const sidebarTopics = [
           { label: 'MAUI Chat UI', link: 'aiconversation/chat-view', dateCreated: '2026-07-31', dateUpdated: '2026-10-29' },
           { label: 'Images & Attachments', link: 'aiconversation/images', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'Camera Tool', link: 'aiconversation/camera', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
+          { label: 'AG-UI & A2UI', link: 'aiconversation/ag-ui', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },
@@ -858,6 +859,7 @@ export const sidebarTopics = [
               { label: 'NFC', link: 'appdevicebridge/nfc', showNew: true, dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
               { label: 'Notifications', link: 'appdevicebridge/notifications', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'OBD-II', link: 'appdevicebridge/obd', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
+              { label: 'Passkeys', link: 'appdevicebridge/passkeys', showNew: true, dateCreated: '2026-11-11', dateUpdated: '2026-11-11' },
               { label: 'Photos', link: 'appdevicebridge/photos', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Pi Camera', link: 'appdevicebridge/rpicamera', showNew: false, dateCreated: '2026-10-04', dateUpdated: '2026-10-04' },
               { label: 'Printing', link: 'appdevicebridge/printing', showNew: false, dateCreated: '2026-10-03', dateUpdated: '2026-10-03' },
@@ -942,6 +944,8 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/mediaelement/blazor', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
         ]
       },
+      { label: 'AgentView', link: 'controls/agent-view/', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12', jumpTo: true },
+      { label: 'A2UI Surface', link: 'controls/a2ui/', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12', jumpTo: true },
       {
         label: 'ChatView',
         jumpTo: true,

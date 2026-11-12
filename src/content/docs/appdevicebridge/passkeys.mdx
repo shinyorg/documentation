@@ -1,0 +1,123 @@
+---
+title: Passkeys
+description: Create and sign in with passkeys (WebAuthn / FIDO2) from a Shiny.AppDeviceBridge web app through Face ID, Touch ID, Android's credential manager and Windows Hello
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+import BridgeApi from '/src/components/BridgeApi.astro';
+
+<NugetBadge name="Shiny.AppDeviceBridge.Maui" />
+
+The passkeys bridge lets the page create and use passkeys with the platform authenticator. A WebView page served from
+loopback can't use `navigator.credentials` for your site, because its origin is `http://127.0.0.1`, not your domain. The
+bridge hands the ceremony to the native app instead. It ships in `Shiny.AppDeviceBridge.Maui`, next to the device and
+[sensors](/appdevicebridge/sensors/) bridges, and is built on the passkeys API in .NET MAUI 11 Essentials
+(`Microsoft.Maui.Authentication.Passkeys`).
+
+The page acts as the go-between. It fetches the WebAuthn options from your relying party server, passes them to the
+bridge untouched, and posts the response back for the server to verify. The bridge never creates challenges and never
+verifies anything. That stays on your server, as it would in a browser.
+
+## Platforms
+
+| Platform | Backed by |
+| --- | --- |
+| iOS, Mac Catalyst | AuthenticationServices: Face ID, Touch ID, iCloud Keychain and other passkey providers |
+| Android | Credential Manager: biometrics, screen lock and the user's passkey provider |
+| Windows | Windows Hello (`webauthn.dll`) |
+| macOS (AppKit), Linux | nothing: `GET passkeys` reports `supported: false` and the ceremonies answer `501` |
+
+## Install and register
+
+```bash
+dotnet add package Shiny.AppDeviceBridge.Maui
+```
+
+```csharp
+builder.UseAppDeviceBridge(
+    bridge => bridge.AddPasskeysBridge("example.com"),
+    webApp => { /* … */ }
+);
+```
+
+Pass every relying party id the page will use, or call `AddPasskeysBridge` again to add more. Options for any other id
+are refused with `403 rp_not_allowed` before the authenticator is involved. An id is the site's host name
+(`example.com`), not a URL.
+
+Each relying party must also list the app:
+
+- **iOS and Mac Catalyst:** add the associated domain `webcredentials:example.com` to the app's entitlements, and the
+  app's id to the site's `/.well-known/apple-app-site-association` under `webcredentials`.
+- **Android:** add the app's package name and signing certificate fingerprint to the site's
+  `/.well-known/assetlinks.json` with the `delegate_permission/common.get_login_creds` relation.
+- **Windows:** nothing.
+
+Without the association, the platform refuses the ceremony and the bridge answers `409 failed` with its message.
+
+:::note[Why the allow-list]
+In a browser, the origin decides which relying party a page can use. Here the page is on loopback, so the relying party
+comes from the options the page sends. On Apple platforms and Android the OS checks the domain association anyway. Windows
+Hello doesn't bind a desktop app to a domain, so the app's list is the only thing stopping a caller from requesting a
+passkey for some other site. The bridge also sits behind the [bridge policy](/appdevicebridge/security/) like every
+other bridge.
+:::
+
+## From the page
+
+```ts
+import { PasskeysBridge } from "@shinyorg/appdevicebridge";
+
+const passkeys = new PasskeysBridge();
+
+// Registration
+const creation = await fetch("/api/passkeys/register/options", { method: "POST" }).then(r => r.json());
+const created = await passkeys.create({ options: creation });
+await fetch("/api/passkeys/register", { method: "POST", body: JSON.stringify(created.response) });
+
+// Sign in
+const request = await fetch("/api/passkeys/login/options", { method: "POST" }).then(r => r.json());
+const signedIn = await passkeys.assert({ options: request });
+await fetch("/api/passkeys/login", { method: "POST", body: JSON.stringify(signedIn.response) });
+```
+
+In Blazor, register `AddPasskeysBridgeClient()` and inject `IPasskeysBridge`, both in `Shiny.AppDeviceBridge.Client`. `Options` and `Response` are
+`JsonElement`, so the server's JSON passes through without a model of its own.
+
+A page that also runs in a browser can check `getStatus()` and use `navigator.credentials` when it isn't hosted.
+
+## Creating a passkey
+
+`POST passkeys/create` takes the server's `PublicKeyCredentialCreationOptions` as `options` and shows the native "create a
+passkey" sheet. The options must carry `rp.id`. It answers with the new credential's `id` (base64url) and `response`, the
+WebAuthn registration response JSON for your server.
+
+## Signing in
+
+`POST passkeys/assert` takes the server's `PublicKeyCredentialRequestOptions` as `options`. They must carry `rpId`,
+because there's no page origin to default it from. It answers with the credential `id`, the `userHandle` the server set
+as `user.id` at registration (for username-less sign-in; `null` when the authenticator doesn't return one), and
+`response`, the WebAuthn authentication response JSON.
+
+Both take `preferImmediatelyAvailable`. It keeps the ceremony on this device, with no QR code or "use another device"
+step: registration happens only if the local authenticator can do it, and sign-in offers only passkeys already on the
+device. Apple and Android honor it; Windows ignores it.
+
+Aborting the request (an `AbortSignal`, or a cancelled token in C#) cancels the ceremony.
+
+## Errors
+
+| Status | Code | When |
+| --- | --- | --- |
+| `400` | `bad_request` | The options are missing `rp.id` (create) or `rpId` (assert), or the platform rejected them as malformed |
+| `403` | `rp_not_allowed` | The relying party id isn't one the app registered |
+| `409` | `cancelled` | The user dismissed the sheet, like a browser's `NotAllowedError` |
+| `409` | `failed` | The ceremony failed: no domain association, no matching passkey, or a platform error. `message` carries the platform's reason |
+| `501` | `not_supported` | macOS (AppKit), Linux, an OS version without passkeys, or the app did not register the bridge |
+
+## Requests
+
+<BridgeApi bridges={["PasskeysBridge"]} show="requests" />
+
+## Types
+
+<BridgeApi bridges={["PasskeysBridge"]} show="types" />

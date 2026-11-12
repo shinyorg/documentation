@@ -1,0 +1,90 @@
+---
+title: AG-UI & A2UI
+description: Run an AI Conversation session as an AG-UI agent so the Shiny AgentView (MAUI and Blazor) renders it, let the model draw A2UI surfaces, and use a remote AG-UI agent as the chat client
+---
+
+import NugetBadge from '/src/components/NugetBadge.astro';
+
+<NugetBadge name="Shiny.AiConversation.AgUi" />
+
+[AG-UI](https://docs.ag-ui.com) is the open protocol between an agent and the app a user is looking at.
+`Shiny.AiConversation.AgUi` speaks it in both directions:
+
+- **A session as an AG-UI agent.** `session.RunAgUiAsync(...)` turns a session into an AG-UI event stream, so
+  the Shiny [AgentView](/controls/agent-view/) (or any AG-UI front end) renders it. You get streaming text,
+  tool call cards, and `ask_user` questions as interrupts with their choices.
+- **Generative UI.** The `render_ui` tool lets the model draw interactive [A2UI](https://a2ui.org) surfaces
+  from the Shiny Controls catalog: DataGrid, Gauge, DateRangePicker, ChipGroup and the basic components.
+- **A remote AG-UI agent as the chat client.** The session's model can live behind an AG-UI endpoint.
+
+## Installation
+
+```bash
+dotnet add package Shiny.AiConversation.AgUi
+```
+
+## Render a session in AgentView
+
+```csharp
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.AddAgUiRenderTool();   // optional: the model can draw A2UI surfaces
+});
+```
+
+```csharp
+var session = await sessionManager.Start();
+agentView.Session = AgentSession.Create(session.SessionId, session.RunAgUiAsync);
+```
+
+```razor
+<AgentView Session="@(AgentSession.Create(session.SessionId, session.RunAgUiAsync))" />
+```
+
+`RunAgUiAsync` has the same shape as `IAgentSession.RunAsync`, so that's the whole adapter. The session
+keeps its own history, memory and compaction. Each AG-UI run only brings the newest input: a typed message,
+a button press on an A2UI surface, or the answers to pending questions.
+
+### How a session maps to AG-UI
+
+| Session | AG-UI |
+|---|---|
+| Streamed reply | `TEXT_MESSAGE_START` / `CONTENT` / `END` |
+| Tool call and result | `TOOL_CALL_START` / `ARGS` / `END`, `TOOL_CALL_RESULT` |
+| `render_ui` call | An `ACTIVITY_SNAPSHOT` of type `a2ui-surface`, which AgentView draws with real controls |
+| `ask_user` questions | `RUN_FINISHED` with an `interrupt` outcome: one interrupt per question, choices in its metadata. AgentView shows them as buttons, and the answer resumes the session with `AiInput.Answer` |
+| Interrupted turn | `RUN_FINISHED` with `outcome: cancelled` (AgentView's Stop button interrupts the turn) |
+| Failed turn | `RUN_ERROR` (AgentView shows it with Retry) |
+
+:::note
+Frontend tools that an AG-UI client sends with a run aren't offered to the model. A session's tools are the
+.NET `AITool`s you register with `opts.AddTool(...)` or an interceptor.
+:::
+
+## Let the model draw UI
+
+```csharp
+opts.AddAgUiRenderTool();                                   // the Shiny Controls catalog
+opts.AddAgUiRenderTool(AgUiRenderTool.BasicCatalogId);      // only the A2UI basic catalog
+opts.AddAgUiRenderTool(catalogInstructions: summary);       // tell the model what it may place
+```
+
+The model calls `render_ui` with A2UI v1.0 messages. The surface appears in the conversation, inputs bind to
+its data model, and a button press comes back to the model as the next turn, with the values the user
+entered. The Shiny catalog's full schema is published at
+[`https://shinylib.net/a2ui/shiny.controls/v1.json`](/a2ui/shiny.controls/v1.json).
+
+## A remote AG-UI agent as the chat client
+
+```csharp
+opts.AddAgUiChatClient(new Uri("https://my-agent.example.com/agent"));
+```
+
+This uses the official SDK's `AGUIChatClient` over HTTP and server-sent events. The remote agent runs its
+own tools, and the session still stores the history.
+
+## AgentView or AiChatView?
+
+[`AiChatView`](/aiconversation/chat-view) is the voice-first chat screen built on `ChatView`, with push-to-talk,
+photos and history paging. It is **feature-frozen**. For anything agent-shaped, use **AgentView**. That covers
+tool cards, generative UI, approvals and sub-agents, and it works on Blazor too.
