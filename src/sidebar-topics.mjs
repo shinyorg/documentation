@@ -1167,7 +1167,7 @@ export const sidebarTopics = [
             label: 'Derived Controls',
             items:[
               { label: 'Overlay', link: 'controls/overlay/', dateCreated: '2026-05-04', dateUpdated: '2026-05-04', jumpTo: true },
-              { label: 'SignaturePad', link: 'controls/signaturepad/', dateCreated: '2026-04-30', dateUpdated: '2026-04-30', jumpTo: true },
+              { label: 'SignaturePad', link: 'controls/signaturepad/', dateCreated: '2026-04-30', dateUpdated: '2026-11-13', jumpTo: true },
               { label: 'DurationPicker', link: 'controls/durationpicker/', dateCreated: '2026-06-26', dateUpdated: '2026-06-26', jumpTo: true, platform: 'maui' },
               { label: 'Sheet View', link: 'controls/sheetview/', dateCreated: '2026-04-15', dateUpdated: '2026-04-15', jumpTo: true, platform: 'blazor' },
             ]
@@ -1241,6 +1241,7 @@ export const sidebarTopics = [
       },
       { label: 'ShinyFlexLayout', link: 'controls/flex-layout/', dateCreated: '2026-09-25', jumpTo: true, platform: 'maui', dateUpdated: '2026-09-25' },
       { label: 'YogaLayout', link: 'controls/yoga-layout/', dateCreated: '2026-09-25', jumpTo: true, dateUpdated: '2026-09-25' },
+      { label: 'Resizable', link: 'controls/resizable/', dateCreated: '2026-11-13', jumpTo: true, dateUpdated: '2026-11-13' },
       {
         label: 'Layout',
         platform: 'blazor',
@@ -1377,6 +1378,7 @@ export const sidebarTopics = [
           { label: 'Range Pickers', link: 'controls/range-pickers/', dateCreated: '2026-10-03', jumpTo: true, dateUpdated: '2026-10-03' },
           { label: 'SecurityPin', link: 'controls/securitypin/', dateCreated: '2026-04-16', dateUpdated: '2026-04-16', jumpTo: true },
           { label: 'PasswordStrength', link: 'controls/passwordstrength/', dateCreated: '2026-08-26', jumpTo: true, dateUpdated: '2026-08-26' },
+          { label: 'SignatureView', link: 'controls/signatureview/', dateCreated: '2026-11-13', jumpTo: true, dateUpdated: '2026-11-13' },
           {
             label: 'Toast',
             jumpTo: true,
