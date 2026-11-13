@@ -12,6 +12,14 @@ export interface WhatsNewItem {
 
 export const whatsNew: WhatsNewItem[] = [
   {
+    date: "2026-11-12",
+    title: "AG-UI & A2UI Controls",
+    tag: "coming in 2.5",
+    href: "/controls/agent-view/",
+    icon: "comment",
+    description: "<code>AgentView</code> turns any AG-UI agent into a conversation on MAUI and Blazor: streaming markdown, reasoning, live tool-call cards, nested sub-agents, and interrupts answered with approve/reject, choices or a text reply. The agent can ask the user through real Shiny controls (confirm, pickers, date ranges). <code>A2UISurfaceView</code> draws A2UI v1.0 surfaces with native controls, covering the full basic catalog plus a Shiny catalog that adds DataGrid, Gauge, ChipGroup, DateRangePicker, Timeline and more. It works inside a conversation or on its own.",
+  },
+  {
     date: "2026-11-07",
     title: "Accessory Setup",
     tag: "coming in 6.6",
