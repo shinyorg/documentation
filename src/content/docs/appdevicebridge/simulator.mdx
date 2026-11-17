@@ -49,8 +49,9 @@ Security is unchanged from an app's release build. The server listens on loopbac
 | --- | --- |
 | **Bridges** | A tree of the host, every bridge, its routes and its events. Pick a route to set its answer, an event to fire it, a bridge to switch it off. |
 | **Traffic** | Every request the page made and what it got back, with a filter, a record switch and the full headers and bodies. The same recorder as the MAUI [traffic monitor](/appdevicebridge/hosting/#traffic-monitor). |
-| **Trails** | Timed scripts: load a `.gpx` walk or a `.trail.json`, record one, play several at once, change the speed, loop. |
+| **Trails** | Timed scripts: load a `.gpx` or `.kml` walk or a `.trail.json`, record one, play several at once, change the speed, loop. |
 | **Activity** | What happened: values changed, events fired, trail steps played. |
+| **OBD** | Load a Shiny.Obd emulator profile, drive its scenarios and watch the vehicle's live values. See [OBD vehicles](#obd-vehicles). |
 
 <img src="/images/appdevicebridge/sim-bridges.png" width="800" alt="The Bridges tab: a tree of the host and every bridge, with the host reporting ios and quickentry, rpicamera and tray switched off" />
 
@@ -73,6 +74,8 @@ without it. The host node sets the platform the page is told it's on.
 
 **Sticky writes** (on by default): a `PUT` or `POST` whose body is the contract its `GET` returns, such as `PUT wifi/radio` or
 `POST gps/listener`, becomes that `GET`'s answer, so the page reads back what it wrote.
+
+**Simulate geofences** (on by default): see [Geofences](#geofences).
 
 The **Traffic** tab, filtered to one bridge, with a request picked:
 
@@ -117,7 +120,8 @@ bridge on or off.
 }
 ```
 
-A `.gpx` file (a track, a route or waypoints) loads as a GPS walk at its recorded pace, or one point a second when it has
+A `.gpx` file (a track, a route or waypoints) or a `.kml`/`.kmz` file (a `gx:Track`, a `LineString` path drawn in Google
+Earth or My Maps, or `Point` placemarks) loads as a GPS walk at its recorded pace, or one point a second when it has
 no times. Each point is fired as `gps.reading`, with heading and speed worked out from the points around it, and also
 becomes what `GET gps/current` and `GET gps/last` answer, so a page that polls sees the same walk as one that listens.
 
@@ -127,6 +131,53 @@ becomes what `GET gps/current` and `GET gps/last` answer, so a page that polls s
 
 **Recording** (Ctrl+R) turns what you do in the Bridges tab into a trail with the time between each step. Save it with
 **Save…** and it replays the same way every time.
+
+### Geofences
+
+The simulator plays the geofences bridge against the simulated GPS. The regions the page monitors through
+`POST geofences/regions` are kept: `GET geofences/regions` lists them, `GET geofences/regions/{identifier}/state` answers
+where the device is (`404` for a region that isn't monitored, as on a device), and the `DELETE` routes stop monitoring them.
+Every `gps.reading` (from a GPX or KML walk, fired from the Bridges tab, or sent by an agent) is checked against them. Crossing a
+boundary fires `geofence.status`, as the OS would:
+
+- A region starts `Unknown`. The first reading inside it fires `Entered`, as Android does for a region the device is
+  already in. The first reading outside settles it as `Exited` without firing.
+- After that, each crossing fires, unless the region set `notifyOnEntry` or `notifyOnExit` to `false`. A `singleUse` region
+  stops being monitored after its first transition.
+- A region added after a reading is checked against that reading straight away.
+- Nothing fires while the geofences bridge is switched off. A recording keeps the readings but not the `geofence.status`
+  events they caused, because replaying the readings fires those again.
+
+Turn it off with the **Simulate geofences** checkbox on the host node, `--no-geofences`, `"simulateGeofences": false` in a
+scenario or the `set_geofence_simulation` tool. Off, the geofences bridge answers only the values set on its routes, like any
+other bridge. Region geofencing (`regiongeofences`) isn't simulated this way, because its region sets are registered in
+the app's C#, not by the page.
+
+## OBD vehicles
+
+The `obd` bridge can be backed by an emulated vehicle from a [Shiny.Obd](https://github.com/shinyorg/obd) emulator
+profile: a JSON file matching
+[`obd-emulator.schema.json`](https://raw.githubusercontent.com/shinyorg/obd/main/obd-emulator.schema.json) that carries
+a vehicle (its VIN, ECU, supported PIDs, fault memory, mass, gearing and fuel), driving scenarios and a fault state. Load
+one with `--obd f150.obd.json`, the **OBD** tab, the web panel or the `load_obd_profile` tool.
+
+While a profile is loaded, the page's `obd` bridge is the real one from `Shiny.AppDeviceBridge.Obd`, and the emulated
+vehicle is an adapter in range:
+
+- `POST obd/scan` lists `shiny-obd-emulator` for either transport, and `POST obd/connection` with it as
+  `peripheralUuid` connects.
+- After that, everything goes through Shiny.Obd and an ELM327 emulated in-process, exactly as it would against
+  an adapter: commands, raw requests, the VIN, trouble codes and the monitor, with the real bridge's validation and its
+  `409`s.
+- Driving a scenario (F5 on the tab, `--obd-drive Commute` or `drive_obd`) moves the live values five times a second:
+  speed, rpm, gear, throttle, load, mass air flow, fuel rate and coolant temperature, all consistent with each other and
+  with the vehicle. The page's monitor reads the drive as it happens. Each scenario runs at real time and loops if it's
+  set to.
+
+Unload the profile and the `obd` bridge goes back to answering the values set on its routes, so you can still script a
+`504` on connect or a `409`. A page still connected to the vehicle sees the adapter go away and has to connect again,
+as it would after swapping adapters. The profile's own scenarios are listed ahead of the emulator's built-in drives.
+A sample profile is in the repo at `samples/simulator/f150.obd.json`.
 
 ## Scenarios and CI
 
@@ -147,9 +198,12 @@ shiny-bridge-sim --scenario offline.scenario.json --trail walk.gpx --play walk -
 | `--platform <name>` | `android`, `ios`, `maccatalyst`, `macos`, `windows` or `linux` |
 | `--app-id <id>` | the app id `GET /_bridge/host` reports |
 | `--scenario <file>` | apply a scenario on start |
-| `--trail <file>` | load a `.gpx` or `.trail.json`; repeatable |
+| `--trail <file>` | load a `.gpx`, `.kml`, `.kmz` or `.trail.json`; repeatable |
 | `--play <name>` | play a loaded trail on start; repeatable |
 | `--speed <n>` | playback speed for `--play` |
+| `--no-geofences` | GPS readings don't fire the geofences the page monitors |
+| `--obd <file>` | load a Shiny.Obd emulator profile: the vehicle the `obd` bridge connects to |
+| `--obd-drive <name>` | drive one of its scenarios on start; needs `--obd` |
 | `--data <dir>` | where the real settings and files bridges keep data; a temporary folder by default |
 | `--headless` | no TUI |
 | `--web` | no TUI: control the simulator from a browser panel at `/_sim/` instead; see [The web panel](#the-web-panel) |
@@ -224,9 +278,10 @@ everything the simulator would have printed goes to stderr.
 | | |
 | --- | --- |
 | **Look** | `get_status`, `list_bridges`, `describe_bridge`, `get_route` — every route with a generated **sample of its contract**, which is the shape a value has to have |
-| **Set** | `set_route`, `set_route_sequence`, `reset_route`, `set_bridge_supported`, `set_platform`, `set_sticky_writes` |
+| **Set** | `set_route`, `set_route_sequence`, `reset_route`, `set_bridge_supported`, `set_platform`, `set_sticky_writes`, `set_geofence_simulation` |
 | **Raise** | `fire_event`, `set_event_payload` — `fire_event` returns how many page streams it reached, so an event that went nowhere says so |
 | **Script** | `list_trails`, `load_trail`, `load_trail_file`, `play_trail`, `pause_trail`, `stop_trail`, `remove_trail` |
+| **Drive** | `get_obd`, `load_obd_profile`, `unload_obd_profile`, `drive_obd`, `stop_obd` |
 | **Save** | `apply_scenario`, `apply_scenario_file`, `capture_scenario` — capture hands back the whole setup to check in as a reproduction |
 | **Watch** | `get_traffic`, `get_activity`, `clear_traffic`, `set_recording`, `wait_for_request`, `wait_for_quiet` |
 

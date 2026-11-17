@@ -353,6 +353,83 @@ The Faults tab holds the fault memory and the adapter's identity:
 - **`ATI` response** — put `STN` in it and `ObdConnection` picks the OBDLink profile instead of the
   ELM327 one, which is how you test that branch without owning an OBDLink
 
+## Sharing a setup as JSON
+
+A vehicle, a scenario or a fault state built in code lives in one project. `ObdEmulatorProfile` puts
+them in a JSON file instead, so the same setup can be checked into several repos, attached to a bug
+report, or handed to a tester. The format is published as
+[`obd-emulator.schema.json`](https://raw.githubusercontent.com/shinyorg/obd/main/obd-emulator.schema.json)
+— reference it with `$schema` and VS Code, Rider and Visual Studio validate and autocomplete the file.
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/shinyorg/obd/main/obd-emulator.schema.json",
+  "formatVersion": 1,
+  "vehicle": {
+    "name": "2017 Ford F-150 XLT",
+    "vin": "1FTEW1EG5HFA12345",
+    "decodes": "2017 Ford F-150 XLT · 3.5L V6 EcoBoost",
+    "note": "Twin turbo",
+    "ecuName": "PCM-EngineControl",
+    "calibrationId": "HL3A-12A650-AXA",
+    "unsupportedPids": ["5B"],
+    "storedDtcs": ["P0299"],
+    "massKg": 2200,
+    "gearRatios": [120, 75, 52, 40, 32, 26, 22, 19, 17, 15]
+  },
+  "scenarios": [
+    {
+      "name": "Tow uphill",
+      "summary": "Heavy load, low speed",
+      "steps": [
+        { "label": "Pull away", "action": "accelerate", "targetSpeedKph": 60, "seconds": 20 },
+        { "label": "Climb", "action": "cruise", "targetSpeedKph": 60, "seconds": 120 }
+      ]
+    }
+  ],
+  "state": {
+    "adapterIdentifier": "STN2120 v5.6.19",
+    "monitorsComplete": true,
+    "parameters": [
+      { "mode": "01", "pid": "0D", "number": 88 },
+      { "mode": "01", "pid": "05", "supported": false }
+    ]
+  }
+}
+```
+
+Every section is optional. A file can be just a vehicle, just a scenario, or just a `state` to put on top
+of whichever vehicle is already selected.
+
+- **`vehicle`** is an `EmulatedVehicle` with the same property names in camelCase. Anything left out keeps the
+  `EmulatedVehicle` default. Applying it selects the vehicle (and adds it to `state.Vehicles`, replacing one with
+  the same name), which rewrites the identity PIDs, the supported masks and the fault memory exactly as picking a
+  catalog vehicle does.
+- **`scenarios`** are `DrivingScenario`s added to the player. One with the same name as an existing scenario
+  replaces it. Actions are camelCase: `idle`, `accelerate`, `cruise`, `coast`, `brake`, `harshBrake`.
+- **`state`** is applied after the vehicle, so it can override what the vehicle set. A property left out keeps
+  its current value. `parameters` take `number` (engineering units), `text` or `hex` according to the PID's kind,
+  plus `supported` and `rawOverride`. PIDs, modes and `unsupportedPids` are two hex digits — `"0D"`, not `13`.
+
+```csharp
+var profile = await ObdEmulatorProfile.Load(File.OpenRead("f150.obd.json"));
+profile.ApplyTo(state, player);           // player is optional - only needed for scenarios
+
+// and the other way: snapshot the emulator to share it
+var json = ObdEmulatorProfile.Capture(state, myScenarios).ToJson();
+```
+
+`Capture` writes the selected vehicle, the adapter and fault state, and only the parameters that differ from
+what that vehicle starts with, so a captured file stays readable.
+
+**Everything is checked before anything is applied.** An unknown or misspelt property, an unencodable trouble
+code (`P4xxx`), an implausible VIN, a PID the emulator has no parameter for, or `number` on a text PID throws
+`ObdException` and leaves the emulator untouched. To test an app against a malformed VIN, set it as `text` on
+parameter `09`/`02` under `state` — `vehicle.vin` has to be a plausible VIN. A file with a newer
+`formatVersion` than the package understands is refused rather than half-read.
+
+Call `ApplyTo` on the UI thread if the state is bound to a UI, the same as editing the state directly.
+
 ## Permissions
 
 Both roles need permissions the client-only case does not.

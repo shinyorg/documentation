@@ -1,0 +1,123 @@
+---
+title: On-Device AI with Apple Foundation Models
+description: FoundationModelsChatClient is a Microsoft.Extensions.AI IChatClient over Apple's on-device Apple Intelligence model, so the AI document scanner (or anything else that takes an IChatClient) runs offline, keyless and free on iOS, Mac Catalyst and macOS
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+`FoundationModelsChatClient` is a **Microsoft.Extensions.AI `IChatClient`** over Apple's **Foundation Models** framework, the on-device model behind Apple Intelligence. It runs on the device, so it needs no network, no API key and costs nothing per call. Use it wherever an `IChatClient` is taken, including the [AI document scanner](/controls/cameraview/ai/).
+
+The model reads images itself (iOS / macOS 27), so a captured frame goes straight in as `DataContent`. **Structured output** (`GetResponseAsync<T>`) uses the model's **guided generation**: the reply is constrained to your type's schema rather than just asked to follow it.
+
+## Install
+
+- <NugetDownloads name="Shiny.Maui.Controls.Analysis.Ai" />
+
+```bash
+dotnet add package Shiny.Maui.Controls.Analysis.Ai
+```
+
+It ships in the MAUI AI add-on. Foundation Models is a Swift-only framework with no .NET binding, so the package carries a small native framework (`ShinyFoundationModels`). The SDK embeds it in your app automatically.
+
+## Requirements
+
+| | |
+|---|---|
+| Text | iOS / Mac Catalyst / macOS **26** or later |
+| Images, `OCRTool`, `BarcodeReaderTool` | iOS / Mac Catalyst / macOS **27** or later |
+| Device | An Apple Intelligence device, with Apple Intelligence turned on and its model downloaded |
+
+The package still installs and loads on older OS versions (iOS 15+); the client just reports that it is unavailable. On Android, Windows and plain `net10.0` the type exists so shared code compiles, reports `UnsupportedPlatform`, and throws `PlatformNotSupportedException` if called.
+
+## Choosing it at runtime
+
+Check `Availability` and fall back to another client when the model can't be used:
+
+```csharp
+using Microsoft.Extensions.AI;
+using Shiny.Maui.Controls.Analysis.Ai;
+
+builder.Services.AddSingleton<IChatClient>(_ =>
+{
+    if (!FoundationModelsChatClient.IsAvailable)
+        return new AzureOpenAIClient(endpoint, credential).GetChatClient("gpt-4o").AsIChatClient();
+
+    FoundationModelsChatClient.Prewarm();   // load the model before the first request
+    return new FoundationModelsChatClient();
+});
+```
+
+`Availability` says why it isn't available, so you can tell the user what to do:
+
+| `FoundationModelsAvailability` | Meaning |
+|---|---|
+| `Available` | Ready |
+| `DeviceNotEligible` | The device doesn't support Apple Intelligence |
+| `AppleIntelligenceNotEnabled` | Supported, but turned off in Settings |
+| `ModelNotReady` | Still downloading |
+| `UnsupportedOperatingSystem` | Older than iOS / macOS 26 |
+| `UnsupportedPlatform` | Not an Apple platform |
+
+The first request after launch loads the model, which can take many seconds. Call `Prewarm()` when the screen that uses it appears; it returns at once and loads in the background.
+
+## With the AI document scanner
+
+Nothing changes in the analyzer. Hand it the client:
+
+```csharp
+var ai = new AiDocumentAnalyzer<Invoice>(new FoundationModelsChatClient())
+{
+    SerializerOptions = MyJsonContext.Default.Options,
+};
+Camera.Analyzer = ai;
+Camera.Scan();
+```
+
+## Using it directly
+
+It is an ordinary `IChatClient`: plain text, history, streaming, cancellation and structured output all work.
+
+```csharp
+IChatClient chat = new FoundationModelsChatClient();
+
+// an image and a typed result
+var message = new ChatMessage(ChatRole.User,
+[
+    new TextContent("Extract the receipt."),
+    new DataContent(jpegBytes, "image/jpeg")
+]);
+var response = await chat.GetResponseAsync<Receipt>([message]);
+if (response.TryGetResult(out var receipt))
+    Console.WriteLine(receipt.Total);
+
+// streaming text
+await foreach (var update in chat.GetStreamingResponseAsync("Summarise this in one line: ..."))
+    Console.Write(update.Text);
+```
+
+System messages and `ChatOptions.Instructions` become the session's instructions. `Temperature` and `MaxOutputTokens` are honoured.
+
+## Vision tools
+
+`FoundationModelsChatClientOptions` gives the model two of Apple's Vision tools, which it calls when it decides it needs them (iOS / macOS 27):
+
+```csharp
+var chat = new FoundationModelsChatClient(new()
+{
+    UseOcrTool = true,            // Vision text recognition, for dense or small text
+    UseBarcodeReaderTool = true,  // decode barcodes and QR codes in the image
+});
+```
+
+Both are off by default. The model already reads images, and a tool call adds about a second. Apple doesn't offer `OCRTool` in the iOS Simulator.
+
+`UseCase = FoundationModelsUseCase.ContentTagging` selects Apple's variant tuned for tagging and entity extraction.
+
+## Limits
+
+- **No `AIFunction` tools yet.** Passing `ChatOptions.Tools` throws `NotSupportedException`; only the Vision tools above are available.
+- **Images must be bytes.** A remote `UriContent` image throws; download it and pass `DataContent`.
+- **Some schemas fall back.** Foundation Models can't express a real union (`string` *or* `number`) or a recursive type. For those, the client asks for the JSON in the instructions instead of constraining it, so the result is no longer guaranteed to match.
+- **Structured replies don't stream.** With a schema, `GetStreamingResponseAsync` returns the whole JSON as one update when it is complete.
+- **It's a small model.** Good at reading and extracting; not a replacement for a large cloud model on open-ended reasoning.
+
+Failures throw `FoundationModelsException`; its `Kind` says why: `GuardrailViolation`, `ContextSizeExceeded`, `UnsupportedLanguage`, `Refusal`, `RateLimited`, `BadRequest` (for example an image it can't decode), `Unavailable` or `Other`. Cancellation throws `OperationCanceledException`.
