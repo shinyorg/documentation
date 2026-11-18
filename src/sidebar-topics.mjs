@@ -905,6 +905,7 @@ export const sidebarTopics = [
           { label: 'Theme Packs', link: 'controls/theming/packs', dateCreated: '2026-08-13', dateUpdated: '2026-08-13' },
           { label: 'Theme Composer', link: 'controls/theming/creator', dateCreated: '2026-06-12', dateUpdated: '2026-09-12' },
           { label: 'Dark Mode', link: 'controls/theming/dark-mode', dateCreated: '2026-08-29', dateUpdated: '2026-08-29' },
+          { label: 'Try It In Blazor', link: 'controls/theming/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ],
       },
       {
@@ -916,6 +917,7 @@ export const sidebarTopics = [
           { label: 'Blazor Usage', link: 'controls/barcodes/blazor', dateCreated: '2026-06-26', dateUpdated: '2026-06-26' },
           { label: 'Headless Rendering', link: 'controls/barcodes/rendering', dateCreated: '2026-06-26', dateUpdated: '2026-06-26' },
           { label: 'Symbologies', link: 'controls/barcodes/symbologies', dateCreated: '2026-06-26', dateUpdated: '2026-06-26' },
+          { label: 'Try It In Blazor', link: 'controls/barcodes/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -933,6 +935,7 @@ export const sidebarTopics = [
           { label: 'AI Photo Stylizer', link: 'controls/cameraview/ai-stylize', dateCreated: '2026-08-04', dateUpdated: '2026-08-04' },
           { label: 'Blazor Usage', link: 'controls/cameraview/blazor', dateCreated: '2026-06-13', dateUpdated: '2026-06-13' },
           { label: 'Blazor Media Service', link: 'controls/cameraview/media-service-blazor', dateCreated: '2026-09-18', dateUpdated: '2026-09-18' },
+          { label: 'Try It In Blazor', link: 'controls/cameraview/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -945,10 +948,25 @@ export const sidebarTopics = [
           { label: 'Background Playback & PiP', link: 'controls/mediaelement/background-playback', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
           { label: 'Analyzers & Captions', link: 'controls/mediaelement/analysis', dateCreated: '2026-11-13', dateUpdated: '2026-11-13' },
           { label: 'Blazor Usage', link: 'controls/mediaelement/blazor', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
+          { label: 'Try It In Blazor', link: 'controls/mediaelement/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
-      { label: 'AgentView', link: 'controls/agent-view/', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12', jumpTo: true },
-      { label: 'A2UI Surface', link: 'controls/a2ui/', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12', jumpTo: true },
+      {
+        label: 'AgentView',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/agent-view/', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12' },
+          { label: 'Try It In Blazor', link: 'controls/agent-view/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
+      {
+        label: 'A2UI Surface',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/a2ui/', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12' },
+          { label: 'Try It In Blazor', link: 'controls/a2ui/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
       {
         label: 'ChatView',
         jumpTo: true,
@@ -967,6 +985,7 @@ export const sidebarTopics = [
           { label: 'Custom Actions', link: 'controls/chatview/custom-actions', dateCreated: '2026-06-27', dateUpdated: '2026-06-27' },
           { label: 'Scenarios', link: 'controls/chatview/scenarios', dateCreated: '2026-05-04', dateUpdated: '2026-05-04' },
           { label: 'API Reference', link: 'controls/chatview/api-reference', dateCreated: '2026-05-04', dateUpdated: '2026-05-04' },
+          { label: 'Try It In Blazor', link: 'controls/chatview/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -985,7 +1004,7 @@ export const sidebarTopics = [
           { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/detail-rows', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
           { label: 'Async Detail & IsBusy', link: 'controls/datagrid/async-detail', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
           { label: 'TreeDataGrid', link: 'controls/datagrid/tree-data-grid', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
-          { label: 'Try It In Blazor', link: 'controls/datagrid/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
+          { label: 'Try It In Blazor', link: 'controls/datagrid/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -995,6 +1014,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Overview', link: 'controls/gantt/', dateCreated: '2026-09-07', dateUpdated: '2026-09-07' },
           { label: 'Scheduling', link: 'controls/gantt/scheduling', dateCreated: '2026-09-07', dateUpdated: '2026-09-07' },
+          { label: 'Try It In Blazor', link: 'controls/gantt/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1003,7 +1023,7 @@ export const sidebarTopics = [
         dateUpdated: '2026-09-16',
         items:[
           { label: 'Overview', link: 'controls/kanban/', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' },
-          { label: 'Try It In Blazor', link: 'controls/kanban/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
+          { label: 'Try It In Blazor', link: 'controls/kanban/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1012,6 +1032,7 @@ export const sidebarTopics = [
         dateUpdated: '2026-09-07',
         items:[
           { label: 'Overview', link: 'controls/floorplan/', dateCreated: '2026-09-07', dateUpdated: '2026-09-07' },
+          { label: 'Try It In Blazor', link: 'controls/floorplan/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1022,6 +1043,7 @@ export const sidebarTopics = [
           { label: 'Overview', link: 'controls/diagram/', dateCreated: '2026-09-07', dateUpdated: '2026-09-07' },
           { label: 'Layouts', link: 'controls/diagram/layouts', dateCreated: '2026-09-07', dateUpdated: '2026-09-07' },
           { label: 'Editing & Undo', link: 'controls/diagram/editing', dateCreated: '2026-09-07', dateUpdated: '2026-09-07' },
+          { label: 'Try It In Blazor', link: 'controls/diagram/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1056,6 +1078,7 @@ export const sidebarTopics = [
           { label: 'Slide Show & Presenter View', link: 'controls/slide-editor/presenting', dateCreated: '2026-09-28', dateUpdated: '2026-09-28' },
           { label: 'Notebook', link: 'controls/notebook/', dateCreated: '2026-09-01', jumpTo: true, dateUpdated: '2026-09-17' },
           { label: 'Find', link: 'controls/office-find', dateCreated: '2026-08-30', dateUpdated: '2026-08-30' },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/office', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1066,6 +1089,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'controls/expander/', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
           { label: 'Accordion', link: 'controls/expander/accordion', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
           { label: 'Blazor Usage', link: 'controls/expander/blazor', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+          { label: 'Try It In Blazor', link: 'controls/expander/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1077,6 +1101,7 @@ export const sidebarTopics = [
           { label: 'CarouselGallery', link: 'controls/carousel-gallery/', dateCreated: '2026-05-13', dateUpdated: '2026-05-13', jumpTo: true },
           { label: 'Carousel', link: 'controls/carousel/', dateCreated: '2026-06-15', dateUpdated: '2026-06-15', jumpTo: true, platform: 'blazor' },
           { label: 'CoverFlowView', link: 'controls/cover-flow/', dateCreated: '2026-10-15', dateUpdated: '2026-10-15', jumpTo: true },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/collections-grids', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1085,6 +1110,7 @@ export const sidebarTopics = [
           { label: 'Tray Icon', link: 'controls/trayicon/', dateCreated: '2026-06-01', dateUpdated: '2026-10-17', jumpTo: true, platform: 'maui' },
           { label: 'Docking', link: 'controls/docking/', dateCreated: '2026-06-07', dateUpdated: '2026-06-07', jumpTo: true },
           { label: 'On-Screen Keyboard', link: 'controls/onscreen-keyboard/', dateCreated: '2026-06-07', dateUpdated: '2026-06-07', jumpTo: true, platform: 'blazor' },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/desktop', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1094,6 +1120,7 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'controls/button/', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
           { label: 'States & Commands', link: 'controls/button/states', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
           { label: 'Blazor Usage', link: 'controls/button/blazor', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
+          { label: 'Try It In Blazor', link: 'controls/button/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1104,6 +1131,7 @@ export const sidebarTopics = [
           { label: 'Fab', link: 'controls/fab/fab', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
           { label: 'FabMenu', link: 'controls/fab/fabmenu', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
           { label: 'Blazor Usage', link: 'controls/fab/blazor', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
+          { label: 'Try It In Blazor', link: 'controls/fab/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1113,6 +1141,7 @@ export const sidebarTopics = [
           { label: 'Feedback Service', link: 'controls/feedback/', dateCreated: '2026-05-03', dateUpdated: '2026-05-03', jumpTo: true, platform: 'maui' },
           { label: 'Media Service', link: 'controls/cameraview/media-service', dateCreated: '2026-09-02', jumpTo: true, platform: 'maui', dateUpdated: '2026-09-07' },
           { label: 'Media Service', link: 'controls/cameraview/media-service-blazor', dateCreated: '2026-09-18', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-18' },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/services', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1126,7 +1155,14 @@ export const sidebarTopics = [
           { label: 'Properties & Events', link: 'controls/flyout/properties', dateCreated: '2026-08-25', dateUpdated: '2026-08-25' },
         ]
       },
-      { label: 'Foldables', link: 'controls/foldables/', dateCreated: '2026-10-25', dateUpdated: '2026-10-25', jumpTo: true },
+      {
+        label: 'Foldables',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/foldables/', dateCreated: '2026-10-25', dateUpdated: '2026-10-25' },
+          { label: 'Try It In Blazor', link: 'controls/foldables/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
       {
         label: 'TabbedPage',
         jumpTo: true,
@@ -1158,6 +1194,7 @@ export const sidebarTopics = [
         dateUpdated: '2026-11-05',
         items:[
           { label: 'Getting Started', link: 'controls/page-transitions/', dateCreated: '2026-11-05', dateUpdated: '2026-11-05' },
+          { label: 'Try It In Blazor', link: 'controls/page-transitions/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1175,14 +1212,43 @@ export const sidebarTopics = [
               { label: 'SignaturePad', link: 'controls/signaturepad/', dateCreated: '2026-04-30', dateUpdated: '2026-11-13', jumpTo: true },
               { label: 'DurationPicker', link: 'controls/durationpicker/', dateCreated: '2026-06-26', dateUpdated: '2026-06-26', jumpTo: true, platform: 'maui' },
               { label: 'Sheet View', link: 'controls/sheetview/', dateCreated: '2026-04-15', dateUpdated: '2026-04-15', jumpTo: true, platform: 'blazor' },
+              { label: 'Try It In Blazor', link: 'controls/try-blazor/derived-controls', dateCreated: '2026-11-18', platform: 'blazor' },
             ]
           },
         ]
       },
-      { label: 'Quick Entry', link: 'controls/quick-entry/', dateCreated: '2026-08-23', jumpTo: true, dateUpdated: '2026-08-23' },
-      { label: 'File Drop', link: 'controls/file-drop/', dateCreated: '2026-08-28', jumpTo: true, dateUpdated: '2026-08-28' },
-      { label: 'Keyboard Shortcuts', link: 'controls/keyboard-shortcuts/', dateCreated: '2026-10-02', jumpTo: true, dateUpdated: '2026-10-03' },
-      { label: 'FrostedGlassView', link: 'controls/frostedglass/', dateCreated: '2026-07-31', dateUpdated: '2026-07-31', jumpTo: true },
+      {
+        label: 'Quick Entry',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/quick-entry/', dateCreated: '2026-08-23', dateUpdated: '2026-08-23' },
+          { label: 'Try It In Blazor', link: 'controls/quick-entry/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
+      {
+        label: 'File Drop',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/file-drop/', dateCreated: '2026-08-28', dateUpdated: '2026-08-28' },
+          { label: 'Try It In Blazor', link: 'controls/file-drop/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
+      {
+        label: 'Keyboard Shortcuts',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/keyboard-shortcuts/', dateCreated: '2026-10-02', dateUpdated: '2026-10-03' },
+          { label: 'Try It In Blazor', link: 'controls/keyboard-shortcuts/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
+      {
+        label: 'FrostedGlassView',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/frostedglass/', dateCreated: '2026-07-31', dateUpdated: '2026-07-31' },
+          { label: 'Try It In Blazor', link: 'controls/frostedglass/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
       {
         label: 'Images',
         items:[
@@ -1198,6 +1264,7 @@ export const sidebarTopics = [
               { label: 'Caching & ImageService', link: 'controls/shinyimage/imageservice', dateCreated: '2026-08-26', dateUpdated: '2026-10-19' },
               { label: 'Blazor', link: 'controls/shinyimage/blazor', dateCreated: '2026-08-26', dateUpdated: '2026-10-19' },
               { label: 'Properties & Events', link: 'controls/shinyimage/properties', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
+              { label: 'Try It In Blazor', link: 'controls/shinyimage/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
             ]
           },
           { label: 'ImageViewer', link: 'controls/imageviewer/', dateCreated: '2026-04-15', dateUpdated: '2026-04-15', jumpTo: true },
@@ -1212,9 +1279,11 @@ export const sidebarTopics = [
               { label: 'Shapes', link: 'controls/imageeditor/shapes', dateCreated: '2026-08-26', dateUpdated: '2026-08-26' },
               { label: 'Properties & Commands', link: 'controls/imageeditor/properties', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
               { label: 'Save & Export', link: 'controls/imageeditor/save-export', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
+              { label: 'Try It In Blazor', link: 'controls/imageeditor/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
             ]
           },
           { label: 'MediaPickerButton', link: 'controls/media-picker-button/', dateCreated: '2026-07-12', dateUpdated: '2026-10-19', jumpTo: true },
+              { label: 'Try It In Blazor', link: 'controls/try-blazor/images', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1229,6 +1298,7 @@ export const sidebarTopics = [
             items: [
               { label: 'Getting Started', link: 'controls/textentry/', dateCreated: '2026-05-04', dateUpdated: '2026-05-04' },
               { label: 'Keyboard Accessory', link: 'controls/textentry/keyboard-accessory', dateCreated: '2026-08-09', dateUpdated: '2026-08-09' },
+              { label: 'Try It In Blazor', link: 'controls/textentry/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
             ]
           },
           { label: 'Speech Add-ins', link: 'controls/speech-addins/', dateCreated: '2026-08-14', jumpTo: true, dateUpdated: '2026-08-14' },
@@ -1240,13 +1310,29 @@ export const sidebarTopics = [
             items: [
               { label: 'Getting Started', link: 'controls/gamepad/', dateCreated: '2026-09-22', dateUpdated: '2026-09-22' },
               { label: 'Layouts & Customizing', link: 'controls/gamepad/customizing', dateCreated: '2026-09-22', dateUpdated: '2026-09-22' },
+              { label: 'Try It In Blazor', link: 'controls/gamepad/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
             ]
           },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/input-controls', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       { label: 'ShinyFlexLayout', link: 'controls/flex-layout/', dateCreated: '2026-09-25', jumpTo: true, platform: 'maui', dateUpdated: '2026-09-25' },
-      { label: 'YogaLayout', link: 'controls/yoga-layout/', dateCreated: '2026-09-25', jumpTo: true, dateUpdated: '2026-09-25' },
-      { label: 'Resizable', link: 'controls/resizable/', dateCreated: '2026-11-13', jumpTo: true, dateUpdated: '2026-11-13' },
+      {
+        label: 'YogaLayout',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/yoga-layout/', dateCreated: '2026-09-25', dateUpdated: '2026-09-25' },
+          { label: 'Try It In Blazor', link: 'controls/yoga-layout/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
+      {
+        label: 'Resizable',
+        jumpTo: true,
+        items: [
+          { label: 'Overview', link: 'controls/resizable/', dateCreated: '2026-11-13', dateUpdated: '2026-11-13' },
+          { label: 'Try It In Blazor', link: 'controls/resizable/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
+        ]
+      },
       {
         label: 'Layout',
         platform: 'blazor',
@@ -1254,6 +1340,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Stacks & Grid', link: 'controls/layout/', dateCreated: '2026-08-13', dateUpdated: '2026-08-13', jumpTo: true },
           { label: 'AppLayout', link: 'controls/applayout/', dateCreated: '2026-08-13', dateUpdated: '2026-08-13', jumpTo: true },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/layout', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1280,6 +1367,7 @@ export const sidebarTopics = [
           { label: 'The Icon Set', link: 'controls/motion-icons/icons', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
           { label: 'Presets', link: 'controls/motion-icons/presets', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
           { label: 'Custom Artwork', link: 'controls/motion-icons/custom', dateCreated: '2026-08-12', dateUpdated: '2026-08-12' },
+          { label: 'Try It In Blazor', link: 'controls/motion-icons/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1290,6 +1378,7 @@ export const sidebarTopics = [
           { label: 'Control Properties', link: 'controls/mermaid-diagrams/control', dateCreated: '2026-03-31', dateUpdated: '2026-03-31' },
           { label: 'Theming', link: 'controls/mermaid-diagrams/theming', dateCreated: '2026-03-31', dateUpdated: '2026-03-31' },
           { label: 'Blazor Usage', link: 'controls/mermaid-diagrams/blazor', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
+          { label: 'Try It In Blazor', link: 'controls/mermaid-diagrams/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1303,6 +1392,7 @@ export const sidebarTopics = [
           { label: 'Event List', link: 'controls/scheduler/event-list', dateCreated: '2026-03-31', dateUpdated: '2026-03-31' },
           { label: 'Custom Templates', link: 'controls/scheduler/templates', dateCreated: '2026-03-31', dateUpdated: '2026-03-31' },
           { label: 'Blazor Usage', link: 'controls/scheduler/blazor', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
+          { label: 'Try It In Blazor', link: 'controls/scheduler/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1315,7 +1405,7 @@ export const sidebarTopics = [
           { label: 'Styling', link: 'controls/tableview/styling', dateCreated: '2026-02-18', dateUpdated: '2026-02-18' },
           { label: 'Advanced Features', link: 'controls/tableview/advanced', dateCreated: '2026-02-18', dateUpdated: '2026-02-18' },
           { label: 'Blazor Usage', link: 'controls/tableview/blazor', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
-          { label: 'Try It In Blazor', link: 'controls/tableview/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
+          { label: 'Try It In Blazor', link: 'controls/tableview/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1326,6 +1416,7 @@ export const sidebarTopics = [
           { label: 'ShinyToolbar', link: 'controls/toolbar-tabbar/toolbar', dateCreated: '2026-06-26', dateUpdated: '2026-06-26', platform: 'blazor' },
           { label: 'ShinyTabBar', link: 'controls/toolbar-tabbar/tabbar', dateCreated: '2026-06-26', dateUpdated: '2026-06-26', platform: 'blazor' },
           { label: 'Ribbon', link: 'controls/ribbon/', dateCreated: '2026-08-28', dateUpdated: '2026-08-28', jumpTo: true },
+          { label: 'Try It In Blazor', link: 'controls/toolbar-tabbar/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1334,7 +1425,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/treeview/', dateCreated: '2026-05-25', dateUpdated: '2026-05-25' },
           { label: 'Blazor Usage', link: 'controls/treeview/blazor', dateCreated: '2026-05-25', dateUpdated: '2026-05-25' },
-          { label: 'Try It In Blazor', link: 'controls/treeview/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
+          { label: 'Try It In Blazor', link: 'controls/treeview/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1345,6 +1436,7 @@ export const sidebarTopics = [
           { label: 'StateView', link: 'controls/stateview/', dateCreated: '2026-08-13', dateUpdated: '2026-08-13' },
           { label: 'Wizard', link: 'controls/wizard/', dateCreated: '2026-08-13', dateUpdated: '2026-08-13' },
           { label: 'Timeline', link: 'controls/timeline/', dateCreated: '2026-09-01', jumpTo: true, dateUpdated: '2026-09-17' },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/wizard-stateview', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1354,6 +1446,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Walkthrough', link: 'controls/walkthrough/', dateCreated: '2026-08-14', dateUpdated: '2026-08-14' },
           { label: 'Tooltip', link: 'controls/tooltip/', dateCreated: '2026-08-14', dateUpdated: '2026-08-14' },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/guidance', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1392,9 +1485,11 @@ export const sidebarTopics = [
             items: [
               { label: 'Getting Started', link: 'controls/toast/', dateCreated: '2026-05-03', dateUpdated: '2026-10-31' },
               { label: 'Snackbar', link: 'controls/toast/snackbar', dateCreated: '2026-10-31', dateUpdated: '2026-10-31' },
+              { label: 'Try It In Blazor', link: 'controls/toast/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
             ]
           },
           { label: 'Modal', link: 'controls/modal/', dateCreated: '2026-08-28', jumpTo: true, platform: 'blazor', dateUpdated: '2026-09-07' },
+          { label: 'Try It In Blazor', link: 'controls/try-blazor/other-controls', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
       },
       { label: 'Blazor Playground', link: 'https://shinyorg.github.io/controls/', attrs: { target: '_blank' } },

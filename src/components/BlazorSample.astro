@@ -5,48 +5,88 @@
  * The samples stay deployed cross-origin on their own GitHub Pages sites (BLAZOR_SAMPLES in consts.ts).
  * Loading one with `?embed=1` makes it drop its own nav, toolbars and source panel (each sample's
  * EmbedLayout). The two sides then talk over postMessage:
+ *   frame -> docs  { type: 'shiny-embed:ready' }               the embed script is listening
  *   frame -> docs  { type: 'shiny-embed:size', height, fill }  the content height; fill = the demo
  *                                                             scrolls itself, keep the fixed height
  *   docs -> frame  { type: 'shiny-embed:theme', mode }        the Starlight theme, on every change
+ *   docs -> frame  { type: 'shiny-embed:navigate', route }    switch demo page without a reload
  *
  * Each frame boots its own .NET runtime (several MB), so by default nothing loads until the reader
  * clicks. A dedicated "Try It In Blazor" page passes `autoload` - the reader came there to try it.
  *
- * <BlazorSample app="controls" route="kanban" source="Pages/KanbanPage.razor" />
+ * One demo:      <BlazorSample app="controls" route="kanban" source="Pages/KanbanPage.razor" />
+ * Several demos: <BlazorSample app="controls" demos={[{ label: 'Calendar', route: 'calendar' }, …]} />
+ *                tabs over one frame - switching navigates inside the running app.
  */
 import { BLAZOR_SAMPLES, type BlazorSampleApp } from '../consts';
+
+interface Demo {
+    /** The tab's caption. */
+    label: string;
+    /** The sample's route, without a leading slash ('kanban'). Empty for its home page. */
+    route: string;
+    /** The demo page's source, relative to the sample project ('Pages/KanbanPage.razor'). */
+    source?: string;
+}
 
 interface Props {
     /** Which sample app: a key of BLAZOR_SAMPLES. */
     app: BlazorSampleApp;
-    /** The sample's route, without a leading slash ('kanban'). Empty for its home page. */
-    route: string;
+    /** The sample's route, for a single demo. */
+    route?: string;
+    /** The demo page's source, for a single demo. */
+    source?: string;
+    /** Several demos behind tabs; replaces route/source. */
+    demos?: Demo[];
     /** Frame height in px for a demo that scrolls itself, and the placeholder's height. */
     height?: number;
     /** Load straight away instead of on click. */
     autoload?: boolean;
-    /** The demo page's source, relative to the sample project ('Pages/KanbanPage.razor'). */
-    source?: string;
     /** What the placeholder calls the demo. */
     title?: string;
 }
 
-const { app, route, height = 720, autoload = false, source, title = 'live demo' } = Astro.props;
+const { app, route = '', source, demos, height = 720, autoload = false, title = 'live demo' } = Astro.props;
 const sample = BLAZOR_SAMPLES[app];
-const page = new URL(route.replace(/^\/+/, ''), sample.url);
-const fullUrl = page.toString();
-page.searchParams.set('embed', '1');
-const embedUrl = page.toString();
-const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
+const list: Demo[] = demos?.length ? demos : [{ label: title, route, source }];
+
+const links = list.map(d => {
+    const page = new URL(d.route.replace(/^\/+/, ''), sample.url);
+    const full = page.toString();
+    page.searchParams.set('embed', '1');
+    return {
+        ...d,
+        route: d.route.replace(/^\/+/, ''),
+        full,
+        embed: page.toString(),
+        sourceUrl: d.source ? `${sample.sourceUrl}/${d.source}` : '',
+    };
+});
+const first = links[0];
 ---
 
 <blazor-sample
     class="not-content"
-    data-src={embedUrl}
+    data-src={first.embed}
     data-origin={new URL(sample.url).origin}
     data-autoload={autoload ? 'true' : undefined}
     style={`--sample-height:${height}px`}
 >
+    {links.length > 1 && (
+        <div class="tabs" role="tablist" aria-label="Demos">
+            {links.map((d, i) => (
+                <button
+                    type="button"
+                    role="tab"
+                    aria-selected={i === 0 ? 'true' : 'false'}
+                    data-route={d.route}
+                    data-embed={d.embed}
+                    data-full={d.full}
+                    data-source={d.sourceUrl}
+                >{d.label}</button>
+            ))}
+        </div>
+    )}
     <div class="frame-wrap">
         <button type="button" class="placeholder">
             <span class="play" aria-hidden="true">
@@ -57,8 +97,8 @@ const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
         </button>
     </div>
     <div class="links">
-        <a href={fullUrl} target="_blank" rel="noopener">Open in the full gallery ↗</a>
-        {sourceUrl && <a href={sourceUrl} target="_blank" rel="noopener">View source ↗</a>}
+        <a class="full-link" href={first.full} target="_blank" rel="noopener">Open in the full gallery ↗</a>
+        <a class="source-link" href={first.sourceUrl || undefined} hidden={!first.sourceUrl} target="_blank" rel="noopener">View source ↗</a>
     </div>
 </blazor-sample>
 
@@ -66,6 +106,35 @@ const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
     blazor-sample {
         display: block;
         margin-block: 1.5rem;
+    }
+
+    .tabs {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.375rem;
+        margin-bottom: 0.75rem;
+    }
+
+    .tabs button {
+        padding: 0.3rem 0.85rem;
+        border: 1px solid var(--sl-color-gray-5);
+        border-radius: 999px;
+        background: transparent;
+        color: var(--sl-color-gray-2);
+        font: inherit;
+        font-size: var(--sl-text-sm);
+        cursor: pointer;
+    }
+
+    .tabs button:hover {
+        color: var(--sl-color-white);
+        border-color: var(--sl-color-gray-3);
+    }
+
+    .tabs button[aria-selected='true'] {
+        background: var(--sl-color-accent);
+        border-color: var(--sl-color-accent);
+        color: var(--sl-color-black);
     }
 
     .frame-wrap {
@@ -150,6 +219,10 @@ const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
         margin-top: 0.5rem;
         font-size: var(--sl-text-sm);
     }
+
+    .links a[hidden] {
+        display: none;
+    }
 </style>
 
 <script>
@@ -167,8 +240,10 @@ const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
 
         connectedCallback() {
             this.origin = this.dataset.origin ?? '';
-            const button = this.querySelector<HTMLButtonElement>('.placeholder');
-            button?.addEventListener('click', () => this.load(), { once: true });
+            this.querySelector<HTMLButtonElement>('.placeholder')?.addEventListener('click', () => this.load(), { once: true });
+            this.querySelectorAll<HTMLButtonElement>('.tabs button').forEach(tab =>
+                tab.addEventListener('click', () => this.select(tab))
+            );
             if (this.dataset.autoload === 'true')
                 this.load();
         }
@@ -195,6 +270,28 @@ const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
             window.addEventListener('message', this.onMessage);
             this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
             this.querySelector('.placeholder')?.replaceWith(frame);
+        }
+
+        select(tab: HTMLButtonElement) {
+            this.querySelectorAll('.tabs button').forEach(t => t.setAttribute('aria-selected', t === tab ? 'true' : 'false'));
+
+            const full = this.querySelector<HTMLAnchorElement>('.full-link');
+            if (full)
+                full.href = tab.dataset.full!;
+
+            const source = this.querySelector<HTMLAnchorElement>('.source-link');
+            if (source) {
+                source.hidden = !tab.dataset.source;
+                source.href = tab.dataset.source || '';
+            }
+
+            // not running yet - the tab picks which page it boots into; running - move the app, keep the runtime
+            if (!this.frame) {
+                this.dataset.src = tab.dataset.embed;
+                this.load();
+                return;
+            }
+            this.frame.contentWindow?.postMessage({ type: 'shiny-embed:navigate', route: tab.dataset.route ?? '' }, this.origin);
         }
 
         handle(e: MessageEvent) {
