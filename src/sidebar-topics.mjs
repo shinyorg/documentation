@@ -145,6 +145,7 @@ export const sidebarTopics = [
                 { label: 'Dapper', link: 'mediator/extensions/dapper', dateCreated: '2025-01-22', dateUpdated: '2025-01-22' }
               ]
           },
+          { label: 'Try It In Blazor', link: 'mediator/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/mediator/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'mediator/release-notes', dateCreated: '2024-06-14', dateUpdated: '2024-06-14' }
         ]
@@ -238,6 +239,7 @@ export const sidebarTopics = [
           { label: 'Firmware Updates (MCUmgr)', link: 'client/ble/mcumgr', dateCreated: '2026-11-06', dateUpdated: '2026-11-06' },
           { label: 'Background Operations', link: 'client/ble/background', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
           { label: 'Best Practice/FAQ', link: 'client/ble/best-practices', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
+          { label: 'Try It In Blazor', link: 'client/ble/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
@@ -341,6 +343,7 @@ export const sidebarTopics = [
           { label: 'Platform GPS Requests', link: 'client/locations/platform-requests', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
           { label: 'AI Tools', link: 'client/locations/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
           { label: 'Architecture', link: 'client/locations/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
+          { label: 'Try It In Blazor', link: 'client/locations/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
@@ -423,6 +426,7 @@ export const sidebarTopics = [
         items: [
           { label: 'Getting Started', link: 'client/screenrecorder/', dateCreated: '2026-08-31', dateUpdated: '2026-08-31' },
           { label: 'Platform Setup', link: 'client/screenrecorder/platform', dateCreated: '2026-08-31', dateUpdated: '2026-08-31' },
+          { label: 'Try It In Blazor', link: 'client/screenrecorder/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
@@ -439,6 +443,7 @@ export const sidebarTopics = [
           { label: 'Devices & Routes', link: 'audio/devices', showNew: false, dateCreated: '2026-07-09', dateUpdated: '2026-11-05' },
           { label: 'Full-Duplex Calls', link: 'audio/duplex', showNew: false, dateCreated: '2026-10-30', dateUpdated: '2026-11-05' },
           { label: 'Linux', link: 'audio/linux', showNew: false, dateCreated: '2026-07-30', dateUpdated: '2026-11-05' },
+          { label: 'Try It In Blazor', link: 'audio/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-11-05' }
         ]
@@ -473,6 +478,7 @@ export const sidebarTopics = [
           { label: 'Native Printing', link: 'client/printing/native', dateCreated: '2026-10-03', dateUpdated: '2026-10-03' },
           { label: 'Blazor', link: 'client/printing/blazor', dateCreated: '2026-10-03', dateUpdated: '2026-10-03' },
           { label: 'Platform Setup', link: 'client/printing/platform', dateCreated: '2026-10-03', dateUpdated: '2026-10-03' },
+          { label: 'Try It In Blazor', link: 'client/printing/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
@@ -619,6 +625,7 @@ export const sidebarTopics = [
           { label: 'Images & Attachments', link: 'aiconversation/images', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'Camera Tool', link: 'aiconversation/camera', dateCreated: '2026-10-29', dateUpdated: '2026-10-29' },
           { label: 'AG-UI & A2UI', link: 'aiconversation/ag-ui', showNew: true, dateCreated: '2026-11-12', dateUpdated: '2026-11-12' },
+          { label: 'Try It In Blazor', link: 'aiconversation/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
         ]
       },
@@ -636,6 +643,7 @@ export const sidebarTopics = [
           { label: 'Microsoft.Extensions.AI', link: 'speech/microsoft-ai', dateCreated: '2026-05-11', dateUpdated: '2026-05-11' },
           { label: 'Whisper (Linux, On-Device)', link: 'speech/whisper', dateCreated: '2026-07-30', dateUpdated: '2026-07-30' },
           { label: 'Custom Provider', link: 'speech/custom-provider', dateCreated: '2026-05-02', dateUpdated: '2026-05-02' },
+          { label: 'Try It In Blazor', link: 'speech/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/speech/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'speech/release-notes', dateCreated: '2026-05-02', dateUpdated: '2026-10-30' }
         ]
@@ -726,6 +734,7 @@ export const sidebarTopics = [
           { label: 'Azure Push Notifications', link: 'client/push/azure', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
           { label: 'Firebase (iOS)', link: 'client/push/firebase-ios', dateCreated: '2026-03-27', dateUpdated: '2026-03-27' },
           { label: 'FAQ', link: 'client/push/faq', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
+          { label: 'Try It In Blazor', link: 'client/push/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
@@ -765,6 +774,7 @@ export const sidebarTopics = [
           { label: 'Transfer Delegate', link: 'client/httptransfers/delegate', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
           { label: 'Monitoring', link: 'client/httptransfers/monitoring', dateCreated: '2026-03-26', dateUpdated: '2026-03-26' },
           { label: 'Transfer Progress', link: 'client/httptransfers/progress', dateCreated: '2026-08-21', dateUpdated: '2026-08-21' },
+          { label: 'Try It In Blazor', link: 'client/httptransfers/try-blazor', dateCreated: '2026-11-18', platform: 'blazor' },
           { label: 'Blazor Playground', link: 'https://shinyorg.github.io/shiny/', attrs: { target: '_blank' } },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]

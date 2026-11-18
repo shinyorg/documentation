@@ -90,11 +90,15 @@ generator. A new library therefore needs all three, or the build stops (`src/dat
 ### Embed a live Blazor demo ("Try It In Blazor")
 
 `src/components/BlazorSample.astro` hosts a page of a `shinyorg/*` Blazor sample in an iframe. The samples stay
-deployed **cross-origin** on their own GitHub Pages sites, listed in `BLAZOR_SAMPLES` in `src/consts.ts` (only
-`controls` is wired up so far). The iframe loads `<route>?embed=1&theme=…`; the sample's `EmbedLayout` drops its own
+deployed **cross-origin** on their own GitHub Pages sites, listed in `BLAZOR_SAMPLES` in `src/consts.ts`: `controls`,
+`shiny` (BLE, GPS, push, HTTP transfers, printing, screen recording), `speech` (speech, AI conversations, audio) and
+`mediator`. The iframe loads `<route>?embed=1&theme=…`; the sample's `EmbedLayout` drops its own
 chrome and reports its height over `postMessage`, and the component sends the Starlight theme back. The protocol is
 documented at the top of the component and in each sample repo's CLAUDE.md, so keep the two sides in step.
 
+- A library or control group gets a **`<folder>/try-blazor.mdx`** page; Controls category sections of single-page
+  controls (Other Controls, Office, …) share **`controls/try-blazor/<section>.mdx`** with a tab per demo
+  (`demos={[{ label, route, source }]}`; tabs navigate inside the one running frame).
 - A control gets a **`controls/<control>/try-blazor.mdx`** page (`tableOfContents: false`) with
   `<BlazorSample app="controls" route="<route>" source="Pages/<Page>.razor" title="<Control> demo" autoload />`, and
   a `Try It In Blazor` sidebar item (`platform: 'blazor'`) at the end of that control's group in `sidebar-topics.mjs`.
@@ -103,7 +107,9 @@ documented at the top of the component and in each sample repo's CLAUDE.md, so k
   Keep it to one live demo per page; each frame boots its own .NET runtime.
 - A demo that scrolls itself (`.demo-fill` in the sample) keeps the frame at `height` (default 720). Anything else
   grows to fit its content.
-- To test against a sample running locally: `PUBLIC_BLAZOR_CONTROLS_URL=http://localhost:5199/ npm run dev`.
+- To test against a sample running locally: `PUBLIC_BLAZOR_<APP>_URL=http://localhost:5199/ npm run dev` (e.g.
+  `PUBLIC_BLAZOR_CONTROLS_URL`). `astro dev` runs as a background daemon here — `npx astro dev stop` before restarting
+  it with new env vars or a changed sidebar.
 
 ### Regenerate the App Device Bridge API reference
 

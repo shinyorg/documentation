@@ -15,6 +15,18 @@ export const BLAZOR_SAMPLES = {
         url: import.meta.env?.PUBLIC_BLAZOR_CONTROLS_URL ?? 'https://shinyorg.github.io/controls/',
         sourceUrl: 'https://github.com/shinyorg/controls/blob/main/samples/Sample.Blazor',
     },
+    shiny: {
+        url: import.meta.env?.PUBLIC_BLAZOR_SHINY_URL ?? 'https://shinyorg.github.io/shiny/',
+        sourceUrl: 'https://github.com/shinyorg/shiny/blob/v6/samples/Sample.Blazor',
+    },
+    speech: {
+        url: import.meta.env?.PUBLIC_BLAZOR_SPEECH_URL ?? 'https://shinyorg.github.io/speech/',
+        sourceUrl: 'https://github.com/shinyorg/speech/blob/v3/samples/BlazorSample',
+    },
+    mediator: {
+        url: import.meta.env?.PUBLIC_BLAZOR_MEDIATOR_URL ?? 'https://shinyorg.github.io/mediator/',
+        sourceUrl: 'https://github.com/shinyorg/mediator/blob/v6.0/samples/Sample.Blazor',
+    },
 } as const;
 export type BlazorSampleApp = keyof typeof BLAZOR_SAMPLES;
 
