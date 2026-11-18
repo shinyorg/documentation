@@ -1,0 +1,118 @@
+---
+title: Storyboards & Triggers
+description: KeyFrame and Setter frames that animate any bindable property, Choreography for staggered and sequenced storyboards in XAML, trigger actions, and playing definitions from code
+---
+
+## KeyFrame + Setter: the storyboard shape
+
+The same `Keyframes` element that takes `Track`/`Key` also takes frames of ordinary MAUI `Setter`s at cue points. Values are written exactly as they would be in a `Style`, and **any** bindable property can animate, not only the registered names.
+
+```xml
+<kf:Keyframes x:Key="PopIn" Duration="0:0:0.4" Fill="Backwards">
+    <kf:KeyFrame Cue="0%">
+        <Setter Property="VisualElement.Opacity" Value="0" />
+        <Setter Property="VisualElement.Scale" Value="0.9" />
+    </kf:KeyFrame>
+    <kf:KeyFrame Cue="60%" Easing="CubicOut">
+        <Setter Property="VisualElement.Opacity" Value="1" />
+        <Setter Property="VisualElement.Scale" Value="1.05" />
+    </kf:KeyFrame>
+    <kf:KeyFrame Cue="100%" Easing="spring(0.4)">
+        <Setter Property="VisualElement.Scale" Value="1" />
+    </kf:KeyFrame>
+</kf:Keyframes>
+```
+
+- `Cue` takes a fraction (`0.6`) or a percentage (`60%`).
+- **A frame's `Easing` arrives.** It shapes the segment that *ends* at that frame, the WinUI and storyboard convention, so `spring(0.4)` on the last frame springs into it. A `Key`'s easing follows CSS and shapes the segment that *starts* at the key.
+- A property whose first frame is after 0% starts from its live value, as in CSS and WinUI.
+- `Setter.TargetName` animates a named element instead.
+- Values blend by type: numbers, `Color` (in Oklab), `Thickness`, `CornerRadius`, `Point`, `Size`, `Rect` and `SolidColorBrush` blend smoothly. Other types switch halfway through a segment, as CSS does, except `bool`, which stays `true` across the segment so an `IsVisible` fade stays visible while it fades. `ValueBlending.Register<T>()` adds your own types.
+
+`Track`s and `KeyFrame`s can sit in the same `Keyframes`.
+
+## Choreography
+
+`Choreography` composes animations on one clock: a storyboard in XAML. Children are `Keyframes` or nested `Choreography` elements. The whole thing plays, pauses, seeks and reverses as one.
+
+```xml
+<!-- Every card fades up, 70 ms apart. -->
+<HorizontalStackLayout>
+    <kf:Animate.Choreography>
+        <kf:Choreography ApplyTo="Children" Stagger="0:0:0.07">
+            <kf:Keyframes Duration="0:0:0.5" Fill="Backwards">
+                <kf:Track Property="Opacity">
+                    <kf:Key Offset="0" Value="0" />
+                    <kf:Key Offset="1" Value="1" />
+                </kf:Track>
+                <kf:Track Property="TranslationY">
+                    <kf:Key Offset="0" Value="28" Easing="bouncy(0.3)" />
+                    <kf:Key Offset="1" Value="0" />
+                </kf:Track>
+            </kf:Keyframes>
+        </kf:Choreography>
+    </kf:Animate.Choreography>
+    <BoxView … /> <BoxView … /> <BoxView … />
+</HorizontalStackLayout>
+```
+
+| Property | Type | Default | Notes |
+|---|---|---|---|
+| `Mode` | `ChoreographyMode` | `Parallel` | `Parallel` starts children together, each `Stagger` after the previous one. `Sequence` starts each child when the previous one finishes, plus `Stagger`. |
+| `Stagger` | `TimeSpan` | `0` | Step between starts, or the gap in a sequence. |
+| `ApplyTo` | `ChoreographyTarget` | `Self` | `Children` makes each child definition a template applied to every visual child of the target, staggered in order: the staggered list or grid entrance. |
+| `TargetName` | `string` | — | Animate a named element instead of the one it is attached to. |
+| `AutoPlay`, `Speed`, `ReducedMotion` | | | As on `Keyframes`. |
+
+`Animate.GetChoreographyPlayer(view)` returns its `Player`. It is called `Choreography` rather than `Storyboard` because the engine's C# `Storyboard` type is in the same XAML namespace; a `Choreography` builds one.
+
+## Playing from code
+
+`Keyframes` and `Choreography` are both `IAnimationDefinition`s: plain descriptions that can live in a `ResourceDictionary` and play on any number of views.
+
+```csharp
+var player = card.Play(popIn);            // replaying continues from the current frame
+bool finished = await card.PlayAsync(popIn, token);
+card.StopAnimations();                    // StopBehavior.Release by default
+var running = card.GetPlayer(popIn);
+```
+
+`PlayAsync` returns `true` when the animation finishes and `false` when it is stopped or cancelled. **It never throws**, so `async void` event handlers that pass a token don't need a `try`/`catch`.
+
+`Player.Stop(StopBehavior)` decides what happens to the values written:
+
+| `StopBehavior` | Effect |
+|---|---|
+| `Release` | Withdraws the animation, so each property shows its own value again: whatever its binding, style or visual state says now. |
+| `Hold` | Leaves the last frame on screen. |
+| `Restore` | Writes back the values the properties had when playback began. |
+
+## Trigger actions
+
+Start and stop animations from a `DataTrigger`, `EventTrigger` or `MultiTrigger`, with no code-behind:
+
+```xml
+<Button Text="Save">
+    <Button.Triggers>
+        <DataTrigger TargetType="Button" Binding="{Binding IsBusy}" Value="True">
+            <DataTrigger.EnterActions>
+                <kf:BeginAnimation Animation="{StaticResource Pulse}" />
+            </DataTrigger.EnterActions>
+            <DataTrigger.ExitActions>
+                <kf:StopAnimation Animation="{StaticResource Pulse}" />
+            </DataTrigger.ExitActions>
+        </DataTrigger>
+    </Button.Triggers>
+</Button>
+```
+
+| Action | Extra properties | Effect |
+|---|---|---|
+| `BeginAnimation` | `Handoff` (`Replace` / `Continue`) | Starts the animation. `Replace` restarts a running one from the current frame. |
+| `StopAnimation` | `Behavior` (`Release` / `Hold` / `Restore`) | Stops it. With no `Animation`, stops every animation started on the element. |
+| `PauseAnimation` | | Pauses where it is. |
+| `ResumeAnimation` | | Resumes a paused animation. |
+| `SkipAnimationToEnd` | | Jumps to the end state. A looping animation is stopped and released instead. |
+| `SeekAnimation` | `Progress` (0–1) | Moves to a point. |
+
+Every action takes `Animation` (usually a `{StaticResource}`, so begin and stop name the same instance) and an optional `TargetName`.

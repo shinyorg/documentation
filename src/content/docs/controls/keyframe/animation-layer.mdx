@@ -1,0 +1,57 @@
+---
+title: Animation Layer & Reduced Motion
+description: Why Keyframe animations never break a binding, style or visual state, the base value, reduced motion by default, and the vsync clock
+---
+
+## The animation layer
+
+Every MAUI animation you have used before (`FadeToAsync`, `Animation`, and this library before 2.6) writes with a plain `SetValue`. That sets a **local value**. It outranks the property's binding, style and visual-state setters, so they keep updating underneath and nothing they set is visible. On a property with a `{DynamicResource}`, it removes the resource association for good. After one fade, the binding has no visible effect.
+
+Keyframe writes through `AnimationLayer` instead. MAUI keeps one value slot above all the others, the one a handler writes into when user input changes a property. That slot behaves the way an animation needs: it shows over everything, and as soon as anything else writes the property (a binding update, a style, a visual state, a trigger, your own code), MAUI drops the slot and the new value wins.
+
+So an animation **shows** a value without **owning** the property:
+
+- The binding, style, visual state and trigger underneath keep working.
+- A binding update during an animation takes over at once (and the animation picks up on its next frame if it is still running).
+- An animation that ends without a forwards fill, or is stopped with `StopBehavior.Release`, leaves the property showing its own value: whatever its source says *now*, not a value captured at the start.
+
+```csharp
+var actual = AnimationLayer.GetBaseValue(card, VisualElement.OpacityProperty); // without the animation
+bool moving = AnimationLayer.IsAnimated(card, VisualElement.OpacityProperty);
+AnimationLayer.Release(card, VisualElement.OpacityProperty);
+```
+
+### Running with `FadeToAsync`
+
+If a Keyframe animation and a legacy `FadeToAsync` animate the same property, the Keyframe animation wins while it runs. The legacy animation keeps running underneath, and its latest value shows when the Keyframe animation ends.
+
+### Limits
+
+- A `{DynamicResource}` set **directly** on the animated property is still detached by the first frame, as it would be by any `SetValue`. Set it through a `Style` instead and it stays live.
+- A `TwoWay` binding lives in the same slot, so its source receives the animated values. Don't animate a property the user also edits.
+- Properties you register with getter and setter delegates write directly, as before. Register them with a `BindableProperty` (`new AnimatableProperty<T>(name, MyView.MyProperty, interpolator, parse)`) to use the layer.
+
+## Reduced motion
+
+Every animation, transition and item animation honours the OS reduced-motion setting by default: iOS and Mac Catalyst Reduce Motion, Android's *Remove animations* (an animator duration scale of 0), and Windows' animation setting. A browser uses `prefers-reduced-motion`.
+
+| `ReducedMotion` | Behaviour |
+|---|---|
+| `Auto` (default) | Under reduced motion, jump straight to the end state. A looping animation shows its opening pose and stays there. |
+| `Play` | Always animate. For motion that carries information, such as a progress sweep or a changing value. |
+| `Instant` | Never animate. |
+
+**Seeking is never affected.** Scrubbing is direct manipulation, so a scrubbed player follows the finger whatever the setting. `MotionPolicy.IsReducedMotion` is wired to the platform automatically; replace it in tests.
+
+## The clock
+
+`MauiClock` ticks on the display's own signal, with the platform's frame timestamp:
+
+| Platform | Frame source |
+|---|---|
+| iOS, Mac Catalyst | `CADisplayLink`, asking for the display's full rate. ProMotion iPhones also need `CADisableMinimumFrameDurationOnPhone` in the app's Info.plist to run above 60 Hz. |
+| Android | `Choreographer`. It keeps ticking at an animator duration scale of 0, where a second MAUI ticker stops. |
+| Windows | `CompositionTarget.Rendering` |
+| macOS (AppKit), Linux (GTK4) | A dispatcher timer timed by a stopwatch. |
+
+It never touches MAUI's own ticker, so `FadeTo` and the rest of MAUI's animations are unaffected. There is one clock per window, and it runs only while something is playing.
