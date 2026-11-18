@@ -5,6 +5,19 @@ export const GITHUB_EDIT_URL = `https://github.com/shinyorg/documentation/tree/m
 export const COMMUNITY_INVITE_URL = `https://github.com/shinyorg/shiny/discussions/`;
 export const SPONSOR_URL = 'https://sponsor.shinylib.net';
 export const GITHUB_URL = 'https://github.com/shinyorg';
+/**
+ * The Blazor WebAssembly sample apps <BlazorSample> embeds. Each stays deployed from its own repo to its own
+ * GitHub Pages site; `url` must end in '/'. Set PUBLIC_BLAZOR_<APP>_URL (e.g. PUBLIC_BLAZOR_CONTROLS_URL=
+ * http://localhost:5000/) to point the docs at a sample running locally.
+ */
+export const BLAZOR_SAMPLES = {
+    controls: {
+        url: import.meta.env?.PUBLIC_BLAZOR_CONTROLS_URL ?? 'https://shinyorg.github.io/controls/',
+        sourceUrl: 'https://github.com/shinyorg/controls/blob/main/samples/Sample.Blazor',
+    },
+} as const;
+export type BlazorSampleApp = keyof typeof BLAZOR_SAMPLES;
+
 export const DEFAULT_VERSION: string = VERSIONS.shinyClient;
 /** Recognition IQ (shinyorg/recogintelligence) — Face / Voice / Document Intelligence ship together. */
 export const RECOGNITION_VERSION: string = VERSIONS.shinyRecognition;

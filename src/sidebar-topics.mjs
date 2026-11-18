@@ -985,6 +985,7 @@ export const sidebarTopics = [
           { label: 'Detail (Breakdown) Rows', link: 'controls/datagrid/detail-rows', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
           { label: 'Async Detail & IsBusy', link: 'controls/datagrid/async-detail', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
           { label: 'TreeDataGrid', link: 'controls/datagrid/tree-data-grid', dateCreated: '2026-08-24', dateUpdated: '2026-08-24' },
+          { label: 'Try It In Blazor', link: 'controls/datagrid/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1002,6 +1003,7 @@ export const sidebarTopics = [
         dateUpdated: '2026-09-16',
         items:[
           { label: 'Overview', link: 'controls/kanban/', dateCreated: '2026-09-15', dateUpdated: '2026-09-15' },
+          { label: 'Try It In Blazor', link: 'controls/kanban/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1313,6 +1315,7 @@ export const sidebarTopics = [
           { label: 'Styling', link: 'controls/tableview/styling', dateCreated: '2026-02-18', dateUpdated: '2026-02-18' },
           { label: 'Advanced Features', link: 'controls/tableview/advanced', dateCreated: '2026-02-18', dateUpdated: '2026-02-18' },
           { label: 'Blazor Usage', link: 'controls/tableview/blazor', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
+          { label: 'Try It In Blazor', link: 'controls/tableview/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {
@@ -1331,6 +1334,7 @@ export const sidebarTopics = [
         items:[
           { label: 'Getting Started', link: 'controls/treeview/', dateCreated: '2026-05-25', dateUpdated: '2026-05-25' },
           { label: 'Blazor Usage', link: 'controls/treeview/blazor', dateCreated: '2026-05-25', dateUpdated: '2026-05-25' },
+          { label: 'Try It In Blazor', link: 'controls/treeview/try-blazor', dateCreated: '2026-11-18', dateUpdated: '2026-11-18', platform: 'blazor' },
         ]
       },
       {

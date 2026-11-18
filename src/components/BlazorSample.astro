@@ -1,0 +1,227 @@
+---
+/**
+ * A live Blazor WebAssembly demo from one of the shinyorg/* sample apps, hosted in an iframe.
+ *
+ * The samples stay deployed cross-origin on their own GitHub Pages sites (BLAZOR_SAMPLES in consts.ts).
+ * Loading one with `?embed=1` makes it drop its own nav, toolbars and source panel (each sample's
+ * EmbedLayout). The two sides then talk over postMessage:
+ *   frame -> docs  { type: 'shiny-embed:size', height, fill }  the content height; fill = the demo
+ *                                                             scrolls itself, keep the fixed height
+ *   docs -> frame  { type: 'shiny-embed:theme', mode }        the Starlight theme, on every change
+ *
+ * Each frame boots its own .NET runtime (several MB), so by default nothing loads until the reader
+ * clicks. A dedicated "Try It In Blazor" page passes `autoload` - the reader came there to try it.
+ *
+ * <BlazorSample app="controls" route="kanban" source="Pages/KanbanPage.razor" />
+ */
+import { BLAZOR_SAMPLES, type BlazorSampleApp } from '../consts';
+
+interface Props {
+    /** Which sample app: a key of BLAZOR_SAMPLES. */
+    app: BlazorSampleApp;
+    /** The sample's route, without a leading slash ('kanban'). Empty for its home page. */
+    route: string;
+    /** Frame height in px for a demo that scrolls itself, and the placeholder's height. */
+    height?: number;
+    /** Load straight away instead of on click. */
+    autoload?: boolean;
+    /** The demo page's source, relative to the sample project ('Pages/KanbanPage.razor'). */
+    source?: string;
+    /** What the placeholder calls the demo. */
+    title?: string;
+}
+
+const { app, route, height = 720, autoload = false, source, title = 'live demo' } = Astro.props;
+const sample = BLAZOR_SAMPLES[app];
+const page = new URL(route.replace(/^\/+/, ''), sample.url);
+const fullUrl = page.toString();
+page.searchParams.set('embed', '1');
+const embedUrl = page.toString();
+const sourceUrl = source ? `${sample.sourceUrl}/${source}` : undefined;
+---
+
+<blazor-sample
+    class="not-content"
+    data-src={embedUrl}
+    data-origin={new URL(sample.url).origin}
+    data-autoload={autoload ? 'true' : undefined}
+    style={`--sample-height:${height}px`}
+>
+    <div class="frame-wrap">
+        <button type="button" class="placeholder">
+            <span class="play" aria-hidden="true">
+                <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z" /></svg>
+            </span>
+            <span class="label">Run the {title}</span>
+            <span class="hint">Blazor WebAssembly · downloads the .NET runtime (a few MB)</span>
+        </button>
+    </div>
+    <div class="links">
+        <a href={fullUrl} target="_blank" rel="noopener">Open in the full gallery ↗</a>
+        {sourceUrl && <a href={sourceUrl} target="_blank" rel="noopener">View source ↗</a>}
+    </div>
+</blazor-sample>
+
+<style>
+    blazor-sample {
+        display: block;
+        margin-block: 1.5rem;
+    }
+
+    .frame-wrap {
+        position: relative;
+        border: 1px solid var(--sl-color-gray-5);
+        border-radius: 0.5rem;
+        overflow: hidden;
+        background: var(--sl-color-bg-nav);
+    }
+
+    .placeholder {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+        width: 100%;
+        height: min(var(--sample-height), 420px);
+        border: 0;
+        background:
+            radial-gradient(circle at 30% 20%, color-mix(in srgb, var(--sl-color-accent) 18%, transparent), transparent 60%),
+            var(--sl-color-bg-nav);
+        color: var(--sl-color-white);
+        font: inherit;
+        cursor: pointer;
+    }
+
+    .placeholder:hover .play,
+    .placeholder:focus-visible .play {
+        transform: scale(1.08);
+    }
+
+    .play {
+        display: grid;
+        place-items: center;
+        width: 4rem;
+        height: 4rem;
+        border-radius: 50%;
+        background: var(--sl-color-accent);
+        color: var(--sl-color-black);
+        transition: transform 0.15s ease;
+    }
+
+    .play svg {
+        width: 2rem;
+        height: 2rem;
+        margin-left: 0.2rem;
+    }
+
+    .label {
+        font-weight: 600;
+        font-size: var(--sl-text-lg);
+    }
+
+    .hint {
+        font-size: var(--sl-text-sm);
+        color: var(--sl-color-gray-3);
+        padding-inline: 1rem;
+        text-align: center;
+    }
+
+    /* the gallery's demo cards draw their own edges - a frame border around them reads as a double line */
+    .frame-wrap:has(:global(iframe)) {
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    /* created by the script; the placeholder's height until the demo reports its own */
+    .frame-wrap :global(iframe) {
+        display: block;
+        width: 100%;
+        height: var(--sample-height);
+        border: 0;
+        background: transparent;
+    }
+
+    .links {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem 1.25rem;
+        margin-top: 0.5rem;
+        font-size: var(--sl-text-sm);
+    }
+</style>
+
+<script>
+    // Microphone/camera for the camera, speech and media demos; clipboard for copy buttons; the rest for
+    // the device demos. A cross-origin frame gets none of them unless the parent delegates them here.
+    const ALLOW = 'camera; microphone; clipboard-read; clipboard-write; fullscreen; bluetooth; geolocation; gamepad; screen-wake-lock; display-capture';
+
+    const currentTheme = () => (document.documentElement.dataset.theme === 'light' ? 'light' : 'dark');
+
+    class BlazorSample extends HTMLElement {
+        frame?: HTMLIFrameElement;
+        origin = '';
+        onMessage = (e: MessageEvent) => this.handle(e);
+        themeObserver = new MutationObserver(() => this.sendTheme());
+
+        connectedCallback() {
+            this.origin = this.dataset.origin ?? '';
+            const button = this.querySelector<HTMLButtonElement>('.placeholder');
+            button?.addEventListener('click', () => this.load(), { once: true });
+            if (this.dataset.autoload === 'true')
+                this.load();
+        }
+
+        disconnectedCallback() {
+            window.removeEventListener('message', this.onMessage);
+            this.themeObserver.disconnect();
+        }
+
+        load() {
+            if (this.frame)
+                return;
+
+            const src = new URL(this.dataset.src!);
+            src.searchParams.set('theme', currentTheme());
+
+            const frame = document.createElement('iframe');
+            frame.src = src.toString();
+            frame.title = this.querySelector('.label')?.textContent ?? 'Blazor demo';
+            frame.allow = ALLOW;
+            frame.loading = 'lazy';
+            this.frame = frame;
+
+            window.addEventListener('message', this.onMessage);
+            this.themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+            this.querySelector('.placeholder')?.replaceWith(frame);
+        }
+
+        handle(e: MessageEvent) {
+            // several demos can share a page - only listen to our own frame
+            if (e.origin !== this.origin || e.source !== this.frame?.contentWindow)
+                return;
+
+            const data = e.data;
+            if (data?.type === 'shiny-embed:ready') {
+                this.sendTheme();
+                return;
+            }
+            if (data?.type !== 'shiny-embed:size' || !this.frame)
+                return;
+
+            // a demo that scrolls itself keeps the fixed height; anything else grows to its content
+            // (the floor stops a page that is still rendering from collapsing the frame to a sliver)
+            this.frame.style.height = data.fill || typeof data.height !== 'number'
+                ? ''
+                : `${Math.max(data.height, 160)}px`;
+        }
+
+        sendTheme() {
+            this.frame?.contentWindow?.postMessage({ type: 'shiny-embed:theme', mode: currentTheme() }, this.origin);
+        }
+    }
+
+    if (!customElements.get('blazor-sample'))
+        customElements.define('blazor-sample', BlazorSample);
+</script>

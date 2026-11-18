@@ -87,6 +87,24 @@ generator. A new library therefore needs all three, or the build stops (`src/dat
    `PackageReference`, registration, platform manifests).
 3. An entry in `src/components/Boilerplate/componentTemplateMap.ts` from the component id to that option.
 
+### Embed a live Blazor demo ("Try It In Blazor")
+
+`src/components/BlazorSample.astro` hosts a page of a `shinyorg/*` Blazor sample in an iframe. The samples stay
+deployed **cross-origin** on their own GitHub Pages sites, listed in `BLAZOR_SAMPLES` in `src/consts.ts` (only
+`controls` is wired up so far). The iframe loads `<route>?embed=1&theme=…`; the sample's `EmbedLayout` drops its own
+chrome and reports its height over `postMessage`, and the component sends the Starlight theme back. The protocol is
+documented at the top of the component and in each sample repo's CLAUDE.md, so keep the two sides in step.
+
+- A control gets a **`controls/<control>/try-blazor.mdx`** page (`tableOfContents: false`) with
+  `<BlazorSample app="controls" route="<route>" source="Pages/<Page>.razor" title="<Control> demo" autoload />`, and
+  a `Try It In Blazor` sidebar item (`platform: 'blazor'`) at the end of that control's group in `sidebar-topics.mjs`.
+  Routes come from the sample's `Catalog.cs`.
+- Inline embeds inside a normal page work too: leave out `autoload`, so the reader clicks before the runtime downloads.
+  Keep it to one live demo per page; each frame boots its own .NET runtime.
+- A demo that scrolls itself (`.demo-fill` in the sample) keeps the frame at `height` (default 720). Anything else
+  grows to fit its content.
+- To test against a sample running locally: `PUBLIC_BLAZOR_CONTROLS_URL=http://localhost:5199/ npm run dev`.
+
 ### Regenerate the App Device Bridge API reference
 
 The Requests / Events / Types sections on every `appdevicebridge/` bridge page (and the catalog on `bridges.mdx`) render
