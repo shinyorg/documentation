@@ -52,7 +52,8 @@ services.AddBeaconRanging(new BeaconRangingOptions
     NearThreshold = 3.0,
     RegionExitTimeout = TimeSpan.FromSeconds(30),
     RegionEvaluationInterval = TimeSpan.FromSeconds(5),
-    AllowNonAppleCompanyId = false
+    AllowNonAppleCompanyId = false,
+    ServiceUuids = []
 });
 ```
 
@@ -66,6 +67,7 @@ services.AddBeaconRanging(new BeaconRangingOptions
 | `NearThreshold` | 3.0 m | Below this is `Near`, above is `Far` |
 | `RegionExitTimeout` | 30s | Silence before a monitored region counts as exited |
 | `AllowNonAppleCompanyId` | `false` | Accept iBeacon-shaped payloads sent under another company id |
+| `ServiceUuids` | none | Filter the BLE scan on these service UUIDs (not Apple, which uses CoreLocation). See [Monitoring](/client/beacons/monitoring/#scan-filter) |
 
 ## The estimators
 

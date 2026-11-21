@@ -17,7 +17,7 @@ export const BLAZOR_SAMPLES = {
     },
     shiny: {
         url: import.meta.env?.PUBLIC_BLAZOR_SHINY_URL ?? 'https://shinyorg.github.io/shiny/',
-        sourceUrl: 'https://github.com/shinyorg/shiny/blob/v6/samples/Sample.Blazor',
+        sourceUrl: 'https://github.com/shinyorg/shiny/tree/main/samples/Sample.Blazor',
     },
     speech: {
         url: import.meta.env?.PUBLIC_BLAZOR_SPEECH_URL ?? 'https://shinyorg.github.io/speech/',

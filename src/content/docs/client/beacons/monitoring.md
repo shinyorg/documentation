@@ -53,9 +53,13 @@ before any advertisement has arrived.
 On **iOS 18 / Mac Catalyst 18 and above** monitoring uses `CLMonitor` with
 `CLBeaconIdentityCondition` — the same path `Shiny.Locations` takes for geofences, including the
 `CLServiceSession` that background delivery requires and the cold-start replay suppression that
-stops a re-attached condition from firing a spurious entry.
+stops a re-attached condition from firing a spurious entry. A region added by `StartMonitoring` is
+not a replay: if the device is already inside it, your delegate gets `Entered` straight away, as it
+does on Android.
 
-**Below 18** it uses `CLLocationManager.StartMonitoring(CLBeaconRegion)`.
+**Below 18** it uses `CLLocationManager.StartMonitoring(CLBeaconRegion)`. iOS only reports
+transitions there, so a region the device is already inside stays quiet until it leaves and comes
+back - call `RequestState(region)` if the starting state matters.
 
 Either way the OS does the work, so monitoring keeps running with the app closed and iOS will
 relaunch the app to deliver a transition.
@@ -85,6 +89,30 @@ On **Android** a foreground service with a visible notification keeps that scan 
 leaves the foreground. Its service type is `connectedDevice`, not `location`: Android 14 requires the
 declared type to match what the service actually does, and a BLE scan is not a location activity.
 
+#### Scan filter
+
+On **Android**, a scan with no filter stops delivering results while the screen is off. Without a
+filter, a beacon lying right next to the phone goes quiet a minute after the screen turns off and its
+region reports a false exit. So on Android the scan is always filtered: by default on Apple's iBeacon
+identifier (company `0x004C`, payload starting `0x02 0x15`), which matches every iBeacon and needs no
+setup. Windows, Linux and Blazor scan unfiltered by default.
+
+On any of these platforms you can filter on service UUIDs instead with `ServiceUuids`. An iBeacon
+advertises no service UUID: the whole packet is Apple manufacturer data, and the region's UUID is a
+field inside it. Use this only if your beacons also advertise a service UUID of their own in the same
+packet, as some vendors do. Only advertisements carrying one of these UUIDs are then reported, so a
+beacon that sends its service UUID in a separate packet from the iBeacon data is never seen:
+
+```csharp
+services.AddBeaconMonitoring<MyDelegate>(new BeaconRangingOptions
+{
+    ServiceUuids = ["<your vendor service uuid>"]
+});
+```
+
+With `AllowNonAppleCompanyId = true` and no `ServiceUuids`, the Android scan is unfiltered, because
+those payloads arrive under other company identifiers, so it pauses while the screen is off.
+
 On desktop, the process simply has to keep running.
 
 ## Tuning exit detection
@@ -113,6 +141,12 @@ afterwards, and it presents that prompt **once**. Call `RequestAccess()` from th
 it — the moment the user turns beacon monitoring on is the only moment you can explain why. Word the
 "always" string for what background monitoring actually does rather than reusing the when-in-use
 sentence.
+
+`RequestAccess()` returns `Restricted` while only when-in-use is granted. The first request for
+the upgrade waits up to 30 seconds for the user's answer, because the app gets no signal while the
+prompt is up and "Keep Only While Using" changes nothing. iOS won't show that prompt again, so later
+calls return straight away and the user has to switch to "Always" in Settings. `RequestAccess()`
+reads the current status on every call, so it picks that up.
 
 **Android**
 
