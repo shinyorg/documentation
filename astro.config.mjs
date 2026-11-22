@@ -49,6 +49,13 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
+      id: 'client-v70-net11',
+      title: 'Shiny Client v7 on .NET 11',
+      description: 'Every Shiny client package now targets .NET 11 - MAUI 11, Blazor WebAssembly 11 and Uno 7 - plus BLE manufacturer data scan filters, screen-off iBeacon monitoring and iOS location permission fixes.',
+      href: '/client/release-notes/#700---november-22-2026',
+      cta: 'Release notes',
+    },
+    {
       id: 'speech-v30',
       title: 'AI Conversations, Speech, & Audio Release',
       description: '[Have a full conversation with AI](/aiconversation), [use speech commands](/speech), and [interact with audio content seamlessly](/audio).'
