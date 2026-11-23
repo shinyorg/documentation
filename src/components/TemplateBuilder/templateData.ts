@@ -7,32 +7,30 @@ import type { TemplateKind } from './templateFiles';
  */
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
-    shinyMediator: '6.12.0',
-    shinyShell: '7.1.0-beta-0002',
-    shinyControls: '2.4.0',
+    shinyMediator: '6.13.0-beta-0002',
+    shinyShell: '8.0.0',
+    shinyControls: '2.5.0',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '6.6.0-beta-0002',
-    shinyConfiguration: '6.6.0-beta-0002',
+    shinyClient: '7.0.0',
+    shinyConfiguration: '7.0.0',
     shinyLocalization: '2.1.2',
-    shinyStores: '6.0.1',
-    shinyReflector: '6.0.1',
-    shinyDI: '6.0.1',
-    shinySerialization: '6.0.1',
-    shinyContactStore: '6.6.0-beta-0002',
-    shinyCalendar: '6.6.0-beta-0002',
-    shinySpeech: '3.0.0',
-    shinyAiConversation: '3.0.0',
+    shinyStores: '6.0.2',
+    shinyReflector: '6.0.2',
+    shinyDI: '6.0.2',
+    shinySerialization: '6.0.2',
+    shinyContactStore: '7.0.0',
+    shinyCalendar: '7.0.0',
+    shinySpeech: '3.1.0-beta-0002',
+    shinyAiConversation: '3.1.0-beta-0002',
     shinyMusic: '4.1.0',
     shinyHealth: '2.1.0',
-    shinyDocumentDb: '14.1.0',
-    shinyHttpServer: '2.2.1',
-    /** Pinned to 6.5.2: Shiny.Jobs 6.6.0-beta-0002 was never published, and Shiny.Data.Sync 6.6.0-beta-0002 depends on it */
-    shinyDataSync: '6.5.2',
-    /** Shiny.Jobs - off the client train until a 6.6 beta of it is published (see shinyDataSync) */
-    shinyJobs: '6.5.2',
-    shinyObd: '1.5.1-beta-0002',
+    shinyDocumentDb: '14.3.0',
+    shinyHttpServer: '3.0.0',
+    shinyDataSync: '7.0.0',
+    shinyJobs: '7.0.0',
+    shinyObd: '1.5.2-beta-0001',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
     shinyRecognition: '1.0.0-beta-0021',
     /** Shiny.AspNet.* server libraries (WebHosting, JsonPatch, Idempotency, ...) ship together. */
@@ -41,39 +39,39 @@ export const VERSIONS = {
     shinyFirestoreMobile: '4.0.1',
     /** Shiny.Push.FirebaseMessaging is off the core train */
     shinyPushFirebase: '6.0.0',
-    shinyBleHubs: '1.5.0',
+    shinyBleHubs: '2.0.0',
     /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
-    shinyUniversalHubs: '1.5.0',
-    shinyAppDeviceBridge: '3.0.0',
+    shinyUniversalHubs: '2.0.0',
+    shinyAppDeviceBridge: '4.0.0',
     shinyPermissions: '1.0.0-beta-0009',
     /** shinyorg/actors - Shiny.Actors and its add-ons ship together */
     shinyActors: '1.0.0-beta.12',
     /** shinyorg/efcore - Shiny.EntityFrameworkCore.* ship together */
-    shinyEfCore: '1.0.0-beta.2',
+    shinyEfCore: '1.0.0-beta.3',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.14.26531.2',
+    devflow: '0.1.0-preview.14.26567.2',
 
     // Microsoft + third-party
     /** The MicrosoftVersion MSBuild property - Microsoft.Extensions.* / ASP.NET Core, kept on the TFM's major */
-    microsoftExtensions: '10.0.14',
+    microsoftExtensions: '11.0.0',
     ctMvvm: '8.4.2',
-    sentry: '6.12.1',
-    liveCharts: '2.0.5',
-    skia: '4.154.0',
+    sentry: '7.0.1',
+    liveCharts: '2.2.0',
+    skia: '4.157.0',
     skiaExtended: '3.0.0',
     userDialogs: '9.2.2',
     sqliteNetPcl: '1.11.285',
     roomsharp: '0.5.5',
-    msExtAi: '10.11.0',
+    msExtAi: '11.0.1',
     androidAuto: '1.7.0.4',
     systemReactive: '7.0.0',
     humanizer: '3.0.10',
     unitsNet: '5.75.1',
     sysLinqAsync: '7.0.1',
-    refit: '16.4.0',
+    refit: '17.0.0',
     orleans: '10.4.2',
-    scalar: '2.19.0',
+    scalar: '3.2.0',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';
@@ -156,10 +154,10 @@ const MAUI_PARAMS: TemplateParam[] = [
         description: 'Debug-only toolkit for visual tree inspection, performance profiling, network monitoring, and AI agent automation. Adds Microsoft.Maui.DevFlow.Agent to your app, which connects to the MAUI CLI (maui devflow) https://github.com/dotnet/maui-labs' },
 
     // Choices
-    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
+    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net11.0', category: 'project',
         description: 'The target framework for the project',
         choices: [
-            { value: 'net10.0', label: '.NET 10.0', description: 'Target .NET 10.0' },
+            { value: 'net11.0', label: '.NET 11.0', description: 'Target .NET 11.0' },
         ],
     },
     { id: 'mvvmframework', label: 'MVVM Framework', type: 'choice', defaultValue: 'Shiny MAUI Shell', category: 'framework',
@@ -752,10 +750,10 @@ const ASPNET_CATEGORIES: readonly TemplateCategory[] = [
 ];
 
 const ASPNET_PARAMS: TemplateParam[] = [
-    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
+    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net11.0', category: 'project',
         description: 'The target framework for the project',
         choices: [
-            { value: 'net10.0', label: '.NET 10.0', description: 'Target .NET 10.0' },
+            { value: 'net11.0', label: '.NET 11.0', description: 'Target .NET 11.0' },
         ],
     },
 
@@ -1011,10 +1009,10 @@ const BLAZOR_CATEGORIES: readonly TemplateCategory[] = [
 ];
 
 const BLAZOR_PARAMS: TemplateParam[] = [
-    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net10.0', category: 'project',
+    { id: 'Framework', label: 'Target Framework', type: 'choice', defaultValue: 'net11.0', category: 'project',
         description: 'The target framework for the project',
         choices: [
-            { value: 'net10.0', label: '.NET 10.0', description: 'Target .NET 10.0' },
+            { value: 'net11.0', label: '.NET 11.0', description: 'Target .NET 11.0' },
         ],
     },
 
@@ -1223,7 +1221,7 @@ export const TEMPLATE_CONFIGS: Record<TemplateKind, TemplateConfig> = {
     shinyblazor: {
         kind: 'shinyblazor',
         label: 'Blazor WASM',
-        blurb: 'Standalone Blazor WebAssembly app targeting .NET 10 with optional Shiny libraries and a UI component library.',
+        blurb: 'Standalone Blazor WebAssembly app targeting .NET 11 with optional Shiny libraries and a UI component library.',
         showApplicationId: false,
         categories: BLAZOR_CATEGORIES,
         params: BLAZOR_PARAMS,

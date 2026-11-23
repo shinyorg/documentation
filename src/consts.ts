@@ -625,7 +625,7 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "camera-motion",
-        "nuget": "Shiny.Maui.Controls.Camera.Motion",
+        "nuget": "Shiny.Maui.Controls.Analysis.Motion",
         "description": "CameraView Motion Analyzer",
         "category": "controls",
         "version": VERSIONS.shinyControls,
@@ -633,7 +633,7 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "camera-barcode",
-        "nuget": "Shiny.Maui.Controls.Camera.Barcode",
+        "nuget": "Shiny.Maui.Controls.Analysis.Barcode",
         "description": "CameraView Barcode Analyzer",
         "category": "controls",
         "version": VERSIONS.shinyControls,
@@ -641,7 +641,7 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "camera-face",
-        "nuget": "Shiny.Maui.Controls.Camera.Face",
+        "nuget": "Shiny.Maui.Controls.Analysis.Face",
         "description": "CameraView Face Analyzer",
         "category": "controls",
         "version": VERSIONS.shinyControls,
@@ -649,7 +649,7 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "camera-documents",
-        "nuget": "Shiny.Maui.Controls.Camera.Documents",
+        "nuget": "Shiny.Maui.Controls.Analysis.Documents",
         "description": "CameraView Document Analyzers (invoice, receipt, licence, passport, cards)",
         "category": "controls",
         "version": VERSIONS.shinyControls,
@@ -657,7 +657,7 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "camera-ai",
-        "nuget": "Shiny.Maui.Controls.Camera.Ai",
+        "nuget": "Shiny.Maui.Controls.Analysis.Ai",
         "blazorNuget": "Shiny.Blazor.Controls.Camera.Ai",
         "description": "CameraView AI Document Scanner & Photo Stylizer",
         "category": "controls",
@@ -666,7 +666,7 @@ export const ShinyComponents: ShinyComponent[] = [
     },
     {
         "id": "camera-ocr",
-        "nuget": "Shiny.Maui.Controls.Camera.Ocr",
+        "nuget": "Shiny.Maui.Controls.Analysis.Ocr",
         "description": "CameraView OCR Analyzer",
         "category": "controls",
         "version": VERSIONS.shinyControls,

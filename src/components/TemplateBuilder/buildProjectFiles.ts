@@ -51,7 +51,7 @@ function generateGuid(): string {
 function buildReplacements(state: TemplateState, projectName: string, guid: string): Record<string, string> {
     return {
         '{APPLICATION_ID}': state.applicationId || 'com.companyname.app',
-        '{DOTNET_TFM}': (state.Framework as string) || 'net10.0',
+        '{DOTNET_TFM}': (state.Framework as string) || 'net11.0',
         '{DEEPLINK_HOST}': (state.deeplinks as string) || '',
         '{MSAL_CLIENT_ID}': (state.msalclientid as string) || '',
         '{MAUI_MAPS_ANDROID_KEY}': (state.mapsandroidkey as string) || '',
