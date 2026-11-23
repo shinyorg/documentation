@@ -32,6 +32,58 @@ opts.ConfigureDocument<Article>(cfg => cfg.MapFullTextProperty(
     language: FullTextLanguage.English));
 ```
 
+The `textSelector` is compiled code, so only the in-memory fallback runs it. The relational providers index the **whole value** at each named path, which for a collection of objects means every field of every element. To index one field of each element, use `MapFullTextCollection` (below).
+
+### Indexing one field of each collection element
+
+`MapFullTextCollection` indexes a single string property of every element in a collection, and nothing else from the elements. For a day's schedule, that means searching programme titles without matching their descriptions:
+
+```csharp
+opts.ConfigureDocument<Schedule>(cfg => cfg.MapFullTextCollection(
+    x => x.Programmes,      // the collection
+    p => p.Title));         // the field of each element to index
+```
+
+The database extracts the values itself (`json_each` on SQLite, `jsonb_path_query_array` on PostgreSQL, a `[*]` wildcard path on MySQL, MariaDB, Oracle and DuckDB), so the index stays engine-maintained.
+
+| Provider | `MapFullTextCollection` |
+|---|---|
+| SQLite, PostgreSQL, MySQL, MariaDB, Oracle, DuckDB | ✅ |
+| SQL Server, CockroachDB | ❌ throws `NotSupportedException` at table init |
+
+### Substring search with the trigram tokenizer
+
+The default tokenizer indexes whole words, so `"spo"` doesn't find `"Sportsnet"`. For an as-you-type search box, pass `tokenizer: FullTextTokenizer.Trigram`:
+
+```csharp
+opts.ConfigureDocument<Channel>(cfg => cfg.MapFullTextProperty(
+    x => x.Name,
+    tokenizer: FullTextTokenizer.Trigram));
+
+await store.FullTextSearch<Channel>("spo");       // finds "Sportsnet One"
+await store.FullTextSearch<Channel>("bbc one");   // both terms must appear
+```
+
+- Matching is **case-insensitive** and finds a term **anywhere** in the text.
+- The search's whitespace-separated terms are **ANDed** (a word index ORs them).
+- Terms shorter than **three characters** are ignored, because a trigram index can't look them up. A search made only of such terms returns nothing.
+- `LuceneMatch` / `LuceneScore` work over a trigram index too.
+
+| Provider | Trigram engine |
+|---|---|
+| **SQLite** | FTS5 `tokenize='trigram'` |
+| **PostgreSQL** | `pg_trgm` GIN index (`gin_trgm_ops`) serving `ILIKE`, ranked by `word_similarity`. The store runs `CREATE EXTENSION IF NOT EXISTS pg_trgm`, which needs the privilege to create extensions. |
+| **CockroachDB** | built-in trigram index, ranked by `similarity` |
+| Everything else | ❌ throws `NotSupportedException` at table init |
+
+### Changing a mapping
+
+The index is built when the store first initializes a table. If you later change a type's full-text mapping (other properties, a collection element, the tokenizer or the language), the next startup **rebuilds that type's index from the stored documents**. It doesn't keep serving the old text. Each relational provider records the definition it indexed: SQLite in a `{table}_fts_meta` table, and the others on the index's backing column (a column comment, or an extended property on SQL Server). An unchanged mapping costs one catalog lookup at startup.
+
+An index built by 14.3 or earlier has no recorded definition, so **it is rebuilt once on the first startup after upgrading**. On PostgreSQL and MySQL, rebuilding a generated column rewrites the table, so allow for that on large tables. DuckDB rebuilds its snapshot index before every query anyway.
+
+Mapping a type onto a table that already holds documents of that type indexes them as well.
+
 ### FullTextLanguage
 
 Controls stemming / stop-words where the backend supports it (PostgreSQL `regconfig`, Oracle lexer, DuckDB stemmer, the in-memory fallback). Backends without per-language support ignore everything but the distinction between `Simple` (no stemming) and a stemmed language.
@@ -134,6 +186,7 @@ Composable queries reuse the same per-type index as `FullTextSearch`, but each e
 | **MySQL** (BOOLEAN MODE) | ✅ | ✅ | prefix, proximity |
 | **SQL Server** (`CONTAINS`) | ✅ | ✅ (`CONTAINSTABLE`) | prefix, proximity (`NEAR`) |
 | **Oracle Text** (`CONTAINS`) | ✅ | ❌ — use `FullTextSearch` | prefix, fuzzy, proximity |
+| **Trigram index** (SQLite, PostgreSQL, CockroachDB) | ✅ (substring tests) | ✅ | prefix, phrase |
 | **LiteDB / IndexedDB** (in-memory) | ✅ | ✅ | **all** (incl. fuzzy) |
 | **DuckDB / Cosmos DB / MongoDB** | ❌ — use `FullTextSearch` | ❌ | — |
 
@@ -149,11 +202,12 @@ The index is maintained automatically by the engine — no write-path bookkeepin
 
 | Provider | Engine | Ranking | Notes |
 |---|---|---|---|
-| **SQLite** | FTS5 virtual table + triggers | BM25 | Always available. |
-| **PostgreSQL** | generated `tsvector` column + GIN | `ts_rank` | Per-language stemming. |
+| **SQLite** | FTS5 virtual table + triggers | BM25 | Always available. Trigram tokenizer. |
+| **PostgreSQL** | generated `tsvector` column + GIN | `ts_rank` | Per-language stemming. Trigram via `pg_trgm`. |
+| **CockroachDB** | generated `tsvector` column + GIN | `ts_rank` | Built-in trigram. |
 | **MySQL** | generated column + `FULLTEXT` (InnoDB) | `MATCH … AGAINST` | Natural-language mode. |
 | **Oracle** | `CTXSYS.CONTEXT` (sync on commit) | `SCORE()` | Requires the Oracle Text option. |
-| **SQL Server** | Full-Text Index + `FREETEXTTABLE` | `RANK` | Requires the Full-Text Search feature. |
+| **SQL Server** | Full-Text Index + `FREETEXTTABLE` | `RANK` | Requires the Full-Text Search feature. Each mapped type adds its column to the table's one full-text index. |
 | **DuckDB** | `fts` extension (BM25) | BM25 | Snapshot index — rebuilt before each query. |
 | **Cosmos DB** | full-text policy + `FullTextScore` | rank order | Newer Cosmos service feature. |
 | **MongoDB** | `$text` index | `textScore` | One text index per collection. |
@@ -163,6 +217,6 @@ The index is maintained automatically by the engine — no write-path bookkeepin
 ### Limitations
 
 - **Map before you query.** A type that hasn't been mapped with `cfg.MapFullTextProperty` cannot be full-text searched — `FullTextSearch`/`FullTextMatch` throw. This is by design (it's how the index gets created).
-- **One mapped type per table/collection** is the supported shape on engines that allow only a single full-text index per table (SQL Server, MongoDB).
+- **One mapped type per collection** on MongoDB, which allows a single text index per collection.
 - **Optional features must be installed.** Oracle Text and SQL Server Full-Text Search are optional server components; if absent, `FullTextSearch` fails at query time. Cosmos full-text requires a service/SDK that supports it.
 - **In-memory fallback** (LiteDB, IndexedDB) loads and scans the collection, so it suits modest data sizes — exactly the client-tier scenarios those providers target.

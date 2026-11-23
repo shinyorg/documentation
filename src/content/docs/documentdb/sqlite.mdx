@@ -82,6 +82,27 @@ Doing this **breaks `Shiny.DocumentDb.Sqlite.SqlCipher` for now**. Encrypted ope
    ```
 </Steps>
 
+## Concurrent reads
+
+By default every operation shares one connection, so a read waits while a long import holds it. Set
+`ConcurrentReads` to run reads on a small pool of read-only connections next to the writer:
+
+```csharp
+opts.DatabaseProvider = new SqliteDatabaseProvider("Data Source=app.db")
+{
+    ConcurrentReads = true
+};
+```
+
+- Reads are `Get`, the query terminals (`ToList`, `Count`, `Any`, aggregates, cursor pages, projections, grouping,
+  joins), streaming, and `FullTextSearch`. Up to 4 read connections are opened as needed.
+- Writes, and every read inside a unit of work, stay on the writer, so a unit still reads its own uncommitted changes.
+- It only takes effect for a **file database in WAL mode** (the mode this provider sets). `:memory:`,
+  `Mode=Memory` and `Cache=Shared` databases keep the single connection. SQLCipher inherits the setting, and its
+  read connections use the same password.
+- It is **off by default** because it changes one thing: a read outside a unit of work sees the last committed
+  state straight away, rather than waiting for another caller's open transaction to finish.
+
 ## Storage Layout
 
 ```sql
@@ -154,6 +175,13 @@ await store.CreateIndexAsync<User>(u => u.Name);
 ```
 
 Indexes are **partial** by type so multiple types sharing the same table do not pay for each other's indexes. See [Indexes & Transactions](/documentdb/indexes/).
+
+## Full-text search
+
+Full-text uses FTS5. Word-tokenized types share a `{table}_fts` virtual table; types mapped with
+`tokenizer: FullTextTokenizer.Trigram` (case-insensitive substring search) use `{table}_fts_tri`. Each type's
+index definition is recorded in `{table}_fts_meta`, so changing the mapping rebuilds that type's rows on the next
+startup. See [Full-Text Search](/documentdb/full-text/).
 
 ## Notes
 
