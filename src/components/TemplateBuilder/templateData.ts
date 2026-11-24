@@ -7,9 +7,9 @@ import type { TemplateKind } from './templateFiles';
  */
 export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
-    shinyMediator: '6.13.0-beta-0002',
-    shinyShell: '8.0.0',
-    shinyControls: '2.5.0',
+    shinyMediator: '6.13.0',
+    shinyShell: '8.0.1',
+    shinyControls: '3.0.0-beta.1',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
@@ -26,19 +26,19 @@ export const VERSIONS = {
     shinyAiConversation: '3.1.0-beta-0002',
     shinyMusic: '4.1.0',
     shinyHealth: '2.1.0',
-    shinyDocumentDb: '14.3.0',
+    shinyDocumentDb: '14.4.1',
     shinyHttpServer: '3.0.0',
     shinyDataSync: '7.0.0',
     shinyJobs: '7.0.0',
-    shinyObd: '1.5.2-beta-0001',
+    shinyObd: '2.0.0',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
     shinyRecognition: '1.0.0-beta-0021',
     /** Shiny.AspNet.* server libraries (WebHosting, JsonPatch, Idempotency, ...) ship together. */
     shinyAspNet: '1.0.0',
     shinyExtensionsPush: '3.0.0-beta-0008',
-    shinyFirestoreMobile: '4.0.1',
+    shinyFirestoreMobile: '5.0.0',
     /** Shiny.Push.FirebaseMessaging is off the core train */
-    shinyPushFirebase: '6.0.0',
+    shinyPushFirebase: '7.0.0',
     shinyBleHubs: '2.0.0',
     /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
     shinyUniversalHubs: '2.0.0',
@@ -50,7 +50,7 @@ export const VERSIONS = {
     shinyEfCore: '1.0.0-beta.3',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.14.26567.2',
+    devflow: '0.1.0-preview.14.26573.4',
 
     // Microsoft + third-party
     /** The MicrosoftVersion MSBuild property - Microsoft.Extensions.* / ASP.NET Core, kept on the TFM's major */
