@@ -82,10 +82,10 @@ full front-end and runs both roles at once:
 ```bash
 git clone https://github.com/shinyorg/obd
 cd obd
-dotnet build samples/Sample.Maui/Sample.Maui.csproj -f net10.0-android   # or -f net10.0-ios
+dotnet build samples/Sample.Maui/Sample.Maui.csproj -f net11.0-android   # or -f net11.0-ios
 ```
 
-Windows is in the target list too (`net10.0-windows10.0.19041.0`, added automatically when building on
+Windows is in the target list too (`net11.0-windows10.0.19041.0`, added automatically when building on
 Windows).
 
 Hosting starts as soon as the app launches — there is no button to press first. The Adapter tab shows

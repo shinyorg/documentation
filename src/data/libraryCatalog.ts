@@ -49,8 +49,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'foundation',
         topicId: 'foundation',
-        accent: '#6A3DF0',
-        accentDark: '#A98CFF',
+        accent: 'var(--topic-0)',
+        accentDark: 'var(--topic-0)',
         headline: 'The building blocks under every Shiny app — hosting, messaging, DI and source generators that keep you AOT-clean.',
         intro: 'Start here. These libraries have no platform code of their own; they are the patterns the rest of Shiny is built on, and most of them are just as useful in a console app or an ASP.NET service as in a phone app.',
         resources: [
@@ -162,8 +162,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'hardware',
         topicId: 'hardware',
-        accent: '#0E9F68',
-        accentDark: '#45E8AB',
+        accent: 'var(--topic-1)',
+        accentDark: 'var(--topic-1)',
         headline: 'Radios, sensors and the local network — Bluetooth, GPS, beacons, Wi-Fi, VPN and discovery behind one API.',
         intro: 'The parts of an app where every platform does it differently and the documentation assumes you already know. Each library owns the native code, the permissions and the background rules, and gives you one API across iOS, Android, Windows, macOS and beyond.',
         libraries: [
@@ -483,8 +483,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'device-data',
         topicId: 'device-data',
-        accent: '#0077C2',
-        accentDark: '#57BCFF',
+        accent: 'var(--topic-2)',
+        accentDark: 'var(--topic-2)',
         headline: 'The data the OS already owns — music, health, contacts and calendars — with permissions handled for you.',
         intro: 'Your users already keep their music, health records, contacts and calendars on the device. These libraries put each store behind one cross-platform API, handle the permission dance, and — where it helps — expose it to an AI agent.',
         libraries: [
@@ -599,8 +599,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'ai',
         topicId: 'ai',
-        accent: '#D96A00',
-        accentDark: '#FFAE52',
+        accent: 'var(--topic-3)',
+        accentDark: 'var(--topic-3)',
         headline: 'Conversation, speech, and on-device recognition of faces, voices and documents.',
         intro: 'The intelligence layer: a complete conversational service, speech in and out with pluggable cloud providers, and recognition that runs entirely on the device — so biometric data and scanned documents never have to leave it.',
         libraries: [
@@ -680,8 +680,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'background',
         topicId: 'background',
-        accent: '#D81B60',
-        accentDark: '#FF7BA8',
+        accent: 'var(--topic-4)',
+        accentDark: 'var(--topic-4)',
         headline: "Work that keeps running when your app isn't on screen, and the notifications that bring users back.",
         intro: 'Every platform has its own rules for what may run in the background and for how long. These libraries follow those rules for you — scheduled jobs, transfers that survive suspension, and local, push and live notifications.',
         libraries: [
@@ -772,8 +772,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'maui',
         topicId: 'maui',
-        accent: '#5E9B26',
-        accentDark: '#AEDC6C',
+        accent: 'var(--topic-5)',
+        accentDark: 'var(--topic-5)',
         headline: 'Navigation, modular hosting, configuration and permissions — the plumbing of a .NET MAUI app.',
         intro: 'The things every MAUI app needs and nobody enjoys writing: typed navigation with a real ViewModel lifecycle, a `MauiProgram.cs` that stays readable, configuration from the platform and the network, and permissions declared once.',
         libraries: [
@@ -836,8 +836,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'controls',
         topicId: 'controls',
-        accent: '#3949AB',
-        accentDark: '#93A0F0',
+        accent: 'var(--topic-9)',
+        accentDark: 'var(--topic-9)',
         page: '/controls/',
         headline: '85+ native controls for .NET MAUI and Blazor, sharing one theme system — no WebViews.',
         intro: 'One package per host and a shared theme contract across both.',
@@ -871,8 +871,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'data',
         topicId: 'data',
-        accent: '#00838F',
-        accentDark: '#4FD6E4',
+        accent: 'var(--topic-6)',
+        accentDark: 'var(--topic-6)',
         headline: 'Store, query, sync and persist data — on the device and in the cloud, with or without an ORM.',
         intro: 'Lightweight data libraries that run everywhere .NET does: a document database over twenty backends, feature packages that fill the gaps in EF Core, a two-way sync engine, and a key/value store abstraction.',
         libraries: [
@@ -938,8 +938,8 @@ export const categories: CategoryCopy[] = [
     {
         slug: 'server',
         topicId: 'server',
-        accent: '#8E24AA',
-        accentDark: '#DB8CF0',
+        accent: 'var(--topic-7)',
+        accentDark: 'var(--topic-7)',
         headline: 'An HTTP server that runs anywhere .NET does, push dispatch from your backend, and .NET Aspire integrations.',
         intro: 'Server-side .NET without the weight: an embeddable HTTP stack that even runs inside a MAUI app, modular startup for ASP.NET and Blazor, push delivery from your own backend, and Aspire resources for Orleans, VPNs and tunnels.',
         includeLabels: ['Aspire'],

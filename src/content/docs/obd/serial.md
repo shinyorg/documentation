@@ -19,7 +19,7 @@ It is built on `System.IO.Ports`, which is supported on **Windows, Linux, macOS 
 
 :::danger[Android compiles but cannot work]
 `System.IO.Ports` is *not* marked unsupported on Android, and its native library really does ship for
-the `android-*` RIDs — so a `net10.0-android` project can reference this package and build cleanly.
+the `android-*` RIDs — so a `net11.0-android` project can reference this package and build cleanly.
 It then fails at runtime with `UnauthorizedAccessException`, not `PlatformNotSupportedException`,
 which looks like a fixable permissions problem and is not.
 

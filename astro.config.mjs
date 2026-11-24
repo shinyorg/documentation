@@ -416,12 +416,30 @@ export default defineConfig({
   integrations: [
     react(),
     expressiveCode({
-      themes: ['github-dark', 'github-light'],
+      // Catppuccin's mauve / green / peach syntax sits naturally beside the logo colours. The
+      // backgrounds are swapped for the site's own ink and paper so code reads as part of the page.
+      themes: ['catppuccin-mocha', 'catppuccin-latte'],
       styleOverrides: {
-        borderRadius: '0.5rem',
+        borderRadius: '0.875rem',
+        borderColor: ({ theme }) => theme.type === 'dark' ? 'rgba(255, 255, 255, 0.1)' : 'rgba(21, 18, 43, 0.12)',
+        codeBackground: ({ theme }) => theme.type === 'dark' ? '#110F1C' : '#FFFFFF',
+        codeFontFamily: "'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+        uiFontFamily: "'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+        codeLineHeight: '1.7',
         frames: {
-          frameBoxShadowCssValue: '0 0 0 1px #9A81EA20, 0 5px 17px rgba(0, 0, 0, 0.15)',
-        }
+          editorTabBarBackground: ({ theme }) => theme.type === 'dark' ? '#0C0B15' : '#F5F3FB',
+          editorActiveTabBackground: ({ theme }) => theme.type === 'dark' ? '#110F1C' : '#FFFFFF',
+          editorActiveTabIndicatorTopColor: ({ theme }) => theme.type === 'dark' ? '#AE99FF' : '#5B3FE0',
+          editorActiveTabIndicatorBottomColor: 'transparent',
+          editorTabBarBorderBottomColor: ({ theme }) => theme.type === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(21, 18, 43, 0.08)',
+          terminalTitlebarBackground: ({ theme }) => theme.type === 'dark' ? '#0C0B15' : '#F5F3FB',
+          terminalTitlebarBorderBottomColor: ({ theme }) => theme.type === 'dark' ? 'rgba(255, 255, 255, 0.08)' : 'rgba(21, 18, 43, 0.08)',
+          terminalBackground: ({ theme }) => theme.type === 'dark' ? '#110F1C' : '#FFFFFF',
+          inlineButtonBorder: ({ theme }) => theme.type === 'dark' ? 'rgba(255, 255, 255, 0.2)' : 'rgba(21, 18, 43, 0.2)',
+          frameBoxShadowCssValue: ({ theme }) => theme.type === 'dark'
+            ? '0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 18px 40px -18px rgba(0, 0, 0, 0.8)'
+            : '0 1px 2px rgba(21, 18, 43, 0.04), 0 14px 32px -18px rgba(41, 28, 120, 0.25)',
+        },
       }
     }),
     mdx(),
@@ -447,6 +465,10 @@ export default defineConfig({
         { icon: 'youtube', label: 'YouTube', href: 'https://www.youtube.com/@GoneDotnet' },
       ],
       head: [
+        // Aurora type: Bricolage Grotesque (display), Geist (text), Geist Mono (code)
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.googleapis.com' } },
+        { tag: 'link', attrs: { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: true } },
+        { tag: 'link', attrs: { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Geist:wght@400..700&family=Geist+Mono:wght@400..600&display=swap' } },
         // Default social share image (Open Graph + Twitter). Per-page frontmatter can override.
         // Bump ?v= whenever og-image.png changes — X, Teams, LinkedIn and Slack
         // cache the card by URL, so the same URL keeps serving the old artwork.

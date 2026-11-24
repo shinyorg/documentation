@@ -7,7 +7,7 @@ RFCOMM and the Serial Port Profile. That is what the ELM327 v1.5 "Bluetooth" clo
 Vgate iCar BT and Veepeak BT speak. They are not BLE devices, so [`Shiny.Obd.Ble`](/client/obd/ble)
 never sees them in a scan, however long it runs.
 
-It is built on [Shiny.Bluetooth](https://github.com/shinyorg/shiny) (6.5.1+).
+It is built on [Shiny.Bluetooth](https://github.com/shinyorg/shiny) (7.0.0+).
 
 ## Platform support
 
