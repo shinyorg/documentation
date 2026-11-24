@@ -108,7 +108,7 @@ notifications.AddChannel(new AndroidChannel
 
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
-| `AllowBubbles` | `bool?` | `null` | Allow bubble notifications |
+| `AllowBubbles` | `bool?` | `null` | Allow bubble notifications (Android 10+, ignored on older versions) |
 | `ShowBadge` | `bool?` | `null` | Show badge on app icon for this channel |
 | `EnableLights` | `bool?` | `null` | Enable LED indicator |
 | `EnableVibration` | `bool?` | `null` | Enable vibration |
