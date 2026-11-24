@@ -57,7 +57,9 @@ export const sidebarTopics = [
           { label: 'Getting Started', link: 'foundation/hosting/', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
           { label: 'MAUI', link: 'foundation/hosting/maui', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
           { label: 'Native', link: 'foundation/hosting/native', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
-          { label: 'Manual', link: 'foundation/hosting/manual', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' }
+          { label: 'Manual', link: 'foundation/hosting/manual', dateCreated: '2026-04-22', dateUpdated: '2026-04-22' },
+          { label: 'Avalonia', link: 'client/core/avalonia', dateCreated: '2026-11-03', dateUpdated: '2026-11-03' },
+          { label: 'Uno Platform', link: 'client/core/uno', dateCreated: '2026-11-05', dateUpdated: '2026-11-05' }
         ]
       },
       {

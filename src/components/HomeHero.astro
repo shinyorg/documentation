@@ -1,32 +1,363 @@
 ---
 /**
- * Homepage hero — "scan" composition.
+ * Homepage hero — "live editor" composition.
  *
- * The right-hand art is a radar field: rings ping outward from behind a fanned
- * deck of real MAUI screenshots. It's the literal thing the libraries do (BLE
- * scanning, network discovery, geofencing) rather than a decorative gradient.
+ * The right-hand art is the thing a developer actually meets: a code window that cycles through
+ * real Shiny snippets (verified against the library docs), each line "typed" in with a clip
+ * reveal, followed by a small toast of what that code just did. It sits on an aurora wash and a
+ * masked dot grid, with a few library chips drifting around it.
  *
- * Motion is layered so the transforms don't fight each other:
- *   .phone      → static position + rotation
- *   .phone-in   → one-shot entrance
- *   .phone-bob  → continuous ambient float
+ * Motion is CSS-driven so nothing needs a timer:
+ *   .editor-tab.is-active .tab-progress  → fills over --cycle, and its animationend advances the tab
+ *   .pane.is-active .ln                  → per-line clip reveal, staggered by --i
+ *   .pane.is-active .toast               → pops in after the last line lands
+ * Hovering or focusing the editor pauses the cycle; reduced motion turns the autoplay off
+ * entirely (no animation, so no animationend) while the tabs keep working.
  */
 
 import { platforms } from '../data/platforms';
-
-const phones = [
-  { src: '/images/tableview/s1.png',   alt: 'TableView on iOS',   slot: -2 },
-  { src: '/images/scheduler/s1.png',   alt: 'Scheduler on iOS',   slot: -1 },
-  { src: '/images/chatview/s1.png',    alt: 'ChatView on iOS',    slot:  0 },
-  { src: '/images/datagrid/s1.png',    alt: 'DataGrid on iOS',    slot:  1 },
-  { src: '/images/imageeditor/s1.png', alt: 'ImageEditor on iOS', slot:  2 },
-];
 
 const facts = [
   { value: 40,  suffix: 'M+', label: 'NuGet downloads' },
   { value: 50,  suffix: '+',  label: 'libraries' },
   { value: 85,  suffix: '+',  label: 'UI controls' },
   { value: null, text: 'AOT', label: 'trim-clean' },
+];
+
+type Snippet = {
+  id: string;
+  label: string;
+  file: string;
+  pkg: string;
+  href: string;
+  toast: { title: string; detail: string; note: string; tone: 'purple' | 'green' | 'lime' };
+  code: string;
+};
+
+const snippets: Snippet[] = [
+  {
+    id: 'ble',
+    label: 'Bluetooth LE',
+    file: 'Scanner.cs',
+    pkg: 'Shiny.BluetoothLE',
+    href: '/client/ble/',
+    toast: { title: 'Peripheral found', detail: 'Thermostat · −48 dBm', tone: 'purple', note: 'Filtered, background-capable scans on every platform' },
+    code: `// Scan for BLE peripherals as an observable stream
+var scan = bleManager
+    .Scan(new ScanConfig("Your-Service-UUID"))
+    .Subscribe(result =>
+    {
+        var peripheral = result.Peripheral;
+        Console.WriteLine($"{peripheral.Name} {result.Rssi}");
+    });
+
+// stop whenever you like
+scan.Dispose();`,
+  },
+  {
+    id: 'appfunctions',
+    label: 'App Functions',
+    file: 'OpenOrders.cs',
+    pkg: 'Shiny.AppFunctions',
+    href: '/client/appfunctions/',
+    toast: { title: 'Ask Siri or Gemini', detail: '“How many orders are open?”', tone: 'green', note: 'App Intents on iOS, AppFunctions on Android' },
+    code: `// One record becomes a Siri, Shortcuts and Gemini action
+[AppFunction("count_open_orders", Title = "Open Orders")]
+[AppShortcut("How many orders are open in \${applicationName}")]
+public record CountOpenOrders : IAppFunction<int>;
+
+public class CountOpenOrdersHandler(OrderStore store)
+    : IAppFunctionHandler<CountOpenOrders, int>
+{
+    public Task<int> Handle(CountOpenOrders request,
+        AppFunctionContext context, CancellationToken ct)
+        => store.CountOpen(ct);
+}`,
+  },
+  {
+    id: 'jobs',
+    label: 'Background Jobs',
+    file: 'SyncJob.cs',
+    pkg: 'Shiny.Jobs',
+    href: '/client/jobs/',
+    toast: { title: 'Job scheduled', detail: 'BGTaskScheduler · WorkManager', tone: 'green', note: 'Runs even when the app is closed' },
+    code: `// Background work the OS schedules, with conditions
+services.AddJob<SyncJob>(r => r
+    .WithInternet(InternetAccess.Any)
+    .WithBatteryNotLow()
+);
+
+public class SyncJob(ApiClient api) : IJob
+{
+    public async Task Run(CancellationToken cancelToken)
+        => await api.SyncAsync(cancelToken);
+}`,
+  },
+  {
+    id: 'aitools',
+    label: 'AI Tools',
+    file: 'WeatherService.cs',
+    pkg: 'Shiny.Extensions.DependencyInjection',
+    href: '/di/ai-tools/',
+    toast: { title: 'AIFunction generated', detail: 'reflection-free · AOT-safe', tone: 'lime', note: 'Your interface becomes an AIFunction at compile time' },
+    code: `// Source-generated, AOT-safe AI tools from an interface
+[Tool]
+[Description("Provides weather information")]
+public interface IWeatherService
+{
+    [Description("Get the current weather for a city")]
+    Task<WeatherResult> GetWeatherAsync(
+        [Description("City name")] string city);
+}
+
+builder.Services.AddGeneratedAITools();`,
+  },
+  {
+    id: 'mauishell',
+    label: 'MAUI Shell + AI',
+    file: 'WorkOrderViewModel.cs',
+    pkg: 'Shiny.Maui.Shell',
+    href: '/mauishell/ai/',
+    toast: { title: 'Navigated by AI', detail: '“the sink is leaking” → WorkOrderPage', tone: 'purple', note: 'Route parameters inferred from natural language' },
+    code: `// AI picks the page from what the user said and fills it
+[ShellMap<WorkOrderPage>(description: "User reports a repair")]
+public partial class WorkOrderViewModel(INavigator navigator)
+{
+    [ShellProperty("Summarize what is broken", required: true)]
+    public string Description { get; set; } = string.Empty;
+}
+
+builder.UseShinyShell(x => x.AddGeneratedMaps().AddAiTools());
+
+var options = new ChatOptions { Tools = [.. aiTools.Tools] };
+var reply = await chatClient.GetResponseAsync(history, options);`,
+  },
+  {
+    id: 'http',
+    label: 'HTTP Server',
+    file: 'Program.cs',
+    pkg: 'Shiny.Net.HttpServer',
+    href: '/httpserver/',
+    toast: { title: 'Listening', detail: 'http://localhost:8080', tone: 'lime', note: 'Runs on MAUI, tvOS and plain .NET' },
+    code: `// An HTTP server that runs inside your app, no ASP.NET
+using Shiny.Net.HttpServer;
+
+var server = new HttpServer(new HttpServerOptions
+{
+    Port = 8080
+});
+
+server.MapGet("/ping", ctx => ctx.Response.WriteAsync("pong"));
+await server.RunAsync();`,
+  },
+  {
+    id: 'agui',
+    label: 'AG-UI',
+    file: 'AgentPage.xaml.cs',
+    pkg: 'Shiny.Maui.Controls.Agents',
+    href: '/controls/agent-view/',
+    toast: { title: 'Agent UI, native controls', detail: 'AG-UI stream · A2UI surfaces', tone: 'purple', note: 'Tool calls, approvals and sub-agents drawn natively' },
+    code: `// A native AG-UI agent chat that can draw A2UI surfaces
+builder.Services.AddShinyAiConversation(opts =>
+{
+    opts.AddAgUiRenderTool();   // the model can draw A2UI
+});
+
+var session = await sessionManager.Start();
+agentView.Session = AgentSession.Create(
+    session.SessionId,
+    session.RunAgUiAsync);`,
+  },
+  {
+    id: 'documentdb',
+    label: 'DocumentDb',
+    file: 'Users.cs',
+    pkg: 'Shiny.DocumentDb.Sqlite',
+    href: '/documentdb/',
+    toast: { title: 'Same code, any backend', detail: 'SQLite · Postgres · Cosmos · more', tone: 'purple', note: 'One LINQ API across every provider, AOT-safe' },
+    code: `// LINQ over JSON documents, on SQLite or any backend
+services.AddDocumentStore(opts => opts.DatabaseProvider =
+    new SqliteDatabaseProvider("Data Source=app.db"));
+
+await store.Insert(new User { Id = "u1", Name = "Alice" });
+
+var adults = await store.Query<User>()
+    .Where(u => u.Age >= 18)
+    .OrderBy(u => u.Name)
+    .ToList();`,
+  },
+  {
+    id: 'health',
+    label: 'Health',
+    file: 'HealthViewModel.cs',
+    pkg: 'Shiny.Health',
+    href: '/health/',
+    toast: { title: 'Today: 8,412 steps', detail: 'HealthKit · Health Connect', tone: 'green', note: 'Read, write and observe health data' },
+    code: `// HealthKit and Health Connect behind one API
+await health.RequestPermissions(
+    DataType.StepCount,
+    DataType.HeartRate);
+
+var end = DateTimeOffset.Now;
+var start = end.AddDays(-1);
+
+var steps = await health.GetStepCounts(start, end, Interval.Hours);
+foreach (var bucket in steps)
+    Console.WriteLine($"{bucket.Start:t}  {bucket.Value:N0} steps");`,
+  },
+  {
+    id: 'accessorysetup',
+    label: 'Accessory Setup',
+    file: 'Pairing.cs',
+    pkg: 'Shiny.BluetoothLE.AccessorySetup',
+    href: '/client/accessorysetup/',
+    toast: { title: 'Paired from the system sheet', detail: 'no location prompt', tone: 'green', note: 'AccessorySetupKit on iOS, CompanionDeviceManager on Android' },
+    code: `// The OS pairing sheet: no scan, no location prompt
+var accessory = await setup.ShowPicker(new AccessoryPickerItem(
+    "Shiny Sensor",
+    new AccessoryDiscoveryFilter
+    {
+        ServiceUuid = "6E400001-B5A3-F393-E0A9-E50E24DCCA9E",
+        Range = AccessoryRange.Immediate
+    }));
+
+var peripheral = ble.GetPeripheral(accessory!);  // no scan
+await peripheral!.ConnectAsync();`,
+  },
+  {
+    id: 'mediator',
+    label: 'Mediator',
+    file: 'GetData.cs',
+    pkg: 'Shiny.Mediator',
+    href: '/mediator/',
+    toast: { title: 'Served offline', detail: 'cached response · 0 ms', tone: 'purple', note: 'Returns the last stored result when the network drops' },
+    code: `// One attribute makes a request work offline
+public record GetData(string Id) : IRequest<MyData>;
+
+public class GetDataHandler(Api api) : IRequestHandler<GetData, MyData>
+{
+    [OfflineAvailable] // <= boom, done
+    public Task<MyData> Handle(
+        GetData request,
+        IMediatorContext context,
+        CancellationToken ct) => api.Get(request.Id, ct);
+}`,
+  },
+  {
+    id: 'aiconversation',
+    label: 'AI Conversations',
+    file: 'ChatViewModel.cs',
+    pkg: 'Shiny.AiConversation',
+    href: '/aiconversation/',
+    toast: { title: 'Streaming reply', detail: 'persisted · interruptible', tone: 'green', note: 'Sessions persist to SQLite with search and titles' },
+    code: `// Stream an AI reply from a persisted session
+await using var session = await sessions.GetLatest()
+    ?? await sessions.Start();
+
+var turn = session.Send(AiInput.Text(message));
+await foreach (var e in turn.Events)
+{
+    if (e is TextDelta delta)
+        Console.Write(delta.Text);
+}
+var result = await turn.Completion;`,
+  },
+  {
+    id: 'push',
+    label: 'Push',
+    file: 'MyPushDelegate.cs',
+    pkg: 'Shiny.Push',
+    href: '/client/push/',
+    toast: { title: 'Token registered', detail: 'APNs · FCM · one API', tone: 'lime', note: 'Token changes reach your delegate automatically' },
+    code: `// Native push on APNs and FCM through one API
+var result = await pushManager.RequestAccess();
+if (result.Status == AccessState.Available)
+    await api.Register(result.RegistrationToken);
+
+public class MyPushDelegate(ApiClient api) : PushDelegate
+{
+    public override Task OnNewToken(string token)
+        => api.Register(token);
+}`,
+  },
+  {
+    id: 'mcumgr',
+    label: 'Firmware (McuMgr)',
+    file: 'Firmware.cs',
+    pkg: 'Shiny.BluetoothLE.McuMgr',
+    href: '/client/ble/mcumgr',
+    toast: { title: 'Firmware updated', detail: 'uploaded · tested · confirmed', tone: 'lime', note: 'Uploads, tests, resets and confirms in one call' },
+    code: `// Over-the-air firmware updates for MCUboot devices
+using var client = peripheral.CreateMcuMgrClient();
+
+var image = new FirmwareImage(
+    await File.ReadAllBytesAsync("zephyr.signed.bin"));
+
+var result = await client.UpgradeFirmwareAsync(image);
+if (result.AlreadyUpToDate)
+    Console.WriteLine("Device already runs this firmware");`,
+  },
+  {
+    id: 'gps',
+    label: 'GPS',
+    file: 'MyGpsDelegate.cs',
+    pkg: 'Shiny.Gps',
+    href: '/client/locations/gps/',
+    toast: { title: 'Tracking in background', detail: 'app suspended · still reading', tone: 'green', note: 'Readings reach your delegate even while suspended' },
+    code: `// GPS that keeps reading while the app is in the background
+var request = GpsRequest.Background;
+var access = await gpsManager.RequestAccess(request);
+if (access == AccessState.Available)
+    await gpsManager.StartListener(request);
+
+public partial class MyGpsDelegate(TripLog trips) : IGpsDelegate
+{
+    public Task OnReading(GpsReading reading)
+        => trips.Add(reading.Position);
+}`,
+  },
+];
+
+// A tiny C# highlighter — enough for these snippets, and it keeps the markup static.
+const KEYWORDS = new Set([
+  'var', 'new', 'await', 'async', 'public', 'private', 'class', 'record', 'readonly', 'using',
+  'return', 'this', 'string', 'int', 'bool', 'void', 'static', 'override', 'partial', 'foreach',
+  'if', 'is', 'in', 'interface',
+]);
+
+type Token = { t: string; c?: string };
+
+function tokenize(line: string): Token[] {
+  const out: Token[] = [];
+  const re = /(\/\/.*$)|(\$?"(?:[^"\\]|\\.)*")|(\[[A-Z]\w*\])|(\b\d+\b)|([A-Za-z_]\w*)|(\s+|.)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(line))) {
+    const [all, comment, str, attr, num, ident] = m;
+    const next = line[re.lastIndex] ?? '';
+    let c: string | undefined;
+    if (comment) c = 'cm';
+    else if (str) c = 'st';
+    else if (attr) c = 'at';
+    else if (num) c = 'nu';
+    else if (ident) {
+      if (KEYWORDS.has(ident)) c = 'kw';
+      else if (next === '(' ) c = 'fn';
+      else if (/^[A-Z]/.test(ident)) c = 'ty';
+    }
+    out.push({ t: all, c });
+  }
+  return out;
+}
+
+const panes = snippets.map((s) => ({ ...s, lines: s.code.split('\n').map(tokenize) }));
+const maxLines = Math.max(...panes.map((p) => p.lines.length));
+
+const chips = [
+  { label: 'Push',        x: '-4%',  y: '2%',  d: 0 },
+  { label: 'GPS',         x: '88%',  y: '2%',  d: 1 },
+  { label: 'Speech',      x: '93%',  y: '40%', d: 2 },
+  { label: 'DocumentDb',  x: '4%',   y: '93%', d: 3 },
+  { label: 'AI tools',    x: '62%',  y: '94%', d: 4 },
 ];
 ---
 
@@ -38,7 +369,7 @@ const facts = [
         <span>Shiny.NET</span>
       </a>
 
-      <h1 data-reveal="split" data-reveal-delay="120">The hard parts of your app,<br />already solved.</h1>
+      <h1 data-reveal="split" data-reveal-delay="120">The hard parts of your app,<br /><span class="hl">already solved.</span></h1>
 
       <p class="lede">
         Everything the platform makes hard: Bluetooth, background jobs, push, location,
@@ -95,25 +426,77 @@ const facts = [
       </dl>
     </div>
 
-    <div class="hero-scan" aria-hidden="true">
-      <div class="scan-field" data-parallax="0.14" data-depth="-14">
-        <span class="ring" style="--r:0"></span>
-        <span class="ring" style="--r:1"></span>
-        <span class="ring" style="--r:2"></span>
-        <span class="ring" style="--r:3"></span>
-        <span class="sweep"></span>
+    <div class="hero-art">
+      <div class="aurora" aria-hidden="true" data-parallax="0.12" data-depth="-16">
+        <span class="blob blob--purple"></span>
+        <span class="blob blob--green"></span>
+        <span class="blob blob--lime"></span>
+      </div>
+      <div class="dot-grid" aria-hidden="true" data-parallax="0.06"></div>
+
+      <div class="chips" aria-hidden="true" data-depth="14">
+        {chips.map((c) => (
+          <span class="chip" style={`--x:${c.x}; --y:${c.y}; --d:${c.d}`}>
+            <span class="chip-dot"></span>{c.label}
+          </span>
+        ))}
       </div>
 
-      <div class="fan" data-parallax="-0.06" data-depth="22">
-        {phones.map((p, i) => (
-          <div class="phone" style={`--slot:${p.slot}; --order:${Math.abs(p.slot)}; --seed:${i}`}>
-            <div class="phone-in">
-              <div class="phone-bob">
-                <img src={p.src} alt={p.alt} width="420" height="912" loading="eager" decoding="async" />
-              </div>
+      <div class="editor-wrap" data-depth="-8" style={`--lines:${maxLines}`}>
+        <div class="editor" data-editor>
+          <div class="editor-bar">
+            <span class="lights" aria-hidden="true"><i></i><i></i><i></i></span>
+            <div class="editor-tabs" role="tablist" aria-label="Shiny code samples">
+              {panes.map((p, i) => (
+                <button
+                  class:list={['editor-tab', { 'is-active': i === 0 }]}
+                  role="tab"
+                  type="button"
+                  id={`hero-tab-${p.id}`}
+                  aria-controls={`hero-pane-${p.id}`}
+                  aria-selected={i === 0 ? 'true' : 'false'}
+                  tabindex={i === 0 ? 0 : -1}
+                  data-pkg={p.pkg}
+                >
+                  <span class="tab-label">{p.label}</span>
+                  <span class="tab-progress" aria-hidden="true"></span>
+                </button>
+              ))}
             </div>
           </div>
-        ))}
+
+          <div class="editor-body">
+            {panes.map((p, i) => (
+              <div
+                class:list={['pane', { 'is-active': i === 0 }]}
+                role="tabpanel"
+                id={`hero-pane-${p.id}`}
+                aria-labelledby={`hero-tab-${p.id}`}
+                hidden={i !== 0}
+              >
+                <div class="pane-file">
+                  <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+                  {p.file}
+                  <a class="pane-docs" href={p.href} tabindex={i === 0 ? 0 : -1}>Docs →</a>
+                </div>
+                <pre class="code"><code>{p.lines.map((tokens, li) => (
+                  <span class="ln" style={`--i:${li}`}><span class="gutter" aria-hidden="true">{li + 1}</span>{tokens.length ? tokens.map((tk) => tk.c ? <span class={`tk-${tk.c}`}>{tk.t}</span> : tk.t) : ' '}{li === p.lines.length - 1 && <span class="caret" aria-hidden="true"></span>}</span>
+                ))}</code></pre>
+                <div class:list={['toast', `toast--${p.toast.tone}`]} style={`--n:${p.lines.length}`} aria-hidden="true">
+                  <span class="toast-icon">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.2 4.2L19 7"/></svg>
+                  </span>
+                  <span class="toast-text"><strong>{p.toast.title}</strong><span class="toast-detail">{p.toast.detail}</span><span class="toast-note">{p.toast.note}</span></span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div class="editor-term">
+            <span class="term-prompt" aria-hidden="true">$</span>
+            <span class="term-cmd">dotnet add package <span class="term-pkg" data-term-pkg>{panes[0].pkg}</span></span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -382,155 +765,464 @@ const facts = [
   }
 
   /* ─────────────────────────────────────────────────────────────
-     Scan field + phone fan
+     Art column — aurora, dot grid, chips and the live editor
      ───────────────────────────────────────────────────────────── */
-  .hero-scan {
+  .hero-art {
     position: relative;
     display: grid;
     place-items: center;
-    min-height: clamp(340px, 42vw, 520px);
-    /* Unitless scale for the whole composition; stepped at the breakpoints
-       below, since clamp() can't mix a bare number with a vw term. */
-    --fan: 1;
+    min-height: clamp(380px, 40vw, 520px);
+    grid-template-columns: minmax(0, 1fr);
+    padding: 1.5rem 0;
+    --cycle: 7s;
   }
 
-  /* The rings and the sweep are sized off this box but paint (and, once the
-     sweep starts rotating, *measure*) wider than it. Left unclipped that
-     widens the document on a phone, which drags the fixed header's controls
-     off-screen with it — so clip the decoration to the composition. */
-  .scan-field {
+  /* Aurora + grid paint wider than the column; clip so a phone never scrolls sideways. */
+  .aurora,
+  .dot-grid {
     position: absolute;
-    inset: 0;
-    display: grid;
-    place-items: center;
-    overflow: clip;
+    inset: -6% -4%;
     pointer-events: none;
   }
 
-  .ring {
+  .aurora { overflow: clip; filter: blur(46px) saturate(1.15); opacity: 0.55; }
+  :global(:root[data-theme='dark']) .aurora { opacity: 0.75; }
+
+  .blob {
     position: absolute;
-    width: min(100%, 620px);
-    aspect-ratio: 1;
-    border: 1.5px solid var(--shiny-purple-vivid);
     border-radius: 50%;
-    opacity: 0;
-    animation: ping 5.6s cubic-bezier(0.16, 0.6, 0.3, 1) infinite;
-    animation-delay: calc(var(--r) * 1.4s);
+    mix-blend-mode: normal;
   }
 
-  .ring:nth-child(even) { border-color: var(--shiny-green-vivid); }
-
-  @keyframes ping {
-    0%   { transform: scale(0.28); opacity: 0; }
-    12%  { opacity: 0.85; }
-    100% { transform: scale(1.3); opacity: 0; }
+  .blob--purple {
+    width: 58%; aspect-ratio: 1; left: 12%; top: 6%;
+    background: radial-gradient(circle, var(--shiny-purple-vivid), transparent 68%);
+    animation: drift-a 16s ease-in-out infinite;
+  }
+  .blob--green {
+    width: 50%; aspect-ratio: 1; right: 4%; top: 30%;
+    background: radial-gradient(circle, var(--shiny-green-vivid), transparent 68%);
+    animation: drift-b 19s ease-in-out infinite;
+  }
+  .blob--lime {
+    width: 36%; aspect-ratio: 1; left: 26%; bottom: 0;
+    background: radial-gradient(circle, var(--shiny-lime-vivid), transparent 70%);
+    opacity: 0.7;
+    animation: drift-c 22s ease-in-out infinite;
   }
 
-  .sweep {
+  @keyframes drift-a { 50% { transform: translate(14%, 10%) scale(1.08); } }
+  @keyframes drift-b { 50% { transform: translate(-16%, -8%) scale(0.92); } }
+  @keyframes drift-c { 50% { transform: translate(18%, -14%) scale(1.15); } }
+
+  .dot-grid {
+    background-image: radial-gradient(circle, color-mix(in srgb, var(--sl-color-gray-3) 55%, transparent) 1px, transparent 1.5px);
+    background-size: 22px 22px;
+    mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, #000 30%, transparent 75%);
+    -webkit-mask-image: radial-gradient(ellipse 60% 55% at 50% 50%, #000 30%, transparent 75%);
+    opacity: 0.5;
+  }
+
+  /* ── Chips ───────────────────────────────────────────────── */
+  .chips { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+
+  .chip {
     position: absolute;
-    width: min(100%, 620px);
-    aspect-ratio: 1;
-    border-radius: 50%;
-    background: conic-gradient(
-      from 0deg,
-      rgba(106, 61, 240, 0.34) 0deg,
-      rgba(106, 61, 240, 0.08) 34deg,
-      transparent 74deg,
-      transparent 360deg);
-    mask-image: radial-gradient(circle, transparent 8%, #000 46%, transparent 88%);
-    -webkit-mask-image: radial-gradient(circle, transparent 8%, #000 46%, transparent 88%);
-    animation: spin 11s linear infinite;
+    left: var(--x);
+    top: var(--y);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.7rem 0.3rem 0.55rem;
+    border: 1px solid color-mix(in srgb, var(--sl-color-gray-4) 50%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--sl-color-bg) 72%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    box-shadow: 0 8px 24px rgba(12, 10, 26, 0.12);
+    font-size: 0.75rem;
+    font-weight: 700;
+    color: var(--sl-color-gray-1);
+    white-space: nowrap;
+    animation:
+      chip-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) backwards,
+      float calc(6s + var(--d) * 0.8s) ease-in-out infinite;
+    animation-delay: calc(0.9s + var(--d) * 0.12s), calc(var(--d) * -1.1s);
   }
 
-  :global(:root[data-theme='dark']) .sweep {
-    background: conic-gradient(
-      from 0deg,
-      rgba(155, 123, 255, 0.46) 0deg,
-      rgba(43, 229, 160, 0.14) 34deg,
-      transparent 74deg,
-      transparent 360deg);
+  .chip-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: var(--shiny-green-vivid);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--shiny-green-vivid) 22%, transparent);
+  }
+  .chip:nth-child(even) .chip-dot {
+    background: var(--shiny-purple-vivid);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--shiny-purple-vivid) 22%, transparent);
+  }
+  .chip:nth-child(5) .chip-dot {
+    background: var(--shiny-lime-vivid);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--shiny-lime-vivid) 25%, transparent);
   }
 
-  /* ── The fan ─────────────────────────────────────────────── */
-  .fan {
+  @keyframes chip-in { from { opacity: 0; transform: translateY(10px) scale(0.9); } }
+  @keyframes float { 50% { translate: 0 -9px; } }
+
+  /* ── Editor ──────────────────────────────────────────────── */
+  @property --angle {
+    syntax: '<angle>';
+    initial-value: 0deg;
+    inherits: false;
+  }
+
+  .editor-wrap {
     position: relative;
-    z-index: 1;
-    /* Sits right of centre so the widest phone clears the headline. */
-    transform: translateX(5%);
-    width: 100%;
-    height: 100%;
+    justify-self: center;
+    z-index: 2;
+    width: min(100%, 35rem);
+    padding: 1px;
+    border-radius: 18px;
+    /* A slowly orbiting gradient hairline around the window. */
+    background: conic-gradient(from var(--angle),
+      rgba(255, 255, 255, 0.08) 0deg,
+      var(--shiny-purple-vivid) 70deg,
+      rgba(255, 255, 255, 0.08) 140deg,
+      var(--shiny-green-vivid) 230deg,
+      rgba(255, 255, 255, 0.08) 300deg);
+    box-shadow:
+      0 2px 6px rgba(12, 10, 26, 0.12),
+      0 30px 70px -10px rgba(40, 20, 110, 0.38);
+    animation:
+      editor-in 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.25s backwards,
+      orbit 10s linear infinite;
+  }
+
+  @keyframes editor-in { from { opacity: 0; transform: translateY(26px) scale(0.97); } }
+  @keyframes orbit { to { --angle: 360deg; } }
+
+  /* The editor is dark in both themes — a code window, not a page surface. */
+  .editor {
+    --ed-bg: #12101c;
+    --ed-bar: #1a1727;
+    --ed-line: rgba(255, 255, 255, 0.07);
+    --ed-text: #e6e3f2;
+    --ed-dim: #7c7896;
+    position: relative;
+    overflow: hidden;
+    border-radius: 17px;
+    background:
+      radial-gradient(120% 80% at 100% 0%, rgba(106, 61, 240, 0.16), transparent 55%),
+      radial-gradient(90% 70% at 0% 100%, rgba(15, 191, 122, 0.10), transparent 60%),
+      var(--ed-bg);
+    color: var(--ed-text);
+  }
+
+  .editor-bar {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    padding: 0 0.9rem;
+    background: color-mix(in srgb, var(--ed-bar) 85%, transparent);
+    border-bottom: 1px solid var(--ed-line);
+  }
+
+  .lights { display: inline-flex; gap: 6px; flex: none; }
+  .lights i { width: 10px; height: 10px; border-radius: 50%; background: #ff5f57; }
+  .lights i:nth-child(2) { background: #febc2e; }
+  .lights i:nth-child(3) { background: #28c840; }
+
+  .editor-tabs {
+    display: flex;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    /* More tabs than fit: fade the edges so the strip reads as scrollable. */
+    mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 28px), transparent);
+    -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 14px, #000 calc(100% - 28px), transparent);
+  }
+  .editor-tabs::-webkit-scrollbar { display: none; }
+
+  .editor-tab {
+    position: relative;
+    flex: none;
+    padding: 0.8rem 0.75rem 0.75rem;
+    border: 0;
+    background: none;
+    color: var(--ed-dim);
+    font: inherit;
+    font-size: 0.78rem;
+    font-weight: 650;
+    cursor: pointer;
+    transition: color 0.2s ease;
+  }
+
+  .editor-tab:hover { color: var(--ed-text); }
+  .editor-tab.is-active { color: #fff; }
+  .editor-tab:focus-visible { outline: 2px solid var(--shiny-green-vivid); outline-offset: -4px; border-radius: 6px; }
+
+  .tab-progress {
+    position: absolute;
+    left: 0.75rem;
+    right: 0.75rem;
+    bottom: -1px;
+    height: 2px;
+    border-radius: 2px;
+    background: linear-gradient(90deg, #9B7BFF, #2BE5A0, #C4F03A);
+    transform: scaleX(0);
+    transform-origin: left;
+  }
+
+  .editor-tab.is-active .tab-progress {
+    transform: scaleX(1);
+  }
+
+  /* With autoplay on, the active tab's bar fills over one cycle; its end advances the tab. */
+  .editor.is-playing .editor-tab.is-active .tab-progress {
+    animation: fill var(--cycle) linear both;
+  }
+
+  .editor.is-playing:hover .tab-progress,
+  .editor.is-playing:focus-within .tab-progress { animation-play-state: paused; }
+
+  @keyframes fill { from { transform: scaleX(0); } to { transform: scaleX(1); } }
+
+  .editor-body {
+    position: relative;
+    /* Hold the height of the longest snippet so the hero never jumps between tabs. */
+    min-height: calc(var(--lines) * 1.7em + 8.4rem);
+    font-size: 0.78rem;
+  }
+
+  .pane { position: relative; }
+  .pane[hidden] { display: none; }
+
+  .pane-file {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.7rem 1rem 0.2rem;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--ed-dim);
+  }
+
+  .pane-docs {
+    margin-left: auto;
+    color: #2BE5A0;
+    font-weight: 700;
+    text-decoration: none;
+    opacity: 0.85;
+  }
+  .pane-docs:hover { opacity: 1; text-decoration: underline; }
+
+  .code {
+    margin: 0;
+    padding: 0.4rem 1rem 1.1rem 0;
+    overflow-x: auto;
+    background: none;
+    border: 0;
+    font-family: var(--__sl-font-mono, ui-monospace, 'SF Mono', Menlo, Consolas, monospace);
+    font-size: 1em;
+    line-height: 1.7;
+    color: var(--ed-text);
+    scrollbar-width: none;
+  }
+  .code::-webkit-scrollbar { display: none; }
+
+  .code code { background: none; padding: 0; font: inherit; color: inherit; }
+
+  .ln {
+    display: block;
+    white-space: pre;
+  }
+
+  .gutter {
+    display: inline-block;
+    width: 2.6rem;
+    padding-right: 1rem;
+    text-align: right;
+    color: #4d4a63;
+    user-select: none;
+  }
+
+  /* Typing: each line wipes in from the left, one after another. */
+  .editor.is-animating .pane.is-active .ln {
+    animation: type 0.42s steps(18, end) backwards;
+    animation-delay: calc(0.08s + var(--i) * 0.11s);
+  }
+
+  @keyframes type {
+    from { clip-path: inset(0 100% 0 0); }
+    to   { clip-path: inset(0 0 0 0); }
+  }
+
+  .caret {
+    display: inline-block;
+    width: 0.55em;
+    height: 1.15em;
+    margin-left: 2px;
+    vertical-align: -0.2em;
+    border-radius: 1px;
+    background: #2BE5A0;
+    animation: blink 1.05s steps(1) infinite;
+  }
+
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .tk-kw { color: #c792ea; }
+  .tk-ty { color: #7fdbca; }
+  .tk-fn { color: #82aaff; }
+  .tk-st { color: #c3e88d; }
+  .tk-nu { color: #f78c6c; }
+  .tk-at { color: #ffcb6b; }
+  .tk-cm { color: #6f6b8a; font-style: italic; }
+
+  /* ── Toast ───────────────────────────────────────────────── */
+  /* The toast is the snippet's "output": its own row under the code, so it never covers a line. */
+  .toast {
+    width: fit-content;
+    margin: -0.3rem 0.9rem 0.9rem auto;
+    --tone: #2BE5A0;
+    position: relative;
+    overflow: hidden;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.65rem;
+    max-width: min(20rem, calc(100% - 1.8rem));
+    padding: 0.6rem 0.9rem 0.6rem 0.65rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-left: 2px solid var(--tone);
+    border-radius: 12px;
+    background: rgba(32, 28, 50, 0.78);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.4);
+    font-family: var(--sl-font, inherit);
+    font-size: 0.74rem;
+    line-height: 1.3;
+  }
+
+  .editor.is-animating .pane.is-active .toast {
+    animation: toast-in 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) backwards;
+    animation-delay: calc(0.35s + var(--n) * 0.11s);
+  }
+
+  @keyframes toast-in { from { opacity: 0; transform: translateY(12px) scale(0.92); } }
+
+  .toast--purple { --tone: #9B7BFF; }
+  .toast--lime { --tone: #C4F03A; }
+
+  /* A soft wash of the tone colour behind the text. */
+  .toast::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(120% 140% at 0% 0%, color-mix(in srgb, var(--tone) 16%, transparent), transparent 60%);
+    pointer-events: none;
+  }
+
+  .toast-icon {
+    position: relative;
+    flex: none;
     display: grid;
     place-items: center;
+    width: 24px;
+    height: 24px;
+    margin-top: 1px;
+    border-radius: 8px;
+    color: #0c0a16;
+    background: var(--tone);
   }
 
-  .phone {
+  /* One ring ripples out of the check as the toast lands. */
+  .toast-icon::after {
+    content: '';
     position: absolute;
-    /* Slot drives every positional value, so the fan stays symmetrical. */
-    width: calc((190px - var(--order) * 16px) * var(--fan));
-    transform:
-      translateX(calc(var(--slot) * 116px * var(--fan)))
-      translateY(calc(var(--order) * 26px * var(--fan)))
-      rotate(calc(var(--slot) * 7deg));
-    z-index: calc(4 - var(--order));
-    opacity: calc(1 - var(--order) * 0.1);
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 0 var(--tone);
+    opacity: 0;
+  }
+  .editor.is-animating .pane.is-active .toast-icon::after {
+    animation: ping-ring 1.1s ease-out backwards;
+    animation-delay: calc(0.65s + var(--n) * 0.11s);
+  }
+  @keyframes ping-ring {
+    0%   { opacity: 0.7; box-shadow: 0 0 0 0 var(--tone); }
+    100% { opacity: 0; box-shadow: 0 0 0 10px var(--tone); }
   }
 
-  .phone-in {
-    /* Entrance ripples outward from the centre phone — the scan finding
-       devices one ring at a time. */
-    animation: found 0.85s cubic-bezier(0.22, 1, 0.36, 1) backwards;
-    animation-delay: calc(0.35s + var(--order) * 0.16s);
+  .toast-text { position: relative; display: flex; flex-direction: column; min-width: 0; }
+  .toast-text strong { color: #fff; font-weight: 700; }
+  .toast-detail { color: #a9a5c2; }
+  .toast-note {
+    margin-top: 0.3rem;
+    padding-top: 0.3rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    color: #8d89a8;
+    font-size: 0.68rem;
+    line-height: 1.35;
   }
 
-  @keyframes found {
-    from { opacity: 0; transform: translateY(34px) scale(0.86); }
-    to   { opacity: 1; transform: none; }
+  /* ── Terminal strip ──────────────────────────────────────── */
+  .editor-term {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    padding: 0.65rem 1rem;
+    border-top: 1px solid var(--ed-line);
+    background: rgba(0, 0, 0, 0.22);
+    font-family: var(--__sl-font-mono, ui-monospace, 'SF Mono', Menlo, Consolas, monospace);
+    font-size: 0.74rem;
+    color: #a9a5c2;
+    white-space: nowrap;
+    overflow: hidden;
   }
 
-  .phone-bob {
-    animation: bob calc(6s + var(--seed) * 0.9s) ease-in-out infinite;
-    animation-delay: calc(var(--seed) * -1.3s);
+  .term-prompt { color: #2BE5A0; font-weight: 700; }
+  .term-pkg { color: #fff; font-weight: 600; }
+  .term-pkg.is-swapping { animation: swap 0.45s ease both; }
+
+  @keyframes swap {
+    from { opacity: 0; filter: blur(4px); transform: translateY(4px); }
+    to   { opacity: 1; filter: none; transform: none; }
   }
 
-  @keyframes bob {
-    0%, 100% { transform: translateY(0); }
-    50%      { transform: translateY(-11px); }
-  }
-
-  .phone img {
-    display: block;
-    width: 100%;
-    height: auto;
-    border-radius: calc(18px * var(--fan));
-    border: 1px solid var(--sl-color-gray-5);
-    box-shadow:
-      0 2px 6px rgba(12, 10, 26, 0.10),
-      0 22px 48px rgba(12, 10, 26, 0.22);
-  }
-
-  :global(:root[data-theme='dark']) .phone img {
-    border-color: rgba(255, 255, 255, 0.14);
-    box-shadow:
-      0 2px 6px rgba(0, 0, 0, 0.5),
-      0 24px 56px rgba(0, 0, 0, 0.6);
+  /* ─────────────────────────────────────────────────────────────
+     Headline highlight
+     ───────────────────────────────────────────────────────────── */
+  .hl,
+  .hl :global(.split-inner) {
+    background: linear-gradient(100deg,
+      var(--shiny-purple-vivid) 0%,
+      var(--shiny-green-vivid) 60%,
+      var(--shiny-lime-vivid) 100%);
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    animation: drift 10s ease-in-out infinite;
   }
 
   /* ─────────────────────────────────────────────────────────────
      Responsive
      ───────────────────────────────────────────────────────────── */
-  @media (max-width: 82rem) { .hero-scan { --fan: 0.86; } }
-  @media (max-width: 72rem) { .hero-scan { --fan: 0.74; } }
-
-  @media (max-width: 60rem) {
-    .hero-inner { grid-template-columns: 1fr; }
-    .hero-scan { order: -1; min-height: 320px; --fan: 0.72; }
-    .fan { transform: none; }
+  /* Below this the column is too narrow for chips to float clear of the editor. */
+  @media (max-width: 76rem) {
+    .chips { display: none; }
   }
 
-  @media (max-width: 46rem) { .hero-scan { min-height: 280px; --fan: 0.58; } }
+  @media (max-width: 60rem) {
+    /* minmax(0, …): a plain 1fr would let the code's longest line widen the page. */
+    .hero-inner { grid-template-columns: minmax(0, 1fr); }
+    .hero-art { min-height: 0; padding: 2rem 0 0.5rem; overflow-x: clip; }
+  }
+
+  @media (max-width: 46rem) {
+    .editor-body { font-size: 0.72rem; }
+    .gutter { width: 2rem; padding-right: 0.7rem; }
+  }
 
   @media (max-width: 32rem) {
-    .hero-scan { min-height: 230px; --fan: 0.44; }
     .facts { gap: 0.9rem 1.2rem; }
     .fact dt { font-size: 1.2rem; }
   }
@@ -542,14 +1234,95 @@ const facts = [
     .hero-copy > *,
     .brandline img,
     .btn-primary,
-    .phone-in,
-    .phone-bob,
-    .sweep {
+    .blob,
+    .chip,
+    .editor-wrap,
+    .caret,
+    .hl,
+    .hl :global(.split-inner),
+    .term-pkg,
+    .toast-icon::after {
       animation: none !important;
     }
-    .ring { animation: none !important; opacity: 0.18; transform: scale(calc(0.45 + var(--r) * 0.26)); }
   }
 </style>
+
+<script>
+  // Live editor: tabs, autoplay (driven by the progress bar's animationend) and the package strip.
+  (function () {
+    const editor = document.querySelector<HTMLElement>('[data-editor]');
+    if (!editor) return;
+
+    const tabs = Array.from(editor.querySelectorAll<HTMLButtonElement>('.editor-tab'));
+    const panes = Array.from(editor.querySelectorAll<HTMLElement>('.pane'));
+    const pkg = editor.querySelector<HTMLElement>('[data-term-pkg]');
+    const reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    let current = 0;
+
+    if (!reduced) {
+      editor.classList.add('is-animating');
+      // Start the cycle only once the hero is on screen, and stop it for good once the reader picks a tab.
+      const io = new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          editor.classList.toggle('is-playing', entry.isIntersecting && !editor.dataset.manual);
+        });
+      }, { threshold: 0.35 });
+      io.observe(editor);
+    }
+
+    function show(index: number, focus = false) {
+      current = (index + tabs.length) % tabs.length;
+      tabs.forEach((tab, i) => {
+        const on = i === current;
+        tab.classList.toggle('is-active', on);
+        tab.setAttribute('aria-selected', on ? 'true' : 'false');
+        tab.tabIndex = on ? 0 : -1;
+        panes[i].classList.toggle('is-active', on);
+        panes[i].hidden = !on;
+        panes[i].querySelectorAll<HTMLElement>('a').forEach((a) => (a.tabIndex = on ? 0 : -1));
+      });
+      if (focus) tabs[current].focus({ preventScroll: true });
+      // Keep the active tab centred in the strip without scrolling the page.
+      const strip = tabs[current].parentElement;
+      if (strip) {
+        const t = tabs[current].getBoundingClientRect();
+        const r = strip.getBoundingClientRect();
+        strip.scrollBy({ left: t.left + t.width / 2 - (r.left + r.width / 2), behavior: reduced ? 'auto' : 'smooth' });
+      }
+      if (pkg) {
+        pkg.textContent = tabs[current].dataset.pkg ?? '';
+        pkg.classList.remove('is-swapping');
+        void pkg.offsetWidth; // restart the swap animation
+        if (!reduced) pkg.classList.add('is-swapping');
+      }
+    }
+
+    function pick(index: number, focus = false) {
+      editor!.dataset.manual = 'true';
+      editor!.classList.remove('is-playing');
+      show(index, focus);
+    }
+
+    tabs.forEach((tab, i) => {
+      tab.addEventListener('click', () => pick(i));
+      tab.querySelector('.tab-progress')?.addEventListener('animationend', () => {
+        if (editor.classList.contains('is-playing') && i === current) show(current + 1);
+      });
+    });
+
+    editor.querySelector('[role="tablist"]')?.addEventListener('keydown', (e) => {
+      const key = (e as KeyboardEvent).key;
+      const moves: Record<string, number> = { ArrowRight: 1, ArrowLeft: -1 };
+      if (key in moves) {
+        e.preventDefault();
+        pick(current + moves[key], true);
+      } else if (key === 'Home' || key === 'End') {
+        e.preventDefault();
+        pick(key === 'Home' ? 0 : tabs.length - 1, true);
+      }
+    });
+  })();
+</script>
 
 <script>
   // Count the facts up once, when the hero is actually on screen.

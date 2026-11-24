@@ -49,9 +49,15 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
-      id: 'client-v70-net11',
+      id: 'controls-30',
+      title: 'Controls 3.0',
+      description: 'MAUI & Blazor NET11 Support',
+      href: '/controls/release-notes/',
+    },
+    {
+      id: 'client-v70',
       title: 'Shiny Client v7 on .NET 11',
-      description: 'Every Shiny client package now targets .NET 11 - MAUI 11, Blazor WebAssembly 11 and Uno 7 - plus BLE manufacturer data scan filters, screen-off iBeacon monitoring and iOS location permission fixes.',
+      description: 'Every Shiny client package now targets .NET 11 - MAUI 11, Blazor WebAssembly 11, + Bugfixes',
       href: '/client/release-notes/#700---november-22-2026',
       cta: 'Release notes',
     },
@@ -59,25 +65,10 @@ const announcementConfig = {
       id: 'speech-v30',
       title: 'AI Conversations, Speech, & Audio Release',
       description: '[Have a full conversation with AI](/aiconversation), [use speech commands](/speech), and [interact with audio content seamlessly](/audio).'
-    },     
-    {
-      id: 'client-v64',
-      title: 'Shiny Client v6.4',
-      description: '[iPhone Duo](/client/core/screen-posture), [VPN Management](/client/vpn), [Push Notification Images](/client/push), & [Age Signals](/client/agesignals)'
-    }, 
-    {
-      id: 'client-v65',
-      title: 'Shiny Client v6.5',
-      description: '[Biometrics](/client/biometrics), [NFC](/client/nfc), [Classic Bluetooth](/client/bluetooth), [Uno Support](/client/core/uno), & [Avalonia Support](/client/core/avalonia)'
     },
     {
-      id: 'client-v66',
-      title: 'Shiny Client v6.6',
-      description: '[Accessory Setup](/client/accessorysetup), [McuMgr BLE Protocol](/client/mcumgr-ble-protocol)'
-    },
-    {
-      id: 'unihub-15',
-      title: 'Universal Hubs 1.5',
+      id: 'unihub',
+      title: 'Universal Hubs ',
       description: 'Universal Hubs - Peer Nearby Connectivity - Dynamic Hub Registration',
       href: '/universalhubs/',
       cta: 'YES PLEASE!',
@@ -103,6 +94,8 @@ export default defineConfig({
     },
   },
   redirects: {
+      // The Uno hosting guide lives with Core
+      '/foundation/hosting/uno': '/client/core/uno',
       // Monorepo modules → /client (one shared release notes page)
       '/beacons/': '/client/beacons/',
       '/beacons/broadcasting': '/client/beacons/broadcasting',

@@ -165,7 +165,40 @@ So `List<Animal>` deserializes into `Dog`/`Cat` instances, and `new Dog()` seria
 - The discriminator is always written as the first property, so a strict reader on the other side (System.Text.Json without `AllowOutOfOrderMetadataProperties`) accepts it.
 - Values missing from `discriminator.mapping` use the schema name, as the OpenAPI spec defines.
 - `$type` (ASP.NET Core's default discriminator) becomes a `Type` property.
-- Bases are always `abstract`. A payload with a missing or unknown discriminator throws a `JsonException`. A mapping entry that points at the base itself is ignored with a `SHINYMED009` warning, as is a schema claimed by two bases (C# has single inheritance).
+- Bases are always `abstract`. A payload with a missing or unknown discriminator throws a `JsonException`, unless the discriminator declares an OpenAPI 3.2 `defaultMapping`: then those payloads deserialize to that variant (`defaultMapping: '#/components/schemas/OtherAnimal'`), which keeps clients working when the server adds a variant they don't know yet. A mapping entry or `defaultMapping` that points at the base itself (or outside the hierarchy) is ignored with a `SHINYMED009` warning, as is a schema claimed by two bases (C# has single inheritance).
+
+## Server-Sent Event Streams
+
+An operation whose success response is `text/event-stream` (and offers no `application/json`) generates a stream contract instead of a request: `IStreamRequest<T>` plus the `IServerSentEventsStream` marker. The generated handler reads the response as server-sent events and yields one `T` per event, deserialized from its `data`.
+
+`T` comes from the event schema: OpenAPI 3.2's `itemSchema` (what ASP.NET Core 11 emits for `TypedResults.ServerSentEvents`), or `schema` in 3.0/3.1 documents. When that schema is an event envelope (`data` plus `event`/`id`/`retry`, or ASP.NET Core 10's `SseItem<T>` fields), `T` is the type of `data`; otherwise the schema itself is the payload.
+
+```yaml
+/ticks:
+  get:
+    operationId: getTicks
+    responses:
+      '200':
+        content:
+          text/event-stream:
+            itemSchema:
+              type: object
+              required: [data]
+              properties:
+                data: { $ref: '#/components/schemas/Tick' }
+                event: { type: string }
+                id: { type: string }
+```
+
+```csharp
+// generated: public partial class GetTicksHttpRequest : IStreamRequest<Tick>, IServerSentEventsStream
+await foreach (var (context, tick) in mediator.Request(new GetTicksHttpRequest()))
+{
+    // one Tick per event
+}
+```
+
+So a Mediator server mapping stream contracts with the [ASP.NET extension](/mediator/extensions/aspnet) can be consumed from its own OpenAPI document with no hand-written contracts.
 
 ## Type Mapping
 
@@ -182,6 +215,9 @@ So `List<Animal>` deserializes into `Dog`/`Cat` instances, and `new Dog()` seria
 | `string` / `uuid` | `Guid` |
 | `string` / `byte` or `binary` | `byte[]` (base64 in JSON) |
 | `array` | `List<T>` |
+| `oneOf` of plain types that includes `string` | `string` |
+
+A property is nullable (`T?`) when it isn't listed in `required`, or when its schema allows null: OpenAPI 3.1 `type: [x, "null"]`, or 3.0 `nullable: true`. That includes the type-less `nullable: true` + `allOf: [$ref]` shape Swashbuckle and NSwag emit for a nullable reference, which generates the referenced type as nullable (e.g. `ReturnTimeState?`).
 
 ### Numeric Enums
 
@@ -218,4 +254,5 @@ public enum OrderStatus
 
 - When using the `Uri` attribute, you must still set the `Include` value to satisfy the MSBuild ItemGroup requirements. Use `Visible="false"` to hide it from the IDE solution explorer.
 - The `OperationId` is used to derive the contract class name when present; otherwise the name is derived from the HTTP method and path segments (see the note under [Overview](#overview)). Meaningful operation IDs still produce the clearest names.
+- Operations, parameters and model properties marked `deprecated: true` are generated with `[Obsolete]`, so callers get a compiler warning (CS0618). The generated handlers and converters suppress it for themselves.
 - Response and request-body schemas that are defined inline (an anonymous `object` rather than a `$ref` to a named component schema) are given a synthesized, strongly-typed contract (e.g. `GetUsersResponse`) instead of falling back to a weakly-typed `object`.
