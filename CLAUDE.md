@@ -125,3 +125,14 @@ the C# `[BridgeClient]` interfaces (C# method names).
 3. A new bridge class needs `<BridgeApi bridges={["XBridge"]} show="requests|events|types" />` on its page and an entry
    in the `pages` map in `BridgeCatalog.astro`.
 4. `npm run build`.
+
+### WebMCP tools and the skills catalog
+
+`src/components/WebMcp.astro` (rendered from `Header.astro`) registers read-only WebMCP tools (`search-docs`,
+`read-page`, `get-current-page`, `list-skills`, `get-skill`, `list-libraries`) from `src/scripts/webmcp.ts`, but only
+where the browser has `document.modelContext` (Chrome/Edge `#enable-webmcp-testing`). They read
+`/webmcp/index.json` (`src/pages/webmcp/index.json.ts`: pages, libraries from `libraryCatalog.ts`, skills) and Pagefind.
+
+`src/data/skills.json` is **generated** from the sibling repo `~/Desktop/dev/shinyorg/skills`; never hand-edit it.
+After skills are added or changed there, run `node scripts/extract-skills.mjs` and `npm run build`. Category, library
+and docs link for each skill come from the tables on `foundation/ai-skills.mdx`, so add a row there for a new skill.
