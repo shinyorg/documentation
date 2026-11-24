@@ -1,7 +1,7 @@
 /**
  * ShinySoft's own desktop apps, each linking out to its product website.
- * Used by the header "Apps" menu (`ThemeSelect.astro`), the mobile finder
- * (`HomepageNav.astro`) and the homepage section (`ShinyApps.astro`).
+ * Used by the Apps band in the "Browse docs" panel (`HomepageNav.astro`)
+ * and the homepage section (`ShinyApps.astro`).
  * The longer write-ups live on /foundation/apps/ and in the
  * "Three Desktop Apps, One Stack" blog post.
  */
