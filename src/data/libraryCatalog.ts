@@ -83,7 +83,7 @@ export const categories: CategoryCopy[] = [
                     'Offline support, caching, validation and resiliency middleware — one attribute each',
                     'HTTP request handlers generated from contracts',
                     'Expose contracts as AI-callable tools',
-                    'Works with MAUI, Blazor, Uno Platform, ASP.NET Core, Prism and Dapper',
+                    'Works with MAUI, Blazor, Uno Platform, ASP.NET Core and Dapper',
                 ],
                 packages: ['Shiny.Mediator', 'Shiny.Mediator.Maui', 'Shiny.Mediator.Blazor', 'Shiny.Mediator.AspNet'],
                 frameworks: ['dotnet', 'maui', 'blazor', 'aspnet'],
