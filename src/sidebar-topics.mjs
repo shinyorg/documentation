@@ -340,7 +340,7 @@ export const sidebarTopics = [
         label: 'GPS',
         jumpTo: true,
         items:[
-          { label: 'GPS', link: 'client/locations/gps', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' },
+          { label: 'GPS', link: 'client/locations/gps', dateCreated: '2023-07-06', dateUpdated: '2026-11-25' },
           { label: 'Platform GPS Requests', link: 'client/locations/platform-requests', dateCreated: '2026-03-28', dateUpdated: '2026-03-28' },
           { label: 'AI Tools', link: 'client/locations/ai-tools', dateCreated: '2026-07-06', dateUpdated: '2026-09-17' },
           { label: 'Architecture', link: 'client/locations/architecture', dateCreated: '2026-06-09', dateUpdated: '2026-06-09' },
@@ -363,7 +363,7 @@ export const sidebarTopics = [
         label: 'Reverse Geocoding',
         jumpTo: true,
         items:[
-          { label: 'Reverse Geocoding', link: 'client/locations/geocoding', dateCreated: '2026-09-26', dateUpdated: '2026-10-04' },
+          { label: 'Reverse Geocoding', link: 'client/locations/geocoding', dateCreated: '2026-09-26', dateUpdated: '2026-11-25' },
           { label: 'Release Notes', link: 'client/release-notes', dateCreated: '2023-07-06', dateUpdated: '2023-07-06' }
         ]
       },
