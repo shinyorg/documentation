@@ -1457,10 +1457,9 @@ export const sidebarTopics = [
       },
       {
         label: 'Guidance',
-        jumpTo: true,
         dateUpdated: '2026-08-14',
         items:[
-          { label: 'Walkthrough', link: 'controls/walkthrough/', dateCreated: '2026-08-14', dateUpdated: '2026-08-14' },
+          { label: 'Walkthrough', link: 'controls/walkthrough/', dateCreated: '2026-08-14', dateUpdated: '2026-08-14', jumpTo: true },
           { label: 'Tooltip', link: 'controls/tooltip/', dateCreated: '2026-08-14', dateUpdated: '2026-08-14' },
           { label: 'Try It In Blazor', link: 'controls/try-blazor/guidance', dateCreated: '2026-11-18', platform: 'blazor' },
         ]
