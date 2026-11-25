@@ -111,7 +111,7 @@ its memberships are removed automatically, after `OnDisconnectedAsync` has run.
 | `HubDisconnectReason` | When |
 |---|---|
 | `ClientDisconnect` | The client called `Disconnect()` or was disposed. It tells the host before it unsubscribes |
-| `ClientTimeout` | The link dropped: an unsubscribe with no goodbye first (iOS and Android report a vanished client this way), or the cleanup sweep |
+| `ClientTimeout` | The link dropped: an unsubscribe with no goodbye first (iOS and Android report a vanished client this way), or the cleanup sweep. For a client that can [resume](#dropped-links--resume), only once the resume window has run out |
 | `ServerDisconnect` | `Context.Abort(reason)` or `IHubContext.Disconnect(id, reason)` |
 | `ServerShutdown` | `IBleHubHost.Stop(reason)` or `IHubContext.Stop(reason)` |
 
@@ -119,7 +119,7 @@ its memberships are removed automatically, after `OnDisconnectedAsync` has run.
 public override Task OnDisconnectedAsync(HubDisconnect disconnect)
 {
     if (disconnect.Reason == HubDisconnectReason.ClientTimeout)
-        engine.HoldSeat(this.Context.ConnectionId);   // the link dropped - they may come back
+        engine.MarkAway(this.Context.ConnectionId);   // dropped and didn't come back within the resume window
     else
         engine.Leave(this.Context.ConnectionId);
     return Task.CompletedTask;
@@ -128,6 +128,38 @@ public override Task OnDisconnectedAsync(HubDisconnect disconnect)
 
 By default `OnDisconnectedAsync(HubDisconnect)` calls `OnDisconnectedAsync(string? reason)` with `Description`, so
 hubs that override the string version keep working. Override one or the other.
+
+### Dropped Links & Resume
+
+A client whose link drops - it went out of range, its app went to the background, someone checked a text - is **held**
+for a while rather than let go. If it comes back in time it is the same connection, and the hub never sees it leave:
+
+```csharp
+services.AddBleHubServer(server => server
+    .Host(o =>
+    {
+        o.ResumeWindow = TimeSpan.FromSeconds(60);   // default 30s; TimeSpan.Zero turns holding off
+        o.ResumeBufferSize = 128;                    // pushes kept for a held client (the default)
+    })
+    .AddHub<GameHub>(GameCharacteristicUuid));
+```
+
+- **What's held:** the client stays in `ConnectedClients`, its groups and the `MaxClients` count, and keeps its
+  connection id and `Items`. Pushes to it are kept, in order.
+- **When it comes back:** on whatever central it reconnects on (Android gives a reconnecting phone a new address), it
+  hands back a secret resume token from its handshake. It carries on as the same connection, and the kept pushes are
+  replayed before anything new.
+- **When it doesn't:** `OnDisconnectedAsync` runs with `ClientTimeout` once the window runs out, or as soon as more is
+  pushed to it than `ResumeBufferSize` keeps.
+- **Never held:** a client that says goodbye (`ClientDisconnect`), `Context.Abort` / `IHubContext.Disconnect` and
+  `Stop`. Stopping lets held clients go straight away.
+- **Who is held:** only clients that say they can resume. The client library does, unless the app turned off
+  [automatic reconnect](./client#automatic-reconnect), so older clients leave as they always did.
+- **Lost in the drop:** hub methods running when the link dropped are cancelled (the client has failed those calls),
+  and media channels close.
+
+The same holding covers clients on [Universal Hubs'](/universalhubs/) Multipeer and Nearby transports; Wi-Fi has its own
+resume.
 
 ### Renaming
 
@@ -211,7 +243,8 @@ and `e.Reason` is its `Description`.
 :::note[Disconnecting is cooperative]
 iOS can't force a central (client) off a peripheral (host). So `Stop`, `Disconnect` and `Abort` **ask** the client to
 leave, and the client library always complies. A client that silently drops is removed when it unsubscribes, or by a
-periodic sweep (`BleHubHostOptions.ClientSweepInterval`, 10s by default).
+periodic sweep (`BleHubHostOptions.ClientSweepInterval`, 10s by default) - and then [held](#dropped-links--resume) for
+the resume window when it can come back.
 :::
 
 ## Handler Hubs

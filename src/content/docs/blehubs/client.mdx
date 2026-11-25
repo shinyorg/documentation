@@ -74,13 +74,39 @@ The host may refuse the client: it is full, `ValidateClient` said no, or the hub
 
 | Member | |
 |---|---|
-| `Status` | `Disconnected`, `Connecting`, `Connected`, `Disconnecting` |
-| `StatusChanged` / `Connected` / `Disconnected` | `Disconnected` carries a [`HubDisconnect`](#disconnect-reasons) saying why. `StatusChanged` carries it as `Disconnect` while `Disconnecting` and `Disconnected` |
+| `Status` | `Disconnected`, `Connecting`, `Connected`, `Disconnecting`, `Reconnecting` ([after a dropped link](#automatic-reconnect)) |
+| `StatusChanged` / `Connected` / `Disconnected` | `Disconnected` carries a [`HubDisconnect`](#disconnect-reasons) saying why. `StatusChanged` carries it as `Disconnect` while `Disconnecting` and `Disconnected`, and why the link dropped while `Reconnecting` |
 | `Host` / `HostName` | The connected host, and its name: from the handshake, kept up to date when the host [renames](#renaming) |
 | `ClientName` | The name the host knows you by: `BleHubConnectOptions.Name`, or your latest `Rename`. `null` while disconnected |
 | `CanTransferFiles` | See [File Transfers](./files) |
 | `Disconnect()` | Leaves the hub, telling the host first |
 | `Rename(name)` / `HostRenamed` | See [Renaming](#renaming) |
+
+## Automatic Reconnect
+
+When the link drops (out of range, the app went to the background) and the host [holds dropped
+clients](./hosting#dropped-links--resume), the client gets back onto it by itself:
+
+1. `Status` goes to `Reconnecting`, and `StatusChanged` says why the link dropped.
+2. The client reconnects the peripheral and hands the host the resume token from its handshake.
+3. It is `Connected` again - the same connection on the host, same groups - and the pushes it missed are raised, in order.
+
+If it can't get back within the host's resume window (or the host already let it go), it goes to `Disconnected` with
+`ClientTimeout`, and `Disconnected` is raised. `Connected` isn't raised again after a resume.
+
+```csharp
+client.StatusChanged += (_, e) => MainThread.BeginInvokeOnMainThread(() => this.Banner = e.Status switch
+{
+    BleHubClientStatus.Reconnecting => "Reconnecting...",
+    BleHubClientStatus.Disconnected => $"Disconnected: {e.Reason}",
+    _ => null
+});
+```
+
+- Calls in flight when the link dropped, and calls made while `Reconnecting`, throw `BleHubDisconnectedException`.
+- Media channels close; open a new one once `Connected`.
+- Turn it off per connection: `new BleHubConnectOptions("Allan") { AutomaticReconnect = false }`. The host then lets
+  the client go as soon as its link drops.
 
 ## Renaming
 
@@ -178,7 +204,7 @@ UI thread yourself.
 | Exception | When |
 |---|---|
 | `BleHubRemoteException` | The hub method threw. Includes `RemoteErrorType` and `Message` |
-| `BleHubDisconnectedException` | You called while not connected, or the connection dropped while a call was in flight (`Disconnect` says why, and `Reason` is its text) |
+| `BleHubDisconnectedException` | You called while not connected (or while `Reconnecting`), or the link dropped while a call was in flight (`Disconnect` says why, and `Reason` is its text) |
 | `TimeoutException` | No reply within `RequestTimeout` |
 | `OperationCanceledException` | You cancelled the call |
 
