@@ -472,14 +472,14 @@ export default defineConfig({
         // Default social share image (Open Graph + Twitter). Per-page frontmatter can override.
         // Bump ?v= whenever og-image.png changes — X, Teams, LinkedIn and Slack
         // cache the card by URL, so the same URL keeps serving the old artwork.
-        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png?v=7' } },
-        { tag: 'meta', attrs: { property: 'og:image:secure_url', content: 'https://www.shinylib.net/og-image.png?v=7' } },
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://www.shinylib.net/og-image.png?v=8' } },
+        { tag: 'meta', attrs: { property: 'og:image:secure_url', content: 'https://www.shinylib.net/og-image.png?v=8' } },
         { tag: 'meta', attrs: { property: 'og:image:type', content: 'image/png' } },
         { tag: 'meta', attrs: { property: 'og:image:width', content: '1200' } },
         { tag: 'meta', attrs: { property: 'og:image:height', content: '630' } },
-        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny Platform — everything you need on .NET, one platform: native UI, Document DB and EF Core extensions, communications, devices, AI, the back end and .NET Aspire integrations. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean.' } },
-        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png?v=7' } },
-        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Shiny Platform — everything you need on .NET, one platform: native UI, Document DB and EF Core extensions, communications, devices, AI, the back end and .NET Aspire integrations. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean.' } },
+        { tag: 'meta', attrs: { property: 'og:image:alt', content: 'Shiny Platform — everything you need on .NET, one platform: native UI, Document DB and EF Core extensions, communications, devices, AI, the back end and .NET Aspire integrations. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean, 1.5M+ lines of code, 8K+ commits, 30B+ AI tokens.' } },
+        { tag: 'meta', attrs: { name: 'twitter:image', content: 'https://www.shinylib.net/og-image.png?v=8' } },
+        { tag: 'meta', attrs: { name: 'twitter:image:alt', content: 'Shiny Platform — everything you need on .NET, one platform: native UI, Document DB and EF Core extensions, communications, devices, AI, the back end and .NET Aspire integrations. 40M+ NuGet downloads, 50+ libraries, 85+ UI controls, AOT trim-clean, 1.5M+ lines of code, 8K+ commits, 30B+ AI tokens.' } },
         {
           tag: 'script',
           attrs: {
