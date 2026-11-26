@@ -106,6 +106,12 @@ CoreBluetooth. Disposing the subscription (or cancelling the token passed to `Wr
 then cancels it. If CoreBluetooth does not report it is ready within 5 seconds, the write fails with a
 `BleException`. For a shorter limit, dispose or cancel the write yourself.
 
+On Android a write without response completes once the Bluetooth stack has accepted the packet
+(`onCharacteristicWrite`). Android runs one GATT operation at a time, so awaiting each write in turn is all the
+pacing a long stream needs - again, no delay of your own. On Android 13+ a write the stack refuses up front (for
+example because it is busy) fails with a `BleOperationException` whose `GattStatusCode` is the Android
+`BluetoothStatusCodes` value.
+
 ### BLOB Writes
 
 For writing data larger than a single GATT operation, use blob writes, which automatically chunk the
