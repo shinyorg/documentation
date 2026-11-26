@@ -157,6 +157,7 @@ app.MapPost("/logout", async ctx =>
 | `LoginPath` / `AccessDeniedPath` | `null` |
 | `ReturnUrlParameter` | `returnUrl` |
 | `ValidateTicketAsync` | `null` |
+| `OnValidatePrincipal` | `null` |
 
 The ticket is **AES-GCM encrypted rather than merely signed** — a cookie lives on a machine you do
 not control and carries claims — and keyed by a short stable key id, so a rotation can add a new
@@ -166,12 +167,21 @@ primary key while cookies issued under the old one keep working until they expir
 o.Protector = new TicketProtector(newKey, oldKey);
 ```
 
+Each ticket is also bound to a **purpose** — the cookie scheme's, or the session cookie's — which is
+mixed into the encryption's authenticated data. One `TicketProtector` can therefore safely serve both
+[sessions](/httpserver/sessions/) and cookie authentication: a session cookie presented as the auth
+cookie does not decrypt. Tickets issued by earlier versions (no purpose) are still read until they expire, and a
+session ticket is refused as a sign-in either way. `TicketProtector.Protect(ticket, purpose)` /
+`Unprotect(value, purpose)` are public for a ticket of your own.
+
 Claims are serialized by hand into a length-prefixed binary format. Not for speed: it makes the
 parser total, so a truncated or tampered payload fails as a parse error rather than an exception from
 somewhere deeper.
 
 `SlidingExpiration` reissues at the halfway mark rather than on every request, because a `Set-Cookie`
-on every response breaks shared caching for nothing.
+on every response breaks shared caching for nothing. A renewal keeps the cookie as it was issued:
+`SignInAsync(user, persistent: false)` gives a browser-session cookie (no `Expires`), the ticket records
+that (`AuthenticationTicket.IsPersistent`), and the renewed cookie stays a session cookie.
 
 Denial is answered per-caller: a browser navigation gets a redirect to `LoginPath` with the original
 URL attached as `returnUrl`, an API client gets its 401.
@@ -179,6 +189,27 @@ URL attached as `returnUrl`, an API client gets its 401.
 `ValidateTicketAsync` runs on every request with the decrypted ticket, which is the hook for checking
 a user that has since been disabled — the claims travel in the cookie, so a ticket cannot otherwise be
 revoked before it expires.
+
+`OnValidatePrincipal` runs after it and can do more than accept or reject: replace the principal with
+fresh claims, ask for a renewal, or refuse the cookie. Without it a sliding renewal copies the claims the
+ticket already had, so a role taken away from a user would stay in their cookie for as long as they kept
+using it.
+
+```csharp
+o.OnValidatePrincipal = async ctx =>
+{
+    var user = await users.FindAsync(ctx.Principal.Identity!.Name!);
+
+    if (user is null)
+        ctx.RejectPrincipal();                       // anonymous, cookie deleted
+    else if (user.SecurityStamp != ctx.Principal.FindFirst("stamp")?.Value)
+        ctx.ReplacePrincipal(user.ToPrincipal());    // reissued with current roles
+    // ctx.ShouldRenew = true;                       // reissue with a fresh expiry
+};
+```
+
+A replaced principal is reissued with the ticket's original expiry, so refreshing claims never extends a
+sign-in on its own.
 
 ## JWT
 

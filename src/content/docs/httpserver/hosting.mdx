@@ -268,8 +268,19 @@ app.MapPost("/server/restart", async ctx =>
 
 ## Shutdown
 
-`StopAsync` unbinds the listener first so nothing new arrives, then waits for in-flight requests to
-finish. Connections still running when the cancellation token fires are aborted.
+`StopAsync` unbinds the listener first so nothing new arrives, then drains:
+
+- Idle keep-alive connections close at once.
+- A request already running carries on, with `RequestAborted` **not** cancelled. Its response says
+  `Connection: close`, and the connection closes once it is done.
+- Whatever is still running when `Options.ShutdownTimeout` (5 seconds by default) or the stop's own
+  cancellation token runs out, whichever comes first, has its `RequestAborted` cancelled and its
+  connection aborted. The server reports `Stopped` only after that.
+
+`ShutdownTimeout = TimeSpan.Zero` aborts at once; `Timeout.InfiniteTimeSpan` leaves the limit to the
+token you pass. A long-lived handler (an event stream, a WebSocket) holds the stop for the full
+timeout unless it ends on its own. HTTP/2 connections follow the same rules: `GOAWAY` goes out when
+the stop begins, and the open streams are left to finish within the same timeout.
 
 `DisposeAsync` stops the server and releases everything. In a console host the usual shape is:
 

@@ -37,6 +37,21 @@ chunked request and response bodies, and the 101 handover that
 Limits — request line size, header count and total size, body size, keep-alive and header timeouts,
 requests per connection — are on `Options.Limits`. See [Configuration](/httpserver/configuration/).
 
+Request framing follows RFC 9112 strictly, because a framing disagreement between this server and a
+proxy in front of it is how request smuggling works:
+
+- A `Transfer-Encoding` whose final coding is not exactly `chunked` (`gzip`, `identity`,
+  `chunked, gzip`, `xchunked`) is a 400; one with other codings layered under `chunked` is a 501.
+  `Transfer-Encoding` on an HTTP/1.0 request, or alongside `Content-Length`, is a 400.
+- `Content-Length` must be plain digits; `+3` is a 400.
+- Chunk data must be followed by exactly CRLF (a bare LF is accepted). Chunk-size lines and trailer
+  lines are validated, and the trailer section is held to `MaxRequestHeadersTotalSize`.
+- An absolute-form target (`GET http://host/path`) sets the request's host from its authority,
+  overriding the `Host` header (RFC 9112 §3.2.2). A `Host` that is not a valid `host[:port]` is a 400.
+
+A handler's `RequestAborted` fires when the client closes the connection, once the request body has
+been read (or straight away for a request without one), and when the handler calls `ctx.Abort()`.
+
 ## HTTP/2
 
 On by default and negotiated per connection, so turning it on cannot break an HTTP/1.1 client.
@@ -47,8 +62,8 @@ builder.Configure(o =>
     o.Http2.Enabled = true;                 // default
     o.Http2.AllowCleartext = true;          // default — prior-knowledge h2c
     o.Http2.MaxConcurrentStreams = 100;
-    o.Http2.InitialStreamWindowSize = 96 * 1024;
-    o.Http2.InitialConnectionWindowSize = 1024 * 1024;
+    o.Http2.InitialStreamWindowSize = 8 * 1024 * 1024;      // default
+    o.Http2.InitialConnectionWindowSize = 16 * 1024 * 1024; // default
     o.Http2.MaxFrameSize = 16 * 1024;
     o.Http2.MaxHeaderListSize = 32 * 1024;
 });
@@ -67,6 +82,52 @@ A full server-side stack written on the same primitives as everything else:
 
 The connection window is larger than one stream's, so several concurrent uploads do not have to take
 turns.
+
+### Request bodies and memory
+
+The read loop never waits on a handler. A request body is buffered for its handler, and the
+flow-control windows are what bound the buffer: a client may only send what the server has credited,
+and credit goes back as the handler *reads* the body, not as the bytes arrive. So a handler that is
+slow to read, or answers without reading at all, holds its own client to one stream window of
+buffered body while every other stream on the connection carries on. The worst case is
+`InitialStreamWindowSize` per stream and `InitialConnectionWindowSize` per connection — lower them
+on a memory-constrained device that takes uploads from untrusted clients.
+
+A client that sends more than the window it was given has its stream reset (or the connection
+closed, for the connection window) with `FLOW_CONTROL_ERROR`. A request whose `DATA` does not add up
+to its `Content-Length` is reset with `PROTOCOL_ERROR`, and the handler's body read throws instead of
+ending as if the upload were complete.
+
+### Limits and abuse
+
+- **Concurrency.** A stream counts against `MaxConcurrentStreams` until its handler finishes, even
+  after the client resets it, so resetting streams cannot get a client more handlers than the limit.
+  A client that keeps opening streams past the limit, or resets streams by the hundred per second, is
+  disconnected with `GOAWAY ENHANCE_YOUR_CALM` — the HTTP/2 Rapid Reset attack (CVE-2023-44487).
+- **Headers.** `MaxHeaderListSize` is enforced on the *decoded* headers, counted as the setting
+  defines it: name, value and 32 bytes per field. A request over it gets a `431` and never reaches a
+  handler, and the connection stays usable. A header block whose encoded size alone is more than
+  twice the limit closes the connection, since it has to be held in memory before it can be decoded.
+- **Timeouts.** `Limits.KeepAliveTimeout` closes a connection with no open stream, and
+  `Limits.RequestHeadersTimeout` one whose header block is left unfinished, each with `GOAWAY`.
+  An open stream is never timed out by either.
+
+### Shutdown and GOAWAY
+
+When the client sends `GOAWAY` it opens no more streams, and the ones it has open are still
+answered before the connection closes. When the server stops it sends `GOAWAY` with `NO_ERROR` and
+the last stream it accepted and takes no new streams. The open ones carry on with `RequestAborted`
+**not** cancelled, exactly as an HTTP/1.1 request in flight does, and the connection closes once the
+last of them ends. Whatever is still running when `Options.ShutdownTimeout` or the stop's own token
+runs out is cancelled and the connection is torn down. See [Shutdown](/httpserver/hosting/#shutdown).
+
+### HEAD and Content-Length
+
+A `HEAD` response ends with its `HEADERS` frame. The handler can write the body as it would for a
+`GET`, which keeps `Content-Length` and the other headers identical, and the bytes are counted and
+dropped. A response that declares `Content-Length` is held to it, as on HTTP/1.1: writing past it
+throws before the extra bytes are sent, and ending short resets the stream instead of ending it
+cleanly, so the client never takes a truncated body for a whole one. HTTP/3 does the same.
 
 **Not implemented:** server push (deprecated and gone from browsers), trailers, and the `h2c`
 `Upgrade:` handshake — prior knowledge only, which is what every real h2c client actually uses. The

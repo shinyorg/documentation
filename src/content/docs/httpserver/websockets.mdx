@@ -46,6 +46,20 @@ the peer has closed.
 
 Ping/pong is handled automatically — an incoming ping is answered without the handler seeing it.
 
+A peer that breaks the protocol is sent a close frame with the status RFC 6455 gives it, and
+`ReceiveAsync` throws a `WebSocketProtocolException` carrying the same status:
+
+| Violation | Close status |
+| --- | --- |
+| An unmasked frame, a stray continuation, a control frame over 125 bytes | 1002 Protocol Error |
+| A text message that is not valid UTF-8 | 1007 Invalid Payload Data |
+| A compressed message that does not inflate | 1007 Invalid Payload Data |
+| A message over `MaxMessageLength` | 1009 Message Too Big |
+
+A close frame from the peer is echoed back — unless it carries a code no endpoint may send (under 1000,
+1004-1006, 1015, 1016-2999, 5000 and up), a one-byte payload or a reason that is not UTF-8. That close is
+answered with 1002 instead and reported as `CloseResult.Status == ProtocolError`.
+
 ## Accept options
 
 ```csharp
@@ -68,6 +82,22 @@ too, which is what a compressed frame inside the frame limit says nothing about.
 | `CompressionThreshold` | 256 bytes | Below it, deflate makes a message bigger |
 | `KeepAliveInterval` | 30s | `null` switches the ping loop off |
 | `MissedPingsBeforeClosing` | 2 | Then the socket is torn down |
+| `AllowedOrigins` | empty | Origins allowed to open the socket; empty skips the check |
+
+`AllowedOrigins` closes off cross-site WebSocket hijacking. A browser attaches cookies to a WebSocket
+handshake from any page, and the same-origin policy does not apply to WebSockets, so a socket
+authenticated by a cookie is open to any site the user visits unless something checks `Origin`:
+
+```csharp
+await using var socket = await ctx.AcceptWebSocketAsync(new WebSocketAcceptOptions
+{
+    AllowedOrigins = { "https://app.example.com" }
+});
+```
+
+A handshake from an origin not on the list is refused with 403 (`AcceptWebSocketAsync` throws a
+`BadHttpRequestException` carrying it). One with no `Origin` at all is let through: browsers always send
+it, so its absence means a non-browser client this check cannot protect against anyway.
 
 Sub-protocol negotiation picks by the **server's** preference order, which is the side that actually
 knows what it can do, and echoes the choice back. `socket.SubProtocol` is what was agreed.

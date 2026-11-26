@@ -55,6 +55,33 @@ app.MapGet("/secrets", ctx => …).RequireAuthorization("admin");
 app.MapGet("/ping", ctx => …).AllowAnonymous();
 ```
 
+`RequireAuthorization` (and `AllowAnonymous`) chained onto the server apply to **every route the
+preceding call mapped** — the one route of a `MapGet`, or every route of a `MapGroup`, `MapModule`,
+`MapModules` or a generated `Map{Class}()` / `Map{Assembly}Endpoints()`:
+
+```csharp
+app.MapGroup("/admin", admin =>
+{
+    admin.MapGet("/users", ListUsers);
+    admin.MapPost("/delete-all", DeleteAll);
+})
+.RequireAuthorization("admin");          // both routes
+
+app.MapAdminEndpoints().RequireAuthorization();   // every route the class declares
+```
+
+A route inside the set that says `[AllowAnonymous]` (or `.AllowAnonymous()`) about itself stays open.
+The same goes for every other convention chained onto the server — `RequireRateLimiting`,
+`RequireIpFilter`, `RequireCors`, `ValidateAntiforgery`, `WithRequestTimeout`, `CacheOutput`,
+`WithRequestSizeLimit` and the rest. An extension method of your own that maps several routes and
+returns the server should wrap them in `using (server.Router.BeginRegistration()) { … }` so a convention
+chained after it covers all of them.
+
+<Aside type="caution">
+Earlier versions applied a convention chained onto the server to the last route in the table only, so
+`MapGroup(…).RequireAuthorization()` protected one route of the group and left the rest open.
+</Aside>
+
 Or hand the attributes to `Map` as metadata — the same requirements, for code that builds its routes
 from a table or already has the attribute in hand:
 
@@ -71,7 +98,11 @@ so they are enforced by the middleware and documented in [OpenAPI](/httpserver/o
 Two rules:
 
 - **A method's `[Authorize]` adds to its class's** rather than replacing it, so narrowing an endpoint
-  is additive and cannot accidentally widen it. Every named policy must pass.
+  is additive and cannot accidentally widen it. Every named policy must pass, and **every attribute's
+  roles are a requirement of their own**: within one `Roles = "a,b"` any listed role will do, across
+  attributes each must be met. A class marked `[Authorize(Roles = "admin")]` with a method marked
+  `[Authorize(Roles = "viewer")]` needs a caller in both roles. The same holds for several
+  `AuthorizeAttribute` instances given to `Map`, and for a mediator group's `Roles` and an endpoint's.
 - **`[AllowAnonymous]` always wins**, including over a class-level `[Authorize]` and over a fallback
   policy.
 
@@ -128,6 +159,14 @@ The fallback applies to endpoints with **no** `[Authorize]` at all. Setting it f
 deny-by-default, which is the safer posture for anything reachable from a
 [tunnel](/httpserver/tunneling/): a route added later is protected until someone says otherwise with
 `[AllowAnonymous]`.
+
+<Aside type="caution">
+The fallback covers **routed endpoints only**. Authorization runs after routing, so a request that
+matches no route never meets it: the `OnRequest` terminal handler, static and embedded files (served
+before routing), and the 404 for an unknown path are all outside it. Put an authentication check in
+front of `UseStaticFiles` / `UseEmbeddedFiles`, or serve the content from a mapped route, when it is
+not public.
+</Aside>
 
 ## 401 versus 403
 

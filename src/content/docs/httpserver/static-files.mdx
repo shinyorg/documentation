@@ -74,19 +74,21 @@ For an archive that was zipped along with its parent folder, name the directory 
 new ZipFileSource("./site.zip", "wwwroot");     // wwwroot/css/site.css is served as /css/site.css
 ```
 
-The archive is never held open. The entry index — path, length, CRC and timestamp — is read once at
-construction, and each response opens its own reader over its own stream, so one source serves any
-number of requests at once. Reopening an embedded archive costs nothing: the resource stream is a
-window onto the already-mapped assembly image rather than a copy of it.
+The archive is never held open. The entry index — path, length, CRC, timestamp and where each entry's
+bytes sit in the archive — is read once at construction, and each response opens its own stream and
+reads just that entry, without reading the central directory again, so one source serves any number
+of requests at once. Reopening an embedded archive costs nothing: the resource stream is a window onto
+the already-mapped assembly image rather than a copy of it.
 
 The `ETag` comes from the entry's CRC, so it follows the content and survives a rebuild that produced
 identical bytes. `ZipFileSource.Paths` lists what an archive can serve.
 
 <Aside type="note">
-A deflated entry cannot seek, so a byte range over one is served by reading up to the start of the
-range and discarding. Correct, and cheap for the ranges a browser actually asks for — but a source
-that expects to serve large ranges out of very large files is better off on disk, where the seek is
-free.
+A **stored** (uncompressed) entry seeks straight to the start of a byte range. A **deflated** entry
+cannot seek, so a range over one is served by inflating up to the start of the range and discarding.
+Correct, and cheap for the ranges a browser actually asks for — but store large media uncompressed
+(`zip -0`, or `CompressionLevel.NoCompression`) if it will be scrubbed through, and it costs no more to
+seek than a file on disk.
 </Aside>
 
 ### Both, in order
@@ -159,9 +161,12 @@ better: those were compressed once at maximum effort, and
 The content type still describes the file underneath.
 
 The source has to offer them as well as the middleware asking. `PhysicalFileSource` and
-`ZipFileSource` both take `PrecompressedEncodings` (`UseBlazorWebAssembly` sets it for you when it
-builds the source), and `CompositeFileSource` passes the question through to whichever source
-answers. A source that has no notion of sidecars — `EmbeddedFileSource`, or your own — is simply
+`ZipFileSource` both take `PrecompressedEncodings`; `UseStaticFiles(path, …)` and
+`UseBlazorWebAssembly` set it for you (`br`, then `gzip`) when they build the source, and
+`CompositeFileSource` passes the question through to whichever source answers.
+
+A coding the client gives a quality of zero — `br;q=0`, `br;q=0.0`, `br;q=0.000` — is a refusal, and
+its sidecar is never sent. A source that has no notion of sidecars — `EmbeddedFileSource`, or your own — is simply
 asked for the file that was requested.
 
 ## Security
@@ -171,11 +176,15 @@ This is the part that has to be right, so it is worth stating what the middlewar
 - **Paths arrive already percent-decoded**, so `%2e%2e%2f` is a plain `../` by the time anything sees
   it. That is exactly why the segment check happens on the decoded path: `..`, null bytes, `\`, `:`
   and invalid filename characters are all refused.
-- **Containment is checked after normalization *and* after resolving links.** A symlink is the one
-  way a path that looks contained can leave.
+- **Containment is checked after normalization *and* after resolving every link along the path.**
+  A symlink — to a file, or to a directory part way down the path — is the one way a path that looks
+  contained can leave. Links that stay inside the root are followed as ordinary content.
 - **Path comparison follows the platform.** Treating a case-insensitive file system as
   case-sensitive is how a containment check passes while the open succeeds on a different file.
-- **Dotfiles are refused** by default. `.env` and `.git` live in content directories.
+- **Dotfiles are refused** by default, and so is anything with the Hidden attribute, or under a
+  hidden directory. `.env` and `.git` live in content directories.
+- **On Windows, a segment ending in a dot or a space is refused**, since Windows opens `app.js.` as
+  `app.js` and every check made on the string would be about a different name.
 - **Unknown extensions are refused** by default. Guessing a type for an unknown extension is how a
   user-writable directory turns into a way to serve HTML — and therefore script — from your origin.
 

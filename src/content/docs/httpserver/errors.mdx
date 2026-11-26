@@ -12,6 +12,17 @@ controls whether the message is included). That is the floor. Above it sits a ch
 `IExceptionHandler`s, tried in registration order until one claims the exception — the connection's
 own 500 is the last resort rather than the first response.
 
+That includes exceptions that merely look like a dropped connection — a `FileNotFoundException`, an
+`HttpClient` timeout's `TaskCanceledException`, an `ObjectDisposedException`. Over HTTP/1.1 an
+exception is treated as the client going away (no 500, no error log) only when it really came from
+the connection: its reads or writes failed, the request was aborted, or `RequestAborted` had been
+cancelled.
+
+The same goes for a response the handler built wrong. Setting a response header whose value holds a
+CR, LF or NUL, or whose name is not an RFC 9110 token, throws `InvalidOperationException` where it is
+set, and a reason phrase with a control character throws when the head is written. Writing a body
+on a 204 or 304 throws too. Each reaches the chain above like any other exception.
+
 ```csharp
 public sealed class TimeoutHandler : IExceptionHandler
 {
@@ -105,11 +116,18 @@ theirs.
 | Anything else | 500 |
 
 `MapException<T>(status)` overrides or extends this. Lookup goes exact type first, then base types, so
-mapping a base covers everything under it.
+mapping a base covers everything under it. `MapException<T>(status, includeMessage: true)` also lets
+that exception's message into `detail` — for an exception of your own written to tell the caller what
+to fix.
 
 ### What is and is not disclosed
 
-- A **4xx** carries the exception message in `detail` — it describes the caller's own mistake.
+- A **4xx** carries the exception message in `detail` **only for exceptions written for the client** —
+  `BadHttpRequestException`, `JsonPatchException`, and types mapped with `includeMessage: true` — or when
+  `IncludeExceptionDetails` is on. A framework exception's message is not echoed even when its status is
+  a 4xx: `UnauthorizedAccessException` (403) names the absolute path it was refused, and
+  `ArgumentException` (400) names the parameter. `ProblemDetailsOptions.IncludesMessage(exception)`
+  says which way a given exception goes.
 - A **5xx** never does.
 - `IncludeExceptionDetails` adds the type, message, stack trace and inner exception under an
   `exception` extension. Off by default, and it must stay off anywhere untrusted: an exception message

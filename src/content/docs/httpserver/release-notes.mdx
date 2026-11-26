@@ -5,6 +5,116 @@ tableOfContents: true
 
 import RN from '/src/components/ReleaseNote.astro';
 
+## 3.1 - November 25, 2026
+
+<RN type="fix">**Request smuggling: a `Transfer-Encoding` that isn't exactly `chunked` is refused.** `gzip` or `identity` without a `Content-Length` was read as no body, so the body was parsed as a second request on the same connection; `chunked, gzip` and `xchunked` were accepted by substring. The final coding must now be exactly `chunked` (400 otherwise), codings layered under `chunked` are a 501, and `Transfer-Encoding` on HTTP/1.0 or alongside `Content-Length` is a 400. `Content-Length` must be plain digits (`+3` was accepted).</RN>
+
+<RN type="fix">**Chunked request bodies are parsed strictly and can no longer be made to buffer without limit.** Bytes between chunk data and its line ending were held until a line feed arrived, on any route and before authentication, so a client could grow the heap by hundreds of MB. Chunk data must now be followed by CRLF, chunk-size and trailer lines are validated, and the trailer section is capped at `MaxRequestHeadersTotalSize`.</RN>
+
+<RN type="fix">**Response headers can no longer be split by injected line breaks.** Header names and values were written as given, so a `Location` built from a query string could add a `Set-Cookie` or a whole second response. Values containing CR, LF or NUL, and names that aren't tokens, now throw `InvalidOperationException` where they are set, on every protocol; a reason phrase with a control character throws before the head is written.</RN>
+
+<RN type="fix">**Static files and the file browser no longer follow a symlinked directory out of the root.** Only the last path component's link was checked, so `root/link -> ../outside` served `/link/secret.txt`, and a file browser `PUT /files/link/x.txt` created a file outside the root. Every link along the path is now followed and the real location must stay inside the root, for reads, writes and deletes. Links that stay inside the root still work.</RN>
+
+<RN type="fix">**A convention chained after `MapGroup`, `MapModule(s)` or a generated `Map{Class}()` now covers every route it mapped.** `RequireAuthorization`, `RequireRateLimiting`, `RequireIpFilter`, `RequireCors`, `ValidateAntiforgery`, `WithRequestTimeout`, `CacheOutput` and the rest applied only to the last route in the table, so `MapGroup("/admin", …).RequireAuthorization()` left all but one admin route anonymous. Multi-route extensions of your own can use `server.Router.BeginRegistration()`.</RN>
+
+<RN type="breaking">**Several `[Authorize(Roles = …)]` must now all pass.** Roles from a class and a method (or stacked attributes, a mediator group and endpoint, or a switchboard and method) were merged into one any-of list, so a method's `viewer` role satisfied a class's `admin` requirement. Each attribute is now its own requirement; use one attribute with a comma list for "either role".</RN>
+
+<RN type="fix">**A session cookie can no longer sign a visitor in when sessions and cookie authentication share a `TicketProtector`.** Tickets are now bound to a purpose (`TicketProtector.Protect(ticket, purpose)`); cookies issued before the upgrade keep working until they expire, and a session ticket is refused as a sign-in either way.</RN>
+
+<RN type="fix">**HTTP/2 resists the Rapid Reset attack (CVE-2023-44487).** A reset stream used to free its concurrency slot while its handler kept running. Streams now count against `MaxConcurrentStreams` until the handler finishes, and a client that keeps getting refused or resets streams in bulk is disconnected with `ENHANCE_YOUR_CALM`.</RN>
+
+<RN type="fix">**HTTP/2 enforces `MaxHeaderListSize`.** It was advertised but never checked: endless `CONTINUATION` frames were buffered without limit, and a 16 KB block of indexed cookies could allocate hundreds of MB. Requests over the decoded limit now get a 431 without reaching a handler; a block more than twice the limit closes the connection.</RN>
+
+<RN type="fix">**Appending a repeated header is amortised O(1).** Every append copied all earlier values, and HPACK makes a repeat cost one byte, so a 15 KB HTTP/2 header block could allocate close to a gigabyte.</RN>
+
+<RN type="fix">**A cleartext connection that sends nothing is closed.** While the server waited to see whether a plain-HTTP client would speak HTTP/2, no timeout applied, so a socket that connected and stayed silent (or sent part of the preface) held a connection slot until shutdown; 256 of them locked everyone out. It is now closed after `KeepAliveTimeout` / `RequestHeadersTimeout`.</RN>
+
+<RN type="breaking">**Problem details no longer echo framework exception messages on a 4xx.** Only `BadHttpRequestException`, `JsonPatchException` and types mapped with `MapException<T>(status, includeMessage: true)` put their message in `detail` (or anything, with `IncludeExceptionDetails`); an `UnauthorizedAccessException` was leaking absolute file paths.</RN>
+
+<RN type="breaking">**`UseForwardedHeaders` reads `X-Forwarded-*` from the right and can trust a proxy list.** The left-most entry, which the client controls, used to win. New `HttpServerOptions.ForwardedHeaders` (`KnownProxies`, `KnownNetworks`, `ForwardLimit` = 1); a chain of proxies needs `ForwardLimit` raised. `GetClientIpAddress(true)` now returns the right-most entry.</RN>
+
+<RN type="fix">**`ByIpAddressAndPath` can no longer be dodged by respelling a path.** It keys on the matched route template, or the path normalised the way the router compares it.</RN>
+
+<RN type="enhancement">**`ByIpAddress` counts IPv6 callers per `/64`.** IPv4-mapped addresses count as IPv4.</RN>
+
+<RN type="fix">**The file browser's `Filter` can no longer be bypassed by changing case.** On macOS and Windows `/files/PRIVATE/keys.txt` opened `private/keys.txt` while the filter saw `PRIVATE`. The filter now sees the on-disk spelling, Windows short-name aliases are refused, and a link inside the root is checked against where it leads as well.</RN>
+
+<RN type="fix">**Files and directories with the Hidden attribute are refused by name**, not just left out of listings, by the file browser and by `PhysicalFileSource`, unless `ServeHiddenFiles` is on.</RN>
+
+<RN type="breaking">**Antiforgery tokens are bound to the signed-in user, and the cookie is `Secure` and `__Host-` prefixed over HTTPS.** Fetch a new token after sign-in; new `AntiforgeryOptions.SecurePolicy` (`SameAsRequest`) and `UseHostPrefix` (`true`). Tokens issued before the upgrade stop validating.</RN>
+
+<RN type="feature">**`WebSocketAcceptOptions.AllowedOrigins` guards against cross-site WebSocket hijacking.** A handshake from an unlisted `Origin` is refused with 403.</RN>
+
+<RN type="feature">**tus per-upload ownership.** `TusOptions.OwnerSelector` records who created an upload and requires the same caller for every later HEAD, PATCH, DELETE or concatenation. `TusOptions.AuthorizeUploadAsync` adds custom rules. Other callers get 404. Off by default.</RN>
+
+<RN type="fix">**HTTP/2 downloads no longer stall partway.** A stream's send window was spent by the response writer and refilled from the peer's `WINDOW_UPDATE` frames by the connection's read loop, on two threads, with no synchronisation. When the two collided the refill could be lost, and since the peer had already sent that credit it never sent it again: the response waited forever with the connection otherwise healthy. On a loopback test about one large download in four hung. Browsers use HTTP/2 over HTTPS, so this hit file downloads in browsers. The window is now updated atomically.</RN>
+
+<RN type="fix">**HTTP/2 no longer hangs when a handler answers before reading a large request body.** The connection's frame reader waited on every request body's 64 KiB buffer, so a handler that wrote its response first (or never read a body over 64 KiB) stalled the whole connection forever: no flow-control credit, no other streams, and the handler outlived the client. Bodies are now buffered up to the flow-control window and the client gets more credit as the handler reads.</RN>
+
+<RN type="enhancement">**HTTP/2 uploads are no longer held back by latency.** A client can only have one stream's flow-control window of a request body in flight per round trip, and the default was 96 KiB, which held a browser upload to about 30 MB/s on a 3 ms Wi-Fi link no matter how fast the link was. `Http2.InitialStreamWindowSize` now defaults to 8 MiB and `Http2.InitialConnectionWindowSize` to 16 MiB; the same 3 ms test now goes past 850 MB/s. An unread request body is buffered up to the stream window (and the connection window per connection), with more credit granted only as the handler reads, so lower the windows on a memory-constrained device that takes untrusted uploads.</RN>
+
+<RN type="fix">**HTTP/2 responses no longer stall when several streams wait for connection credit.** One `WINDOW_UPDATE` woke only one waiting writer, and a writer parked on the connection window could outlive its reset stream.</RN>
+
+<RN type="fix">**HTTP/2 sends body bytes that were written but never flushed.** A handler that called `BodyWriter.Write` without `FlushAsync` sent an empty body over HTTP/2 (HTTP/1.1 was fine).</RN>
+
+<RN type="fix">**HEAD over HTTP/2 and HTTP/3 no longer sends a body**, which clients treated as a protocol error. Responses on both protocols are now held to their `Content-Length` as on HTTP/1.1: writing past it fails, and ending short resets the stream instead of looking complete.</RN>
+
+<RN type="fix">**HTTP/2 uploads that don't match their `Content-Length` are reset**, and the handler's body read throws instead of ending as if the upload were complete. A body read on a stream the client reset now throws too.</RN>
+
+<RN type="fix">**HTTP/2 protocol-conformance fixes:** no duplicate `END_STREAM` after a final data frame; `DATA` after the client ended a stream resets that stream (`STREAM_CLOSED`) instead of closing the connection with an internal error; overflowing HPACK integers are a `COMPRESSION_ERROR`; window overflows and zero increments are handled per RFC 9113; the connection window can no longer be overdrawn by concurrent streams.</RN>
+
+<RN type="enhancement">**HTTP/2 connections honour `KeepAliveTimeout` and `RequestHeadersTimeout`**, closing with `GOAWAY` when idle or when a header block stalls.</RN>
+
+<RN type="enhancement">**`StopAsync` is a real graceful stop, on HTTP/1.1 and HTTP/2.** Idle keep-alive connections close at once. In-flight HTTP/1.1 requests finish with `RequestAborted` untouched and `Connection: close`; HTTP/2 connections get `GOAWAY` with the last stream accepted, and their open streams finish the same way. Only what is still running after the new `ShutdownTimeout` (5 s) or the stop's token is cancelled and aborted. A client's own `GOAWAY` likewise lets its open streams finish instead of cancelling them.</RN>
+
+<RN type="fix">**`RequestAborted` fires when an HTTP/1.1 client closes the connection** while its handler runs, and `HttpContext.Abort()` cancels it. Long-poll and event-stream handlers no longer outlive their client.</RN>
+
+<RN type="enhancement">**New `Limits.RequestBodyTimeout` (30 s) and `Limits.ResponseWriteTimeout` (60 s)** bound how long an HTTP/1.1 body read or response write may stall, and draining an unread request body is capped at five seconds.</RN>
+
+<RN type="fix">**A handler's `IOException`, `OperationCanceledException` or `ObjectDisposedException` is a 500**, through the exception-handler chain. A missing file or an `HttpClient` timeout was mistaken for the client disconnecting: no response, no log. Only failures of the connection itself count as a disconnect now.</RN>
+
+<RN type="fix">**A HEAD response with a `Content-Length` and no body no longer throws and drops the connection**, which every cached HEAD hit, and error responses to HEAD no longer carry a body.</RN>
+
+<RN type="fix">**Writing a body on a 204 or 304 response throws `InvalidOperationException`** instead of sending unframed bytes the client would read as the next response.</RN>
+
+<RN type="fix">**An absolute-form request target's authority overrides the `Host` header** (RFC 9112 §3.2.2), `://` inside a query no longer turns a target into absolute form, and an invalid `Host` is a 400.</RN>
+
+<RN type="fix">**`Connection: keep-alive, close` closes the connection**; every token is considered.</RN>
+
+<RN type="fix">**The socket listener no longer spins on listener-level accept failures** such as descriptor exhaustion; they reach the server's accept backoff and recovery.</RN>
+
+<RN type="fix">**A non-persistent cookie sign-in stays non-persistent across sliding renewals.** The ticket now records `IsPersistent`, and a renewal no longer adds an `Expires` to a browser-session cookie.</RN>
+
+<RN type="enhancement">**`CookieAuthenticationOptions.OnValidatePrincipal` can refresh claims.** It can replace the principal, ask for a renewal or reject the cookie; without it a sliding renewal copied stale claims indefinitely. A replaced principal keeps the original expiry.</RN>
+
+<RN type="fix">**An active session no longer ends at `IdleTimeout`.** The session cookie is reissued as it passes the halfway mark.</RN>
+
+<RN type="fix">**Antiforgery tokens live their full `Lifetime` from issue.** They were stamped by fixed windows and could expire a second after being issued.</RN>
+
+<RN type="fix">**WebSocket protocol violations close with the right status.** Invalid UTF-8 text and corrupt deflate payloads close with 1007 (a corrupt payload threw an unhandled `InvalidDataException`), a reserved or invalid close code is answered with 1002 instead of being echoed, and `ReceiveAsync` sends the close before rethrowing `WebSocketProtocolException`.</RN>
+
+<RN type="fix">**Docs: `FallbackPolicy` covers routed endpoints only.** It never applied to `OnRequest`, static or embedded files, or 404s, as the docs implied.</RN>
+
+<RN type="fix">**A file that grows during a download no longer breaks the response.** `FileDownloadResult` sends exactly the `Content-Length` it measured.</RN>
+
+<RN type="fix">**tus PATCH requests are no longer cut off by the server-wide 30 MB body limit.** The upload routes are bounded by `MaxSize` (or unbounded without it), so a client can send a whole file in one PATCH, and an oversized one gets a 413 rather than a reset. Set your own limit with `MapTus(…).ForEach(r => r.WithRequestSizeLimit(n))`.</RN>
+
+<RN type="fix">**`DiskTusStore` flushes to disk before acknowledging.** Each PATCH is fsynced before its 204 and before `OnUploadCompleteAsync`, `.info` files are fsynced before their rename (and the directory after, where supported), and the expiry sweep now removes data files whose `.info` is missing or unreadable.</RN>
+
+<RN type="enhancement">**Multipart uploads are about 40% faster.** `HttpRequest.BodyReader` now reads 16–64 KB at a time instead of 4 KB; multipart-to-file went from about 1,100 to about 1,580 MB/s on loopback.</RN>
+
+<RN type="fix">**Multipart bodies with a preamble or a leading CRLF are read correctly**, and a body with no boundary delimiter is refused with 400 instead of being read as an empty form.</RN>
+
+<RN type="fix">**Compressed responses get their own `ETag` and no longer advertise `Accept-Ranges`.** The tag gains a `-gzip`/`-br`/`-deflate` suffix, and revalidating with it still answers 304.</RN>
+
+<RN type="fix">**`Accept-Encoding: br;q=0.0` is a refusal.** Any zero quality (`q=0.0`, `q=0.000`) now stops a precompressed sidecar being served, not just the literal `q=0`.</RN>
+
+<RN type="fix">**`UseStaticFiles(path, o => o.ServePrecompressedFiles = true)` now serves `.br`/`.gz` sidecars.** The source was built before the options were configured, so the option did nothing.</RN>
+
+<RN type="fix">**`Range: bytes=-0` answers 416** instead of the whole file, and a range bound with a sign (`bytes=+3-4`) is ignored like any other malformed range instead of being read as `3-4`.</RN>
+
+<RN type="enhancement">**`ZipFileSource` no longer re-reads the archive's central directory on every request, and serves ranges from stored entries by seeking.** Deflated entries still inflate from the start for a range.</RN>
+
 ## 3.0 - November 22, 2026
 
 <RN type="feature">**.NET 11.** Every package now ships `net11.0` alongside `net10.0`, built against the `Microsoft.Extensions.*` 11.x line and Shiny 7 (`Shiny.Core`, `Shiny.Net.Http`, `Shiny.Net.Discovery`) on the new slice, and `Microsoft.Extensions.*` 10.x and Shiny 6 on the existing one. [`Shiny.Net.HttpServer.Mobile`](/httpserver/maui/) adds `net11.0-android`, `net11.0-ios` and `net11.0-maccatalyst`; on `net11.0-android` the minimum is API 24, the floor of the .NET 11 Android SDK, while `net10.0-android` keeps 21. The MAUI and tvOS samples move to .NET 11 (MAUI 11.0.10) and Xcode 27, and the MAUI sample now uses the UIKit scene lifecycle that the iOS / Mac Catalyst 27 SDK requires.</RN>

@@ -65,8 +65,24 @@ list.
 | `MaxRequestBodySize` | 30 MB (`null` removes the limit) |
 | `KeepAliveTimeout` | 130 seconds |
 | `RequestHeadersTimeout` | 30 seconds |
+| `RequestBodyTimeout` | 30 seconds (`Timeout.InfiniteTimeSpan` turns it off) |
+| `ResponseWriteTimeout` | 60 seconds (`Timeout.InfiniteTimeSpan` turns it off) |
 | `MaxRequestsPerConnection` | 1000 (`null` removes the limit) |
 | `InputBufferSize` | 16 KB |
+
+`KeepAliveTimeout` and `RequestHeadersTimeout` apply to HTTP/2 connections too: the first while no
+stream is open, the second while a header block is unfinished. On a cleartext connection they also
+cover the moment before the protocol is known — a client that connects and sends nothing is closed
+after `KeepAliveTimeout`, and one that starts the HTTP/2 preface and stalls after
+`RequestHeadersTimeout`.
+
+`RequestBodyTimeout` and `ResponseWriteTimeout` are HTTP/1.1 limits on the gap between bytes, not on
+the whole transfer, so a large upload or download on a slow link is fine as long as it keeps moving.
+A body that stalls ends with a 408. A client that stops reading the response has its connection
+aborted, and the handler's write fails as a disconnect. The leftover of a body the handler never
+read gets five seconds to arrive before the connection is closed instead of reused.
+
+The chunked trailer section of a request is held to `MaxRequestHeadersTotalSize`.
 
 A body larger than `MaxRequestBodySize` is a 413, not a truncated read. It is the default for every
 route. Keep it small and give an upload route its own limit with `WithRequestSizeLimit(bytes)`,
@@ -153,16 +169,46 @@ o.UseForwardedHeaders = true;
 ```
 
 With this on, `Request.Scheme`, `Request.Host` and the client IP come from `X-Forwarded-Proto` /
-`X-Forwarded-Host` / `X-Forwarded-For`.
+`X-Forwarded-Host` / `X-Forwarded-For`, **read from the right**.
 
-<Aside type="danger" title="It trusts every sender">
-There is **no trusted-proxy list**. The headers are believed from whichever peer sent them, so a
-client that can reach the server directly can claim any address, scheme or host it likes, getting past
-an [IP filter](/httpserver/ip-filtering/), per-IP [rate limits](/httpserver/rate-limiting/),
-[host filtering](/httpserver/host-filtering/) and HTTPS-only checks. Only enable it when **every**
-connection arrives through a proxy or tunnel you control that strips or overwrites these headers.
-**Never on an edge server facing the internet.** Behind a TCP load balancer, the
+Every proxy *appends* the address it received the request from, so the header reads from whatever the
+client claimed on the left to the hop nearest this server on the right. Only the right-hand end was
+written by someone you trust; the left-most entry is the one never to believe. The server takes one
+entry per trusted hop from the right, up to `ForwardLimit`, and takes the scheme and host from the same
+hop:
+
+```csharp
+o.UseForwardedHeaders = true;
+o.ForwardedHeaders.KnownNetworks.Add(IpAddressRange.Parse("10.0.0.0/8"));   // your load balancers
+o.ForwardedHeaders.KnownProxies.Add(IPAddress.Parse("192.0.2.10"));
+o.ForwardedHeaders.ForwardLimit = 2;                                        // CDN → balancer → here
+```
+
+| `ForwardedHeaders` property | Default | Notes |
+| --- | --- | --- |
+| `KnownProxies` | empty | Peers whose headers are believed |
+| `KnownNetworks` | empty | Networks whose headers are believed |
+| `ForwardLimit` | 1 | Entries consumed from the right; `null` removes the limit |
+
+The headers are only read when the connecting peer is a known proxy, and the walk stops at the first
+address that is not one — so with `ForwardLimit = 2`, `X-Forwarded-For: 6.6.6.6, 198.51.100.7, 10.0.0.5`
+from a balancer resolves to `198.51.100.7`, never the `6.6.6.6` the client wrote.
+
+<Aside type="danger" title="With no proxies listed, it trusts every peer">
+Until `KnownProxies` or `KnownNetworks` is set, the headers are believed from whichever peer sent them,
+so a client that can reach the server directly can claim any address, scheme or host it likes, getting
+past an [IP filter](/httpserver/ip-filtering/), per-IP [rate limits](/httpserver/rate-limiting/),
+[host filtering](/httpserver/host-filtering/) and HTTPS-only checks. List your proxies, or only enable it
+when **every** connection arrives through a proxy or tunnel you control. **Never on an edge server
+facing the internet** without a list. Behind a TCP load balancer, the
 [PROXY protocol](/httpserver/proxy-protocol/) with its `TrustedProxies` list is the safer choice.
+</Aside>
+
+<Aside type="caution" title="Changed behaviour">
+Earlier versions took the **left-most** `X-Forwarded-For`, `-Proto` and `-Host` entries — whatever the
+client sent — so a caller behind an ordinary appending proxy could choose its own address. A chain of
+several proxies now needs `ForwardLimit` raised (and the inner proxies listed) to reach the original
+client.
 </Aside>
 
 <Aside type="caution" title="HTTP/1.1 only">
@@ -171,8 +217,9 @@ scheme, host and address whatever this says. Behind a proxy that speaks h2 to th
 headers yourself, and decide who to trust, in a middleware.
 </Aside>
 
-`ctx.GetClientIpAddress(useForwardedHeaders: true)` does the same lookup for a single call site,
-taking the left-most entry (the original client) and stripping an optional port.
+`ctx.GetClientIpAddress(useForwardedHeaders: true)` reads the header for a single call site — the
+**right-most** entry (the address the nearest proxy saw), stripping an optional port — without a trust
+list. For a chain of proxies configure `ForwardedHeaders` and read `Connection.RemoteIpAddress` instead.
 
 Behind a TCP load balancer (HAProxy, AWS NLB, nginx `stream`, Traefik, fly.io), prefer the
 [PROXY protocol](/httpserver/proxy-protocol/). It is read per endpoint, only from peers you list, and
