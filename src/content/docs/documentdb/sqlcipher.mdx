@@ -4,7 +4,7 @@ title: SQLCipher (Encrypted SQLite)
 import NugetBadge from '/src/components/NugetBadge.tsx';
 import { Steps, Tabs, TabItem } from '@astrojs/starlight/components';
 
-The `Shiny.DocumentDb.Sqlite.SqlCipher` package provides an encrypted SQLite provider using [SQLCipher](https://www.zetetic.net/sqlcipher/). It shares all query generation, expression translation, and LINQ support with the standard SQLite provider — the only differences are the native bundle and encryption-aware backup/rekey support.
+The `Shiny.DocumentDb.Sqlite.SqlCipher` package provides an encrypted SQLite provider that reads and writes the [SQLCipher](https://www.zetetic.net/sqlcipher/) 4 file format (AES-256 with HMAC). It runs on [SQLite3 Multiple Ciphers](https://utelle.github.io/SQLite3MultipleCiphers/) (`SQLite3MC.PCLRaw.bundle`), a maintained SQLite build for SQLitePCLRaw 3.x. It shares all query generation, expression translation, and LINQ support with the standard SQLite provider — the only differences are the native engine and encryption-aware backup/rekey support.
 
 <NugetBadge name="Shiny.DocumentDb.Sqlite.SqlCipher" showLabel={true} />
 
@@ -17,15 +17,21 @@ The `Shiny.DocumentDb.Sqlite.SqlCipher` package provides an encrypted SQLite pro
    dotnet add package Shiny.DocumentDb.Sqlite.SqlCipher
    ```
 
-   This replaces `Shiny.DocumentDb.Sqlite` — do **not** install both. The SqlCipher package references `Microsoft.Data.Sqlite.Core` (without the default unencrypted bundle) and adds `SQLitePCLRaw.bundle_e_sqlcipher` for the SQLCipher native library.
+   It covers Windows, Linux (glibc and musl), macOS, Mac Catalyst, Android, iOS and Blazor WebAssembly.
 
-   :::caution[Do not update SQLitePCLRaw to 3.x]
-   SQLCipher needs the SQLitePCLRaw **2.1.x** graph. SQLitePCLRaw 3.x ships no SQLCipher bundle, and an app gets exactly one SQLitePCLRaw core. Adding any SQLitePCLRaw 3.x package (for example to silence the `NU1903` restore warning) therefore **breaks SQLCipher for now**: encrypted opens fail with *"the native SQLite library 'e_sqlite3' doesn't support encryption"*. See [SQLitePCLRaw version and the security advisory](/documentdb/sqlite/#sqlitepclraw-version-and-the-security-advisory) for what the warning means and why it isn't a critical problem for mobile apps. The SQLCipher 4.5.2 build in `bundle_e_sqlcipher` 2.1.11 is itself based on SQLite 3.39.2, so it predates that fix either way.
-   :::
+2. Pin the engine at startup
 
-   For **vector search** on encrypted databases, also add `Shiny.DocumentDb.Sqlite.VectorSupport` and call `SqliteVec.RegisterAutoExtension()` at startup — it registers `vec0` against the active `e_sqlcipher` engine — then set `VectorExtensionPreloaded = true` on your `SqlCipherDatabaseProvider`. See [Vector search](/documentdb/vector/#sqlite--sqlite-vec-virtual-table).
+   SQLitePCLRaw has one engine per process. Call `SqlCipherEngine.Init()` before anything opens a SQLite connection: it installs SQLite3 Multiple Ciphers and locks it in, so a later `Batteries_V2.Init()` can't swap in the unencrypted `e_sqlite3` engine. Constructing a `SqlCipherDatabaseProvider` or `SqlCipherDocumentStore` calls it for you. The explicit call matters only when something else opens SQLite first, such as a plain `SqliteDatabaseProvider` in the same app, EF Core, or `SqliteVec`. The engine opens unencrypted files too, so plain SQLite stores keep working beside encrypted ones.
 
-2. Register with dependency injection
+   ```csharp
+   using Shiny.DocumentDb.Sqlite.SqlCipher;
+
+   SqlCipherEngine.Init(); // first thing in MauiProgram / Program.cs
+   ```
+
+   For **vector search** on encrypted databases, also add `Shiny.DocumentDb.Sqlite.VectorSupport` and call `SqliteVec.RegisterAutoExtension()` after `SqlCipherEngine.Init()` — it registers `vec0` against the active `sqlite3mc` engine — then set `VectorExtensionPreloaded = true` on your `SqlCipherDatabaseProvider`. See [Vector search](/documentdb/vector/#sqlite--sqlite-vec-virtual-table).
+
+3. Register with dependency injection
 
    ```csharp
    using Shiny.DocumentDb;
@@ -52,6 +58,10 @@ The `Shiny.DocumentDb.Sqlite.SqlCipher` package provides an encrypted SQLite pro
 </Steps>
 
 The constructor takes a **file path** and **password** as separate parameters so requirements are explicit. All other `DocumentStoreOptions` (table mapping, AOT, logging, etc.) work identically to the standard SQLite provider.
+
+## File format and existing databases
+
+The provider opens the file as a SQLite URI with `cipher=sqlcipher&legacy=4`, so every database it creates is a standard SQLCipher 4 file (not SQLite3 Multiple Ciphers' ChaCha20 default) that other SQLCipher tools can open. Databases written by earlier versions of this package, which used `SQLitePCLRaw.bundle_e_sqlcipher` (SQLCipher 4.5.2), open unchanged with the same password. No migration is needed.
 
 ## Rekeying
 
@@ -81,8 +91,8 @@ await store.Backup("/path/to/backup.db");
 
 | | `Shiny.DocumentDb.Sqlite` | `Shiny.DocumentDb.Sqlite.SqlCipher` |
 |---|---|---|
-| **Native bundle** | `bundle_e_sqlite3` (via `Microsoft.Data.Sqlite`) | `bundle_e_sqlcipher` (via `SQLitePCLRaw.bundle_e_sqlcipher`) |
-| **Encryption** | Not supported | AES-256 via SQLCipher |
+| **Native engine** | `e_sqlite3` (via `Microsoft.Data.Sqlite`) | `sqlite3mc` (via `SQLite3MC.PCLRaw.bundle`) |
+| **Encryption** | Not supported | AES-256, SQLCipher 4 file format |
 | **Constructor** | Connection string | File path + password |
 | **Backup** | Unencrypted destination | Password propagated to destination |
 | **Rekey** | N/A | `store.RekeyAsync("newPassword")` |
