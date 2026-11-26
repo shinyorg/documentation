@@ -1,0 +1,117 @@
+---
+title: HTTP
+description: Serve hubs as WebSockets on Shiny.Net.HttpServer, found over mDNS on the local network and reachable from the internet through tunnels.
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| HTTP | <NugetDownloads name="Shiny.UniversalHubs.Http" /> |
+
+`Shiny.UniversalHubs.Http` serves hubs over HTTP on an embedded [Shiny HTTP Server](/httpserver/). Each hub connection
+is a **WebSocket** at `{BasePath}/{hub name}`, carrying the same hub session as [Multipeer](/universalhubs/multipeer/)
+and [Nearby](/universalhubs/nearby/): calls, streams, pushes, resume, files and media channels, all in-band. Hosts are
+found over **mDNS** on the local network, and can be reached from the internet through a
+[tunnel](/httpserver/tunneling).
+
+Wi-Fi has more range and bandwidth than BLE, and no MTU.
+
+## Setup
+
+```bash
+dotnet add package Shiny.UniversalHubs.Http
+```
+
+```csharp
+// host
+builder.Services.AddUniversalServer(server => server
+    .Http(o => o.BasePath = "/hubs")                                     // optional
+    .HttpServer(http => http.Options.Port = 8080)                         // optional - the HttpServer itself
+    .AddHub<GameHub>("game", hub => hub.UseHttp("_mygame._tcp"))
+    .AddHub<ChatHub>("chat", hub => hub.UseHttp("_mychat._tcp", allowTunnel: true)));
+
+// client - the same mDNS service type
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o.UseHttp("_mygame._tcp"));
+```
+
+- **mDNS service type** (`_mygame._tcp`): set per hub. It's what the hub is advertised under and what its clients
+  browse for. Hubs that share a type share one advertisement, which lists them. `UseHttp()` with no type uses
+  `HttpTransportOptions.ServiceType` (`_shinyhub._tcp`). iOS hosts and clients list every type in `NSBonjourServices`.
+- **The HttpServer** binds every interface on a free port, and mDNS tells clients which. If you already registered the
+  server with `AddShinyHttpServer`, its address and port are left alone.
+- **Start and stop.** The HTTP server starts with the first hub hosted over HTTP and stops with the last.
+
+| `server.Http(o => ...)` | Default | |
+|---|---|---|
+| `BasePath` | `/hubs` | Each hub is a WebSocket at `{BasePath}/{hub name}`. Advertised over mDNS, so discovering clients need no setting |
+| `Advertise` | `true` | Advertise the running hubs over mDNS |
+| `ServiceType` | `_shinyhub._tcp` | The mDNS type for hubs with no type of their own |
+| `ManageHttpServer` | `true` | Start and stop the HttpServer with HTTP hosting. Turn off when the app runs the server for other things too |
+| `DynamicServiceTypes` | empty | The mDNS types a [dynamic hub](/universalhubs/dynamic-hubs/) may use. Empty allows only `ServiceType` |
+
+`server.HttpServer(http => ...)` configures the [HttpServer](/httpserver/) itself: address, port, TLS, middleware, your
+own routes, tunnels.
+
+| `o.UseHttp(type, h => ...)` (client) | Default | |
+|---|---|---|
+| `ConnectTimeout` | 6 seconds | How long one address gets to answer before the next address (or the next transport) is tried |
+| `RediscoverTimeout` | 3 seconds | When no address answers, how long to look the host up again over mDNS. A host that restarted is on a new port. Zero turns it off |
+| `MessageHandlerFactory` | `null` | The HTTP stack. Tests swap in an in-memory handler |
+
+## In the Hub
+
+```csharp
+public override Task OnConnectedAsync(HubConnection connection)
+{
+    var http = connection.HttpContext();   // the request the WebSocket was opened with - null on other transports
+    var user = http?.User;                 // and the request's headers and connection
+    return Task.CompletedTask;
+}
+```
+
+`connection.Id` is `ws:{id}`.
+
+## Tunnels (the Internet)
+
+A tunnel exposes the whole HTTP server to the internet, so each hub opts in:
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .HttpServer(http => http.AddQuickTunnel())                              // Shiny.Net.HttpServer.Ssh - start it from a button
+    .AddHub<GameHub>("game", hub => hub.UseHttp("_mygame._tcp"))            // not reachable through the tunnel
+    .AddHub<ChatHub>("chat", hub => hub.UseHttp("_mychat._tcp", allowTunnel: true)));
+```
+
+- **Hubs that don't allow it** answer 404 through a tunnel. Their LAN clients aren't affected.
+- **The tunnel's public URL has no mDNS**, so a remote client connects by address (below).
+
+:::caution
+Put authentication in front of anything you share on the internet. `connection.HttpContext()` has the request's user.
+:::
+
+## Connecting by Address
+
+A host you have the address of, rather than one you discovered (a tunnel's public URL, a typed address, a QR code), is
+reached over HTTP only:
+
+```csharp
+await client.Connect(HttpHubHost.FromUrl(new Uri("https://abc.a.pinggy.link")));
+await client.Connect(HttpHubHost.FromUrl(new Uri("http://192.168.1.20:5000"), basePath: "/hubs"));
+```
+
+`basePath` is the host's `HttpTransportOptions.BasePath`, `/hubs` unless it was changed. `http` becomes `ws`, and `https`
+becomes `wss`.
+
+## What's Different
+
+- **Values travel as the serializer wrote them**, the same as every other transport. Any serializer works.
+- **Files and media channels** are in-band on the hub's WebSocket, under the same `EnableFileTransfers`,
+  `AuthorizeFile` and `EnableMediaChannels` settings as every transport.
+- **Resume.** A dropped WebSocket is resumed on a new one as the same connection, within the host's
+  [resume window](/universalhubs/hosting/#dropped-links--resume).
+- **A host that restarted** listens on a new port. When none of its addresses answer, the client looks it up again by
+  name over mDNS and retries where it is now.
+- **An mDNS TXT record** fits about six hub names per service type.
+- **Plane, hotel and public Wi-Fi** usually isolate clients from each other, so mDNS finds nothing there.
+
+See [How It Works](/universalhubs/how-it-works/#http) for the WebSocket session and the TXT record.

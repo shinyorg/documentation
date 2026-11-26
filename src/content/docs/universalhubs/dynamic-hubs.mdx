@@ -1,0 +1,102 @@
+---
+title: Dynamic Hubs
+description: Define hubs while the app runs - from a downloaded web app or a script - and join hubs with no compiled contract.
+---
+
+A **dynamic hub** is defined while the app runs, by a downloaded web app or a script, say, rather than compiled into it.
+It is served beside the compiled hubs, and clients can't tell the difference.
+[Shiny.AppDeviceBridge's Hubs bridge](/appdevicebridge/hubs/) is built on them: the web app defines the hubs and answers
+every call.
+
+## Hosting
+
+Turn them on in the builder:
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .AllowDynamicHubs(o => o.MaxHubs = 6)                        // the default
+    .Http(o => o.DynamicServiceTypes.Add("_mygame._tcp"))       // the mDNS types dynamic hubs may use
+    .BluetoothLE(o => o.DynamicServiceUuid = "FE10")            // optional - the compiled hubs' service otherwise
+    .Multipeer("mygame-mc")
+    .AddHub<ChatHub>("chat", hub => hub.UseHttp("_mychat._tcp").UseMultipeer()));   // optional - a server may have only dynamic hubs
+```
+
+Then add, start and remove them through `IDynamicHubs`:
+
+```csharp
+public class Tables(IDynamicHubs hubs)
+{
+    public async Task Open(IDynamicHubHandler handler)
+    {
+        var hub = hubs.Add(
+            new DynamicHubDefinition("trivia") { MaxClients = 8 }
+                .UseHttp("_mygame._tcp")
+                .UseBluetoothLE("6e400010-b5a3-f393-e0a9-e50e24dcca9e"),
+            handler
+        );
+        await hub.Start();                                          // a transport that can't start is skipped
+        await hub.Clients.All.Send("Opened", [JsonSerializer.SerializeToUtf8Bytes(DateTime.UtcNow)]);
+    }
+
+    public Task Close() => hubs.Remove("trivia", "The table closed");   // its clients are told why
+}
+```
+
+**Each transport decides whether it serves a dynamic hub:**
+
+| Transport | Serves it |
+|---|---|
+| Bluetooth LE | Only when given a characteristic: `.UseBluetoothLE(characteristicUuid, serviceUuid?, advertise)` |
+| HTTP | Always - under `.UseHttp(type, allowTunnel)`, or `HttpTransportOptions.ServiceType` and no tunnel |
+| Multipeer, Nearby | Always |
+| [Your own](/universalhubs/custom-transports/) | `IDynamicHubTransport.CreateSettings`, or always when it doesn't implement it |
+
+| Type | |
+|---|---|
+| `DynamicHubOptions` | `MaxHubs` (6) |
+| `DynamicHubDefinition(name)` | `Name`, `MaxClients` (8), and each transport's settings from `UseHttp` / `UseBluetoothLE` |
+| `IDynamicHubs` | `Hubs`, `Find(name)`, `Add(definition, handler)`, `Remove(name, reason)`. `Add` throws when the name is taken, `MaxHubs` are already added, a transport refuses the hub, or none can serve it |
+| `IDynamicHub` | `Start`, `Stop`, `RunningTransports`, `Connections`, `Groups`, `Clients`, `Disconnect`: a compiled hub's `IHubContext`, without the types |
+| `IDynamicHubHandler` | `GetMethodKind(method)` (`Invoke`, `Stream` or `NotFound`), `Invoke`, `Stream`, `OnConnectedAsync`, `OnDisconnectedAsync`, `OnRenamedAsync` |
+| `DynamicHubCall` | The `Connection`, the `Method`, the `Arguments`, `ConnectionAborted`, and `Abort(reason)` to end the session after the reply |
+| `DynamicHubPush` | `hub.Clients.All` / `Client(id)` / `Group(name)` / …, then `Send(eventName, arguments)` |
+
+- **Names are shared.** A dynamic hub's name is unique among all hubs, compiled or dynamic, and clients ask for it like
+  any other.
+- **Values are JSON and stay serialized.** Arguments, results, stream items and push arguments are the JSON bytes the
+  caller wrote. Nothing on the host needs their types. Clients of a dynamic hub use the JSON serializer.
+- **Methods are found by name.** `NotFound` answers the caller `HubMethodNotFound` without reaching the handler.
+- **Errors.** A thrown exception reaches the caller with its class name and message. Throw a `HubRemoteException` to
+  choose the type, for example to relay an error from whatever runs the hub.
+- **mDNS types and `MaxHubs` are fixed in the app**, because the platforms fix them when the app is built: iOS lists
+  every mDNS type in `NSBonjourServices`.
+- **Bluetooth.** A hub added while its GATT service is up rebuilds the service when it first starts, and the other
+  hubs' BLE clients on that service are asked to reconnect then. Add dynamic hubs before starting if that matters.
+- **Tunnels.** A dynamic hub is reachable through a tunnel only when its `UseHttp` allows it.
+
+## Dynamic Hub Clients
+
+To join a hub whose contract isn't compiled into the app (a dynamic hub, or any hub a downloaded web app or script
+names), register `IDynamicHubClients` and create clients while the app runs:
+
+```csharp
+// what every client shares - set up each transport the clients will use, so it is registered once
+builder.Services.AddDynamicHubClients(o => o.UseHttp().UseMultipeer("mygame-mc"));
+
+// each hub's own settings replace the shared ones
+using var client = dynamicHubClients.Create("trivia", o => o
+    .UseHttp("_mygame._tcp")
+    .UseBluetoothLE("FE10", "6e400010-b5a3-f393-e0a9-e50e24dcca9e"));
+
+client.Hub.Pushed += (name, args) => { /* each argument is JSON */ };
+var host = await client.DiscoverAll().FirstAsync(x => x.Transports.Count > 0);
+await client.Connect(host, new HubConnectOptions("Allan"));
+
+ReadOnlyMemory<byte> result = await client.Hub.Invoke("Answer", [Encoding.UTF8.GetBytes("4")]);
+await foreach (var item in client.Hub.Stream("Watch", [])) { }
+```
+
+`Create(hubName, configure)` returns a new, disconnected `IUniversalHubClient<IDynamicHubCalls>` that discovers and
+connects like any [client](/universalhubs/client/); dispose it when done. `IDynamicHubCalls` calls by name, with values
+as JSON bytes: `Invoke` (an empty result for a method with none), `Stream` and the `Pushed` event, raised in order. It
+works against compiled hubs too, as long as they use the JSON serializer.

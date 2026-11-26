@@ -1,0 +1,171 @@
+---
+title: Files & Media Channels
+description: Move files between a hub host and its clients with progress, and stream live audio and video over a media channel - on every transport.
+---
+
+Hub messages are right for moves, commands and state. Files (photos, logs, recordings) and live media get their own
+channels, so they don't queue behind hub calls or go through the serializer. Both work on every transport:
+
+| Transport | Files | Media channels |
+|---|---|---|
+| [Bluetooth LE](/universalhubs/bluetoothle/) | L2CAP | An L2CAP channel of its own |
+| [HTTP](/universalhubs/http/) | In-band, on the hub's WebSocket | In-band, on the hub's WebSocket |
+| [Multipeer](/universalhubs/multipeer/) | Multipeer resources | Session messages |
+| [Nearby](/universalhubs/nearby/) | Nearby file payloads | Channel messages |
+
+## File Transfers
+
+### Host
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .Configure(o =>
+    {
+        o.EnableFileTransfers(Path.Combine(FileSystem.AppDataDirectory, "shared"), ft =>
+        {
+            ft.AllowUploads = true;
+            ft.AllowDownloads = true;
+            ft.MaxUploadSize = 2 * 1024 * 1024;
+            ft.OverwriteExistingUploads = false;
+        });
+        o.AuthorizeFile = req => req.FileName.EndsWith(".jpg") && req.Client != null;
+    })
+    .AddHub<GameHub>("game", hub => hub.UseHttp().UseBluetoothLE("FE10", GameCharacteristicUuid)));
+
+// IUniversalHubHost - every transport
+host.FileTransferred += (_, e) => Console.WriteLine($"{e.Client?.Name} {e.Direction} {e.FileName} ({e.BytesTransferred} bytes)");
+host.FileTransferProgress += (_, e) => Console.WriteLine($"{e.FileName} {e.Progress.Fraction:P0}");
+```
+
+- **Safe paths**: uploads land in the root directory and downloads are served from it. Peer-supplied names can never
+  escape it.
+- **`AuthorizeFile`** sees a `UniversalHubFileRequest`: `Direction`, `FileName`, `Size` (uploads) and the hub `Client`
+  asking, when the transport knows it. Return `false` to refuse.
+- **The same rules on every transport.** `HubFileTransferOptions` has `AllowUploads`, `AllowDownloads` (both `true`),
+  `OverwriteExistingUploads` (`true`) and `MaxUploadSize` (no limit).
+
+#### Custom handling over Bluetooth LE
+
+To serve L2CAP transfers from a database, generate content on the fly, or route per client, register an
+`IBleFileHandler`. It takes over BLE file transfers entirely, and every request must be accepted or rejected:
+
+```csharp
+public class FileHandler : IBleFileHandler
+{
+    public async Task Handle(BleFileRequest request, CancellationToken ct)
+    {
+        var r = request.Request;   // request.Client is the hub client, when it could be matched
+        if (r.Type == L2CapTransferType.Download && r.FileName == "scores.json")
+        {
+            var bytes = BuildScores();
+            await r.AcceptDownload(new MemoryStream(bytes), bytes.Length, cancellationToken: ct);
+        }
+        else
+        {
+            await r.Reject(L2CapTransferError.NotPermitted, "nope", ct);
+        }
+    }
+}
+
+builder.Services.AddSingleton<IBleFileHandler, FileHandler>();
+```
+
+### Client
+
+```csharp
+if (client.CanTransferFiles)
+{
+    await client.UploadFile(
+        localPhotoPath,
+        "avatar-allan.jpg",
+        new Progress<HubTransferProgress>(p => this.Progress = p.Fraction ?? 0)
+    );
+
+    await client.DownloadFile("scores.json", Path.Combine(FileSystem.CacheDirectory, "scores.json"));
+    await client.UploadStream(stream, stream.Length, "log.txt");
+}
+```
+
+- **No setup**: the handshake tells the client whether the host serves files.
+- **`CanTransferFiles` is false** when the host doesn't serve files, or the transport can't carry them (over BLE: no
+  L2CAP on this device). The file methods then throw `HubFileTransferNotSupportedException`.
+- **Refusals** (not found, not permitted, too large…) throw: `HubException` with the status on HTTP, Multipeer and
+  Nearby, and Shiny's `L2CapTransferException` with an `Error` code over BLE.
+- **Results** are a `HubFileTransferResult` (`Direction`, `FileName`, `BytesTransferred`, `Elapsed`).
+- **A dropped link** fails a transfer in flight. Start it again once the client is back.
+
+| Platform | L2CAP (BLE files) |
+|---|---|
+| iOS / macOS / Mac Catalyst | Yes |
+| Android | API 29+ |
+| Windows | No |
+
+## Media Channels
+
+A media channel is an ordered, two-way pipe of raw binary packets beside each hub connection. Use it for live audio and
+video, or any steady stream of packets. Hub calls go through the serializer and, over BLE, through GATT at a few KB/s,
+so they suit neither.
+
+### Host
+
+```csharp
+builder.Services.AddUniversalServer(server => server
+    .Configure(o => o.EnableMediaChannels(maxPacketSize: 128 * 1024))   // off by default
+    .AddHub<CallHub>("call", hub => hub.UseHttp().UseBluetoothLE("FE10", CallCharacteristicUuid)));
+
+// IHubContext<CallHub>: one channel per connected client
+callHub.MediaChannelOpened += (_, e) => _ = Task.Run(async () =>
+{
+    // e.Client is the hub client, e.Channel.ConnectionId is its connection id
+    await foreach (var packet in e.Channel.Receive())
+        Play(e.Client, packet);
+});
+
+IHubMediaChannel? channel = callHub.GetMediaChannel(connectionId);   // null when that client has none open
+if (channel != null)
+    await channel.Send(frame);
+```
+
+- `EnableMediaChannels(maxPacketSize)` sets the largest packet either side may send (128 KB by default).
+- Over BLE the channel is a second L2CAP PSM. `server.BluetoothLE(o => o.SecureMediaChannels = true)` makes Android
+  listen for secure channels.
+- A client has at most one channel. A new one replaces the old.
+- The channel closes when the client disconnects or drops, when the hub stops, or when either side disposes it.
+
+### Client
+
+```csharp
+if (client.CanOpenMediaChannel)
+{
+    var media = await client.OpenMediaChannel(ct);   // returns the channel already open, if there is one
+    _ = Task.Run(async () =>
+    {
+        await foreach (var packet in media.Receive(ct))
+            Render(packet);
+    });
+    await media.Send(encodedFrame, ct);
+}
+```
+
+- **No setup**: the handshake says whether the host serves media channels.
+- **`CanOpenMediaChannel` is false** when the host didn't enable them, or the transport can't carry them (over BLE: no
+  L2CAP). `OpenMediaChannel` then throws `NotSupportedException`. A refused channel throws `HubException`.
+- The channel closes when the hub connection ends. While still connected, call `OpenMediaChannel` again to reopen it.
+
+### The Channel
+
+`IHubMediaChannel` is the same on both sides and every transport:
+
+| Member | |
+|---|---|
+| `Send(packet, ct)` | Serialized: packets arrive whole and in order, or the channel closes. A packet over `MaxPacketSize` throws `ArgumentException`. Sending on a closed channel throws `HubException` |
+| `Receive(ct)` | The packets from the other side. One reader at a time. Completes when the channel closes. Packets that arrive before you read are buffered |
+| `MaxPacketSize` | The host's setting |
+| `IsOpen` / `Completion` | `Completion` completes when the channel closes, for any reason |
+| `ConnectionId` | The client's connection id on the host, `null` on the client |
+| `DisposeAsync()` | Closes the channel at both ends |
+
+The packet format is yours: add sequence numbers and timestamps as your media needs. The library moves whole packets in
+order and never looks inside. The [sample](https://github.com/shinyorg/hubs/tree/main/samples)'s calls show one way to
+use it: its packets carry signalling and media, the host relays calls between its clients, video is latest-wins, and
+audio is PCM16 over Wi-Fi and IMA ADPCM over Bluetooth.

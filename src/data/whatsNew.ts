@@ -190,7 +190,7 @@ export const whatsNew: WhatsNewItem[] = [
   {
     date: "2026-10-03",
     title: "BluetoothLE Hubs",
-    href: "/blehubs/",
+    href: "/universalhubs/bluetoothle/",
     icon: "signal",
     description: "SignalR-style hubs between nearby devices over Bluetooth LE — strongly typed, source-generated proxies, pushes to everyone, one client or a group, and L2CAP file transfers. No server or network required.",
   },

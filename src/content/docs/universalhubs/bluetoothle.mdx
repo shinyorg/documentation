@@ -1,0 +1,119 @@
+---
+title: Bluetooth LE
+description: Serve hubs as GATT characteristics and join them over Bluetooth LE - no network needed - with files and media channels over L2CAP.
+---
+import NugetDownloads from '/src/components/NugetDownloads.astro';
+
+| | |
+|---------|---------|
+| Bluetooth LE | <NugetDownloads name="Shiny.UniversalHubs.BluetoothLE" /> |
+
+`Shiny.UniversalHubs.BluetoothLE` serves hubs over Bluetooth LE: no server, no network, just devices in the same room.
+Each hub is a write + notify characteristic in a GATT service of its choosing, and files and media channels go over
+L2CAP. It's built on [BluetoothLE](/client/ble/) (client) and [BluetoothLE Hosting](/client/blehosting/) (host).
+
+## Setup
+
+```bash
+dotnet add package Shiny.UniversalHubs.BluetoothLE
+```
+
+```csharp
+// host
+builder.Services.AddUniversalServer(server => server
+    .BluetoothLE(o => o.ClientSweepInterval = TimeSpan.FromSeconds(10))   // optional
+    .AddHub<GameHub>("game", hub => hub.UseBluetoothLE(serviceUuid: "FE10", characteristicUuid: GameCharacteristicUuid))
+    .AddHub<ChatHub>("chat", hub => hub.UseBluetoothLE("FE10", ChatCharacteristicUuid)));
+
+// client - the same service and characteristic
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o.UseBluetoothLE("FE10", GameCharacteristicUuid));
+```
+
+- **Platform stacks.** On Android, iOS and Mac Catalyst the package registers Shiny's BLE hosting and client stacks for
+  you. On plain .NET (Linux, tests, the macOS AppKit head), register an `IBleHostingManager` / `IBleManager` yourself.
+- **Apple background alerts.** On iOS and Mac Catalyst the client turns off iOS's connect, disconnect and notification
+  alerts, because hubs are used in the foreground. Call `AddBluetoothLE(config)` with your own `AppleBleConfiguration`
+  first to change that: the first registration wins.
+
+## Services, Characteristics and the Advertisement
+
+```csharp
+hub.UseBluetoothLE(serviceUuid, characteristicUuid, advertise: true);
+```
+
+- **Each hub is a characteristic in a GATT service of its choosing.** Hubs may share a service or have their own. Every
+  hub needs its own characteristic.
+- **UUIDs** are 128-bit, or 16-bit / 32-bit (`"180D"`, `"ABCD1234"`), which expand onto the Bluetooth base UUID and take
+  2 or 4 bytes on air instead of 16. Short UUIDs the Bluetooth SIG hasn't assigned to you work, but aren't compliant.
+- **The advertisement holds 31 bytes.** The advertised services of every hub, running or not, must fit, or
+  registration throws. One 128-bit UUID fits beside a short name; two don't. Use 16-bit or 32-bit UUIDs, share a
+  service, or set `advertise: false`.
+- **A running hub's service is advertised.** A stopped hub's service leaves the advertisement, unless another running
+  hub shares it.
+- **A hub that isn't advertised** is found by scanning for another service the host does advertise, or over another
+  transport. The host logs this once per hub. The client says what to scan for:
+
+```csharp
+// the chat's service isn't advertised - scan for the game's, then connect to the chat
+o.UseBluetoothLE(serviceUuid: "FE11", characteristicUuid: ChatCharacteristicUuid, scanFor: "FE10");
+```
+
+- **Set your own UUIDs** so other apps' hosts stay out of your scans.
+- **Keep `LocalName` short** (about 8 characters). It shares the 31 bytes with the services.
+
+## Options
+
+| `server.BluetoothLE(o => ...)` | Default | |
+|---|---|---|
+| `ClientSweepInterval` | 10 seconds | How often to sweep for clients that dropped without unsubscribing |
+| `SecureFileTransfers` | `false` | Listen for secure L2CAP channels for files. Android listens on secure and insecure channels separately; Apple ignores it |
+| `SecureMediaChannels` | `false` | The same, for media channels |
+| `FileTransfer` | Shiny's | `L2CapTransferOptions`: L2CAP chunk sizes and timeouts |
+| `DynamicServiceUuid` | the compiled hubs' service | The GATT service [dynamic hubs](/universalhubs/dynamic-hubs/) are characteristics in |
+
+## In the Hub
+
+```csharp
+public override Task OnConnectedAsync(HubConnection connection)
+{
+    if (connection.Transport is BleHostTransport)
+    {
+        var central = connection.Peripheral();    // Shiny.BluetoothLE.Hosting.IPeripheral
+        var mtu = connection.Client.Mtu;          // the ATT MTU of the link
+    }
+    return Task.CompletedTask;
+}
+```
+
+`connection.Id` is the platform's id for the central the client first connected through. It stays the same when the
+client resumes, on whichever central it comes back on (Android gives a reconnecting phone a new address).
+
+## Discovery and Connecting
+
+- `host.Endpoint<BleHubEndpoint>()` has the `Peripheral`, the advertised `Name` and the `Rssi`.
+- `Connect` connects, asks for the largest ATT MTU (517; Apple platforms negotiate on their own), subscribes for pushes
+  and completes the handshake.
+- **One BLE connection per host.** Hub clients connected to the same host share one BLE connection, reference counted.
+- **A scan can't tell which hubs a host is running.** Joining a stopped hub is refused at the handshake.
+- **Its own host.** An app that hosts and scans at once doesn't list itself. The match is the service plus the
+  advertised local name, so give hosts distinct names.
+
+## What's Different
+
+- **Throughput** over GATT is a few KB/s: plenty for moves, commands and state. Messages are chunked to the link's MTU.
+  Use [files](/universalhubs/files/) for anything big.
+- **Files and media channels** go over L2CAP (Android API 29+). `CanTransferFiles` and `CanOpenMediaChannel` are
+  false without it.
+- **Disconnecting is cooperative.** iOS can't force a central off a peripheral, so the host asks the client to leave
+  and the client library complies. A client that vanishes is removed when it unsubscribes or by the sweep, after its
+  [resume window](/universalhubs/hosting/#dropped-links--resume).
+- **Foreground only.** An iOS host in the background advertises without its local name, and only through Apple's
+  overflow area, which Android can't see.
+
+| Feature | iOS | macOS / Mac Catalyst | Android | Windows |
+|---------|-----|----------------------|---------|---------|
+| Host | Foreground | Yes | Yes | — |
+| Client | Yes | Yes | Yes | Register an `IBleManager` |
+| Files and media channels (L2CAP) | Yes | Yes | API 29+ | — |
+
+See [How It Works](/universalhubs/how-it-works/#bluetooth-le) for the GATT layout and frames.

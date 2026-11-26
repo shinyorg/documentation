@@ -1,0 +1,107 @@
+---
+title: Custom Transports
+description: Serve and join hubs over a transport of your own - LoRa, a serial link, a relay - beside Bluetooth LE, HTTP, Multipeer and Nearby.
+---
+
+Every transport, built in or yours, is a class, and **its type is its identity**. `host.Stop<BleHostTransport>()`,
+`HubConnectOptions.Prefer<HttpClientTransport>()`, `host.Endpoint<BleHubEndpoint>()` and `connection.Transport is
+NearbyHostTransport` all go by type. A transport of your own plugs into the same places.
+
+| Built in | Host | Client | Client endpoint |
+|---|---|---|---|
+| Bluetooth LE | `BleHostTransport` | `BleClientTransport` | `BleHubEndpoint` |
+| HTTP | `HttpHostTransport` | `HttpClientTransport` | `HttpHubEndpoint` |
+| Multipeer | `MultipeerHostTransport` | `MultipeerClientTransport` | |
+| Nearby | `NearbyHostTransport` | `NearbyClientTransport` | |
+
+:::note
+This is an advanced seam. The hub logic (dispatch, `Clients`, groups, ordering, `MaxClients`, resume) stays in the core:
+a transport only carries handshakes, calls, pushes and disconnects for it.
+:::
+
+## Host: IHubTransport
+
+```csharp
+public sealed record LoraSettings(int Channel);
+
+public sealed class LoraHostTransport(ILoraRadio radio) : IHubTransport
+{
+    public string DisplayName => "LoRa";             // logs, errors and UI - not its identity
+    public bool IsSupported => radio.IsAvailable;    // false: skipped quietly, so one registration works everywhere
+
+    public bool IsRunning(IHubBinding hub) => ...;
+
+    public Task Start(IReadOnlyList<IHubBinding> hubs, CancellationToken ct)
+    {
+        foreach (var hub in hubs)
+        {
+            var settings = hub.GetSettings<LoraSettings>();   // what UseTransport was given for this hub
+            // listen on settings.Channel, and hand each client to hub.Endpoint
+        }
+        return Task.CompletedTask;
+    }
+
+    public Task Stop(IReadOnlyList<IHubBinding> hubs, HubDisconnect disconnect) => ...;
+}
+
+builder.Services.AddUniversalServer(server => server
+    .AddHub<GameHub>("game", hub => hub
+        .UseHttp("_mygame._tcp")
+        .UseTransport<LoraHostTransport>(new LoraSettings(Channel: 7))));
+```
+
+- **`UseTransport<T>(settings)`** serves the hub over `T` and sets the transport up on the server. DI creates it once,
+  however many hubs use it. The settings object comes back from `IHubBinding.GetSettings<T>()`, by its type.
+- **`server.AddTransport<T>()`** sets it up without a hub, for a server with only [dynamic hubs](/universalhubs/dynamic-hubs/).
+  Implement `IDynamicHubTransport.CreateSettings(definition)` to decide whether, and how, it serves each dynamic hub.
+- **A transport that can't start** throws from `Start` (`PlatformNotSupportedException` where the platform doesn't have
+  it). The host skips it as long as another transport starts.
+- **Renames:** override `HostRenamed` to re-advertise when `IUniversalHubHost.Rename` is called.
+
+Each `IHubBinding` has the hub's `Key` and `Name`, its `Transports`, and its `Endpoint`, an `IHubEndpoint`. For each
+client, the transport:
+
+1. Calls `Endpoint.Connect(connectionId, handshake, channel, ct)` with the client's `HandshakeInfo` and an
+   `IHubPeerChannel` it implements. A returned reason means the hub refused the client; tell it and close.
+2. Answers calls with `Endpoint.Invoke` and `Endpoint.Stream`. Arguments and results are the encoded bytes, never
+   re-serialized. An `Invoke` result with `AbortRequested` means send the reply, then `Endpoint.Disconnect`.
+3. Reports a dropped client with `Endpoint.Disconnected(connectionId, channel, disconnect)`.
+4. Optionally supports resume (`EnableResume`, `Resume`, `ResumeWindow`), renames (`Rename`) and media channels
+   (`MediaChannelOpened`).
+
+The `IHubPeerChannel` is how the hub reaches the client: `Push`, `Disconnect`, `HostRenamed`, plus `Transport` (what
+`HubConnection.Transport` reports) and `GetFeature(type)` (what `connection.Get<T>()` returns, for an extension like
+`connection.LoraNode()`).
+
+## Client: IHubClientTransport
+
+```csharp
+public sealed record LoraHubEndpoint(int NodeId, int Rssi) : HubEndpoint;
+
+public sealed class LoraClientTransport(ILoraRadio radio) : IHubClientTransport
+{
+    public string DisplayName => "LoRa";
+    public bool IsSupported => radio.IsAvailable;
+
+    // hosts of client.HubName as they come and go; a null endpoint means it is gone
+    public IObservable<HubHostSighting> Discover(HubClientContext client) => ...;
+
+    public Task Connect(HubClientContext client, HubHostInfo host, CancellationToken ct)
+    {
+        var node = host.Endpoint<LoraHubEndpoint>()!;
+        return client.Connect(events => new LoraConnection(radio, node, events), ct);
+    }
+}
+
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o
+    .UseHttp("_mygame._tcp")
+    .UseTransport(sp => new LoraClientTransport(sp.GetRequiredService<ILoraRadio>())));
+```
+
+- **`Discover`** returns `HubHostSighting(name, hostId, endpoint)`s. The client merges them with the other transports
+  by name, and `host.Endpoint<LoraHubEndpoint>()` returns yours.
+- **`Connect`** goes through `HubClientContext.Connect`, handing it a factory for an `IHubConnectionTransport`: one
+  connection's link, which runs the handshake, carries `Invoke`, `Stream`, `Rename`, files, media and `Close`, and reports
+  pushes, renames, drops and resumes through the `IHubConnectionTransportEvents` it is given.
+- **`client.ConnectOptions`** has the handshake values and `AutomaticReconnect`.
+- `o.UseTransport(create, services)` takes an optional registration callback for what the transport needs.

@@ -1,0 +1,134 @@
+---
+title: Upgrading from BluetoothLE Hubs
+description: Move from Shiny.BluetoothLE.Hubs and Universal Hubs 2 to Universal Hubs 3 - packages, registration, renamed types and transports.
+---
+
+BluetoothLE Hubs is now one transport of Universal Hubs. `Shiny.BluetoothLE.Hubs`, `.Host` and `.Client`, and Universal
+Hubs 2's `.Host` and `.Client`, are replaced by `Shiny.UniversalHubs` plus a package per transport. Your contracts and
+hubs move over with renames; registration is new.
+
+:::caution[The wires changed]
+3.0 can't talk to 2.x. `FrameCodec.ProtocolVersion` is 2, `PeerProtocol.Version` is 2 and `UniversalHubProtocol.Version`
+is 3, and the handshake refuses a mismatch. Ship hosts and clients together.
+:::
+
+## Packages
+
+| Before | Now |
+|---|---|
+| `Shiny.BluetoothLE.Hubs`, `.Host`, `.Client` | `Shiny.UniversalHubs` + `Shiny.UniversalHubs.BluetoothLE` |
+| `Shiny.UniversalHubs.Host`, `.Client` | `Shiny.UniversalHubs` + `Shiny.UniversalHubs.Http` (+ `.BluetoothLE`) |
+| `Shiny.UniversalHubs.Multipeer`, `.Nearby` | the same packages |
+| `namespace Shiny.BluetoothLE.Hubs` | `namespace Shiny.UniversalHubs` |
+
+## Registration
+
+Each hub now has a **name**, and picks its transports.
+
+```csharp
+// before
+services.AddBleHubServer(server => server
+    .ServiceUuid(ServiceUuid)
+    .Host(o => o.LocalName = "TTT")
+    .AddHub<GameHub>(GameCharacteristicUuid, o => o.MaxClients = 6));
+
+services.AddBleHubClient<IGameHub>(GameCharacteristicUuid, o => o.ServiceUuid = ServiceUuid);
+
+// now
+services.AddUniversalServer(server => server
+    .Configure(o => o.LocalName = "TTT")
+    .AddHub<GameHub>("game", hub => hub
+        .MaxClients(6)
+        .UseBluetoothLE(ServiceUuid, GameCharacteristicUuid)));
+
+services.AddUniversalHubClient<IGameHub>("game", o => o.UseBluetoothLE(ServiceUuid, GameCharacteristicUuid));
+```
+
+```csharp
+// before - Universal Hubs 2
+services.AddUniversalServer(server => server
+    .ServiceUuid(ServiceUuid)
+    .Multipeer("mygame-mc")
+    .AddHub<GameHub>(GameCharacteristicUuid, "_mygame._tcp", o => o.AllowTunnel = true));
+
+services.AddUniversalHubClient<IGameHub>(GameCharacteristicUuid, "_mygame._tcp", o =>
+{
+    o.ServiceUuid = ServiceUuid;
+    o.Multipeer("mygame-mc");
+});
+
+// now
+services.AddUniversalServer(server => server
+    .Multipeer("mygame-mc")
+    .AddHub<GameHub>("game", hub => hub
+        .UseHttp("_mygame._tcp", allowTunnel: true)
+        .UseMultipeer()
+        .UseBluetoothLE(ServiceUuid, GameCharacteristicUuid)));
+
+services.AddUniversalHubClient<IGameHub>("game", o => o
+    .UseHttp("_mygame._tcp")
+    .UseMultipeer("mygame-mc")
+    .UseBluetoothLE(ServiceUuid, GameCharacteristicUuid));
+```
+
+| Before | Now |
+|---|---|
+| `AddBleHubServer(...)`, `AddUniversalServer(...).AddHub<THub>(characteristic, mdnsType, o => ...)` | `AddUniversalServer(s => s.AddHub<THub>("name", h => h.UseBluetoothLE(service, characteristic).UseHttp(type)))` |
+| `AddBleHubClient<T>(characteristic, ...)`, `AddUniversalHubClient<T>(characteristic, mdnsType, ...)` | `AddUniversalHubClient<T>("name", o => o.UseBluetoothLE(service, characteristic).UseHttp(type))` |
+| `server.ServiceUuid(...)`, `o.ServiceUuid` | the service is per hub: `UseBluetoothLE(serviceUuid, characteristicUuid, advertise)` |
+| `.Host(o => ...)` / `.Ble(o => ...)` (`BleHubHostOptions`) | `.Configure(o => ...)` (`UniversalServerOptions`: `LocalName`, `HostId`, resume, files, media) and `.BluetoothLE(o => ...)` (`BluetoothLETransportOptions`: sweep, secure L2CAP) |
+| `.Http(o => ...)` (`UniversalHubHostOptions`), `Endpoint` | `.Http(o => ...)` (`HttpTransportOptions`: `BasePath`, `Advertise`, `ManageHttpServer`); `AuthorizeFile` and `HostId` moved to `UniversalServerOptions` |
+| `o.MaxClients`, `o.ValidateClient`, `o.AllowTunnel` | `hub.MaxClients(...)`, `hub.ValidateClient(...)`, `hub.UseHttp(type, allowTunnel: true)` |
+| `server.Multipeer(type)`, `server.Nearby(id)` (every hub) | the same, plus `hub.UseMultipeer()` / `hub.UseNearby()` per hub |
+| `o.Multipeer(type)`, `o.Nearby(id)` (client) | `o.UseMultipeer(type)`, `o.UseNearby(id)` |
+| `o.HttpConnectTimeout`, `o.HttpRediscoverTimeout`, `o.HttpMessageHandlerFactory` | `o.UseHttp(type, h => h.ConnectTimeout / RediscoverTimeout / MessageHandlerFactory)` |
+| `EnableMediaChannels(maxPacketSize, secure)` | `EnableMediaChannels(maxPacketSize)`; `server.BluetoothLE(o => o.SecureMediaChannels = true)` |
+| `AllowDynamicHubs(o => o.ServiceTypes.Add(...))` | `AllowDynamicHubs(o => o.MaxHubs = ...)` and `.Http(o => o.DynamicServiceTypes.Add(...))` |
+| `new DynamicHubDefinition(name, characteristic, serviceType)` | `new DynamicHubDefinition(name).UseHttp(type).UseBluetoothLE(characteristic)` |
+| `dynamicClients.Create(characteristic, mdnsType)` | `dynamicClients.Create("name", o => o.UseHttp(type).UseBluetoothLE(service, characteristic))` |
+| `AllowHandlerHubs`, `IBleHubHandler`, `IBleHubHandlerHost` | [Dynamic hubs](/universalhubs/dynamic-hubs/) |
+
+## Types
+
+| Before | Now |
+|---|---|
+| `[BleHubClient]` | `[UniversalHubContract]` |
+| `BleHub<T>` | `UniversalHub<T>`: `OnConnectedAsync(HubConnection)`, `OnDisconnectedAsync(HubConnection, HubDisconnect)` |
+| `IBleHubClient<T>` | `IUniversalHubClient<T>` (base `IHubProxy<T>`) |
+| `IBleHubConnection` | `IHubConnection` |
+| `IBleHubHost` | `IUniversalHubHost` |
+| `IBleHubSerializer` | `IHubSerializer`, which now has a `Name` |
+| `BleHubException`, `BleHubRemoteException`, `BleHubDisconnectedException` | `HubException`, `HubRemoteException`, `HubDisconnectedException` |
+| `BleHubFileTransferNotSupportedException` | `HubFileTransferNotSupportedException` |
+| `IBleHubMediaChannel` | `IHubMediaChannel` |
+| `IBleHubFileHandler` | `IBleFileHandler` (BLE only) |
+| `BleHubClientStatus` | `HubClientStatus` |
+| `BleHubProtocolOptions` | `HubProtocolOptions` |
+| `BleHubConnectedClient` | `HubConnectedClient` |
+| `BleHubConnectOptions` | `HubConnectOptions` |
+| `HubTransports` flags | transport types: `host.Start<BleHostTransport>()`, `HubConnectOptions.Prefer<HttpClientTransport>()` |
+| `HubHostInfo.Ble` / `.Http` / `.Multipeer` / `.Nearby`, `host.Rssi` | `host.Endpoint<BleHubEndpoint>()?.Rssi`, `host.IsSeenOver<HttpClientTransport>()` |
+| `HubHostInfo.FromUrl(url, endpoint)` | `HttpHubHost.FromUrl(url, basePath)` |
+| `connection.Ble` / `.Http` / `.Multipeer` / `.Nearby`, `Context.Client.Peripheral` | `connection.Peripheral()`, `connection.HttpContext()`, `connection.MultipeerPeer()`, `connection.NearbyPeer()` |
+| `connection.Transport == HubTransports.Ble`, `client.Transport == HubTransports.Http` | `connection.Transport is BleHostTransport`, `client.Transport is HttpClientTransport` |
+| `HubConnectOptions { Prefer = ..., Allowed = ... }` | `new HubConnectOptions("Allan").Prefer<T>()`, `.Allow<T>()`, `.Only<T>()` |
+| `host.Start(HubTransports.All)` returning `HubTransports` | `host.Start()` returning the `IHubTransport`s that started |
+| `client.DiscoverAll(HubTransports.Http)`, `client.Discover()` | `client.DiscoverAll([typeof(HttpClientTransport)])` |
+| `IBleHubClientTransport`, `IUniversalHubTransport`, `IUniversalHubClientTransport` | `IHubTransport`, `IHubClientTransport` ([custom transports](/universalhubs/custom-transports/)) |
+| `SBH001`-`SBH006` diagnostics | `SUH001`-`SUH006` |
+
+## Behavior
+
+- **HTTP no longer uses a Switchboard.** Each hub connection is a WebSocket at `{BasePath}/{hub name}` carrying the same
+  session as Multipeer and Nearby, with files and media channels in-band. The `/files` and `/media` routes are gone.
+- **mDNS and Multipeer advertisements list hub names**, not characteristic UUIDs. Nearby tags hubs by name.
+- **One BLE service per host is gone.** Each hub picks its service and whether it is advertised. Registration throws
+  when the advertised services don't fit in the 31-byte advertisement. Clients scan for the hub's service, or for
+  `scanFor`.
+- **Serializers are checked at connect.** The serializer's `Name` travels in the handshake, and a mismatch is refused.
+  A hub can have its own serializer. Values travel as the serializer wrote them over HTTP too, so non-JSON serializers
+  work there now. Dynamic hubs are JSON.
+- **Transport order** is the order of the `Use…` calls, unless `Priority<…>()` says otherwise. It used to be Wi-Fi,
+  Multipeer, Nearby, BLE.
+- **Resume** works the same on every transport, HTTP included, under `UniversalServerOptions.ResumeWindow`.
+- **The `OnDisconnectedAsync(string? reason)` overload is gone.** Override `OnDisconnectedAsync(HubConnection, HubDisconnect)`.

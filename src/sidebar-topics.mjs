@@ -2058,7 +2058,8 @@ export const sidebarTopicsOptions = {
   ],
   topics: {
     foundation: ['/', '/libraries/foundation'],
-    hardware: ['/libraries/hardware'],
+    // BluetoothLE Hubs' release notes up to 2.0.1 - linked from the Universal Hubs release notes, not in the menu
+    hardware: ['/libraries/hardware', '/universalhubs/blehubs-release-notes'],
     'device-data': ['/libraries/device-data'],
     ai: ['/libraries/ai'],
     background: ['/libraries/background'],
