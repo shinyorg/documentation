@@ -1,6 +1,6 @@
 ---
 title: Nearby
-description: Android, iOS and macOS devices host and join universal hubs over Google's Nearby Connections - no shared network needed, beside BLE and Wi-Fi.
+description: Android, iOS and macOS devices host and join hubs over Google's Nearby Connections - no shared network needed.
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 
@@ -8,10 +8,11 @@ import NugetDownloads from '/src/components/NugetDownloads.astro';
 |---------|---------|
 | Nearby | <NugetDownloads name="Shiny.UniversalHubs.Nearby" /> |
 
-`Shiny.UniversalHubs.Nearby` adds Google's **[Nearby Connections](https://developers.google.com/nearby/connections/overview)**
-as another transport, beside BLE, Wi-Fi and [Multipeer](/universalhubs/multipeer). Like Multipeer it needs no network
-and picks the radio itself: Bluetooth, BLE, Wi-Fi LAN, Wi-Fi Direct or a hotspot. Unlike Multipeer it runs on
-**Android**, so two Android phones on a plane get more than BLE's bandwidth.
+`Shiny.UniversalHubs.Nearby` serves and joins hubs over Google's
+**[Nearby Connections](https://developers.google.com/nearby/connections/overview)**. Like
+[Multipeer](/universalhubs/multipeer/) it needs no network and picks the radio itself: Bluetooth, BLE, Wi-Fi LAN, Wi-Fi
+Direct or a hotspot. Unlike Multipeer it runs on **Android**, so two Android phones on a plane get more than BLE's
+bandwidth.
 
 The same library runs on iOS and macOS. Android, iPhone and Mac players join the same host, in the same hub, with the
 same groups and pushes.
@@ -23,23 +24,20 @@ dotnet add package Shiny.UniversalHubs.Nearby
 ```
 
 ```csharp
-// host - one Nearby service id per app
+// host - one Nearby service id per app, then each hub opts in
 builder.Services.AddUniversalServer(server => server
     .Nearby("com.mycompany.mygame")
-    .AddHub<GameHub>(GameCharacteristicUuid, "_mygame._tcp"));
+    .AddHub<GameHub>("game", hub => hub.UseNearby().UseHttp("_mygame._tcp")));
 
-// client - inside AddUniversalHubClient's options, beside Multipeer if you use it
-builder.Services.AddUniversalHubClient<IGameHub>(GameCharacteristicUuid, "_mygame._tcp", o =>
-{
-    o.ServiceUuid = ServiceUuid;
-    o.Multipeer("mygame-mc");
-    o.Nearby("com.mycompany.mygame");
-});
+// client
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o
+    .UseHttp("_mygame._tcp")
+    .UseMultipeer("mygame-mc")
+    .UseNearby("com.mycompany.mygame"));
 ```
 
-Register it in shared code. `HubTransports.All` includes Nearby, so `Start()` hosts over it and `DiscoverAll()` /
-`Connect()` use it. Where Nearby Connections doesn't exist (Windows, Linux, Mac Catalyst, Android without Google Play
-services) it is skipped quietly.
+Register it in shared code. Where Nearby Connections doesn't exist (Windows, Linux, Mac Catalyst, Android without
+Google Play services) it reports itself unsupported and is skipped.
 
 ### The service id
 
@@ -66,7 +64,7 @@ Nearby advertises over Bonjour as `_` + the first 6 bytes of SHA-256 of the serv
 <string>The local network is used to talk to nearby devices</string>
 <key>NSBonjourServices</key>
 <array>
-    <string>_mygame._tcp</string>         <!-- the hub's mDNS service type, as before -->
+    <string>_mygame._tcp</string>         <!-- the hub's HTTP mDNS type, if it has one -->
     <string>_C06804260E63._tcp</string>   <!-- Nearby: NearbyProtocol.BonjourServices("com.mycompany.mygame") -->
 </array>
 ```
@@ -75,12 +73,12 @@ Nearby advertises over Bonjour as `_` + the first 6 bytes of SHA-256 of the serv
 
 | Host (`NearbyHostOptions`) | Default | |
 |---|---|---|
-| `EndpointName` | the BLE `LocalName` | The name the host advertises. Cut to fit the endpoint info |
+| `EndpointName` | the server's `LocalName` | The name the host advertises. Cut to fit the endpoint info |
 | `Strategy` | `Cluster` | `Cluster` lets a device host and visit at once. `Star` (one host, many clients) gets faster upgrades. Clients must match |
 
 | Client (`NearbyClientOptions`) | Default | |
 |---|---|---|
-| `EndpointName` | the hub client name | The name this device connects under, which the host sees as `connection.Nearby.EndpointName` |
+| `EndpointName` | the hub client name | The name this device connects under, which the host sees as `connection.NearbyPeer().EndpointName` |
 | `ConnectTimeout` | 15 seconds | How long the host gets to accept before the next transport is tried |
 | `Strategy` | `Cluster` | Must match the host |
 
@@ -90,20 +88,11 @@ Nearby advertises over Bonjour as `_` + the first 6 bytes of SHA-256 of the serv
 |---|---|---|
 | Android ↔ Android | Yes: Bluetooth, Wi-Fi Direct, hotspot | Yes |
 | Android ↔ iPhone / Mac | Not promised | Yes, over Wi-Fi LAN |
-| iPhone ↔ iPhone / Mac | Yes, but [Multipeer](/universalhubs/multipeer) is tried first | Yes |
+| iPhone ↔ iPhone / Mac | Yes, though [Multipeer](/universalhubs/multipeer/) is the better fit | Yes |
 
 Android and Apple devices only share the mediums Google's library supports on both. Over BLE they may find each other
 with no network (the package turns on Google's BLE v2), but that isn't verified yet. Wi-Fi Aware stays off: on iOS it
 needs the devices paired through Apple's own Wi-Fi Aware pairing first.
-
-## Discovery and Connecting
-
-- `DiscoverAll()` merges Nearby hosts with the other transports by name. `HubHostInfo.Nearby` is set while the host is
-  seen over Nearby, and `Transports` includes `Nearby`.
-- The advertisement lists every running hub, so a client only sees hosts running its hub.
-- `Connect()` tries `Prefer` first, then **Wi-Fi, Multipeer, Nearby, BLE**. `Prefer = Allowed = HubTransports.Nearby`
-  uses only Nearby.
-- `client.Transport` is `HubTransports.Nearby` while connected over it.
 
 ## In the Hub
 
@@ -111,25 +100,29 @@ needs the devices paired through Apple's own Wi-Fi Aware pairing first.
 public override Task OnConnectedAsync(HubConnection connection)
 {
     // connection.Id: nb:{id}
-    // connection.Transport: HubTransports.Nearby
-    // connection.Nearby?.EndpointName: the name the client connected under
+    if (connection.Transport is NearbyHostTransport)
+        Log(connection.NearbyPeer()?.EndpointName);   // the name the client connected under
     return Task.CompletedTask;
 }
 ```
 
-Everything else is the same hub: `Clients`, groups, `MaxClients` (counted across every transport), `ValidateClient`,
-`Context.Abort`, `IHubContext`.
+## Discovery and Connecting
 
-## What's Different from Wi-Fi
+- `DiscoverAll()` merges Nearby hosts with the other transports by name. `host.IsSeenOver<NearbyClientTransport>()`
+  says whether it is seen over Nearby.
+- The advertisement lists every running hub, so a client only sees hosts running its hub.
+- `new HubConnectOptions("Allan").Only<NearbyClientTransport>()` uses nothing else.
+
+## What's Different
 
 - **One connection per pair of devices.** Nearby refuses a second connection between the same two devices, so every hub
   session is a channel inside one connection, in either direction. A phone in a host's chat and its game, or two phones
   visiting each other's chats, share it. It hangs up two seconds after its last channel closes.
-- **Values travel as binary**, as over BLE and Multipeer. Any serializer works.
 - **Messages over 32 KB** (Nearby's payload limit) travel in pieces and arrive whole.
-- **Files** are Nearby file payloads, under the same `EnableFileTransfers` and `AuthorizeFile` rules as Wi-Fi.
-- **Media channels** ride the channel as ordered messages, so [calls](/blehubs/files#media-channels) work. **Renames work.**
-- **Resume.** A dropped connection is [resumed](/universalhubs/client#resume) as the same connection within the host's
-  resume window; after that it is a `ClientTimeout`.
+- **Files** are Nearby file payloads. **Media channels** ride the channel as ordered messages. **Renames work.**
+- **Resume.** A dropped connection is [resumed](/universalhubs/client/#resume) as the same connection within the host's
+  resume window.
+- **Building from source:** run `native/ShinyNearbyBridge/build.sh` in the hubs repo before building the package or a
+  sample for iOS / macOS.
 
-See [How It Works](/universalhubs/how-it-works#nearby) for the wire protocol.
+See [How It Works](/universalhubs/how-it-works/#nearby) for the wire protocol.

@@ -412,6 +412,14 @@ export default defineConfig({
       '/mediator/extensions/http': '/mediator/http/',
       '/client/appbuilder': '/foundation/appbuilder/',
       '/client/other/configuration': '/client/configuration/',
+      // BluetoothLE Hubs became Universal Hubs' Bluetooth LE transport in 3.0
+      '/blehubs/': '/universalhubs/',
+      '/blehubs/contracts': '/universalhubs/contracts',
+      '/blehubs/hosting': '/universalhubs/hosting',
+      '/blehubs/client': '/universalhubs/client',
+      '/blehubs/files': '/universalhubs/files',
+      '/blehubs/how-it-works': '/universalhubs/how-it-works',
+      '/blehubs/release-notes': '/universalhubs/blehubs-release-notes',
   },
   integrations: [
     react(),

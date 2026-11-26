@@ -1,34 +1,48 @@
 ---
 title: Connecting Clients
-description: Discover hosts over Bluetooth LE and mDNS at once, connect over Wi-Fi or BLE, and resume short Wi-Fi drops.
+description: Register a hub client and its transports, discover hosts over every transport in one list, connect in the order you choose, and call the hub through the generated proxy.
 ---
 
 ## Registration
 
+Register a client per contract, with the hub's name and the transports it may use:
+
 ```csharp
-builder.Services.AddUniversalHubClient<IGameHub>(
-    GameCharacteristicUuid,
-    "_mygame._tcp",                     // the hub's mDNS service type - the same as the host's AddHub
-    o => o.ServiceUuid = ServiceUuid);  // the host's BLE service, if it set one
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o
+    .UseHttp("_mygame._tcp", h => h.ConnectTimeout = TimeSpan.FromSeconds(4))
+    .UseMultipeer("mygame-mc")
+    .UseNearby("com.mycompany.mygame")
+    .UseBluetoothLE("180D", GameCharacteristicUuid)
+    .Priority<NearbyClientTransport, HttpClientTransport>());   // optional - the Use… order otherwise
 ```
 
-Resolve `IUniversalHubClient<IGameHub>`. It is an [`IBleHubClient<IGameHub>`](/blehubs/client), so the generated
-proxy (`client.Hub`), events, `Status`, `Disconnected`, `Rename` and file methods are all there, and they work the same on
-either transport. `IBleHubClient<IGameHub>` and `IGameHub` resolve to the same connection.
+- **The name and each transport's settings** match what the host gave the hub: the mDNS type, the Multipeer service
+  type, the Nearby service id, the BLE service and characteristic.
+- **Transports are tried in the order they're added**, unless `Priority<…>()` says otherwise (transports left out
+  follow in the order they were added).
+- **At least one transport.** Each transport once per client. Mistakes throw at registration.
 
 | Option | Default | |
 |---|---|---|
-| `ServiceUuid` | BluetoothLE Hubs' default | The host's BLE service. Must match the host's `ServiceUuid` |
-| `ServiceType` | set from the registration | The mDNS service type to browse. Must match the hub's |
-| `HttpConnectTimeout` | 6 seconds | How long one Wi-Fi address gets to answer before the next address (or BLE) is tried |
-| `HttpRediscoverTimeout` | 3 seconds | When no address answers, how long to spend looking the host up again over mDNS. A host that restarted is on a new port. Zero turns it off |
-| `AutomaticReconnect` | `true` | Resume after a dropped link instead of disconnecting, on every transport |
-| `HttpMessageHandlerFactory` | `null` | The HTTP stack for Wi-Fi connections. Tests swap in an in-memory handler |
+| `UseBluetoothLE`, `UseHttp`, `UseMultipeer`, `UseNearby` | | The transports: see [Bluetooth LE](/universalhubs/bluetoothle/), [HTTP](/universalhubs/http/), [Multipeer](/universalhubs/multipeer/), [Nearby](/universalhubs/nearby/) |
+| `UseTransport(sp => ...)` | | A [transport of your own](/universalhubs/custom-transports/) |
+| `Priority<T1, T2…>()` | the `Use…` order | The order transports are tried in when a host is seen on several |
+| `Serializer(serializer)` | the app's | The hub's own [serializer](/universalhubs/contracts/#serialization), by name |
+| `Protocol(p => ...)` | | `HubProtocolOptions`: payload size, `RequestTimeout`. App-wide |
+| `AutomaticReconnect` | `true` | [Resume](#resume) after a dropped link instead of disconnecting |
+
+Resolve whichever shape you prefer. They are the same connection:
+
+| Inject | You get |
+|---|---|
+| `IUniversalHubClient<IGameHub>` | Discovery, connecting, transports, plus `.Hub` for calls and events (easiest to mock) |
+| `IHubProxy<IGameHub>` | The connection and `.Hub`, without discovery |
+| `IGameHub` | Calls and events only |
 
 ## Discovery
 
-`DiscoverAll()` watches for hosts over BLE and mDNS at once. A host seen both ways is one `HubHostInfo`, raised again
-whenever either side changes. Dispose the subscription to stop.
+`DiscoverAll()` watches for hosts over every transport at once. A host seen several ways is one `HubHostInfo`, raised
+again whenever any transport's view changes. Dispose the subscription to stop.
 
 ```csharp
 public class JoinViewModel(IUniversalHubClient<IGameHub> client)
@@ -37,104 +51,164 @@ public class JoinViewModel(IUniversalHubClient<IGameHub> client)
         .DiscoverAll()
         .Subscribe(host =>
         {
-            // host.Key: stable across both transports
-            // host.Name, host.HostId, host.Rssi (when seen over BLE)
-            // host.Transports: Ble, Http, Multipeer, Nearby or several - None means it has gone
+            // host.Key: stable across every transport
+            // host.Name, host.HostId
+            // host.Transports: the client transport types it is seen on, in priority order - empty means it has gone
+            var rssi = host.Endpoint<BleHubEndpoint>()?.Rssi;
+            var onWifi = host.IsSeenOver<HttpClientTransport>();
         });
 }
 ```
 
-- **Merging.** BLE results and mDNS results are merged by the host's name, because Apple hosts can't put a host id in
-  a BLE advertisement. Give hosts distinct names (`BleHubHostOptions.LocalName`).
-- **Filtering.** mDNS hosts are only listed when they're running your hub and speak the same protocol version.
-- **Missing transports.** A transport that can't scan (Bluetooth off, no Wi-Fi) is skipped, and the other keeps going.
-  Pass `DiscoverAll(HubTransports.Http)` to browse only one way.
-- **BLE only.** `Discover()` and `Connect(BleHubHostInfo)` still give plain BluetoothLE Hubs behavior.
+- **Merging.** Results are merged by the host's name, because a BLE advertisement has no room for a host id. Give hosts
+  distinct names (`UniversalServerOptions.LocalName`).
+- **Filtering.** A host is listed when it runs your hub, where the transport can tell (mDNS, Multipeer and Nearby
+  list their running hubs; a BLE scan only sees the service).
+- **Missing transports.** A transport that can't scan (Bluetooth off, no Wi-Fi, not this platform) is skipped, and the
+  others keep going. `DiscoverAll([typeof(HttpClientTransport)])` browses only some.
+- **Its own host.** An app that hosts and scans at once doesn't list itself.
 
 ## Connecting
 
 ```csharp
-await client.Connect(host, new HubConnectOptions("Allan") { Prefer = HubTransports.Http });
-
-// client.Transport is Http, Multipeer, Nearby or Ble (None while disconnected)
+await client.Connect(host, new HubConnectOptions("Allan", AppVersion: "1.2", Properties: new() { ["team"] = "blue" }));
 await client.Hub.MakeMove(4);
+
+// client.Transport is the IHubClientTransport carrying the connection, null while disconnected
 ```
 
-`HubConnectOptions` carries what the client tells the host about itself (`Name`, `AppVersion`, `Properties`) and
-which transports it may use:
+`Connect` tries the transports the host is seen on, in priority order, falling back to the next when one fails. Per
+connect, `HubConnectOptions` can change the order:
 
-- **`Prefer`** (Wi-Fi by default) is tried first when the host is reachable more than one way. The rest follow in the
-  order Wi-Fi, [Multipeer](/universalhubs/multipeer), [Nearby](/universalhubs/nearby), BLE.
-- **`Allowed`** limits which transports may be used at all.
-- **Refusals aren't retried.** A host that refuses the client (full, `ValidateClient`, hub not running) is not tried
-  again on another transport.
-- **No migration.** The transport is chosen at connect. A connection doesn't move between Wi-Fi and BLE mid-session.
+```csharp
+new HubConnectOptions("Allan").Prefer<BleClientTransport>();          // tried first, then the rest
+new HubConnectOptions("Allan").Allow<HttpClientTransport>().Allow<NearbyClientTransport>();   // only these
+new HubConnectOptions("Allan").Only<NearbyClientTransport>();         // this and nothing else
+```
+
+- **Refusals aren't retried.** A host that refuses the client (full, `ValidateClient`, the hub isn't running, a
+  serializer mismatch) throws a `HubException` ("Host refused…") and isn't tried on another transport.
+- **No migration.** The transport is chosen at connect. A connection doesn't move between transports mid-session.
+
+| Member | |
+|---|---|
+| `Status` | `Disconnected`, `Connecting`, `Connected`, `Disconnecting`, `Reconnecting` |
+| `StatusChanged` / `Connected` / `Disconnected` | `Disconnected` carries a [`HubDisconnect`](/universalhubs/hosting/#disconnect-reasons). `StatusChanged` carries it while `Disconnecting`, `Disconnected` and `Reconnecting` |
+| `HostName` / `HostRenamed` | The host's name, kept up to date when the host renames itself |
+| `ClientName` / `Rename(name)` | The name the host knows you by. See [Renaming](/universalhubs/hosting/#renaming) |
+| `Transports` / `Transport` | Every transport this client has, and the one carrying the connection |
+| `CanTransferFiles`, `UploadFile`, `DownloadFile` | See [Files](/universalhubs/files/) |
+| `CanOpenMediaChannel`, `OpenMediaChannel` | See [Media Channels](/universalhubs/files/#media-channels) |
+| `Disconnect()` | Leaves the hub, telling the host first |
+
+## Turning Transports On and Off
+
+While the app runs, turn a client's transports on and off, to test each on its own or to let the user pick:
+
+```csharp
+await client.Disable<BleClientTransport>();
+await client.Enable<BleClientTransport>();
+await client.Solo<NearbyClientTransport>();   // this one on, every other off
+bool on = client.IsEnabled<HttpClientTransport>();
+client.EnabledChanged += (_, _) => Refresh();
+```
+
+A disabled transport leaves running discoveries (hosts it saw lose it) and is never connected over. Disabling the one
+a connection is on disconnects it.
 
 ## Resume
 
-A dropped link is resumed on every transport. The connection keeps its id and groups, missed pushes are replayed, and
-the hub sees no disconnect.
+A dropped link comes back as the same connection, on every transport: same connection id, groups and `Properties`, with
+the pushes it missed replayed. The host holds it for its [resume window](/universalhubs/hosting/#dropped-links--resume)
+(30 seconds), and the client reconnects by itself on the transport it dropped from.
 
-- **Wi-Fi:** the Switchboard line resumes on its own; the client stays `Connected` throughout.
-- **BLE, Multipeer and Nearby:** the host holds the client for `BleHubHostOptions.ResumeWindow` (30 seconds, set in
-  `.Ble(o => o.ResumeWindow = ...)` on the host). The client reconnects by itself - invites the Multipeer peer again, or
-  reconnects over Nearby or BLE - and is `Reconnecting` until it's back. Calls fail while it is.
-  See [Dropped Links & Resume](/blehubs/hosting#dropped-links--resume) for what is held and what is lost.
+1. `Status` goes to `Reconnecting`, and `StatusChanged` says why the link dropped.
+2. The client opens a new link (a new WebSocket, a new Multipeer session, a Nearby or BLE reconnect) and hands back its
+   resume token.
+3. It is `Connected` again, and the pushes it missed are raised in order. `Connected` isn't raised again.
 
 ```csharp
-client.StatusChanged += (_, e) =>
+client.StatusChanged += (_, e) => MainThread.BeginInvokeOnMainThread(() => this.Banner = e.Status switch
 {
-    if (e.Status == BleHubClientStatus.Reconnecting)
-        ShowBanner($"Reconnecting over {client.Transport}...");   // e.Disconnect says why the link dropped
+    HubClientStatus.Reconnecting => $"Reconnecting over {client.Transport?.DisplayName}...",
+    HubClientStatus.Disconnected => $"Disconnected: {e.Reason}",
+    _ => null
+});
+```
+
+- Calls in flight when the link dropped, and calls made while `Reconnecting`, throw `HubDisconnectedException`.
+- Media channels and file transfers close. Open a new channel once `Connected`.
+- A drop that outlasts the window ends in `Disconnected` with `ClientTimeout`.
+- Turn it off with `o.AutomaticReconnect = false`. The host then lets the client go as soon as its link drops.
+
+## Calls
+
+```csharp
+var result = await client.Hub.MakeMove(4);
+await client.Hub.Rematch();
+
+using var cts = new CancellationTokenSource();
+await foreach (var n in client.Hub.Countdown(10, cts.Token))
+{
+    if (n == 3)
+        break;   // cancels the hub method on the host
+}
+```
+
+- **Concurrent calls** are fine. Each is matched to its own reply.
+- **Timeouts**: a call with no reply within `HubProtocolOptions.RequestTimeout` (30 seconds) throws a
+  `TimeoutException`. Streams aren't timed out. Set it with `o.Protocol(p => p.RequestTimeout = ...)`.
+- **Cancellation**: cancelling a call's `CancellationToken` stops waiting and cancels the hub method on the host.
+
+## Events (pushes)
+
+```csharp
+client.Hub.StateChanged += state => MainThread.BeginInvokeOnMainThread(() => this.Apply(state));
+client.Hub.Emote += (from, emoji) => MainThread.BeginInvokeOnMainThread(() => this.Show($"{from} {emoji}"));
+```
+
+Events are raised on a **background thread**, one at a time and **in the order the host sent them**. Marshal to the
+UI thread yourself.
+
+## Disconnect Reasons
+
+```csharp
+client.Disconnected += (_, disconnect) =>
+{
+    var text = disconnect.Reason switch
+    {
+        HubDisconnectReason.ServerShutdown => "The host closed the game",
+        HubDisconnectReason.ServerDisconnect => disconnect.Message ?? "You were removed from the game",
+        HubDisconnectReason.ClientTimeout => "Lost the connection to the host",
+        _ => null   // ClientDisconnect - we left
+    };
+    if (text != null)
+        MainThread.BeginInvokeOnMainThread(() => this.Show(text));
 };
 ```
 
-Turn it off on every transport with `UniversalHubClientOptions.AutomaticReconnect = false`. A drop that outlasts the
-resume window ends in `Disconnected` with `ClientTimeout`. See [disconnect reasons](/universalhubs/hosting#disconnect-reasons).
+`ConnectionFailed` is reported through `StatusChanged` only: `Disconnected` isn't raised for a client that never
+connected. See [Disconnect Reasons](/universalhubs/hosting/#disconnect-reasons) for the full table.
 
-## Connecting by Address
+## Failures
 
-A host you have the address of, rather than one you discovered (a tunnel's public URL, a typed address, a QR code),
-is reached over HTTP only:
+| Exception | When |
+|---|---|
+| `HubRemoteException` | The hub method threw. Includes `RemoteErrorType` and `Message` |
+| `HubDisconnectedException` | You called while not connected (or `Reconnecting`), or the link dropped while a call was in flight. `Disconnect` says why |
+| `HubException` | The host refused the client at connect, or a transport failed |
+| `TimeoutException` | No reply within `RequestTimeout` |
+| `OperationCanceledException` | You cancelled the call |
 
-```csharp
-await client.Connect(HubHostInfo.FromUrl(new Uri("https://abc.a.pinggy.link")));
-await client.Connect(HubHostInfo.FromUrl(new Uri("http://192.168.1.20:5000"), endpoint: "/hubs"));
-```
+## Several Hubs on One Host
 
-`endpoint` is the host's `AddUniversalServer` endpoint, `/hubs` unless it was changed.
-
-## Files
-
-`UploadFile`, `UploadStream` and `DownloadFile` work on either transport: L2CAP over BLE, plain HTTP over Wi-Fi.
-`CanTransferFiles` says whether the host has file transfers turned on.
+Register a client per hub. Each connects on its own; over BLE, clients connected to the same host share one BLE
+connection, which is reference counted, so disconnecting one leaves the others connected.
 
 ```csharp
-var result = await client.UploadFile(avatarPath, "avatar-allan.jpg", progress);
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o.UseHttp("_mygame._tcp").UseBluetoothLE("FE10", GameCharacteristicUuid));
+builder.Services.AddUniversalHubClient<IChatHub>("chat", o => o.UseHttp("_mygame._tcp").UseBluetoothLE("FE10", ChatCharacteristicUuid));
 ```
 
-See [BluetoothLE Hubs file transfers](/blehubs/files) for the host's file settings, which both transports share.
-
-## Dynamic Hub Clients
-
-To join a hub whose contract isn't compiled into the app (a [dynamic hub](/universalhubs/hosting#dynamic-hubs), or any
-hub a downloaded web app or script names), register `IDynamicHubClients` and create clients while the app runs:
-
-```csharp
-builder.Services.AddDynamicHubClients(o => o.ServiceUuid = ServiceUuid);   // what every client shares
-
-using var client = dynamicHubClients.Create(GameCharacteristicUuid, "_mygame._tcp");
-client.Hub.Pushed += (name, args) => { /* each argument serialized */ };
-await client.Connect(host, new HubConnectOptions("Allan"));             // host from client.DiscoverAll()
-
-ReadOnlyMemory<byte> result = await client.Hub.Invoke("MakeMove", [Encoding.UTF8.GetBytes("4")]);
-await foreach (var item in client.Hub.Stream("Watch", [])) { }
-```
-
-`Create(characteristicUuid, mdnsServiceType)` returns a new, disconnected `IUniversalHubClient<IDynamicHubCalls>` that
-discovers and connects like any client above; dispose it when done. `IDynamicHubCalls` calls by name, with values as
-serialized bytes (JSON with the default serializer): `Invoke` (an empty result for a method with none), `Stream` and the
-`Pushed` event, raised in order. It works against compiled and dynamic hubs alike.
-
-The options delegate runs again for each client, with `ServiceType` set from `Create`. Add-on transports
-(`o.Multipeer("mygame-mc")`, `o.Nearby("com.mycompany.mygame")`) are registered once.
+A BLE scan only sees the host's service, not which hubs it is running. Joining a hub that's stopped is refused at the
+handshake (`HubException`, "Host refused…"), so handle that.

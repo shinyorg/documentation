@@ -1,6 +1,6 @@
 ---
 title: Universal Hubs
-description: BluetoothLE Hubs over Wi-Fi as well as Bluetooth LE - write the hub once, and clients connect over whichever link they can reach.
+description: SignalR style hubs between nearby devices, over any transport - Bluetooth LE, HTTP, Multipeer, Nearby or your own. Write the hub once and every client shares it.
 ---
 import { Steps } from '@astrojs/starlight/components';
 import PlatformSupport from '/src/components/PlatformSupport.astro';
@@ -12,96 +12,107 @@ import AiSkill from '/src/components/AiSkill.astro';
 
 | | |
 |---------|---------|
-| GitHub | <GitHubStars org="shinyorg" repo="universalhubs" /> |
-| Shared Protocol | <NugetDownloads name="Shiny.UniversalHubs" /> |
-| Host | <NugetDownloads name="Shiny.UniversalHubs.Host" /> |
-| Client | <NugetDownloads name="Shiny.UniversalHubs.Client" /> |
-| Multipeer (optional) | <NugetDownloads name="Shiny.UniversalHubs.Multipeer" /> |
-| Nearby (optional) | <NugetDownloads name="Shiny.UniversalHubs.Nearby" /> |
+| GitHub | <GitHubStars org="shinyorg" repo="hubs" /> |
+| Hubs, host, client, generator | <NugetDownloads name="Shiny.UniversalHubs" /> |
+| Bluetooth LE | <NugetDownloads name="Shiny.UniversalHubs.BluetoothLE" /> |
+| HTTP (Wi-Fi, LAN, tunnels) | <NugetDownloads name="Shiny.UniversalHubs.Http" /> |
+| Multipeer (Apple) | <NugetDownloads name="Shiny.UniversalHubs.Multipeer" /> |
+| Nearby (Android, iOS, macOS) | <NugetDownloads name="Shiny.UniversalHubs.Nearby" /> |
 
 <PlatformSupport frameworks={["dotnet", "maui"]} os={["android", "ios", "macos"]} />
 
-Universal Hubs serves [BluetoothLE Hubs](/blehubs/) over **Wi-Fi as well as Bluetooth LE**. Write the hub once.
-Players on a plane connect over BLE. At home they connect over Wi-Fi, which has more range and bandwidth and no MTU.
-Both kinds of client share the same hub, groups and pushes.
+Universal Hubs brings the SignalR programming model to nearby devices. One device **hosts** a hub, and other devices
+**discover** it, **connect**, and **call** it through a strongly typed proxy. The host **pushes** events back to all
+clients, one client, everyone else, or a group.
 
-The Wi-Fi side is a [Shiny HTTP Server Switchboard](/httpserver/switchboard) (SSE + POST, with resume), advertised over mDNS.
-The hub itself is a plain BluetoothLE Hubs hub: the same contract, source generated proxy, `Clients`, `Groups` and
-`IHubContext<THub>`. Universal Hubs only carries the calls.
+Write the hub once and serve it over **Bluetooth LE**, **HTTP** (Wi-Fi, LAN or the internet through a tunnel), Apple's
+**MultipeerConnectivity** and Google's **Nearby Connections** at the same time, or over a transport of your own. Every
+client shares the same hub, groups and pushes, whichever way it connected. Players on a plane connect over BLE or
+Nearby. At home they connect over Wi-Fi.
+
+:::note[Coming from Shiny.BluetoothLE.Hubs?]
+It is replaced by `Shiny.UniversalHubs` + `Shiny.UniversalHubs.BluetoothLE`. See
+[Upgrading from BluetoothLE Hubs](/universalhubs/upgrading/).
+:::
 
 ## Features
 
-- **One hub, two transports.** `Clients.All`, groups, `IHubContext<THub>`, `MaxClients`, `ValidateClient` and
-  `Context.Abort` cover BLE and Wi-Fi clients together.
-- **One discovery list.** BLE scanning and mDNS browsing are merged, so a host seen both ways shows up once.
-- **Wi-Fi first, BLE fallback.** Connect prefers Wi-Fi and falls back to BLE. The generated proxy, events,
-  `Disconnected` and file methods work the same on either transport.
-- **Knows the transport.** `UniversalHub<T>` hooks get a `HubConnection` that says which transport the client is on.
-- **Resume.** A dropped link keeps the connection id and groups, and missed pushes are replayed, on every transport.
-  The hub sees no disconnect.
-- **One hub at a time.** Run an always-on hub beside one that only runs on demand.
-- **Files:** L2CAP over BLE, plain HTTP over Wi-Fi, behind the same `UploadFile` / `DownloadFile`.
-- **Tunnels.** Hubs can opt in to being reachable from the internet.
-- **Media channels.** BluetoothLE Hubs' [media channels](/blehubs/files#media-channels), live packet pipes for
-  audio and video, work over Wi-Fi too.
-- **Multipeer.** Add [Multipeer](/universalhubs/multipeer) and iPhones, iPads and Macs also reach each other over
-  Apple's MultipeerConnectivity, at Wi-Fi speed with no shared network.
-- **Nearby.** Add [Nearby](/universalhubs/nearby) and Android phones (and iPhones and Macs) reach each other over
-  Google's Nearby Connections with no shared network.
+- **One interface describes the hub.** Its methods are client → host calls (`Task`, `Task<T>`,
+  `IAsyncEnumerable<T>`) and its events are host → client pushes.
+- **Source generated**: the client proxy, hub dispatcher and typed push methods, with compile-time diagnostics.
+- **Hubs:** `Context`, `Clients` (All / Others / Caller / Client / Group…), `Groups`, `OnConnectedAsync` /
+  `OnDisconnectedAsync` and `Context.Abort()`, on every transport at once.
+- **Each hub picks its transports**, its own serializer and, over BLE, its own GATT service.
+- **One discovery list.** A host seen over several transports is one entry. Clients connect over the first transport
+  that works, in an order you choose, and fall back to the next.
+- **Turn transports on and off** while the app runs, on the host and the client.
+- **Resume** after a dropped link: same connection id and groups, missed pushes replayed, on every transport.
+- **Files and media channels** (live audio and video packet pipes) on every transport.
+- **Dynamic hubs**: hubs defined while the app runs.
 - **AOT and trim safe**, with no reflection.
 
 ## Setup
 
 <Steps>
-1. Install the packages. The host app needs `Host`, the client app needs `Client`, and an app that can play either
-   role installs both. The shared protocol package comes along automatically.
+1. Install the core package and the transports you use. The transport packages also build for plain .NET, where a
+   transport the platform doesn't have reports itself unsupported and is skipped, so one registration works in a
+   cross-platform app.
    ```bash
-   dotnet add package Shiny.UniversalHubs.Host
-   dotnet add package Shiny.UniversalHubs.Client
+   dotnet add package Shiny.UniversalHubs
+   dotnet add package Shiny.UniversalHubs.BluetoothLE
+   dotnet add package Shiny.UniversalHubs.Http
    ```
 
-2. Describe the hub in an interface both sides can see. It is a normal
-   [BluetoothLE Hubs contract](/blehubs/contracts):
+2. Describe the hub in an interface both sides can see (see [Contracts](/universalhubs/contracts/)):
    ```csharp
-   using Shiny.BluetoothLE.Hubs;
+   using Shiny.UniversalHubs;
 
-   [BleHubClient]
+   [UniversalHubContract]
    public interface IChatHub
    {
        Task<bool> Send(string message);         // client -> host
        event Action<string, string> Received;   // host -> clients (who, message)
    }
+
+   [JsonSerializable(typeof(string))]
+   [JsonSerializable(typeof(bool))]
+   public partial class ChatJsonContext : JsonSerializerContext;
    ```
 
-3. Implement it on the host by deriving from `UniversalHub<TContract>`:
+3. Implement it on the host:
    ```csharp
    public class ChatHub : UniversalHub<IChatHub>
    {
        public async Task<bool> Send(string message)
        {
-           // this.Connection.Transport says whether the caller is on Ble or Http
+           // this.Connection.Transport says how the caller is connected
            await this.Clients.All.Received(this.Context.Client.Name ?? "?", message);
            return true;
        }
    }
    ```
 
-4. Register everything in `MauiProgram`. Each hub has a BLE characteristic UUID and an mDNS service type, and the
-   client uses the same two:
+4. Register everything in `MauiProgram`. Each hub has a name, and picks its transports:
    ```csharp
-   // host - BLE (GATT) and Wi-Fi (Switchboard + mDNS) at once
-   builder.Services.AddUniversalServer(server => server
-       .ServiceUuid(ServiceUuid)   // optional - the one BLE service; clients use the same
-       .AddHub<ChatHub>(ChatCharacteristicUuid, "_mychat._tcp"));
+   Shiny.Json.AddContext(ChatJsonContext.Default);
 
-   // client
-   builder.Services.AddUniversalHubClient<IChatHub>(ChatCharacteristicUuid, "_mychat._tcp", o => o.ServiceUuid = ServiceUuid);
+   // host
+   builder.Services.AddUniversalServer(server => server
+       .Configure(o => o.LocalName = "Allan")
+       .AddHub<ChatHub>("chat", hub => hub
+           .UseHttp("_mychat._tcp")
+           .UseBluetoothLE(serviceUuid: "FE10", characteristicUuid: ChatCharacteristicUuid)));
+
+   // client - the same name, and the same transport settings
+   builder.Services.AddUniversalHubClient<IChatHub>("chat", o => o
+       .UseHttp("_mychat._tcp")
+       .UseBluetoothLE("FE10", ChatCharacteristicUuid));
    ```
 
 5. Start hosting on one device:
    ```csharp
-   // IUniversalHubHost host - BLE, Wi-Fi or both, whichever this device can do right now
-   HubTransports running = await host.Start();
+   // IUniversalHubHost host - every hub on every transport this device can run right now
+   IReadOnlyList<IHubTransport> running = await host.Start();
    ```
 
 6. Discover, connect and call it from another:
@@ -109,21 +120,20 @@ The hub itself is a plain BluetoothLE Hubs hub: the same contract, source genera
    // IUniversalHubClient<IChatHub> client
    client.Hub.Received += (who, message) => Messages.Add($"{who}: {message}");
 
-   var host = await client.DiscoverAll().FirstAsync(x => x.Transports != HubTransports.None);
-   await client.Connect(host, new HubConnectOptions("Allan"));   // Wi-Fi when it can, BLE otherwise
-   await client.Hub.Send($"hello over {client.Transport}!");
+   var host = await client.DiscoverAll().FirstAsync(x => x.Transports.Count > 0);
+   await client.Connect(host, new HubConnectOptions("Allan"));   // HTTP first here, then BLE
+   await client.Hub.Send($"hello over {client.Transport?.DisplayName}!");
    ```
 </Steps>
 
 :::note
-Test on **two physical devices** on the same Wi-Fi network. The iOS simulator has no Bluetooth, and simulators and
-emulators are unreliable for mDNS.
+Test on **two physical devices**. The iOS simulator has no Bluetooth, and simulators and emulators are unreliable for
+mDNS, Multipeer and Nearby.
 :::
 
 ## Platform Setup
 
-**iOS** (`Platforms/iOS/Info.plist`). List every hub's mDNS service type in `NSBonjourServices`, on both the host and
-the client:
+**iOS / macOS** (`Info.plist`), on both the host and the client:
 
 ```xml
 <key>NSBluetoothAlwaysUsageDescription</key>
@@ -132,7 +142,7 @@ the client:
 <string>The local network is used to talk to nearby devices</string>
 <key>NSBonjourServices</key>
 <array>
-    <string>_mychat._tcp</string>
+    <string>_mychat._tcp</string>        <!-- every hub's mDNS service type -->
 </array>
 <!-- clients: hubs on the local network are plain HTTP to a private address -->
 <key>NSAppTransportSecurity</key>
@@ -142,10 +152,21 @@ the client:
 </dict>
 ```
 
-**Android** (`Platforms/Android/AndroidManifest.xml`). The BLE permissions from
-[BluetoothLE Hubs](/blehubs/#platform-setup), plus:
+[Multipeer](/universalhubs/multipeer/#infoplist) and [Nearby](/universalhubs/nearby/#ios-and-macos) add their own
+`NSBonjourServices` entries.
+
+**Android** (`Platforms/Android/AndroidManifest.xml`):
 
 ```xml
+<!-- Bluetooth LE -->
+<uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />
+<uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE" />
+<uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" android:maxSdkVersion="30" />
+
+<!-- HTTP + mDNS -->
 <uses-permission android:name="android.permission.INTERNET" />
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -155,48 +176,44 @@ the client:
 <application android:usesCleartextTraffic="true" ... />
 ```
 
-**BLE stacks.** On Android, iOS and Mac Catalyst the BLE hosting and client stacks are registered for you. On plain
-`net11.0` (Linux, tests, macOS AppKit), register an `IBleHostingManager` / `IBleManager` yourself.
+Nearby adds its own permissions to the manifest.
 
-| Feature | iOS | macOS / Mac Catalyst | Android |
-|---------|-----|----------------------|---------|
-| Host over BLE | Foreground | Yes | Yes |
-| Host over Wi-Fi | Foreground | Yes | Yes |
-| Connect as a client | Yes | Yes | Yes |
-| File transfers | Yes | Yes | Wi-Fi, or L2CAP on API 29+ |
-| [Multipeer](/universalhubs/multipeer) (host and client) | Foreground | Yes | - |
-| [Nearby](/universalhubs/nearby) (host and client) | Foreground | macOS | With Google Play services |
+| Feature | iOS | macOS / Mac Catalyst | Android | Windows / Linux |
+|---------|-----|----------------------|---------|-----------------|
+| [Bluetooth LE](/universalhubs/bluetoothle/) host | Foreground | Yes | Yes | — |
+| [Bluetooth LE](/universalhubs/bluetoothle/) client | Yes | Yes | Yes | Register an `IBleManager` |
+| [HTTP](/universalhubs/http/) host and client | Foreground | Yes | Yes | Yes |
+| [Multipeer](/universalhubs/multipeer/) | Foreground | Yes | — | — |
+| [Nearby](/universalhubs/nearby/) | Foreground | macOS | With Google Play services | — |
+| [Files and media channels](/universalhubs/files/) | Yes | Yes | Yes (L2CAP over BLE on API 29+) | HTTP |
 
 ## Things to Know
 
 - **Plane, hotel and public Wi-Fi usually isolate clients from each other.** mDNS and device-to-device traffic are
-  blocked there, which is why BLE is the fallback. [Multipeer](/universalhubs/multipeer) and
-  [Nearby](/universalhubs/nearby) work there too.
-- Hosting runs while the app is in the foreground, the same as BLE hosting.
-- The host needs a BLE hosting stack registered even if Bluetooth is off. Wi-Fi-only hosting works on a device whose
-  Bluetooth is off or unavailable.
-- Hub values travel as JSON over Wi-Fi. They are re-framed, never re-serialized, so `IBleHubSerializer` must produce
-  JSON (the default does). BLE, Multipeer and Nearby carry them as-is.
-- An mDNS TXT record fits about six hubs per host.
+  blocked there. BLE, Multipeer and Nearby still work.
+- **Hubs are foreground only**: no background BLE, no state restoration.
+- **A transport that can't start** (Bluetooth off, no network, not this platform) is skipped as long as another starts.
 
 ## Sample
 
-The [sample](https://github.com/shinyorg/hubs/tree/v1/samples) is the BluetoothLE Hubs tic-tac-toe game
-hosting over every transport (BLE, Wi-Fi, Multipeer between iPhones and Macs, and Nearby), plus an always-on chat, for iOS,
-Android and macOS:
-- Each hosted game runs only while hosting (`StartHub` / `StopHub<GameHub>`). The join list shows how each game is
-  reachable, and the game screen says which transport is in use.
-- The chat hub starts with the app and stays open. "Share on the internet" starts a quick tunnel, which only the chat
-  hub allows.
-- 📞 and 📹 in a chat FaceTime the other person over whichever link they're on, built on media channels,
-  [Shiny.Audio](/audio/duplex)'s duplex voice and the [CameraView](/controls/cameraview/)'s live video.
+The [sample](https://github.com/shinyorg/hubs/tree/main/samples) is a .NET MAUI app (Android, iOS) and a macOS AppKit
+app with a tic-tac-toe game and an always-on chat, hosting and joining over every transport:
+- One phone hosts a game and plays X. The next to join plays O, and anyone after that spectates.
+- Moves are hub calls, and board updates and emotes are pushes. Avatars and chat photos are file transfers.
+- 📞 and 📹 in a chat call the other person over whichever link they're on, built on media channels.
+- The **Transports** page turns each transport on and off for hosting and connecting, and **Solo** runs one alone both
+  ways, so each can be tested on its own.
 
 ## Next
 
-- [Hosting](/universalhubs/hosting): `AddUniversalServer`, `UniversalHub<T>`, start/stop, tunnels, disconnect reasons
-- [Connecting Clients](/universalhubs/client): discovery, transport choice, resume, connecting by address, files
-- [Multipeer](/universalhubs/multipeer): Apple devices with no shared network, over MultipeerConnectivity
-- [Nearby](/universalhubs/nearby): Android, iOS and macOS with no shared network, over Google's Nearby Connections
-- [How It Works](/universalhubs/how-it-works): the Wi-Fi wire protocol, mDNS discovery and file routes
+- [Contracts & Source Generator](/universalhubs/contracts/): what a hub interface may contain, and what gets generated
+- [Hosting](/universalhubs/hosting/): `AddUniversalServer`, `UniversalHub<T>`, `IHubContext<THub>`, start and stop
+- [Connecting Clients](/universalhubs/client/): discovery, transport order, calls, streams, events, resume
+- [Files & Media Channels](/universalhubs/files/): file transfers and live packet pipes on every transport
+- Transports: [Bluetooth LE](/universalhubs/bluetoothle/), [HTTP](/universalhubs/http/),
+  [Multipeer](/universalhubs/multipeer/), [Nearby](/universalhubs/nearby/),
+  [your own](/universalhubs/custom-transports/)
+- [Dynamic Hubs](/universalhubs/dynamic-hubs/): hubs defined while the app runs
+- [How It Works](/universalhubs/how-it-works/): the wire protocols, discovery, limits and best practices
 
 <AiSkill skillName="shiny-universal-hubs" />

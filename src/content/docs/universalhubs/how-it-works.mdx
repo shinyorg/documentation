@@ -1,174 +1,184 @@
 ---
 title: How It Works
-description: The Wi-Fi, Multipeer and Nearby wire protocols, discovery, file routes and media channels behind Universal Hubs.
+description: The wire protocols, discovery, limits and best practices behind Universal Hubs - Bluetooth LE frames, and the peer-link session shared by HTTP, Multipeer and Nearby.
 ---
 
-Universal Hubs adds a second transport to [BluetoothLE Hubs](/blehubs/how-it-works). The hub logic (dispatch,
-`Clients`, groups, ordering, `MaxClients`) stays in BluetoothLE Hubs, and Universal Hubs carries calls through its
-transport seams:
+## Hubs over Transports
 
-- **Host:** each hub's `IHubContext<THub>.TransportEndpoint` accepts clients from another transport, so BLE and Wi-Fi
-  clients are registered in the same hub.
-- **Client:** `BleHubClient.ConnectExternal` runs the same generated proxy over a Switchboard line instead of GATT.
+The hub logic (dispatch, `Clients`, groups, ordering, `MaxClients`, `ValidateClient`, resume) lives in one transport-free
+core. Each transport only carries handshakes, calls, pushes and disconnects for it:
 
-[Multipeer](#multipeer) and [Nearby](#nearby) plug into the same seams and share one peer-to-peer wire.
+- **Host:** each hub's runtime is an `IHubEndpoint`. A transport accepts a client, hands its handshake to the endpoint
+  with an `IHubPeerChannel` the hub reaches it through, and passes calls on. Clients on every transport are registered
+  in the same hub.
+- **Client:** the generated proxy runs over an `IHubConnectionTransport` that a client transport creates per connection.
+  The proxy, events and file methods don't know which transport they're on.
 
-## Wire Protocol
+There are two wires. **Bluetooth LE** chunks messages into GATT frames. **HTTP, Multipeer and Nearby** share one
+**peer-link session** of whole messages, over a WebSocket, an `MCSession` or a Nearby channel.
 
-Each hub is one [Switchboard](/httpserver/switchboard) at `{Endpoint}/{characteristicUuid}`, `/hubs/...` by default.
-The hub's own methods are not Switchboard methods. Reserved methods carry them by name, exactly like the BLE frames do:
+Everywhere:
 
-| Call | Arguments | Returns |
+- **Values** are the exact bytes the hub's `IHubSerializer` wrote. They're never re-serialized, so any serializer works
+  on every transport.
+- **The handshake** carries the protocol version, the client's name, app version and properties, whether it can resume,
+  and its serializer's name. The host refuses another protocol version, another serializer, a stopped hub, a full hub
+  and whatever `ValidateClient` refuses.
+- **Ordering.** The host sends each message to a client whole, under a lock. The client raises pushes one at a time, in
+  order. A client is registered and `OnConnectedAsync` has run before the handshake reply, and `Context.Abort()` takes
+  effect after the reply.
+- **Disconnect is cooperative.** The host sends a disconnect carrying a `HubDisconnectReason` and message; the client
+  sends one before it leaves, so the host can tell a client that left from one that dropped.
+
+## Bluetooth LE
+
+### GATT Layout
+
+- Each hub is **one characteristic** with **Write** (client → host) and **Notify** (host → client), in the GATT service
+  the hub picked. Calls are routed by characteristic, so messages never carry a hub name.
+- The host advertises the services of its running, advertised hubs, plus an optional local name. Every advertised
+  service must fit in 31 bytes: 3 bytes of flags, then one field per UUID size (2 bytes of header plus the UUIDs).
+  One 128-bit UUID fits beside a short name; two 128-bit UUIDs take 37 bytes, and Android then refuses to advertise while
+  iOS moves the extra UUID into an Apple-only overflow area. Registration throws before that can happen.
+- A scan can't tell which hubs a host is running. Joining a stopped hub is refused by the handshake.
+
+Why not reads for responses? A client can't tell when a response is ready, so it would have to poll. Reads are also
+ambiguous with several calls in flight, and they're still capped by the MTU. Correlated, chunked notifications avoid all
+of that.
+
+### Frames
+
+A BLE write or notification carries `MTU - 3` bytes: 20 at the BLE minimum, usually 182 or more on iOS, and up to 512.
+The client asks for the largest ATT MTU (517) on every new connection. Every message (call, reply, stream item, push) is
+split into frames that fit:
+
+```
+[version][kind][message id:2][sequence:2][flags][total length:4 - first frame only] + chunk
+```
+
+| Kind | Direction | |
 |---|---|---|
-| `hub.handshake` | `{protocol, name, appVersion, properties}` | `{accepted, reason, hostName, hostId, fileToken}` |
-| `hub.invoke` | `method`, `[args...]` | `{"result": value}`, `{}` for `Task`, or `{"error": {type, message}}` |
-| `hub.stream` | `method`, `[args...]` | a stream of `{"item": value}`, possibly ending with one `{"error": ...}` |
-| `hub.push` (host → client) | `event`, `[args...]` | – |
+| `Handshake` (`0x01`) / `HandshakeAck` (`0x02`) | client → host → client | the handshake; the ack has the host's name, the L2CAP file and media PSMs, a media token and a resume token |
+| `Invoke` (`0x10`), `StreamInvoke` (`0x12`), `Cancel` (`0x13`) | client → host | calls by method name |
+| `Completion` (`0x21`), `StreamItem` (`0x22`), `StreamEnd` (`0x23`), `Error` (`0x24`) | host → client | results, items, and errors with their type and message |
+| `Push` (`0x30`) | host → client | an event and its arguments |
+| `Rename` (`0x14`), `HostRenamed` (`0x31`) | both | a new name |
+| `Resume` (`0x15`) | client → host | a dropped client back on a new link, with its resume token; answered with a `HandshakeAck` |
+| `Disconnect` (`0x40`) | both | a reason code and an optional message |
 
-- **Values.** Each value is the exact JSON that `IBleHubSerializer` produced. It's re-framed between BLE's argument
-  format and a JSON array, and never re-serialized. A serializer that doesn't produce JSON fails with an explanatory
-  error.
-- **Errors** travel in envelopes, not as Switchboard errors, so the remote exception type and message survive as
-  `BleHubRemoteException`, the same as over BLE.
-- **Handshake.** It is the first call on a line. The host refuses other protocol versions, any handshake while the hub
-  isn't running over Wi-Fi, and whatever the hub's own rules refuse.
-- **Disconnect.** A host-initiated disconnect is a Switchboard hang-up that carries
-  `{"reason": <HubDisconnectReason>, "message": ...}`, so the client reads the exact reason. `Context.Abort` hangs up
-  after the reply has been sent.
-- **Resume.** Switchboard's resume window means a dropped line that comes back keeps its connection id, so the hub
-  sees nothing. `OnDisconnectedAsync` runs only when the line is gone for good.
-- **Versioning.** `UniversalHubProtocol.Version` (currently 2) covers the reserved method names, envelopes, handshake
-  records, TXT keys and file routes. The handshake refuses a mismatch.
-- **[Dynamic hubs](/universalhubs/hosting#dynamic-hubs)** share one Switchboard at `{Endpoint}/{hub}`, mapped behind
-  the compiled hubs' literal routes, and each line's handshake picks its hub from the path. Clients reach a dynamic hub
-  at the same path as a compiled one, with no protocol change; an unknown one refuses the handshake with "Hub not
-  found". With dynamic hubs on, a tunnel can't reach any other path under the endpoint.
+- **Matching replies**: frames are put back together by message id, and replies are matched to calls the same way.
+  Many calls can be in flight at once.
+- **Media channels** open the media PSM from the ack and send the token as their first frame. The host answers `[0x01]`,
+  or closes the channel. After that, every packet is `[length:4 LE][bytes]`.
+- **Files** go over the file PSM with Shiny's L2CAP transfers.
+- **Resume**: after a dropped link the client connects again, on any central, and sends `Resume` with its token instead
+  of a handshake. The host moves the held connection onto the new central and replays the pushes it kept.
+- **Versioning.** `FrameCodec.ProtocolVersion` (currently **2**) covers the frame layout and kinds. `FrameKind` values
+  never change. The handshake refuses a mismatch.
 
-## Discovery
+## The Peer-Link Session
 
-**mDNS** advertises one instance per service type per host, named after the host's `LocalName`. Hubs that share a
-type share one advertisement. Its TXT record carries:
+HTTP, Multipeer and Nearby carry the same reliable, ordered messages:
+
+```
+[0] version  [1] kind  [2..5] message id  [6] name length  [7..] name  [...] payload
+```
+
+| Kind | Direction | Carries |
+|---|---|---|
+| `Handshake` / `HandshakeReply` | client → host → client | the hub's name; the reply has the host's name and id, whether files and media channels are available, and a resume token |
+| `Invoke`, `Stream`, `Cancel` | client → host | the method and its arguments |
+| `Completion`, `StreamItem`, `StreamEnd`, `Error` | host → client | results, items, and errors with their type and message |
+| `Push` | host → client | the event and its arguments |
+| `Rename`, `HostRenamed` | both | a new name |
+| `Resume` | client → host | a dropped client back on a new session, with its token; answered with a `HandshakeReply` |
+| `Disconnect` | both | why the hub ended the session, or that the client is leaving |
+| `FileRequest`, `FileReply`, `FileDone` | both | file transfers. Replies use HTTP's status codes: 200, 400 bad name, 403 refused, 404 missing or no files, 409 exists, 413 too big |
+| `MediaOpen`, `MediaOpened`, `MediaPacket`, `MediaClose` | both | the media channel |
+
+- **Control records** (handshakes, errors, file requests) are JSON. Hub values are the serializer's bytes.
+- **Resume.** The reply carries a secret `ResumeToken` and `ResumeWindowSeconds`. After a dropped session the client
+  opens a new one and sends `Resume` with the token. The host moves the held connection onto it - the new session takes
+  the connection's `ws:` / `mc:` / `nb:` id - answers with a handshake reply, then replays the pushes it kept.
+- **Versioning.** `PeerProtocol.Version` (currently **2**) covers the message layout, the `PeerMessageKind` values
+  (never renumbered), the control records, file names, Multipeer's advertisement keys and Nearby's endpoint info and
+  frames. The handshake refuses a mismatch.
+
+### HTTP
+
+- **Each hub connection is a WebSocket** at `{BasePath}/{hub name}` (`/hubs/game`). One binary WebSocket message is one
+  peer-link message. Files and media channels are in-band.
+- **Tunnels.** Through a tunnel, a hub that doesn't allow it (or isn't served over HTTP) answers 404.
+- **mDNS** advertises one instance per service type per host, named after the host's `LocalName`. Hubs that share a type
+  share one advertisement. Its TXT record carries:
 
 | Key | |
 |---|---|
-| `proto` | The protocol version |
-| `hostId` | `UniversalHubHostOptions.HostId` |
+| `proto` | `UniversalHubProtocol.Version` |
+| `hostId` | `UniversalServerOptions.HostId` |
 | `name` | The host's name |
-| `path` | The endpoint (base path) |
-| `hubs` | The running hubs' characteristic UUIDs, comma separated |
+| `path` | The base path |
+| `hubs` | The running hubs' names, comma separated. A TXT string holds 255 bytes, so about six hubs |
 
-A TXT record fits about six hubs.
+- **Versioning.** `UniversalHubProtocol.Version` (currently **3**) covers the WebSocket route and the TXT keys. Clients
+  skip hosts advertising another version.
 
-**BLE** advertises the one service UUID while any hub runs, so a BLE result says "a hub host", not which hubs.
-
-**The client** merges the two by name, and fills in `hostId` from TXT and from the handshake reply.
-
-## Files
-
-Files are plain HTTP, not Switchboard:
-
-- `PUT` / `GET {Endpoint}/files/{name}`, with the `X-Hub-File-Token` header set to the token from the handshake.
-- They follow `BleHubHostOptions.EnableFileTransfers` (the directory, uploads and downloads allowed, overwrite,
-  `MaxUploadSize`) plus `UniversalHubHostOptions.AuthorizeFile`.
-
-| Status | Meaning |
-|---|---|
-| 400 | A bad name or path traversal |
-| 401 | A missing or unknown file token |
-| 403 | Refused by the host's rules |
-| 404 | The file is missing, or file transfers are off |
-| 409 | The file exists and overwrite is off |
-| 411 | An upload without a length |
-| 413 | An upload larger than `MaxUploadSize` |
-
-## Media Channels
-
-A media channel is an ordered packet pipe per client, next to its hub connection. Over Bluetooth it is the
-[BluetoothLE Hubs media channel](/blehubs/files#media-channels), on its own L2CAP PSM. Over Wi-Fi it is a WebSocket:
-
-- `GET {Endpoint}/media` as a WebSocket upgrade, with the `X-Hub-Media-Token` header set to the `mediaToken` from the
-  handshake reply. One binary message is one packet, of at most `mediaMaxPacketSize` bytes.
-- Both reply fields are null when the host has no media channels. They're optional, so the protocol version is
-  unchanged.
-- Through a tunnel, the route is open when any hub allows tunnels, and the token's own hub must allow them too.
-
-| Status | Meaning |
-|---|---|
-| 400 | Not a WebSocket upgrade |
-| 401 | A missing or unknown media token |
-| 404 | The host has no media channels |
-
-### Using Them
-
-The channel is yours: blehubs and this library move whole packets in order and never look inside. The
-[sample](https://github.com/shinyorg/hubs/tree/v1/samples)'s calls show one way to use it. Its packets carry
-signalling and media, and the host relays calls between its clients. Video is latest-wins, and audio is PCM16 over
-Wi-Fi and IMA ADPCM over Bluetooth.
-
-## Multipeer
-
-[Multipeer](/universalhubs/multipeer) uses the same seams as Wi-Fi, with the peer-link wire it shares with
-[Nearby](#nearby).
+### Multipeer
 
 - **One `MCSession` per hub connection.** The host accepts every invitation into a new, encrypted session. No 8-peer
   limit, and clients never connect to each other.
 - **Discovery.** One advertisement per host under the Multipeer service type. Its `discoveryInfo` has the same keys as
-  the mDNS TXT record (`proto`, `hostId`, `name`, `hubs`) and is replaced when the running hubs change. The host's peer
-  id is kept across launches, so a relaunched host isn't listed twice.
-- **Messages** are reliable and ordered:
+  the TXT record (`proto`, `hostId`, `name`, `hubs`) and is replaced when the running hubs change. The host's peer id is
+  kept across launches.
+- **Files** are Multipeer resources, named `hubfile-` + the request's message id.
 
-  ```
-  [0] version  [1] kind  [2..5] message id  [6] name length  [7..] name  [...] payload
-  ```
-
-  | Kind | Direction | Carries |
-  |---|---|---|
-  | `Handshake` / `HandshakeReply` | client → host → client | the hub's characteristic UUID; the reply has the host's name and id, and whether files and media channels are available |
-  | `Invoke`, `Stream`, `Cancel` | client → host | the method and its arguments |
-  | `Completion`, `StreamItem`, `StreamEnd`, `Error` | host → client | results, items, and errors with their type and message |
-  | `Push` | host → client | the event and its arguments |
-  | `Rename`, `HostRenamed` | both | a new name |
-  | `Disconnect` | both | why the hub ended the session, or that the client is leaving |
-  | `FileRequest`, `FileReply`, `FileDone` | both | file transfers (the file itself is a Multipeer resource) |
-  | `MediaOpen`, `MediaOpened`, `MediaPacket`, `MediaClose` | both | the media channel |
-
-- **Values** are the bytes `IBleHubSerializer` wrote, never JSON envelopes, so any serializer works.
-- **Errors** keep the same types and wording as BLE and Wi-Fi.
-- **Disconnects.** Each side says goodbye before ending the session. A session that ends without one leaves a client
-  that can resume held for the host's resume window; otherwise it is a `ClientTimeout`.
-- **Resume.** The client's handshake says it can resume (`Resumable`), and the reply carries a secret `ResumeToken` and
-  `ResumeWindowSeconds`. After a dropped session the client opens a new one and sends `Resume` (`0x14`) with the token
-  instead of a handshake. The host moves the held connection onto the new session - the session takes the connection's
-  `mc:` / `nb:` id - answers with a handshake reply, then replays the pushes it kept. A session the client dropped from
-  that the host hasn't seen end yet is closed. Optional fields and a new message kind, so `PeerProtocol.Version` stays 1.
-- **Versioning.** `PeerProtocol.Version` (currently 1) covers the message layout, kinds, control records,
-  advertisement keys and file resource names, for Multipeer and Nearby alike. The handshake refuses a mismatch.
-
-## Nearby
-
-[Nearby](/universalhubs/nearby) carries the same messages as Multipeer, over Google's Nearby Connections. What's
-different is underneath them:
+### Nearby
 
 - **One connection per pair of devices, many channels.** Nearby allows one connection between two devices, and one
-  advertisement and one discovery per app. So each device keeps one connection per remote device and carries every hub
-  session as a channel inside it, opened from either end. Two hubs on one host, or two phones visiting each other, share
-  one connection. It hangs up two seconds after its last channel closes.
+  advertisement and one discovery per app. Each device keeps one connection per remote device and carries every hub
+  session as a channel inside it, opened from either end. It hangs up two seconds after its last channel closes.
 - **Discovery.** One advertisement per host. Its endpoint info (at most 131 bytes) is the protocol version, the host id,
-  a 4-byte tag per running hub (the start of SHA-256 of its characteristic UUID) and the host's name, cut to fit.
-  Clients only list hosts running their hub.
+  a 4-byte tag per running hub (the start of SHA-256 of its lower-case name) and the host's name, cut to fit. Clients
+  only list hosts running their hub.
 - **Frames.** Each Nearby payload is one frame: a kind (`Message`, `Part`, `Last`, `Open`, `Close`, `FileName`), a bit
   for which end opened the channel, and the channel's number. A message over Nearby's 32 KB payload limit travels as
-  `Part`s and a `Last`, never interleaved with another message on its channel.
+  `Part`s and a `Last`, never interleaved with another message on its channel. `NearbyFrameKind` values never change.
 - **Files** are Nearby file payloads. A `FileName` frame ties each one to its channel and name; it may arrive before or
   after the file.
-- **Versioning.** `PeerProtocol.Version` covers the endpoint info and frames too. `NearbyFrameKind` values never change.
+
+## Discovery
+
+The client runs every transport's discovery at once and merges the results **by the host's name**, because a BLE
+advertisement has no room for a host id. mDNS, Multipeer, Nearby and the handshake fill in the host id. A host with no
+transports left has gone.
+
+## Limits
+
+| | Default | Change with |
+|---|---|---|
+| Largest message | 256 KB | `HubProtocolOptions.MaxPayloadSize` (`server.Protocol(...)` or a client's `o.Protocol(...)`) |
+| Call timeout | 30 seconds | `RequestTimeout` |
+| Partial message lifetime | 30 seconds | `ReassemblyTimeout` |
+| Partial messages per client | 16 | `MaxPartialMessages` |
+| Clients per hub | 8 | `hub.MaxClients(...)` |
+| Resume window | 30 seconds | `UniversalServerOptions.ResumeWindow` |
+| Pushes kept for a held client | 128 | `ResumeBufferSize` |
+| Media packet | 128 KB | `EnableMediaChannels(maxPacketSize)` |
+
+Throughput over GATT is a few KB/s, which is plenty for moves, commands and state. Use
+[files](/universalhubs/files/) for anything big.
 
 ## Best Practices
 
-- **Set your own service UUID and mDNS service types**, so other apps' hosts stay out of your scans.
-- **Give hosts distinct names.** Discovery merges BLE and mDNS results by name.
+- **Put the contract where both sides compile against it**, and treat names as a public API: hub names, method names and
+  event names travel on the wire. Add new members; don't rename existing ones.
+- **Register every wire type** in a `JsonSerializerContext`. A missing registration fails at runtime, not compile time.
+- **Set your own BLE UUIDs, mDNS types, Multipeer type and Nearby service id**, so other apps' hosts stay out of your
+  scans. Prefer 16-bit or 32-bit BLE service UUIDs when several hubs advertise.
+- **Give hosts distinct, short names.** Discovery merges by name, and the BLE advertisement is 31 bytes.
 - **Persist `HostId`** if clients should recognize a host across app restarts.
-- **Keep BLE as the fallback.** Plane, hotel and public Wi-Fi usually block device-to-device traffic.
-  [Multipeer](/universalhubs/multipeer) (Apple devices) and [Nearby](/universalhubs/nearby) work there too.
-- **Test on real devices**, both ways round (an iOS host with an Android client, and the reverse), on Wi-Fi and with
-  Wi-Fi off.
+- **Keep a transport that works without a network.** Plane, hotel and public Wi-Fi usually block device-to-device
+  traffic. BLE, [Multipeer](/universalhubs/multipeer/) and [Nearby](/universalhubs/nearby/) work there.
+- **Marshal hub events to the UI thread**, and **never store state on the hub instance**: it is recreated for every call.
+- **Test on real devices**, both ways round (an iOS host with an Android client, and the reverse), over each transport
+  on its own. The sample's **Transports** page does that.

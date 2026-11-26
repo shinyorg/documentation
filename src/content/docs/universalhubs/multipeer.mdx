@@ -1,6 +1,6 @@
 ---
 title: Multipeer
-description: Apple devices host and join universal hubs over MultipeerConnectivity - Wi-Fi speed with no shared network, beside BLE and Wi-Fi.
+description: Apple devices host and join hubs over MultipeerConnectivity - Wi-Fi speed with no shared network.
 ---
 import NugetDownloads from '/src/components/NugetDownloads.astro';
 
@@ -8,13 +8,12 @@ import NugetDownloads from '/src/components/NugetDownloads.astro';
 |---------|---------|
 | Multipeer | <NugetDownloads name="Shiny.UniversalHubs.Multipeer" /> |
 
-`Shiny.UniversalHubs.Multipeer` adds Apple's **MultipeerConnectivity** as a third transport, beside BLE and Wi-Fi.
-MultipeerConnectivity picks the radio itself: the Wi-Fi network when both devices are on one, peer-to-peer Wi-Fi (AWDL)
-when they aren't, and Bluetooth when Wi-Fi is off. Two iPhones on a plane get Wi-Fi bandwidth instead of BLE's, and no
-MTU.
+`Shiny.UniversalHubs.Multipeer` serves and joins hubs over Apple's **MultipeerConnectivity**. It picks the radio
+itself: the Wi-Fi network when both devices are on one, peer-to-peer Wi-Fi (AWDL) when they aren't, and Bluetooth when
+Wi-Fi is off. Two iPhones on a plane get Wi-Fi bandwidth instead of BLE's, and no MTU.
 
-It only connects Apple devices: iPhone, iPad, Mac Catalyst and macOS. Android players keep using Wi-Fi or BLE against
-the same host, in the same hub, with the same groups and pushes.
+It only connects Apple devices: iPhone, iPad, Mac Catalyst and macOS. Android players use another transport against the
+same host, in the same hub, with the same groups and pushes.
 
 ## Setup
 
@@ -23,21 +22,19 @@ dotnet add package Shiny.UniversalHubs.Multipeer
 ```
 
 ```csharp
-// host - one Multipeer service type per host, like the BLE service UUID
+// host - one Multipeer service type per server, then each hub opts in
 builder.Services.AddUniversalServer(server => server
-    .Multipeer("mygame-mc")
-    .AddHub<GameHub>(GameCharacteristicUuid, "_mygame._tcp"));
+    .Multipeer("mygame-mc", o => o.DisplayName = "Allan's iPad")
+    .AddHub<GameHub>("game", hub => hub.UseMultipeer().UseHttp("_mygame._tcp")));
 
-// client - inside AddUniversalHubClient's options
-builder.Services.AddUniversalHubClient<IGameHub>(GameCharacteristicUuid, "_mygame._tcp", o =>
-{
-    o.ServiceUuid = ServiceUuid;
-    o.Multipeer("mygame-mc");
-});
+// client
+builder.Services.AddUniversalHubClient<IGameHub>("game", o => o
+    .UseHttp("_mygame._tcp")
+    .UseMultipeer("mygame-mc", mc => mc.InviteTimeout = TimeSpan.FromSeconds(10)));
 ```
 
-Register it in shared code. `HubTransports.All` includes Multipeer, so `Start()` hosts over it and `DiscoverAll()` /
-`Connect()` use it. Where MultipeerConnectivity doesn't exist (Android, Windows, Linux) it is skipped quietly.
+Register it in shared code. Where MultipeerConnectivity doesn't exist (Android, Windows, Linux) it reports itself
+unsupported and is skipped.
 
 ### Info.plist
 
@@ -50,7 +47,7 @@ when either is missing.
 <string>The local network is used to talk to nearby devices</string>
 <key>NSBonjourServices</key>
 <array>
-    <string>_mygame._tcp</string>       <!-- the hub's mDNS service type, as before -->
+    <string>_mygame._tcp</string>       <!-- the hub's HTTP mDNS type, if it has one -->
     <string>_mygame-mc._tcp</string>    <!-- Multipeer -->
     <string>_mygame-mc._udp</string>
 </array>
@@ -59,29 +56,20 @@ when either is missing.
 ### The service type
 
 - 1 to 15 lowercase letters, digits and hyphens, with at least one letter and no leading, trailing or doubled hyphen.
-- It **must differ** from the name inside any hub's mDNS service type (`mygame` for `_mygame._tcp`). MultipeerConnectivity
-  advertises over Bonjour as `_{type}._tcp` too.
-- The host uses one for all its hubs. Every running hub is listed in its one advertisement, the way every hub shares one
-  BLE service.
+- It **must differ** from the name inside any hub's mDNS service type (`mygame` for `_mygame._tcp`):
+  MultipeerConnectivity advertises over Bonjour as `_{type}._tcp` too.
+- One per server. Every running hub served over Multipeer is listed in its one advertisement.
 
 ### Options
 
 | Host (`MultipeerHostOptions`) | Default | |
 |---|---|---|
-| `DisplayName` | the BLE `LocalName` | The host's Multipeer name. At most 63 UTF-8 bytes; longer is cut |
+| `DisplayName` | the server's `LocalName` | The host's Multipeer name. At most 63 UTF-8 bytes; longer is cut |
 
 | Client (`MultipeerClientOptions`) | Default | |
 |---|---|---|
-| `DisplayName` | `Hub client` | This device's Multipeer name, which the host sees as `connection.Multipeer.DisplayName`. The hub client name still travels in the handshake |
+| `DisplayName` | `Hub client` | This device's Multipeer name, which the host sees as `connection.MultipeerPeer().DisplayName`. The hub client name still travels in the handshake |
 | `InviteTimeout` | 10 seconds | How long the host gets to accept and connect before the next transport is tried |
-
-## Discovery and Connecting
-
-- `DiscoverAll()` merges Multipeer hosts with BLE and mDNS ones by name. `HubHostInfo.Multipeer` is set while the host
-  is seen over Multipeer, and `Transports` includes `Multipeer`.
-- `Connect()` tries `Prefer` first, then **Wi-Fi, Multipeer, BLE**. Wi-Fi comes first among the rest because Android
-  peers can use it too. Multipeer beats BLE everywhere it works.
-- `client.Transport` is `HubTransports.Multipeer` while connected over it.
 
 ## In the Hub
 
@@ -89,26 +77,29 @@ when either is missing.
 public override Task OnConnectedAsync(HubConnection connection)
 {
     // connection.Id: mc:{id}
-    // connection.Transport: HubTransports.Multipeer
-    // connection.Multipeer?.DisplayName: the peer's radio name
+    if (connection.Transport is MultipeerHostTransport)
+        Log(connection.MultipeerPeer()?.DisplayName);   // the peer's radio name
     return Task.CompletedTask;
 }
 ```
 
-Everything else is the same hub: `Clients`, groups, `MaxClients` (counted across every transport), `ValidateClient`,
-`Context.Abort`, `IHubContext`.
+## Discovery and Connecting
 
-## What's Different from Wi-Fi
+- `DiscoverAll()` merges Multipeer hosts with the other transports by name. `host.IsSeenOver<MultipeerClientTransport>()`
+  says whether it is seen over Multipeer.
+- The advertisement lists the running hubs, so a client only sees hosts running its hub.
+- `Connect` tries it in the client's priority order. `new HubConnectOptions("Allan").Only<MultipeerClientTransport>()`
+  uses nothing else.
 
-- **Values travel as binary**, exactly as `IBleHubSerializer` wrote them, the way they do over BLE. Any serializer
-  works, not only JSON.
-- **Renames work** (`client.Rename`, `HostRenamed`), as they do over BLE.
-- **Files** move as Multipeer resources, under the same `EnableFileTransfers` and `AuthorizeFile` rules as Wi-Fi.
-- **Media channels** ride the session as reliable, ordered messages, so [calls](/blehubs/files#media-channels) work.
+## What's Different
+
+- **One session per hub connection.** The host accepts each client into its own encrypted `MCSession`, so
+  MultipeerConnectivity's 8-peer limit never applies and clients never connect to each other.
+- **Files** move as Multipeer resources. **Media channels** ride the session as reliable, ordered messages. **Renames
+  work.**
 - **Resume.** A Multipeer session ends when the app goes to the background or the peer goes out of range. The client
-  invites the host again and [resumes](/universalhubs/client#resume) as the same connection within the host's resume
-  window; after that it is a `ClientTimeout`.
-- **One session per hub connection.** The host accepts each client into its own `MCSession`, so MultipeerConnectivity's
-  8-peer limit never applies and clients never connect to each other. Sessions are always encrypted.
+  invites the host again and [resumes](/universalhubs/client/#resume) as the same connection within the host's resume
+  window.
+- **The host's peer id** is kept across launches, so a relaunched host isn't listed twice.
 
-See [How It Works](/universalhubs/how-it-works#multipeer) for the wire protocol.
+See [How It Works](/universalhubs/how-it-works/#multipeer) for the wire protocol.
