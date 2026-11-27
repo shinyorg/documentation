@@ -594,10 +594,16 @@ export const componentTemplateMap: Record<string, TemplateParamRef[]> = {
         { kind: 'shinyapp', paramId: 'ainotifications' },
     ],
     speechmicrosoftai: [{ kind: 'shinyapp', paramId: 'speechmicrosoftai' }],
-    'blehubs-host': [{ kind: 'shinyapp', paramId: 'blehubshost' }],
-    'blehubs-client': [{ kind: 'shinyapp', paramId: 'blehubsclient' }],
     'universalhubs-host': [{ kind: 'shinyapp', paramId: 'universalhubshost' }],
     'universalhubs-client': [{ kind: 'shinyapp', paramId: 'universalhubsclient' }],
+    'universalhubs-bluetoothle': [
+        { kind: 'shinyapp', paramId: 'universalhubshost' },
+        { kind: 'shinyapp', paramId: 'universalhubsble' },
+    ],
+    'universalhubs-http': [
+        { kind: 'shinyapp', paramId: 'universalhubshost' },
+        { kind: 'shinyapp', paramId: 'universalhubshttp' },
+    ],
     'universalhubs-multipeer': [
         { kind: 'shinyapp', paramId: 'universalhubshost' },
         { kind: 'shinyapp', paramId: 'universalhubsmultipeer' },

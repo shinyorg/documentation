@@ -25,7 +25,6 @@ Always run `npm run build` after non-trivial content/config changes — MDX erro
 - `src/pages/llms.txt.ts`, `llms-full.txt.ts` — generated LLM-facing text endpoints
 - `astro.config.mjs` — Astro + Starlight config, redirects, giscus, analytics
 - `public/` — static assets copied verbatim into `dist/`
-- `scripts/extract-templates.mjs` — build-support script
 
 `dist/`, `.astro/`, and `node_modules/` are generated — never edit by hand.
 
@@ -65,17 +64,6 @@ https://api.nuget.org/v3-flatcontainer/<package-id-lowercased>/index.json
 - Keep `Microsoft.*` / `.NET` framework packages (the `MicrosoftVersion` property) on the same major as the project TFM — take the latest patch within that major, not a different major.
 
 After editing, run `npm run build` to confirm nothing broke.
-
-### Sync the `dotnet new` templates with the Template Builder
-
-The real `dotnet new` templates live in the **sibling repo `~/Desktop/dev/templates`** (`ProjectTemplates/ShinyApp`, `ShinyAspNet`, `ShinyBlazor`). **Those are the source of truth** — the builder's `templateFiles.<id>.ts` files are AUTO-GENERATED from them by `scripts/extract-templates.mjs` (templates → builder). `XplatLib` and the `ItemTemplates/*` are **not** part of the builder, so leave them out of any builder-sync work.
-
-So "update the templates from the builder" really means: apply the same edits (e.g. the version bumps above) to the template `.csproj` files, then **regenerate the builder so the two stay in sync**:
-
-1. Edit `~/Desktop/dev/templates/ProjectTemplates/{ShinyApp,ShinyAspNet,ShinyBlazor}/*.csproj`. Match by MSBuild property name (`<ShinyVersion>…`) or `PackageReference Include="…"` and set the target value — the templates can drift from the builder (e.g. an older `ShinyDocumentDbVersion`), so match by name, not by old value.
-2. Bump the NuGet package version: in `~/Desktop/dev/templates/Template.csproj` (the `Shiny.Templates` package project), increment `<PackageVersion>` by one **minor** (e.g. `7.0.0` → `7.1.0`).
-3. From this repo, run `node scripts/extract-templates.mjs` to regenerate all three `templateFiles.<id>.ts`.
-4. `npm run build` here to confirm, and `git diff` both repos to review.
 
 ### Add a library to the builders
 

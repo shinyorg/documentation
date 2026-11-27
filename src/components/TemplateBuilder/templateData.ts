@@ -39,9 +39,8 @@ export const VERSIONS = {
     shinyFirestoreMobile: '5.0.0',
     /** Shiny.Push.FirebaseMessaging is off the core train */
     shinyPushFirebase: '7.0.0',
-    shinyBleHubs: '2.0.0',
-    /** shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5 */
-    shinyUniversalHubs: '2.0.0',
+    /** shinyorg/hubs - the core and every transport package share one version */
+    shinyUniversalHubs: '3.0.0-beta.1',
     shinyAppDeviceBridge: '4.0.0',
     shinyPermissions: '1.0.0-beta-0009',
     /** shinyorg/actors - Shiny.Actors and its add-ons ship together */
@@ -289,18 +288,20 @@ const MAUI_PARAMS: TemplateParam[] = [
         version: VERSIONS.shinyClient,
         description: 'Region sets read from a SQLite document store, plus bundled US & Canada regions (Shiny.Geofencing.Regions.DocumentDb) https://shinylib.net/client/locations/region-geofencing/',
         visibleWhen: (s) => !!s.regiongeofencing },
-    { id: 'blehubshost', label: 'BLE Hubs - Host', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyBleHubs,
-        description: 'SignalR-style hubs served over Bluetooth LE (Shiny.BluetoothLE.Hubs.Host) https://shinylib.net/blehubs/hosting/' },
-    { id: 'blehubsclient', label: 'BLE Hubs - Client', type: 'bool', defaultValue: false, category: 'services',
-        version: VERSIONS.shinyBleHubs,
-        description: 'Typed client for BLE hubs (Shiny.BluetoothLE.Hubs.Client) https://shinylib.net/blehubs/client/' },
     { id: 'universalhubshost', label: 'Universal Hubs - Host', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyUniversalHubs,
-        description: 'The same hub over BLE and Wi-Fi at once - replaces the BLE Hubs host registration (Shiny.UniversalHubs.Host) https://shinylib.net/universalhubs/hosting/' },
+        description: 'SignalR-style hubs served over the transports you pick below (Shiny.UniversalHubs) https://shinylib.net/universalhubs/hosting/' },
     { id: 'universalhubsclient', label: 'Universal Hubs - Client', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyUniversalHubs,
-        description: 'Discovers hubs over BLE and mDNS, connects over Wi-Fi first with BLE fallback (Shiny.UniversalHubs.Client) https://shinylib.net/universalhubs/client/' },
+        description: 'Typed hub client - discovers hosts over every transport you pick and connects over the first that works (Shiny.UniversalHubs) https://shinylib.net/universalhubs/client/' },
+    { id: 'universalhubsble', label: 'Universal Hubs - Bluetooth LE', type: 'bool', defaultValue: true, category: 'services',
+        version: VERSIONS.shinyUniversalHubs,
+        description: 'The hub as a GATT characteristic - no network needed (Shiny.UniversalHubs.BluetoothLE) https://shinylib.net/universalhubs/bluetoothle/',
+        visibleWhen: (s) => !!(s.universalhubshost || s.universalhubsclient) },
+    { id: 'universalhubshttp', label: 'Universal Hubs - HTTP', type: 'bool', defaultValue: true, category: 'services',
+        version: VERSIONS.shinyUniversalHubs,
+        description: 'The hub over a WebSocket on the local network, found over mDNS (Shiny.UniversalHubs.Http) https://shinylib.net/universalhubs/http/',
+        visibleWhen: (s) => !!(s.universalhubshost || s.universalhubsclient) },
     { id: 'universalhubsmultipeer', label: 'Universal Hubs - Multipeer', type: 'bool', defaultValue: false, category: 'services',
         version: VERSIONS.shinyUniversalHubs,
         description: 'Apple MultipeerConnectivity as a hub transport - iPhone/iPad/Mac with no network needed; skipped quietly elsewhere (Shiny.UniversalHubs.Multipeer) https://shinylib.net/universalhubs/multipeer/',
@@ -714,15 +715,21 @@ function computeMauiSymbols(state: TemplateState): Record<string, boolean | stri
     s.useregiongeofencing = !!(s.regiongeofencing || s.regiongeofencingdocdb);
     s.regiongeofencingdocdb = !!(s.regiongeofencing && s.regiongeofencingdocdb);
     s.useappfunctions = !!(s.appfunctions || s.aiappfunctions);
-    // BLE Hubs and Universal Hubs share the ChatHub sample and the BLE permissions; Universal Hubs replaces
-    // the BLE Hubs registration for its role (AddUniversalServer registers the BLE hub server itself)
+    // Universal Hubs: a host and/or client, plus the transports the ChatHub sample is served and reached over
     s.universalhubs = !!(s.universalhubshost || s.universalhubsclient);
-    s.usehubshost = !!(s.blehubshost || s.universalhubshost);
-    s.usehubsclient = !!(s.blehubsclient || s.universalhubsclient);
-    s.usehubs = !!(s.usehubshost || s.usehubsclient);
-    // Multipeer / Nearby are extra Universal Hubs transports - only with a Universal Hubs host or client
+    s.universalhubsble = !!(s.universalhubs && s.universalhubsble);
+    s.universalhubshttp = !!(s.universalhubs && s.universalhubshttp);
     s.universalhubsmultipeer = !!(s.universalhubs && s.universalhubsmultipeer);
     s.universalhubsnearby = !!(s.universalhubs && s.universalhubsnearby);
+    // a hub with no transport throws at registration, so fall back to Bluetooth LE
+    if (s.universalhubs && !(s.universalhubsble || s.universalhubshttp || s.universalhubsmultipeer || s.universalhubsnearby))
+        s.universalhubsble = true;
+    // platform setup: BLE permissions follow the BLE transport, ATS / cleartext the HTTP client, local network all three Wi-Fi ones
+    s.hubsble = s.universalhubsble;
+    s.hubsblehost = !!(s.universalhubshost && s.universalhubsble);
+    s.hubsbleclient = !!(s.universalhubsclient && s.universalhubsble);
+    s.hubshttpclient = !!(s.universalhubsclient && s.universalhubshttp);
+    s.hubslocalnetwork = !!(s.universalhubshttp || s.universalhubsmultipeer || s.universalhubsnearby);
     // McuMgr is an SMP client over Shiny.BluetoothLE's IPeripheral
     s.blemcumgr = !!(s.bluetoothle && s.blemcumgr);
     s.usedocumentdbvector = !!(s.documentdb && s.documentdbvector);

@@ -159,34 +159,31 @@ export const ShinyComponents: ShinyComponent[] = [
         "version": VERSIONS.shinyClient
     },
     {
-        // SignalR-style hubs over BLE. Host rides on blehosting, client on ble - see IMPLIED_COMPONENTS.
-        "id": "blehubs-host",
-        "nuget": "Shiny.BluetoothLE.Hubs.Host",
-        "macOsSupported": true,
-        "description": "Bluetooth LE Hubs - Host",
-        "category": "hardware",
-        "version": VERSIONS.shinyBleHubs
-    },
-    {
-        "id": "blehubs-client",
-        "nuget": "Shiny.BluetoothLE.Hubs.Client",
-        "macOsSupported": true,
-        "description": "Bluetooth LE Hubs - Client",
-        "category": "hardware",
-        "version": VERSIONS.shinyBleHubs
-    },
-    {
-        // shinyorg/hubs - ships with BluetoothLE Hubs, one version from 1.5
+        // shinyorg/hubs - the core (hubs, host, client) and every transport share one version
         "id": "universalhubs-host",
-        "nuget": "Shiny.UniversalHubs.Host",
-        "description": "Universal Hubs - Host (BLE + Wi-Fi)",
+        "nuget": "Shiny.UniversalHubs",
+        "description": "Universal Hubs - Host",
         "category": "hardware",
         "version": VERSIONS.shinyUniversalHubs
     },
     {
         "id": "universalhubs-client",
-        "nuget": "Shiny.UniversalHubs.Client",
-        "description": "Universal Hubs - Client (BLE + Wi-Fi)",
+        "nuget": "Shiny.UniversalHubs",
+        "description": "Universal Hubs - Client",
+        "category": "hardware",
+        "version": VERSIONS.shinyUniversalHubs
+    },
+    {
+        "id": "universalhubs-bluetoothle",
+        "nuget": "Shiny.UniversalHubs.BluetoothLE",
+        "description": "Universal Hubs - Bluetooth LE Transport",
+        "category": "hardware",
+        "version": VERSIONS.shinyUniversalHubs
+    },
+    {
+        "id": "universalhubs-http",
+        "nuget": "Shiny.UniversalHubs.Http",
+        "description": "Universal Hubs - HTTP Transport",
         "category": "hardware",
         "version": VERSIONS.shinyUniversalHubs
     },
