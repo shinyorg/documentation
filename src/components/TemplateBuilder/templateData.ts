@@ -9,27 +9,27 @@ export const VERSIONS = {
     // Shiny — family-versioned (all *.Maui / *.Blazor / *.AspNet ship together)
     shinyMediator: '6.13.0',
     shinyShell: '8.0.1',
-    shinyControls: '3.0.0-beta.1',
+    shinyControls: '3.0.0',
     // Shiny — client packages that share the core release train (the default Shiny version).
     // The client Microsoft.Extensions.AI tool packages (Contacts / Locations / Notification reminders)
     // ship on this same train, so they track this key too.
-    shinyClient: '7.0.0',
-    shinyConfiguration: '7.0.0',
+    shinyClient: '7.2.0',
+    shinyConfiguration: '7.2.0',
     shinyLocalization: '2.1.2',
     shinyStores: '6.0.2',
     shinyReflector: '6.0.2',
     shinyDI: '6.0.2',
     shinySerialization: '6.0.2',
-    shinyContactStore: '7.0.0',
-    shinyCalendar: '7.0.0',
+    shinyContactStore: '7.2.0',
+    shinyCalendar: '7.2.0',
     shinySpeech: '3.1.0-beta-0002',
     shinyAiConversation: '3.1.0-beta-0002',
     shinyMusic: '4.1.0',
     shinyHealth: '2.1.0',
-    shinyDocumentDb: '14.4.1',
-    shinyHttpServer: '3.0.0',
-    shinyDataSync: '7.0.0',
-    shinyJobs: '7.0.0',
+    shinyDocumentDb: '15.0.0',
+    shinyHttpServer: '3.2.0',
+    shinyDataSync: '7.2.0',
+    shinyJobs: '7.2.0',
     shinyObd: '2.0.0',
     /** Recognition IQ (Face / Voice / Document Intelligence) ships as one train — no stable release yet. */
     shinyRecognition: '1.0.0-beta-0021',
@@ -40,8 +40,8 @@ export const VERSIONS = {
     /** Shiny.Push.FirebaseMessaging is off the core train */
     shinyPushFirebase: '7.0.0',
     /** shinyorg/hubs - the core and every transport package share one version */
-    shinyUniversalHubs: '3.0.0-beta.1',
-    shinyAppDeviceBridge: '4.0.0',
+    shinyUniversalHubs: '3.0.0',
+    shinyAppDeviceBridge: '4.2.0',
     shinyPermissions: '1.0.0-beta-0009',
     /** shinyorg/actors - Shiny.Actors and its add-ons ship together */
     shinyActors: '1.0.0-beta.12',
@@ -49,15 +49,15 @@ export const VERSIONS = {
     shinyEfCore: '1.0.0-beta.3',
 
     // MAUI tooling
-    devflow: '0.1.0-preview.14.26573.4',
+    devflow: '0.1.0-preview.16.26575.3',
 
     // Microsoft + third-party
     /** The MicrosoftVersion MSBuild property - Microsoft.Extensions.* / ASP.NET Core, kept on the TFM's major */
     microsoftExtensions: '11.0.0',
     ctMvvm: '8.4.2',
-    sentry: '7.0.1',
+    sentry: '7.1.0',
     liveCharts: '2.2.0',
-    skia: '4.157.0',
+    skia: '4.158.0',
     skiaExtended: '3.0.0',
     userDialogs: '9.2.2',
     sqliteNetPcl: '1.11.285',
@@ -70,7 +70,7 @@ export const VERSIONS = {
     sysLinqAsync: '7.0.1',
     refit: '17.0.0',
     orleans: '10.4.2',
-    scalar: '3.2.0',
+    scalar: '3.3.0',
 } as const;
 
 export type ParamType = 'bool' | 'choice' | 'string';

@@ -225,6 +225,7 @@ export const sidebarTopics = [
     icon: 'link',
     featuredInHomenav: [
       { label: 'Accessory Setup', link: 'client/accessorysetup/', dateCreated: '2026-11-07', dateUpdated: '2026-11-07', note: 'The system pairing sheet for your BLE accessory' },
+      { label: 'Universal Hubs 3', link: 'universalhubs/', note: 'Hubs over BLE, HTTP, Multipeer & Nearby' },
       { label: 'Firmware Updates (MCUmgr)', link: 'client/ble/mcumgr', dateCreated: '2026-11-06', dateUpdated: '2026-11-06', note: 'MCUboot firmware upgrades over BLE' },
     ],
     items: [
@@ -279,27 +280,27 @@ export const sidebarTopics = [
       {
         label: 'Universal Hubs',
         jumpTo: true,
-        dateUpdated: '2026-11-26',
+        dateUpdated: '2026-11-27',
         items: [
-          { label: 'Getting Started', link: 'universalhubs/', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
-          { label: 'Contracts & Source Generator', link: 'universalhubs/contracts', dateCreated: '2026-10-02', dateUpdated: '2026-11-26' },
-          { label: 'Hosting', link: 'universalhubs/hosting', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
-          { label: 'Connecting Clients', link: 'universalhubs/client', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
-          { label: 'Files & Media Channels', link: 'universalhubs/files', dateCreated: '2026-10-02', dateUpdated: '2026-11-26' },
+          { label: 'Getting Started', showNew: false, link: 'universalhubs/', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
+          { label: 'Contracts & Source Generator', showNew: false, link: 'universalhubs/contracts', dateCreated: '2026-10-02', dateUpdated: '2026-11-26' },
+          { label: 'Hosting', showNew: false, link: 'universalhubs/hosting', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
+          { label: 'Connecting Clients', showNew: false, link: 'universalhubs/client', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
+          { label: 'Files & Media Channels', showNew: false, link: 'universalhubs/files', dateCreated: '2026-10-02', dateUpdated: '2026-11-26' },
           {
             label: 'Transports',
             items: [
-              { label: 'Bluetooth LE', link: 'universalhubs/bluetoothle', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
-              { label: 'HTTP', link: 'universalhubs/http', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
-              { label: 'Multipeer', link: 'universalhubs/multipeer', dateCreated: '2026-10-30', dateUpdated: '2026-11-26' },
-              { label: 'Nearby', link: 'universalhubs/nearby', dateCreated: '2026-10-31', dateUpdated: '2026-11-26' },
-              { label: 'Custom Transports', link: 'universalhubs/custom-transports', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' }
+              { label: 'Bluetooth LE', showNew: false, link: 'universalhubs/bluetoothle', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
+              { label: 'HTTP', showNew: false, link: 'universalhubs/http', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
+              { label: 'Multipeer', showNew: false, link: 'universalhubs/multipeer', dateCreated: '2026-10-30', dateUpdated: '2026-11-26' },
+              { label: 'Nearby', showNew: false, link: 'universalhubs/nearby', dateCreated: '2026-10-31', dateUpdated: '2026-11-26' },
+              { label: 'Custom Transports', showNew: false, link: 'universalhubs/custom-transports', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' }
             ]
           },
-          { label: 'Dynamic Hubs', link: 'universalhubs/dynamic-hubs', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
-          { label: 'How It Works', link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
-          { label: 'Upgrading from BluetoothLE Hubs', link: 'universalhubs/upgrading', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
-          { label: 'Release Notes', link: 'universalhubs/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' }
+          { label: 'Dynamic Hubs', showNew: false, link: 'universalhubs/dynamic-hubs', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
+          { label: 'How It Works', showNew: false, link: 'universalhubs/how-it-works', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' },
+          { label: 'Upgrading from BluetoothLE Hubs', showNew: false, link: 'universalhubs/upgrading', dateCreated: '2026-11-26', dateUpdated: '2026-11-26' },
+          { label: 'Release Notes', showNew: false, link: 'universalhubs/release-notes', dateCreated: '2026-10-12', dateUpdated: '2026-11-26' }
         ]
       },
       {

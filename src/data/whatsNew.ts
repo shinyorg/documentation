@@ -13,6 +13,13 @@ export interface WhatsNewItem {
 export const whatsNew: WhatsNewItem[] = [
   {
     date: "2026-11-27",
+    title: "Universal Hubs 3",
+    href: "/universalhubs/release-notes/",
+    icon: "signal",
+    description: "Hubs over transports. <code>Shiny.UniversalHubs</code> is the hub, host, client and source generator, with a package per transport: <code>.BluetoothLE</code>, <code>.Http</code>, <code>.Multipeer</code> and <code>.Nearby</code>, or a transport of your own. Each hub is added by name and picks its transports and serializer, clients turn transports on and off while the app runs, and HTTP is now one WebSocket per hub that resumes like the others. BluetoothLE Hubs is folded in, with an upgrade guide.",
+  },
+  {
+    date: "2026-11-27",
     title: "DocumentDb 15",
     href: "/documentdb/release-notes/",
     icon: "seti:db",
