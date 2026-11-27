@@ -1,0 +1,65 @@
+---
+title: Schema Versioning
+---
+
+DocumentDb never needs a migration to *store* a changed class, but documents written by an older version of your
+app keep their old JSON shape. Upcasters bring those documents up to date as they are read, so the rest of your code
+only ever sees the current shape.
+
+```csharp
+opts.ConfigureDocument<Person>(cfg => cfg
+    .AddUpcaster(1, json =>                 // version 1 → 2: split name became fullName
+    {
+        json["fullName"] = $"{json["firstName"]} {json["lastName"]}";
+        json.Remove("firstName");
+        json.Remove("lastName");
+    })
+    .AddUpcaster(2, json =>                 // version 2 → 3: add a slug
+        json["slug"] = json["fullName"]!.GetValue<string>().ToLowerInvariant().Replace(' ', '-')));
+
+var person = await store.Get<Person>("ada");   // stored as v1, arrives as v3
+```
+
+## How it works
+
+- Each upcaster receives the parsed document as a `JsonObject` and changes it in place. The step registered with
+  `fromVersion: n` turns version `n` into version `n + 1`. Steps must cover every version from 1 up; a gap throws
+  the first time the type is read or written.
+- The **current version** is the highest `fromVersion` + 1. Once a type has upcasters, every write stamps it into the
+  body as `"_v": 3`.
+- A document **without** `"_v"` — anything written before you added the first upcaster — is version 1.
+- On every read, the store looks at `"_v"` and runs only the steps the document is missing, then deserializes it. A
+  current document costs one scan of its top-level properties. Types without upcasters are untouched.
+- A document stored at a version *newer* than the current one (written by a newer deployment) is read as-is.
+- It works on every provider: the stamp and the upcast happen where each provider serializes and deserializes a
+  document. Upcasters run on reads from `Get`, queries, streams, change notifications and temporal history.
+
+The chain belongs to the CLR type, so it applies to every store in the process, the same way a
+[soft-delete](/documentdb/soft-delete) mapping does.
+
+## Queries see the stored JSON
+
+Upcasting happens to documents as they are read. A `Where`, `OrderBy` or index on a relational provider, MongoDB or
+Cosmos DB runs against the JSON in the database, so a predicate on a new property does not match documents still
+stored in the old shape. (The providers that filter in memory — LiteDB, IndexedDB, Azure Table, DynamoDB, Redis,
+RavenDB, Firestore — already see the upcast shape.)
+
+Rewrite the old documents once to make every query see the new shape:
+
+```csharp
+int rewritten = await store.UpgradeDocuments<Person>();   // pages through the type, rewrites only the stale ones
+int current   = store.GetSchemaVersion<Person>() ?? 1;    // 3
+```
+
+`UpgradeDocuments` reads the type a page at a time (`batchSize`, default 500), and writes back with `BatchUpdate` the
+documents that needed an upcast. It goes through the normal API, so query filters apply (a soft-deleted or filtered-out
+document is skipped, and still upcasts whenever it is read) and interceptors, version checks and temporal history see
+an ordinary update. Running it again finds nothing to do.
+
+## Things to know
+
+- Write upcasters to tolerate a document that already has some of the new shape — a merge-patch `Upsert` can stamp a
+  new version onto a document that kept old properties.
+- [JSON collections](/documentdb/json-collections) and [bulk export/import](/documentdb/backup) work on the raw stored
+  JSON and do not upcast. A raw write without `"_v"` is treated as version 1.
+- `ExecuteUpdate`, `SetProperty` and other partial writes leave `"_v"` as it was.

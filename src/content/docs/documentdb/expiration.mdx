@@ -1,0 +1,73 @@
+---
+title: Expiration (TTL)
+---
+
+Give a document type an expiry property and documents disappear from every read once it has passed — sessions,
+caches, one-time tokens, short-lived drafts. Expired documents are deleted with `PurgeExpired`, by hand or on a timer.
+
+```csharp
+public class Session
+{
+    public string Id { get; set; } = "";
+    public string UserId { get; set; } = "";
+    public DateTimeOffset? ExpiresAt { get; set; }
+}
+
+opts.ConfigureDocument<Session>(cfg => cfg.MapExpiration(x => x.ExpiresAt, defaultTimeToLive: TimeSpan.FromHours(8)));
+
+await store.Insert(new Session { Id = "s1", UserId = "u1" });   // ExpiresAt = now + 8h
+// … 8 hours later
+await store.Get<Session>("s1");                                 // null
+await store.PurgeExpired<Session>();                            // 1 deleted
+```
+
+## Mapping
+
+`MapExpiration` takes a top-level nullable `DateTimeOffset` or `DateTime` property. A `null` expiry never expires.
+Store expiry times in UTC.
+
+| Parameter | Meaning |
+|---|---|
+| `expiresAt` | The expiry property, e.g. `x => x.ExpiresAt`. |
+| `defaultTimeToLive` | Optional. An `Insert` or `Upsert` that leaves the expiry `null` gets now + this. The caller's instance is updated too. |
+| `timeProvider` | Optional clock for the filter and the default stamp. `TimeProvider.System` by default; pass a fake in tests. |
+
+## What expiry does
+
+It is built like [soft delete](/documentdb/soft-delete), on public building blocks, so it behaves identically on
+every provider:
+
+- A named [query filter](/documentdb/query-filters), `"expiration"`, hides a document once its expiry is in the
+  past, from `Get`, queries, counts, joins and set-based writes. "Now" is read each time a query runs.
+- With `defaultTimeToLive`, an [interceptor](/documentdb/interceptors) stamps the expiry on insert and upsert.
+- Expired documents stay stored until they are purged.
+
+```csharp
+var all     = await store.Query<Session>().IncludeExpired().ToList();      // lift the filter
+var expired = await store.Query<Session>().IncludeExpired()
+    .Where(x => x.ExpiresAt <= DateTimeOffset.UtcNow).ToList();
+```
+
+To extend a document's life, set a new expiry with `Update`, `SetProperty` or
+`ExecuteUpdate(x => x.ExpiresAt, DateTimeOffset.UtcNow.AddHours(8))`. An already-expired document is hidden from
+those writes too.
+
+## Purging
+
+`PurgeExpired<T>()` deletes every expired document of the type and returns how many. It is a set-based delete, so
+delete interceptors apply — with soft delete mapped on the same type, purged documents are soft-deleted.
+
+To purge on a schedule in a generic host:
+
+```csharp
+builder.Services.AddDocumentExpirationSweeper(TimeSpan.FromMinutes(15));
+// or, for a keyed store
+builder.Services.AddDocumentExpirationSweeper(TimeSpan.FromMinutes(15), storeName: "cache");
+```
+
+The sweeper purges every type mapped with `MapExpiration`, one interval after the host starts and every interval
+after that. A failure is logged and retried on the next tick. On .NET MAUI there is no generic host; call
+`PurgeExpired` yourself, for example when the app resumes.
+
+The database's own TTL features (MongoDB TTL indexes, Cosmos DB `ttl`, DynamoDB TTL, Redis `EXPIRE`) are not used:
+the filter is what guarantees an expired document is never returned, on every provider.

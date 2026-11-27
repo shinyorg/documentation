@@ -915,6 +915,109 @@ Assignments apply in the order declared, and nested paths (`o => o.ShippingAddre
 
 Relational providers render the dialect's JSON-set expression nested N deep (`json_set(json_set(Data, …), …)`, `JSON_MODIFY(JSON_MODIFY(…))`, chained `jsonb_set`, Oracle `JSON_TRANSFORM`), MongoDB combines them into one `$set`, and Cosmos applies them in the same read-modify-write pass. A provider without a multi-path primitive applies them one at a time — correct, but not atomic unless you wrap the call in a [session](/documentdb/context/) transaction.
 
+### Increment, Unset and array operations
+
+Besides `Set`, the builder takes the operations a document store needs that a plain assignment cannot express:
+
+```csharp
+await store.Query<Post>()
+    .Where(p => p.Id == postId)
+    .ExecuteUpdate(b => b
+        .Increment(p => p.Views, 1)              // add (negative to subtract); null or missing counts as 0
+        .Unset(p => p.DraftNotes)                // remove the property
+        .Push(p => p.Tags, "featured")           // append; creates the array when it is null or missing
+        .Pull(p => p.Tags, "draft")              // remove every equal element
+        .AddToSet(p => p.Readers, userId));      // append unless an equal element is already there
+```
+
+- `Increment` takes any numeric type and keeps integers integral (`int` + `int` stays an integer; decimals keep their fraction). Incrementing a stored non-number throws.
+- Array elements compare by JSON value, so `Pull(o => o.Lines, new Line { Sku = "s1", Qty = 1 })` removes an object element with exactly those properties and values.
+- Operations combine with `Set` in the same call, and the "same property twice throws" rule covers them too.
+- Each operation is a `DocumentUpdateOperation` in the assignment's value slot, so a [bulk interceptor](/documentdb/interceptors) sees it in `ctx.Assignments`, and the JSON-path overloads take one directly: `ExecuteUpdate(new Dictionary<string, object?> { ["retries"] = DocumentUpdateOperation.Increment(1) })`.
+
+How each provider runs them:
+
+| Provider | How |
+|---|---|
+| SQLite, PostgreSQL, CockroachDB, SQL Server, MySQL, MariaDB, Oracle, DuckDB | The matching rows are read with a row lock (`FOR UPDATE` / `UPDLOCK`; the write transaction itself on SQLite and DuckDB), changed and written back in one transaction — or in your unit of work when there is one. Concurrent increments do not lose updates. |
+| MongoDB | One `UpdateMany` with an aggregation-pipeline update (`$add` over `$ifNull`, `$concatArrays`, `$filter`), so a stored `null` behaves like everywhere else. |
+| Amazon DocumentDB | Classic `$inc` / `$unset` / `$push` / `$pull` / `$addToSet`; stored nulls are first set to `0` / `[]`. |
+| Cosmos DB, LiteDB, IndexedDB, Azure Table, DynamoDB, Redis, RavenDB, Firestore | The same read-modify-write each provider already uses for `Set`. |
+
+## C# union types
+
+Documents can hold C# 15 union types (.NET 11). System.Text.Json stores a union as just its case value — `"ref": 42`, `"pet": { "name": "Rex", "goodBoy": true }` — and queries understand that shape:
+
+```csharp
+public union TicketRef(int, string);
+
+[JsonUnion(TypeClassifier = typeof(JsonUnionTypeStructuralClassifier))]   // needed: both cases are objects
+public union Pet(Cat, Dog);
+
+public class Owner
+{
+    public string Id { get; set; } = "";
+    public TicketRef Ref { get; set; }
+    public Pet Pet { get; set; }
+}
+
+// Compare the value by casting it to a case
+await store.Query<Owner>().Where(x => (int)x.Ref.Value! == 42).ToList();      // not the string "42"
+await store.Query<Owner>().Where(x => (string)x.Ref.Value! == "ABC").ToList();
+
+// Test which case it holds
+await store.Query<Owner>().Where(x => x.Ref.Value is int).ToList();
+await store.Query<Owner>().Where(x => x.Pet.Value is Dog).ToList();
+
+// Reach into a case
+await store.Query<Owner>().Where(x => x.Pet.Value is Dog && ((Dog)x.Pet.Value!).GoodBoy).ToList();
+```
+
+- **Storing.** Unions whose cases are different JSON kinds (`int` and `string`) need nothing extra. When two or more cases are objects, add `[JsonUnion(TypeClassifier = typeof(JsonUnionTypeStructuralClassifier))]` so System.Text.Json can tell them apart when reading; without it, reading the document throws.
+- **Casts.** `x.Ref.Value` is the union property's own JSON path, and a cast gives it the case's type, so it compares as a number or a string. A value of another case never matches: the relational providers only read the value when its JSON kind is the cast's (`CASE WHEN … THEN … END`), and the in-memory providers treat a failed cast as no match rather than throwing.
+- **Case tests.** `is int` / `is string` / `is bool` test the stored JSON kind. For one of several object cases, `is Dog` tests for a property only `Dog` has (preferring one that can't be null). If the stored JSON can't tell two cases apart — two object cases with the same properties, or `DateTime` and `string`, which are both JSON strings — the query throws `NotSupportedException`.
+- **Case members.** `((Dog)x.Pet.Value).GoodBoy` is the path `pet.goodBoy`. Documents holding another case don't have it, so they don't match.
+
+The [string `Where`](#string-based-where-dynamic-filter) takes the same queries, without the casts:
+
+| String filter | LINQ equivalent |
+|---|---|
+| `"ref == 42"`, `"ref > 10"`, `"ref in (7, 42)"` | `(int)x.Ref.Value == 42` … — the literal picks the case |
+| `"ref == 'ABC'"` | `(string)x.Ref.Value == "ABC"` |
+| `"ref is int"`, `"ref is not string"` | `x.Ref.Value is int`, `!(x.Ref.Value is string)` |
+| `"pet is Dog"` | `x.Pet.Value is Dog` — the case's type name, or a C# keyword for built-in types |
+| `"pet.goodBoy == true"` | `((Dog)x.Pet.Value).GoodBoy` — the path continues into the case that has the property |
+| `"ref is null"` | `x.Ref.Value == null` |
+
+Interpolated filters work too: `Where($"ref == {number}")` picks the case from the argument's type. Union syntax needs a typed `Query<T>()`; [JSON collections](/documentdb/json-collections) and join filters reject it with a parse error.
+
+Every provider supports this. MongoDB uses `$type` and `$exists`, Cosmos DB uses `IS_NUMBER` / `IS_STRING` / …, the relational providers use their JSON-type functions, and the rest filter in memory. Case tests run on a union property of the document, not on one inside a collection element.
+
+## Loading related documents with Include
+
+`Include` loads the documents your results refer to in **one batched read per related type** after the query runs, instead of a `Get` per result. It works on every provider.
+
+```csharp
+var customers = new Dictionary<string, Customer>();
+var products  = new Dictionary<Guid, Product>();
+
+var orders = await store.Query<Order>()
+    .Where(o => o.Status == "open")
+    .Include(o => o.CustomerId, customers)       // a single key
+    .Include(o => o.ProductIds, products)        // a collection of keys
+    .ToList();
+
+foreach (var order in orders)
+    Console.WriteLine($"{order.Id}: {customers[order.CustomerId].Name}");
+```
+
+- The distinct keys of the results are collected and the related documents are read with an `IN` query on their id (500 keys per query), through the same store or unit of work, with that type's [query filters](/documentdb/query-filters) applied.
+- A key with no document (or one a filter hides) is just missing from the dictionary. Null keys are skipped; `Guid?` and other nullable keys work.
+- Related documents load for `ToList`, `ToAsyncEnumerable` (per batch of 100 results), `First` / `Single` and their `OrDefault` forms, `ToCursorPage`, `NearestVectors` and `FullTextMatch`. `Count`, aggregates, `Select`, `GroupBy` and set-based writes ignore the `Include`.
+- `Where`, `OrderBy` and `Paginate` after `Include` keep it.
+
+On the relational providers and MongoDB a [join](#joins) reads both sides in one statement instead; `Include` is the portable choice and keeps each related document as its own object.
+
 ## Raw SQL queries
 
 Raw SQL queries use provider-specific syntax. The examples below show SQLite; other providers use their own JSON functions (e.g. `JSON_VALUE` for SQL Server, `JSON_EXTRACT` for MySQL, `#>>` for PostgreSQL).

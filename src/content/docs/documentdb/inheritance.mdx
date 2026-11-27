@@ -1,0 +1,62 @@
+---
+title: Inheritance
+---
+
+Store a base type and the types derived from it together, query them all through the base type, or query one derived
+type on its own. Each document comes back as the type it was saved as.
+
+```csharp
+public abstract class Payment
+{
+    public string Id { get; set; } = "";
+    public string Kind { get; set; } = "";       // the discriminator
+    public decimal Amount { get; set; }
+}
+public class CardPayment : Payment { public string Last4 { get; set; } = ""; }
+public class CashPayment : Payment { public decimal Tendered { get; set; } }
+
+opts.ConfigureDocument<Payment>(cfg => cfg.MapDerivedTypes(x => x.Kind, d => d
+    .Add<CardPayment>("card")
+    .Add<CashPayment>("cash")));
+
+await store.Insert(new CardPayment { Id = "p1", Amount = 10, Last4 = "4242" });
+await store.Insert<Payment>(new CashPayment { Id = "p2", Amount = 20, Tendered = 50 });
+
+var all   = await store.Query<Payment>().ToList();        // a CardPayment and a CashPayment
+var cards = await store.Query<CardPayment>().ToList();    // only p1
+var p1    = await store.Get<Payment>("p1");               // CardPayment
+```
+
+## Mapping
+
+`MapDerivedTypes` goes on the base type's configuration:
+
+- `discriminator` — a settable `string` property on the base type. The store sets it to the document's value on every
+  write, so you never have to.
+- `configure` — `Add<TDerived>("value")` for each derived type. A derived type can derive from another mapped type
+  (`PremiumCardPayment : CardPayment`); querying `CardPayment` then returns both.
+- `baseValue` — the base type's own value when it is not abstract. A document with a missing or unknown discriminator
+  is read as the base type.
+
+## What it does
+
+- **Storage.** Derived types are stored under the base type's name, so they share its table, collection or container.
+- **Writes** serialize the document by its runtime type, so `Insert<Payment>(card)` keeps the card's own properties.
+- **Reads** look at the discriminator and return that type. `Get<CashPayment>("p1")` returns `null`.
+- **`Query<CardPayment>()`** adds a query filter on the discriminator (`Kind == "card"`, plus the values of types
+  derived from it). This filter is never lifted by `IgnoreQueryFilters()` — it is what makes the query a query for
+  that type.
+- **Base mappings are inherited.** Query filters registered on the base (your own `AddQueryFilter`, and the filters
+  of soft delete and expiration), the id property and the version property apply to the derived types. Soft delete's
+  *delete conversion* matches the exact type it was mapped on, so soft-delete through the base type:
+  `Remove<Payment>(id)`.
+
+It works on every provider. Like [upcasters](/documentdb/schema-versioning), the hierarchy belongs to the CLR types
+and applies to every store in the process.
+
+## Things to know
+
+- With a source-generated `JsonSerializerContext`, add a `[JsonSerializable]` for each derived type.
+- Configure features such as unique indexes, spatial, vector and full-text mappings on the type you query them
+  through.
+- Saving an instance of a type that is not mapped (a derived type you forgot to `Add`) throws.
