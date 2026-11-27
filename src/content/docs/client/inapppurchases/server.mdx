@@ -163,6 +163,41 @@ app.MapPost("/purchases", async (PurchaseDto dto, IPurchaseVerifier verifier, Cl
 
 Grant to the **authenticated user**, never to an account id sent in the request.
 
+## Replay protection
+
+Verification proves a purchase is genuine, not that it hasn't been granted already. The same JWS or purchase token can reach your endpoint twice - an app retry, or a captured one replayed - and it still verifies:
+
+* A finished Apple consumable keeps verifying with `IsActive == true`. Apple doesn't report consumption.
+* A consumed Google one-time product also keeps `IsActive == true` (its purchase state stays `PURCHASED`), but `IsConsumed` tells you it has been consumed.
+
+So grant at most once per purchase:
+
+1. **De-duplicate on `TransactionId`** - the Apple `transactionId` or the Google `orderId`. Store it with a unique constraint and answer a repeat with success, without granting again.
+2. **On Google, refuse `IsConsumed == true`** for a transaction you have no record of. It was consumed after an earlier grant (possibly by another backend or before you kept records), so granting it again pays out twice.
+
+```csharp
+var result = await verifier.VerifyAsync(request);
+if (!result.IsValid || !result.IsActive)
+    return Results.BadRequest(result.Error);
+
+if (await db.HasGrant(result.Platform, result.TransactionId!))
+    return Results.Ok(); // already granted - the app can finish the purchase
+
+if (result.IsConsumed == true)
+    return Results.Conflict("Purchase was already consumed");
+
+await db.Grant(user.GetUserId(), result.Platform, result.TransactionId!, result.ProductId, result.Quantity ?? 1);
+return Results.Ok();
+```
+
+| `IsConsumed` | Meaning |
+|---|---|
+| `false` | Google one-time product, `CONSUMPTION_STATE_YET_TO_BE_CONSUMED` |
+| `true` | Google one-time product, `CONSUMPTION_STATE_CONSUMED` |
+| `null` | App Store (not reported), subscriptions, or Google didn't say |
+
+Check the grant record before `IsConsumed`: the app consumes a purchase only after your server granted it, so a retry that arrives after `FinishPurchaseAsync(purchase, consume: true)` is consumed *and* already recorded, and should still get a success.
+
 ## Store clients
 
 | Interface | Methods |

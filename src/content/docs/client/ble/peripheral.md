@@ -149,6 +149,10 @@ to the platform's negotiation API), while the value you *get back* is the payloa
 typically yields `509`.
 :::
 
+The MTU belongs to the link, not the device: when the connection drops `Mtu` goes back to `20`, so request it again
+after every connect (from `WhenConnected()`). On Android the request waits its turn behind any GATT operation already
+in progress, and fails at once if Android refuses it.
+
 ```csharp
 // Check if ATT MTU requests are supported
 if (peripheral.CanRequestMtu())

@@ -75,6 +75,12 @@ var result = await purchases.PurchaseAsync("remove_ads", new PurchaseOptions
 
 switch (result.Status)
 {
+    case PurchaseResultStatus.Success when !result.Purchase!.IsVerified:
+        // Apple: StoreKit's on-device verification failed - never grant it (see below)
+        logger.LogWarning("Unverified purchase: {Error}", result.Purchase.VerificationError);
+        await purchases.FinishPurchaseAsync(result.Purchase, consume: false);
+        break;
+
     case PurchaseResultStatus.Success:
         // 1. verify on your server  2. grant  3. finish
         await api.VerifyAndGrant(result.Purchase!.VerificationData);
@@ -94,10 +100,18 @@ switch (result.Status)
 }
 ```
 
-Genuine failures (network, product not found, billing unavailable, verification failure) throw `InAppPurchaseException` with an `ErrorCode`. Cancellation is not an exception.
+Genuine failures (network, product not found, billing unavailable) throw `InAppPurchaseException` with an `ErrorCode`. Cancellation is not an exception, and neither is a transaction that fails verification - see [Unverified purchases](#unverified-purchases-ios).
 
 :::caution[Always finish purchases]
 `PurchaseAsync` never finishes a purchase for you. Call `FinishPurchaseAsync` once the entitlement is granted. **Google Play automatically refunds purchases that are not acknowledged within three days**, and unfinished Apple transactions are redelivered on every launch.
+:::
+
+### Unverified purchases (iOS)
+
+StoreKit 2 checks the signature of every transaction on the device. A transaction that fails that check is still reported, with `Purchase.IsVerified = false` and the reason in `Purchase.VerificationError`. It arrives everywhere a verified one does: `PurchaseAsync` (as `Success`), `GetUnfinishedPurchasesAsync`, `GetEntitlementsAsync`, `IPurchaseDelegate` and the `PurchaseUpdated` event.
+
+:::danger[Never grant an unverified purchase]
+Log it and finish it without granting anything, or send its `VerificationData` to your server, which rejects the JWS. Either way, **finish it**: StoreKit redelivers an unfinished transaction on every launch. Google Play purchases are always `IsVerified = true`, because Play Billing verification only happens on the server.
 :::
 
 ### Consumables
@@ -128,6 +142,11 @@ public class MyPurchaseDelegate(IInAppPurchaseManager purchases, MyApi api) : IP
     {
         switch (purchase.State)
         {
+            case PurchaseState.Purchased when !purchase.IsVerified && !purchase.IsFinished:
+                // Apple only - never grant; finish so StoreKit stops redelivering it
+                await purchases.FinishPurchaseAsync(purchase, consume: purchase.ProductId == "coins_100");
+                break;
+
             case PurchaseState.Purchased when !purchase.IsFinished:
                 await api.VerifyAndGrant(purchase.VerificationData);
                 await purchases.FinishPurchaseAsync(purchase, consume: purchase.ProductId == "coins_100");
@@ -175,6 +194,7 @@ await purchases.ShowManageSubscriptionsAsync();
 | `ExpirationDate` | subscription expiry | not available on device |
 | `IsFinished` | transaction finished | acknowledged |
 | `Environment` | Production / Sandbox / Xcode | Unknown (the server can tell) |
+| `IsVerified` / `VerificationError` | `false` and the reason when StoreKit's on-device verification fails | always `true` / `null` |
 
 ## Samples
 * [Sample MAUI App](https://github.com/shinyorg/shiny/tree/main/samples/Sample.InAppPurchases.Maui)

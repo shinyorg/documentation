@@ -105,6 +105,8 @@ await gpsManager.StartListener(new AppleGpsRequest(
 | `StationaryMetersThreshold` | `int` | `10` | Distance in meters below which the user is considered not moving (legacy iOS only — iOS 18+ uses native detection) |
 | `StationarySecondsThreshold` | `int` | `30` | Seconds the user must remain within the distance threshold to be marked stationary (legacy iOS only) |
 
+`DistanceFilterMeters` and `UseSignificantLocationChanges` are honored on iOS, Mac Catalyst and macOS. On iOS 18+ Shiny applies the distance filter itself, since `CLLocationUpdater` has none.
+
 ### CLActivityType
 
 | Value | Description |

@@ -127,7 +127,7 @@ Both are no-ops if the transfer doesn't exist, and `Resume` only acts on a trans
 
 ### Downloads vs. uploads
 
-- **Downloads** resume from where they left off. The partial file on disk is preserved while paused (it is only deleted by `Cancel`), and the transfer continues via an HTTP `Range` request (or native session resume on Apple).
+- **Downloads** resume from where they left off. The partial file on disk is preserved while paused (it is only deleted by `Cancel`), and the transfer continues via an HTTP `Range` request (or native session resume on Apple). Only a partial file the transfer itself wrote is resumed - a file that was already at `LocalFilePath` before the download was queued is overwritten. On the managed platforms the resume also checks that the server file hasn't changed - see [Changed server files](#changed-server-files).
 - **Uploads** are stopped but are **not resumable** in general - resuming an upload **restarts it from the beginning**. The exception is iOS/Mac Catalyst, where the native `NSUrlSessionTask` is suspended and resumed in place.
 - **tus uploads** (`TransferType.UploadTus`) resume from the offset the server reports on every platform except Blazor. See [Resumable Uploads (tus)](/client/httptransfers/tus/).
 
@@ -136,10 +136,20 @@ Both are no-ops if the transfer doesn't exist, and `Resume` only acts on a trans
 | Platform | Pause / Resume | Interrupts an in-flight transfer? | Download resumes from partial? | Upload on resume |
 |----------|----------------|-----------------------------------|-------------------------------|------------------|
 | iOS / Mac Catalyst | ✅ native `NSUrlSessionTask.Suspend()`/`Resume()` | ✅ | ✅ (native background session) | ▶️ resumes in place |
-| Android | ✅ | ✅ (foreground-service loop) | ✅ HTTP `Range` | 🔁 restarts |
-| Windows | ✅ | ✅ | ✅ HTTP `Range` | 🔁 restarts |
-| Linux / macOS / plain .NET | ✅ | ✅ | ✅ HTTP `Range` | 🔁 restarts |
+| Android | ✅ | ✅ (foreground-service loop) | ✅ HTTP `Range` + `If-Range` | 🔁 restarts |
+| Windows | ✅ | ✅ | ✅ HTTP `Range` + `If-Range` | 🔁 restarts |
+| Linux / macOS / plain .NET | ✅ | ✅ | ✅ HTTP `Range` + `If-Range` | 🔁 restarts |
 | Blazor WASM | ⚠️ best-effort | ❌ (a running Service Worker `fetch()` cannot be aborted) | ❌ (whole-`Blob` fetch → restarts) | 🔁 restarts |
+
+### Changed server files
+
+If the file changes on the server between attempts, appending the rest of the new file to the start of the old one would leave a corrupt download. On Android, Windows, Linux, macOS and plain .NET the managed loop guards against this with `If-Range`:
+
+1. The response that starts a download (from byte 0) has its validator stored beside the transfer: its strong `ETag`, or its `Last-Modified` date when there is no strong one. Weak ETags (`W/"..."`) are ignored because they can't be used with ranges.
+2. A resume sends `Range: bytes=N-` together with `If-Range: <ETag or date>`.
+3. A `206 Partial Content` means the file is unchanged, and the download continues from the partial file. A `200 OK` means it changed: the partial file is truncated and the download restarts from byte 0, storing the new file's validator.
+
+A server that sends neither header gets a plain `Range` request, as before (a `200` there still restarts the download). The stored validator is removed with the transfer - when it completes, fails or is cancelled. No app code is involved; for safe resumes, have your server send a strong `ETag`. iOS / Mac Catalyst resume through `NSURLSession`, which validates on its own, and Blazor doesn't resume.
 
 :::caution[Blazor is best-effort]
 On Blazor WASM, transfers are executed by a Service Worker via `fetch()`. `Pause` marks the queued entry so the Service Worker's drain skips it, and `Resume` re-queues it - but a transfer that has **already started** cannot be interrupted (it runs to completion), and because the Service Worker receives a whole response `Blob`, downloads are **not** resumable and restart on resume.

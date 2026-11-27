@@ -10,11 +10,186 @@ Every package in the [Shiny client repository](https://github.com/shinyorg/shiny
 
 ## v7
 
-### 7.1.1 - TBD
+### 7.2.0 - November 26, 2026
 
 #### BluetoothLE
 <RN type="fix" platform="Android">**Back-to-back writes without response no longer fail on Android.** Since 7.0.0, a write without response finished as soon as it was handed to Android, without waiting for `onCharacteristicWrite`. Android only allows one GATT operation at a time, so the next write started while the last one was still in progress. On Android 12 and below that write failed with `Failed to write to characteristic`. On Android 13+ it was dropped without an error (`prior command is not finished`), so a long transfer was corrupted or stalled. Each write now waits for the callback again, as it did in 3.x, so awaiting writes in turn paces them. ([#1682](https://github.com/shinyorg/shiny/issues/1682))</RN>
 <RN type="fix" platform="Android">**On Android 13+, a characteristic or descriptor write that Android refuses now throws** a `BleOperationException` whose `GattStatusCode` is the `BluetoothStatusCodes` value. Before, the status code was ignored, so a refused write either reported success or waited until it timed out.</RN>
+<RN type="fix" platform="Android">**`RequestMtu` / `TryRequestMtuAsync` now waits its turn behind other GATT operations.** It used to call Android straight away. If a read or write was in progress, Android refused the request, and the caller waited out its whole timeout. A disconnect didn't end that wait either. A refusal now fails straight away, and a failed MTU exchange no longer changes `IPeripheral.Mtu`.</RN>
+<RN type="fix" platform="Android">**`IPeripheral.Mtu` goes back to 20 when the connection ends.** Before, the MTU agreed on the last connection carried over to the next one. Before Android 14, a new connection always starts at the default size, so writes sized from `Mtu` were too large for it, and writes without response could be cut short. Request the MTU again after every connect (from `WhenConnected()`).</RN>
+<RN type="fix" platform="Android">**`ReadDescriptor` now throws when the read fails** (for example, when the peripheral requires authentication). Before, it ignored the result and returned the descriptor's old value. **`ReadRssi`** also fails straight away when Android refuses the request, instead of waiting until it times out.</RN>
+<RN type="fix" platform="Android">**On Android 13+, the result of a characteristic or descriptor write now contains the bytes that were written.** Before, its `Data` held the last value read from that characteristic or descriptor.</RN>
+<RN type="fix" platform="Android">**Calling `NotifyCharacteristic` for the same characteristic from two threads at once no longer throws** an `ArgumentException`. Both callers get the same notification stream.</RN>
+<RN type="fix" platform="Android">**Disposing an `OpenL2CapChannel` subscription now cancels a connect that is still in progress.** The connect used to block the subscribing thread, so the subscription couldn't be disposed until it finished or failed. It now runs in the background, and disposing closes the socket.</RN>
+<RN type="fix">**`NotifyCharacteristic` keeps a single shared stream per characteristic across reconnects** (Android, iOS, Mac Catalyst, macOS, Windows). The cached stream used to be dropped on every disconnect. A subscriber that survived an auto-reconnect kept the old stream, and a later `NotifyCharacteristic` call built a second one. When either was disposed, notifications were turned off underneath the other. A stream that fails is now removed from the cache, so the next call starts a new one instead of getting the same error.</RN>
+<RN type="fix" platform="iOS">**A peripheral that refuses a notification subscription now errors the `NotifyCharacteristic` stream** (for example, when encryption is required). Before, the stream stayed silent forever. A read or notification that arrives with an error is no longer sent to subscribers as a notification. Applies to iOS, Mac Catalyst and macOS.</RN>
+<RN type="fix" platform="iOS">**Reading the standard descriptors now returns their value** (iOS, Mac Catalyst, macOS). CoreBluetooth returns the Client Characteristic Configuration (0x2902) and Extended Properties descriptors as numbers and the User Description (0x2901) as a string. `ReadDescriptor` only handled raw data, so it returned `null` for all of them. A descriptor read also can no longer be completed by a late descriptor write on the same descriptor.</RN>
+<RN type="fix" platform="iOS">**Write results now contain the bytes that were written, and read results contain the value that was read** (iOS, Mac Catalyst, macOS). CoreBluetooth never stores a written value on the characteristic, so a write's `Data` was the last value read or notified. A read now captures its value in the callback, so a notification that arrives straight afterwards can't replace it.</RN>
+<RN type="fix" platform="iOS">**`GetCharacteristics` now waits its turn behind other GATT operations** (iOS, Mac Catalyst, macOS). When it ran alongside a single-characteristic lookup, it could return just one characteristic. If the link dropped mid-discovery, it waited forever.</RN>
+<RN type="fix" platform="iOS">**`OpenL2CapChannel` now fails when the peripheral disconnects, instead of waiting forever** (iOS, Mac Catalyst, macOS). Opens run one at a time, because CoreBluetooth's failure callback doesn't say which PSM failed and could fail a different open.</RN>
+<RN type="fix" platform="Windows">**`IPeripheral.Mtu` now reports the negotiated size** (`GattSession.MaxPduSize` minus the 3-byte ATT header), usually 244 or more. Before, it was always 20, so chunked writes and message framing used about 12 times more packets than needed.</RN>
+<RN type="fix" platform="Windows">**Notification subscriptions now come back after the peripheral reconnects.** They were torn down on every disconnect and went silent without an error. Disposing the last subscriber now turns notifications off on the peripheral. Before, notifications kept arriving until the device disconnected.</RN>
+<RN type="fix" platform="Windows">**Reads and writes no longer run a full service discovery or leak a `GattDeviceService` each time.** Services and characteristics are now cached for the life of the connection. The cache is cleared when the peripheral reports its services changed.</RN>
+<RN type="fix" platform="Windows">**You can now reconnect on the same `IPeripheral` after `CancelConnection()`.** It used to dispose the device and drop the peripheral from the manager, so a later `Connect()` failed with "Device is disposed". `Connect()` now finds the device again by its Bluetooth address.</RN>
+<RN type="fix" platform="Windows">**A brief drop while connecting no longer disposes a peripheral that then connected.** The device was disposed right after `Connected` was reported, so the next GATT call failed. The cleanup also closed the shared GATT session that keeps the link up, so after a reconnect the connection could drop whenever it went idle.</RN>
+
+#### Core & Hosting
+<RN type="fix" platform="Android">**Shiny's foreground services can start from the background on Android 8 to 11.** Shiny only used `StartForegroundService` on Android 12+, but Android has refused background `startService` calls since Android 8. A background trigger (a geofence, a push, boot) that started GPS, beacons, HTTP transfers, data sync or screen recording threw `IllegalStateException: Not allowed to start service` on Android 8 to 11.</RN>
+<RN type="fix" platform="Android">`GetPendingIntentFlags` keeps an explicit `PendingIntentFlags.Immutable` instead of also adding `Mutable`, which Android rejects.</RN>
+
+#### Configuration
+<RN type="fix" platform="Android">**`appsettings.<Environment>.json` assets now override `appsettings.json` on Android.** The environment file was added before the base file, so the base file won.</RN>
+<RN type="fix">**`AddRemoteWithCacheFile(waitForRemoteLoad: true)` no longer fails the configuration build when the first fetch fails,** for example on a first launch with no network and no cache file yet. The failure is logged, and the blocking load can no longer deadlock on the UI thread. Await `GetRemoteConfigurationProvider().LoadAsync()` yourself if you need the error.</RN>
+<RN type="fix">A cancelled remote configuration `LoadAsync` no longer lets two loads run at once and write the cache file together.</RN>
+<RN type="fix" platform="Android">**The SharedPreferences and NSUserDefaults sources survive `IConfigurationRoot.Reload()`** and keys that differ only by case, which used to throw. On Android, preference changes keep raising reloads with the new values; the change listener was only weakly held and was garbage collected.</RN>
+<RN type="fix" platform="Android">JSON asset sources work when the configuration is built more than once or reloaded. The asset stream was read once and disposed.</RN>
+<RN type="fix" platform="iOS">`AddJsonPlatformBundle(addPlatformSpecific: false)` now skips the platform files. The flag was passed as `reloadOnChange`.</RN>
+
+#### Jobs
+<RN type="fix">**Foreground jobs no longer run at startup when the OS launches the app in the background** (a `BGTask`, silent push or location launch on iOS; WorkManager, a service or a broadcast on Android). They ran alongside the background run. They now run on the first foreground instead.</RN>
+<RN type="fix">**`WithBatteryNotLow()` jobs run on battery again.** The foreground check compared the battery level (0.0 to 1.0) against `20`, so these jobs only ran while the device was plugged in. The threshold is now 20%.</RN>
+<RN type="fix">**Jobs no longer crash at startup on plain .NET hosts with no battery API** (console, Avalonia desktop on Windows and macOS). `JobManager` required an `IBattery` that `AddBattery()` doesn't register there. The machine is now treated as on mains power. Code that calls `new JobManager(...)` directly needs the battery argument moved to the end, where it is optional.</RN>
+<RN type="fix" platform="Android">**`InternetAccess.Unmetered` background jobs now wait for an unmetered network.** They were scheduled in the same WorkManager category as `Any` jobs, so they ran over cellular data. Existing schedules are moved to the new categories in place.</RN>
+<RN type="fix">Foreground `InternetAccess.Unmetered` jobs no longer run over cellular. The check only excluded constrained networks.</RN>
+<RN type="fix" platform="iOS">**Background jobs are scheduled again after each run.** A `BGProcessingTaskRequest` fires once, and the next one was only submitted at a cold launch, so a run in a still-living process was the last one.</RN>
+<RN type="fix">The foreground job timer stops while the app is in the background, and job batches no longer overlap.</RN>
+
+#### App Store
+<RN type="fix" platform="Windows">**`RequestReview` works in WinUI and unpackaged apps.** The store context was never attached to the app's window, so the call failed with "Invalid window handle" and returned `false`. `ReleasedAt` is now filled in on Windows too.</RN>
+<RN type="fix" platform="iOS">A single-part store version such as `2` no longer makes `GetCurrent` return `null`.</RN>
+
+#### Beacons
+<RN type="fix" platform="Windows">**Beacon monitoring resumes at startup on Windows and Linux,** and recovers after a failed scan. Monitored regions were loaded but nothing scanned until the app called `StartMonitoring` again, and a scan error stopped monitoring for good while every entered region reported a false exit.</RN>
+<RN type="fix" platform="iOS">**On iOS 18+, a region transition that relaunches the app is delivered.** The first event after the monitor was created was always dropped as the initial state. It is now only dropped when it matches the last state Shiny handled. `CurrentStatus` reports the live authorization instead of `Unknown`, and `RequestState` no longer reads `CLMonitor` off the main queue.</RN>
+<RN type="fix">`ManagedBeaconScan` stops instead of crashing the app when ranging fails.</RN>
+
+#### Locations
+<RN type="fix" platform="Android">**`IGpsDelegate` receives readings for `None` and `Standard` listeners on Android,** not only `Realtime`. The delegate was only called from the foreground service.</RN>
+<RN type="fix" platform="Linux">**`Shiny.Gps.Linux` keeps working after GeoClue exits.** GeoClue quits about a minute after its last client stops, and the cached client path then failed every later `StartListener`. A dropped system bus connection now reconnects too.</RN>
+<RN type="fix" platform="iOS">**`AppleGpsRequest.DistanceFilterMeters` and `UseSignificantLocationChanges` are honoured.** On iOS 18+, readings closer than the distance filter are skipped.</RN>
+<RN type="fix" platform="iOS">An exception thrown from a `GpsReadingReceived` handler no longer crashes the app.</RN>
+<RN type="fix" platform="iOS">On iOS 18+, a foreground `RequestAccess` returns `Restricted` when access is restricted, or when a precise request only has reduced accuracy.</RN>
+<RN type="fix" platform="Windows">GPS `GetCurrentStatus` and geofence `CurrentStatus` no longer show the consent prompt or block the UI thread.</RN>
+<RN type="fix">`GetCurrentPosition` no longer leaks its event handler when `StartListener` throws or the call is cancelled.</RN>
+<RN type="fix">A new GPS listener's first reading is no longer marked stationary because of the previous session.</RN>
+<RN type="fix" platform="iOS">**On iOS 18+, a geofence crossing that relaunches the app is delivered** instead of being dropped as the initial state, and `CurrentStatus` reports the live authorization.</RN>
+<RN type="fix" platform="iOS">On iOS 17 and below, `StartMonitoring` throws past the 20-region limit (`CLLocationGeofenceManager.MaxMonitoredRegions`) instead of silently not monitoring the region, and monitoring failures are logged.</RN>
+
+#### Network Discovery
+<RN type="fix" platform="Android">**On Android 13 and below, an mDNS resolve that times out no longer makes every later resolve fail.** Android allows one resolve at a time there and can't cancel one, so a service that never answered blocked the rest. While it is outstanding, later resolves go through Shiny's managed mDNS stack, or wait their turn with their own timeout. The package now declares `CHANGE_WIFI_MULTICAST_STATE` (granted at install, no prompt) for this.</RN>
+<RN type="fix">Managed mDNS browsing expires SRV and TXT records by their TTL, refreshes them at 80–95% of the TTL as RFC 6762 describes, and asks again for an instance whose SRV/TXT expired while it is still advertised, instead of keeping a stale host, port or TXT data.</RN>
+<RN type="fix">**SSDP, WS-Discovery and the managed mDNS responder keep sending after a network change** (Windows, Linux, macOS). Rejoining the multicast group failed with "already joined" on every interface that stayed up, and those interfaces dropped out until the sockets restarted, so searches, announcements and mDNS address records stopped.</RN>
+<RN type="fix">Malformed mDNS packets whose compression pointers loop over long label runs are now rejected (names are capped at 255 bytes) instead of stalling the receive loop.</RN>
+<RN type="fix">A network drop after discovery has been working no longer ends browses and SSDP re-announcements with a misleading `DiscoveryPermissionException`.</RN>
+<RN type="fix" platform="iOS">`IMdnsManager.Resolve` no longer times out at random because the resolving service was garbage collected. Browse no longer emits an instance twice when Bonjour reports it on several interfaces, or `Found` after `Lost` (also on Android).</RN>
+<RN type="fix">Disposing a WS-Discovery publication no longer sends `ProbeMatches` after its `Bye`, and a `Bye` that lists several targets no longer stops at the first unknown one.</RN>
+<RN type="fix">`IMdnsManager.Resolve` on the managed stack can return a partially resolved service when the address doesn't arrive in time, as documented.</RN>
+<RN type="fix">An SSDP publication with a very small `MaxAge` no longer re-announces in a tight loop, and a long mDNS browse no longer caches SRV and TXT records for every service on the network.</RN>
+
+#### Wi-Fi
+<RN type="fix" platform="Linux">**Subscribing to `IWifiManager.Changed` no longer breaks every later Wi-Fi call on Linux.** The signal handler read the notification's exception before checking for completion, which throws and disconnects the shared NetworkManager connection.</RN>
+<RN type="fix" platform="Linux">A refused join with `Remember = false`, or a failed hotspot start, no longer retries as a saved profile and leaves it behind. WEP keys are sent as `wep-key0` instead of a WPA passphrase, and the `Changed` watcher no longer leaks a D-Bus match.</RN>
+<RN type="fix" platform="iOS">**`Connect` checks that the device actually joined the requested network** and throws `WifiConnectionException` if it stayed on another one (needs location access to read the SSID). `GetCurrentNetwork` now fills in the IP address, DNS, gateway and subnet mask.</RN>
+<RN type="fix" platform="Windows">Hidden networks (`IsHidden = true`) can be joined, and WPA3-Enterprise networks are reported as `Enterprise` instead of `Wpa3Psk`.</RN>
+<RN type="fix" platform="Android">Current-network reads recover after a network joined through a specifier drops, and cancelling a hotspot start no longer leaves the hotspot running.</RN>
+
+#### VPN
+<RN type="fix" platform="Linux">`StatusChanged` keeps reporting after the D-Bus connection drops: the NetworkManager watches are subscribed again (retrying from 1 s up to 30 s while the bus is unavailable) and the current state is read once.</RN>
+<RN type="fix">`StatusChanged` delivers the current state to every new subscriber, not only the first.</RN>
+<RN type="fix" platform="Linux">The D-Bus connection is rebuilt after it drops, instead of failing every call until the app restarts.</RN>
+
+#### Screen Recording
+<RN type="fix">**Pausing no longer leaves the paused stretch in the recording** (Android, iOS, macOS, Windows). Only about one frame was removed on resume, so the video jumped forward by the length of the pause, and on Android the audio drifted out of sync with it.</RN>
+<RN type="fix" platform="iOS">**Recordings with microphone or system audio save again on iOS, Mac Catalyst and macOS.** Audio was passed through as uncompressed PCM, which an MP4 can't hold, so the whole recording failed to finalise. It is now encoded as AAC.</RN>
+<RN type="fix" platform="Android">Recordings with audio no longer start with a long empty lead-in, and `ScreenRecordingResult.Duration` is the length of the recording instead of the device uptime (also on iOS and macOS).</RN>
+<RN type="fix" platform="macOS">On macOS 12.3 to 14, frames without an image are skipped instead of risking a failed recording.</RN>
+<RN type="fix">A failed start in Blazor (for example, microphone denied) no longer leaves the browser sharing the screen. Cancelling `Stop` on Windows releases the capture and unlocks the file, and reaching `MaxDuration` always raises `Faulted` when finalising fails.</RN>
+<RN type="fix" platform="Linux">GStreamer recordings are encoded 4:2:0 so browsers and QuickTime can play them, and an encoder that dies at startup is reported once as a failed start.</RN>
+<RN type="enhancement" platform="Linux">On X11, recording falls back to ffmpeg `x11grab` when GStreamer is installed but no desktop portal is running.</RN>
+
+#### Gamepads
+<RN type="fix" platform="Android">`AndroidGamepadManager.ConsumeEvents = true` now stops controller events reaching the rest of the app.</RN>
+<RN type="fix" platform="iOS">Rumble works again after the haptic engine stops or resets (app backgrounded, controller asleep).</RN>
+
+#### Game Center
+<RN type="fix" platform="iOS">Progress read back from Game Center rounds to the nearest step instead of down, so an achievement stored as 33% of 3 steps reads as 1 step and the next increment is no longer lost.</RN>
+<RN type="fix">Concurrent `IncrementAsync` calls no longer lose increments, and an unreadable state file no longer stops the manager from starting.</RN>
+
+#### NFC
+<RN type="fix">A PC/SC tag dropped from the scan queue while your loop was busy is delivered again once the loop is ready, if it is still on the reader, instead of being lost until it is lifted and put back. It never pushes out another reader's waiting tag, so a slow loop gets each reader's tag in turn.</RN>
+<RN type="fix" platform="iOS">A tag leaving the field while it is being read no longer crashes the app.</RN>
+<RN type="fix">Type 2 tags on PC/SC readers no longer report a capacity one byte too small at the 255-byte boundary.</RN>
+
+#### Printing
+<RN type="fix">**Receipts rendered to PDF no longer repeat earlier text on every line**, and a trailing `Cut()` no longer adds a blank page.</RN>
+<RN type="fix">TSPL escapes double quotes as `\["]`, so text, barcode and QR data containing quotes print correctly. ESC/POS barcodes over 255 bytes throw `NotSupportedException` instead of corrupting the print job.</RN>
+<RN type="fix" platform="Linux">`GetPrinters` works on non-English systems, and cancelling a print stops `lp` (also on macOS).</RN>
+
+#### Contact Store
+<RN type="fix" platform="iOS">**One contact with a year-less Feb 29 birthday no longer makes `GetAll`, `Query` and `GetById` throw for the whole address book.**</RN>
+<RN type="fix" platform="Android">**`Update` no longer deletes data the model doesn't cover:** group memberships, IM and SIP addresses, other apps' rows, and the photo when only the thumbnail was loaded. Contacts linked across accounts no longer get duplicated phones and emails. Changing the given or family name now updates the display name.</RN>
+<RN type="fix">Birthdays without a year round-trip as year-less dates (new `ContactDate.HasYear`) instead of being dropped or saved as year 0001. Android reads and writes dates with the invariant culture.</RN>
+<RN type="fix" platform="Android">Address books over 999 contacts no longer fail with "too many SQL variables" on Android 11 and below, and query filters no longer miss matches on the aggregate display name, accented text or case.</RN>
+<RN type="fix" platform="iOS">`DisplayName` falls back to the family name or company when the given name is empty.</RN>
+<RN type="fix">The AI `update_contact` tool keeps the job title and department when it changes the company.</RN>
+
+#### Calendar Store
+<RN type="fix" platform="Android">**`GetEvents` and `Query` return recurring events on Android,** once per occurrence. The window filter dropped every recurring series, because Android stores them with no end time.</RN>
+<RN type="fix">**Updating or deleting one occurrence of a recurring event now changes that occurrence,** not the first one in the series (Android, iOS, macOS). Occurrences now have their own ids (`{eventId}|{start}`); treat event ids as opaque. A plain series id still means the first occurrence. On Android, `deleteSeries: true` removes that occurrence and the rest of the series.</RN>
+<RN type="fix" platform="Android">All-day events are stored on the right day in time zones east of UTC, and read back at local midnight as on Apple. Large windows no longer fail with "too many SQL variables" on Android 11 and below, and updating an event keeps attendee status.</RN>
+
+#### Call Directory
+<RN type="fix">A number written with a trunk `0` (such as `04941 1234567`) always gets the default country code, so it matches the same number stored in international form.</RN>
+
+#### Local Notifications
+<RN type="fix" platform="Android">**Scheduled and repeating notifications survive a reboot.** The receiver never got `BOOT_COMPLETED`, so the alarms Android clears at boot were never set again. Future notifications are now re-armed at boot, and ones that came due while the device was off are shown.</RN>
+<RN type="fix">**`IntervalTrigger.TimeOfDay` is local time on Android and Windows.** It was treated as UTC and always started tomorrow, so a "daily at 9:00" reminder in UTC-5 fired at 4:00. It is now daylight-saving aware and fires today when the time is still ahead.</RN>
+<RN type="fix" platform="Windows">Repeating notifications keep firing; the next 30 occurrences are scheduled and topped up at startup. Toasts shown straight away are no longer listed as pending.</RN>
+<RN type="fix" platform="Android">Action buttons on a notification still on screen no longer deliver a newer notification's data after an app restart, and a tap is no longer reported to `OnEntry` again when the activity is recreated or reopened from recents. A scheduled notification whose channel was removed uses the default channel.</RN>
+<RN type="fix" platform="iOS">A channel with `ChannelSound.None` is silent, and the critical sound is only used for Critical channels with critical-alert permission (also on macOS). A repeating interval under one minute throws `InvalidOperationException` from `Send` instead of a native error.</RN>
+<RN type="enhancement" platform="Linux">Clicking a notification or one of its actions raises `INotificationDelegate.OnEntry`, and the D-Bus connection reconnects after it drops.</RN>
+<RN type="fix">`GetNotification` returns `null` for an unknown id on Windows and Linux instead of a `null` task.</RN>
+
+#### Push Notifications
+<RN type="fix" platform="iOS">**When the user turns notifications off, the next app start unregisters the device** (iOS, macOS, Android). `IPushDelegate.OnUnRegistered` fires with the old token, the provider unregisters, and `RegistrationToken` / `NativeRegistrationToken` are cleared, as the delegate's docs promised. A later successful `RequestAccess` registers again and raises `OnNewToken`. With Azure Notification Hubs, set your tags again after registering. On Android, an FCM token refresh no longer registers the device again while it is unregistered.</RN>
+<RN type="fix" platform="Android">**A token refresh that fails to register (for example, offline) no longer crashes the app.**</RN>
+<RN type="fix" platform="Android">Tapping one of several push notifications delivers that notification's data, and a tap is no longer reported again when the activity is recreated. Firebase topics are kept across restarts, so `ClearTags` and `SetTags` unsubscribe earlier topics, and the notification colour is applied correctly.</RN>
+<RN type="fix" platform="iOS">Launching the app from a push tap raises `OnEntry` once, not twice (also on macOS).</RN>
+<RN type="fix" platform="Windows">A registered device reopens its push channel at startup, so pushes arrive again after a restart.</RN>
+<RN type="fix">`TryRequestAccessWithTags` only sets tags when access is granted, and Azure Notification Hubs tags set before registering are kept and sent with the registration instead of throwing.</RN>
+
+#### Live Activities
+<RN type="fix" platform="iOS">**`OnPushToStartTokenChanged` is raised and the push-to-start token is saved.** The token was compared with the bridge's own cache, which already held it, so it never reached your delegate. Activities started in the app no longer raise `OnStarted` and their token and state changes twice.</RN>
+
+#### In-App Purchases
+<RN type="feature">**Server: new `VerifiedPurchase.IsConsumed`** reports whether a Google Play one-time purchase has been consumed (`null` on the App Store and for subscriptions). A consumed token still verifies with `IsActive = true`, so a verify endpoint that grants on `IsActive` could be replayed with an old token. Grant at most once per `TransactionId`, and refuse a Google token with `IsConsumed == true` that you haven't already granted. See [Replay protection](/client/inapppurchases/server#replay-protection).</RN>
+<RN type="enhancement" platform="iOS" breaking>**StoreKit transactions that fail on-device verification now reach your app** as a `Purchase` with the new `IsVerified = false` and a `VerificationError`, from `PurchaseAsync`, `GetUnfinishedPurchasesAsync`, `GetEntitlementsAsync` and `IPurchaseDelegate`. Before, they were skipped and StoreKit delivered them again on every launch. `PurchaseAsync` no longer throws `InAppPurchaseException(VerificationFailed)` for them; it returns `Success` with the unverified purchase, so **check `IsVerified` before granting**. Never grant one: log it or send it to your server, then finish it with `FinishPurchaseAsync`. Google Play purchases always report `IsVerified = true`.</RN>
+
+#### App Functions
+<RN type="fix">The source generator produces compiling code for requests that mix `required` members with optional members that have defaults, and for an `[AppEntity]` whose `DisplayProperty` is a value type. Types with the same short name in different namespaces no longer generate clashing Swift types.</RN>
+
+#### HTTP Transfers
+<RN type="fix">**Download resume now checks that the file hasn't changed on the server** (Android, Windows, Linux, macOS, .NET). The first response's strong `ETag` (or `Last-Modified`) is saved and sent back as `If-Range`, so a file that changed between attempts restarts from the beginning instead of being appended to and corrupted.</RN>
+<RN type="fix">**A download no longer appends to a file that was already at `LocalFilePath` before it was queued,** which corrupted it. A partial download that is already complete finishes instead of failing on a 416.</RN>
+<RN type="fix" platform="Blazor">**Multipart uploads in Blazor are sent as multipart form data,** upload bodies can no longer be sent empty, transfers are no longer sent twice, and transient failures are retried (up to 5 times) before `OnError`.</RN>
+<RN type="fix">A transfer paused while another one is running is no longer started, and a pause that interrupts a request stays paused. A connection failure pauses a transfer for retry instead of failing it, and a transfer queued while the loop was shutting down (such as right after `CancelAll`) is no longer left unstarted.</RN>
+<RN type="fix" platform="Android">The transfer loop stops with the foreground service (for example, on the service timeout) instead of running alongside the next service's loop and uploading twice.</RN>
+<RN type="fix" platform="iOS">Progress callbacks no longer undo a pause, which left `Resume` unable to continue. A failed download file copy reports an error instead of leaving the transfer stuck, and the background completion handler is called once, after your delegate finishes.</RN>
+<RN type="fix">`PercentComplete` and `IsDeterministic` no longer report NaN or negative values for a zero or unknown total.</RN>
+
+#### Data Sync
+<RN type="feature">**New `SyncEndpoint.TreatMissingAsDeleted` (default `true`): a 404 or 410 on a DELETE completes the operation** (`OnSent`, `Completed`) instead of failing it. The entity is gone either way, and a retried DELETE whose first try succeeded used to end in `OnError`.</RN>
+<RN type="fix">On batched endpoints, a Create that was never sent followed by a Delete for the same entity is now dropped: nothing is sent and both operations are reported `Canceled`. A batch request that throws counts as an attempt on every operation in it, and stops at `MaxAttempts`.</RN>
+<RN type="fix" platform="iOS">The background session's completion handler is handed back only after every `IDataSyncDelegate` call has returned, so iOS no longer suspends the app partway through one. `Start()` also sends operations that older versions left waiting with no upload task.</RN>
+<RN type="fix">**Batched endpoints no longer drop an operation whose batch item failed or whose conflict resolved as `KeepLocal` or `UseMerged`.** The retry was saved and then deleted with the batch, so the change never reached the server. It is now retried with the combined payload.</RN>
+<RN type="fix">**Tombstones carry the deleted row's id** in the new `SyncReceivedItem.EntityIdentifier` (also set for pulled items and accepted remote conflicts). Before, a delete arrived with nothing saying which row to remove. Recompile libraries built against an earlier `Shiny.Data.Sync`, because the record's constructor changed.</RN>
+<RN type="fix">Operations waiting out a retry backoff are retried without a new `Queue` or app start, and later operations for the same entity wait so the server sees them in order. `ClientWins` / `KeepLocal` / `UseMerged` conflict retries back off and stop at `MaxAttempts` with `OnError` (409) instead of re-sending forever.</RN>
+<RN type="fix">A failed pull no longer resets the `MinPullInterval` throttle, and an operation queued while the outbox loop was shutting down is no longer left unsent.</RN>
+<RN type="fix" platform="iOS">Retries count toward `MaxAttempts`, retries and `KeepLocal` conflicts are re-sent (also after the app is killed mid-backoff), and `Cancel` / `CancelAll` cancel operations waiting for a retry.</RN>
+
+#### Wearables
+<RN type="fix">Registering several delegates with `AddWearables<T>()` no longer registers and starts the manager more than once.</RN>
+<RN type="fix" platform="Android">Cancelling a transfer no longer raises `OnTransferCompleted` as if it had been delivered.</RN>
 
 ### 7.1.0 - November 25, 2026
 

@@ -43,7 +43,7 @@ So `Queue<T>` writes a `SyncOperation` to the [Shiny repository](/stores/) **bef
 
 This is the same architecture `Shiny.Net.Http` uses for background file transfers. It composes with the rest of Shiny:
 
-- On iOS / Mac Catalyst, queued ops drive `NSURLSession` upload tasks. The OS keeps a parallel queue, so even if Shiny's in-process queue dies, the OS still drives the upload to completion and notifies us on wake. Retries go to the OS the same way: a new upload task held back with `EarliestBeginDate` until its backoff is up.
+- On iOS / Mac Catalyst, queued ops drive `NSURLSession` upload tasks. The OS keeps a parallel queue, so even if Shiny's in-process queue dies, the OS still drives the upload to completion and notifies us on wake. A retry waits out its backoff in the app and then starts a new upload task. Its due time is saved with the op, so if iOS suspends or ends the app during the wait, the next launch's `Start()` sends it.
 - On Android, queued ops are drained inside a foreground service. The service spawns on `Queue<T>` and stops when every op has been sent or has used up its attempts. It stays up while an op waits for a scheduled retry.
 - On Windows / Linux / macOS / Blazor, queued ops are drained by the in-process `HttpClientDataSyncProcess` — which is woken by `IConnectivity.Changed`, by app startup, and by `Queue<T>` itself. While an op is waiting out its backoff, the loop sleeps until the retry is due and then sends it. See [Retries and backoff](/client/datasync/platform-behavior#retries-and-backoff).
 
@@ -122,7 +122,8 @@ A foreground service guarantees the OS keeps the process alive while the queue d
 
 A user can hit "Save" twelve times while the network is offline. Sending twelve `Update`s for the same entity wastes bandwidth, server CPU, and is harder to roll back. `OperationCoalescer` collapses redundant ops in the outbox before they go on the wire:
 
-- Trailing `Delete` wins — any preceding `Create` / `Update` for the same entity is dropped.
+- A `Create` that was never sent, followed by a `Delete` → both dropped, nothing goes on the wire (each op is reported `Canceled`).
+- Otherwise trailing `Delete` wins — any preceding `Create` / `Update` for the same entity is dropped.
 - `Create + Update(s)` → single `Create` with the latest payload.
 - `Update + Update(s)` → single `Update` with the latest payload.
 - `Delete + Create` (entity recreated under the same id) → fresh `Create`.

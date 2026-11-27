@@ -34,6 +34,7 @@ builder.Services.AddDataSync<MyDataSyncDelegate>(opts =>
         ep.Batch = true;                             // coalesce ops per round-trip
         ep.MaxAttempts = 8;                          // retry transient failures up to 8x
         ep.RetryBaseDelay = TimeSpan.FromSeconds(3); // base for exponential backoff
+        ep.TreatMissingAsDeleted = true;             // default: 404 / 410 on a DELETE counts as deleted
 
         // -- Conflicts --
         ep.DefaultConflictPolicy = ConflictPolicy.ServerWins;
@@ -93,6 +94,7 @@ builder.Services.AddDataSync<MyDataSyncDelegate>(opts =>
 | `Batch` | `false` | When `true`, the outbox coalesces multiple queued ops for this endpoint into one `POST {url}/batch`. See [Batching](#batching). |
 | `MaxAttempts` | `5` | Number of send attempts before the op is permanently handed to `IDataSyncDelegate.OnError`. |
 | `RetryBaseDelay` | `2s` | Base delay for exponential backoff. The actual wait is `baseDelay * 2^(attempts - 1)` capped at 60s. The retry timestamp is persisted on the `SyncOperation`, so a process restart resumes the wait window. The retry is sent when it is due with no other trigger needed; see [Retries and backoff](/client/datasync/platform-behavior#retries-and-backoff). |
+| `TreatMissingAsDeleted` | `true` | A `404 Not Found` or `410 Gone` answer to a `Delete` op completes it as sent: `OnSent` runs (with a `null` body) and the op is reported `Completed` with that status code. The entity is gone either way — this covers a retried `DELETE` whose first try already succeeded. Set it to `false` if your API returns 404 on `DELETE` for something else; the op then fails through `OnError`. Other verbs are unaffected. |
 
 ### Inbox throttle / scheduling
 
@@ -114,7 +116,7 @@ Set `MinPullInterval = null` for endpoints you only ever want to refresh on dema
 
 | Property | Default | Description |
 |---|---|---|
-| `TombstoneUrl` | `null` | When set, every successful pull is followed by a GET against this URL. Each returned id is dispatched to `OnReceived` with `Verb = Delete` and `Entity = null`. |
+| `TombstoneUrl` | `null` | When set, every successful pull is followed by a GET against this URL. Each returned id is dispatched to `OnReceived` with `Verb = Delete`, `Entity = null` and the id in `EntityIdentifier`. |
 | `TombstoneCursorParameter` | `"since"` | Cursor query parameter for the tombstone stream. Tracked independently from `SyncCursor`. |
 
 ### Soft-delete / expiry
@@ -144,7 +146,8 @@ See [Removal Strategies](/client/datasync/removal-strategies) for the full discu
 
 When `Batch = true`, queued ops for the endpoint are coalesced into one `POST {url}/batch` request. Coalescing rules:
 
-- Trailing `Delete` wins — any preceding `Create` / `Update` for the same entity drop.
+- A `Create` that was never sent (`Attempts == 0`, still `Pending`) followed by a `Delete` cancels out: **both ops are removed and nothing is sent**. Each raises `UpdateReceived` with `Canceled` and an `OutboxCanceled` activity event, the same as `Cancel(id)`. No delegate method runs: nothing reached the server and nothing failed.
+- Otherwise a trailing `Delete` wins — any preceding `Create` / `Update` for the same entity drop. A `Create` that was already attempted may be on the server (a timeout can't tell), so the `DELETE` still goes; if the server answers `404` it completes under `TreatMissingAsDeleted`.
 - `Create + Update(s)` → single `Create` with the latest payload.
 - `Update + Update(s)` → single `Update` with the latest payload.
 

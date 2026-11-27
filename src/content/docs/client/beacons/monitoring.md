@@ -89,6 +89,10 @@ On **Android** a foreground service with a visible notification keeps that scan 
 leaves the foreground. Its service type is `connectedDevice`, not `location`: Android 14 requires the
 declared type to match what the service actually does, and a BLE scan is not a location activity.
 
+On **Windows, Linux and Blazor** there is no service to keep the scan alive, so monitoring runs while
+the app does: it resumes at startup for any regions still registered, and a scan that fails is retried
+rather than leaving monitoring stopped.
+
 #### Scan filter
 
 On **Android**, a scan with no filter stops delivering results while the screen is off. Without a

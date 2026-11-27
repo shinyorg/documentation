@@ -67,6 +67,7 @@ manager.CountChanged += (sender, count) =>
 | `BytesTransferred` | `long` | Bytes transferred so far |
 | `PercentComplete` | `double` | 0-1 range, or -1 if indeterminate |
 | `EstimatedTimeRemaining` | `TimeSpan` | Estimated completion time |
+| `IsDeterministic` | `bool` | `false` when the total is unknown or `0` - `PercentComplete` is then `-1` |
 
 ## HttpTransferState
 
@@ -75,7 +76,7 @@ manager.CountChanged += (sender, count) =>
 | `Pending` | Queued, waiting to start |
 | `InProgress` | Currently transferring |
 | `Paused` | Paused by user/system |
-| `PausedByNoNetwork` | Paused due to no network |
+| `PausedByNoNetwork` | Paused due to no network (also set when a connection fails with no HTTP status) |
 | `PausedByCostedNetwork` | Paused due to metered network |
 | `Completed` | Successfully completed |
 | `Error` | Failed with error |

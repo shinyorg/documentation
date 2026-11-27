@@ -72,6 +72,12 @@ await notifications.Send(new Notification
 });
 ```
 
+`TimeOfDay` is **local** time (the device time zone, DST-aware) on every platform, and fires today if that time is still ahead, otherwise on the next day (or the next matching `DayOfWeek`). Use either `Interval` or `TimeOfDay`, never both.
+
+- **iOS / Mac Catalyst / macOS:** a repeating `Interval` must be at least 1 minute - `Send` throws `InvalidOperationException` otherwise.
+- **Android:** scheduled and repeating notifications are re-armed after a reboot (the library declares `RECEIVE_BOOT_COMPLETED`); any that came due while the device was off are shown at boot.
+- **Windows:** there is no repeating toast, so Shiny schedules the next 30 occurrences and tops them up each time the app starts - a short `Interval` runs out if the app is not opened.
+
 :::note[Linux]
 Linux has no OS-level scheduler, so repeating notifications fire from an in-process timer that checks every 30 seconds while the host is running - expect up to ~30 seconds of lateness. An `Interval` repeats every interval from the moment you call `Send`. `TimeOfDay` is local time and fires today if that time is still ahead, otherwise on the next day (or the next matching `DayOfWeek`).
 :::

@@ -16,7 +16,7 @@ exposes an API for those two protocols and they must therefore use raw multicast
 | Platform | Backing | Consequence |
 |----------|---------|-------------|
 | iOS / tvOS / Mac Catalyst / macOS | `NSNetService` (Bonjour) | Goes through the system `mDNSResponder` daemon — **no multicast entitlement required** |
-| Android | `NsdManager` | No `CHANGE_WIFI_MULTICAST_STATE` permission and no `WifiManager.MulticastLock` |
+| Android | `NsdManager` | The OS keeps the multicast path alive. Below API 34 a resolve can fall back to the managed responder (see [Android](#android)) |
 | Windows | Managed responder, UDP 5353 | Dependency-free, coexists with the Windows DNS client |
 | Linux | Managed responder, UDP 5353 | Coexists with `avahi-daemon`; Avahi is not required |
 | macOS console / server .NET | Managed responder, UDP 5353 | Coexists with `mDNSResponder` |
@@ -43,7 +43,9 @@ permission requirements below follow directly from that.
 
 A missing requirement throws `DiscoveryPermissionException`, whose message names the specific
 entitlement, manifest entry, or capability to add. That exists because every one of these failures
-otherwise looks identical to an empty network.
+otherwise looks identical to an empty network. `AccessDenied` always throws; an unreachable or
+network-down send error only throws if no send has succeeded yet - after that it is an interface
+dropping (a Wi-Fi handoff, say), and the browse or publication keeps going.
 
 ## iOS, tvOS, Mac Catalyst, and macOS
 
@@ -139,10 +141,24 @@ No runtime permission is required. Declare these in `AndroidManifest.xml`:
 <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 ```
 
+The package also declares `CHANGE_WIFI_MULTICAST_STATE` itself. It is a normal (install-time)
+permission, merged into your app manifest automatically, and is only used by the Android 13 fallback
+below.
+
 On API 34+ resolution uses `NsdManager.registerServiceInfoCallback`, which supports concurrent
-resolves. Below API 34 the deprecated `resolveService` is used and calls are serialised internally,
-because that API only tolerates one resolve at a time — a large scan resolves a little more slowly
-on older devices as a result.
+resolves. Below API 34 the deprecated `resolveService` is used. That API only tolerates one resolve
+at a time and has no way to cancel one, so:
+
+- Resolves queue behind the one in flight, each with its own timeout — a large scan resolves a
+  little more slowly on older devices.
+- A resolve that times out keeps NsdManager's slot until the system eventually reports back. A
+  service that disappeared mid-resolve may never report back.
+- While the slot is held by such a resolve, resolves go through Shiny's managed mDNS responder
+  instead (SRV, TXT and A/AAAA queries over UDP 5353), holding a `WifiManager.MulticastLock` only
+  for the duration of the query. If that cannot run, callers wait behind the stuck resolve until
+  their own timeout.
+
+You do not need to configure any of this.
 
 ### SSDP and WS-Discovery
 

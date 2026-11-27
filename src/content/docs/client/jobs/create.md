@@ -39,9 +39,9 @@ A job's identity is its CLR `Type` — there is no separate string identifier.
 |----------|------|---------|-------------|
 | `JobType` | `Type` | required | The `IJob` implementation type (the unique identity) |
 | `RunOnForeground` | `bool` | `false` | Also run on a foreground timer while the app is active |
-| `RequiredInternetAccess` | `InternetAccess` | `None` | `None`, `Any`, or `Unmetered` |
+| `RequiredInternetAccess` | `InternetAccess` | `None` | `None`, `Any`, or `Unmetered` (WorkManager `NetworkType.Unmetered` on Android; "not cellular" for foreground runs) |
 | `DeviceCharging` | `bool` | `false` | Only run while the device is charging |
-| `BatteryNotLow` | `bool` | `false` | Only run when the battery is not low |
+| `BatteryNotLow` | `bool` | `false` | Only run when the battery is above 20% |
 
 ## Registration at Startup
 
@@ -70,7 +70,7 @@ The first `AddJob<...>` call also wires up the job manager infrastructure (and, 
 
 ## Foreground Jobs
 
-When `WithForeground()` is applied, the job also runs periodically while your app is in the foreground. The foreground driver is `JobLifecycleTask` on platform builds (default interval 1 minute, range 15s–5min via `JobLifecycleTask.Interval`); on plain .NET it is the in-process `JobManager` timer (default 30s, range 15s–5min via `JobManager.Interval`).
+When `WithForeground()` is applied, the job also runs periodically while your app is in the foreground. The foreground driver is `JobLifecycleTask` on platform builds (default interval 1 minute, range 15s–5min via `JobLifecycleTask.Interval`); on plain .NET it is the in-process `JobManager` timer (default 30s, range 15s–5min via `JobManager.Interval`). On platform builds the foreground timer stops while the app is in the background, and foreground jobs do not run at start when the OS launched the process in the background (an iOS `BGTask`, silent push or location launch, or an Android WorkManager / service start) - that launch is already running jobs through the OS scheduler. They run, and the timer starts, the first time the app comes to the foreground.
 
 ```csharp
 services.AddJob<MySyncJob>(r => r
