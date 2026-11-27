@@ -103,6 +103,10 @@ var provider = new RelayTunnelProvider(
 | `HandshakeTimeout` | 15 seconds | |
 | `KeepAliveInterval` | 30 seconds | Mobile networks drop idle connections aggressively |
 | `ReconnectDelay` | 3 seconds | `null` to fail instead of reconnecting |
+| `EnableFlowControl` | `true` | See [flow control](#flow-control) |
+| `StreamWindowSize` / `MaxStreamWindowSize` | 256 KiB / 16 MiB | A request body's starting window, and how far it may grow |
+| `TunnelWindowBudget` | 64 MiB | Room, across all streams, for windows to grow |
+| `MaxStreams` | 512 | Flow-controlled connections this end will carry at once |
 
 The client dials out over TCP (plus optional TLS), registers with its token and requested subdomain,
 and unpacks each inbound stream into a connection handed to the server. Outbound-only, so it works
@@ -149,6 +153,11 @@ arrives. Requests are routed to a tunnel by their `Host` header.
 | `MaxRequestHeadSize` | 32 KB |
 | `AddForwardedHeaders` | `true` |
 | `RequestHeadTimeout` / `KeepAliveTimeout` | 15s / 130s |
+| `EnableFlowControl` | `true` — see [flow control](#flow-control) |
+| `StreamWindowSize` / `MaxStreamWindowSize` | 256 KiB / 16 MiB — a response's starting window, and how far it may grow |
+| `TunnelWindowBudget` | 64 MiB — room, across one tunnel's streams, for windows to grow |
+| `MaxStreamsPerTunnel` | 512 — a public connection beyond it gets a 503 |
+| `PublicWriteTimeout` | 60s — a public client that stops reading is disconnected |
 
 `Authorize` is the hook for a real registry — return the subdomain to grant, or `null` to refuse.
 It is asynchronous, so it can look the token up in a database or ask an identity service:
@@ -231,6 +240,45 @@ That is what makes connection reuse safe: a connection is pinned to the tunnel i
 named, and a later request on it for a different host gets **421 Misdirected Request** rather than
 being delivered to another tenant. Browsers never hit that, because their connection pools are keyed
 by authority.
+
+### Flow control
+
+Every request on a tunnel shares its one control connection. Without flow control, each end delivers
+incoming data itself and waits for the destination before reading the next frame. So one public
+client that stops reading a download, or one handler that never reads its upload, stalls every
+other request on the tunnel.
+
+With flow control each request is held to a window of its own, in each direction. The sender may only
+have that many bytes in flight before the receiver grants more, and the receiver grants more as the
+destination takes them. A request whose destination stalls fills its own window and waits. The others
+carry on.
+
+It is negotiated, so old and new ends work together in any combination. A relay that supports it sends
+a `Settings` frame before acknowledging registration. A client that supports it answers with its own,
+and from then on the relay opens streams with flow control. An end that predates it ignores the frame,
+and the tunnel works as before. Turn it off on either end with `EnableFlowControl = false`.
+
+Memory is bounded on both ends:
+
+- **A stalled request** holds at most its window: `StreamWindowSize`, 256 KiB to start.
+- **A request whose destination keeps up** grows its window, as HTTP/2 implementations do. A request
+  moves at most one window per round trip, so a fixed window would cap a large download over a 50 ms
+  relay at a few MB/s. When half a window is delivered in less than a round trip, the window is the
+  bottleneck and it grows, up to `MaxStreamWindowSize`. The round trip is measured with the tunnel's
+  existing ping frames. A request whose destination is slow never grows.
+- **Growth across a tunnel** is capped by `TunnelWindowBudget`, and given back as requests end.
+- **Connections** are capped by `MaxStreamsPerTunnel` on the relay and `MaxStreams` on the client.
+  The relay answers a 503 beyond the limit. A connection counts while it is open, including
+  kept-alive ones, so the limit is set high.
+- **A public client that stops reading** is disconnected after `PublicWriteTimeout`. That frees its
+  window and ends the app's response.
+
+The worst case for one tunnel at the relay is every connection stalled at once:
+`MaxStreamsPerTunnel × StreamWindowSize + TunnelWindowBudget`, 192 MiB with the defaults. Lower
+`MaxStreamsPerTunnel` on a shared relay that carries many tunnels.
+
+An end that breaks the rules has that request reset, not the tunnel: sending past its window, or
+granting more than a window can hold. Malformed `Settings` drop the tunnel.
 
 ## Forwarded headers
 
