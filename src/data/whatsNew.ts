@@ -12,6 +12,13 @@ export interface WhatsNewItem {
 
 export const whatsNew: WhatsNewItem[] = [
   {
+    date: "2026-11-27",
+    title: "DocumentDb 15",
+    href: "/documentdb/release-notes/",
+    icon: "seti:db",
+    description: "Schema versioning with upcasters, so old documents read as the current shape. Document expiration (TTL) with a purge sweeper, inheritance with derived types stored under their base type, and <code>Include</code> to load related documents in one batched read. <code>ExecuteUpdate</code> gains <code>Increment</code>, <code>Unset</code>, <code>Push</code>, <code>Pull</code> and <code>AddToSet</code>, and queries understand C# 15 union types. All of it works on every provider. SQLite moves to <code>Microsoft.Data.Sqlite</code> 11, and SQLCipher now runs on SQLite3 Multiple Ciphers.",
+  },
+  {
     date: "2026-11-22",
     title: "Shiny 7 on .NET 11",
     href: "/client/release-notes/",

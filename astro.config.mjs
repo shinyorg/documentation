@@ -49,6 +49,20 @@ const announcementConfig = {
   rotateMs: 6000,
   items: [
     {
+      id: 'docdb-150',
+      title: 'DocumentDB v15',
+      description: '[Schema versioning](/documentdb/schema-versioning/), [document expiration (TTL)](/documentdb/expiration/), [inheritance](/documentdb/inheritance/), [Include for related documents](/documentdb/querying/#loading-related-documents-with-include), [Increment, Push & Pull in ExecuteUpdate](/documentdb/querying/#increment-unset-and-array-operations) and [C# union type queries](/documentdb/querying/#c-union-types)',
+      href: '/documentdb/release-notes/',
+      cta: 'Release notes'
+    },
+    {
+      id: 'hubs-30',
+      title: 'Universal Hubs ',
+      description: 'Hubs - The SignalR but with transports for Bluetooth, HTTP/Network, & Peer Nearby Connectivity - ULTRA Comms for your apps',
+      href: '/universalhubs/',
+      cta: 'Let\'s Communicate',
+    },    
+    {
       id: 'controls-30',
       title: 'Controls 3.0',
       description: 'MAUI & Blazor NET11 Support',
@@ -65,14 +79,7 @@ const announcementConfig = {
       id: 'speech-v30',
       title: 'AI Conversations, Speech, & Audio Release',
       description: '[Have a full conversation with AI](/aiconversation), [use speech commands](/speech), and [interact with audio content seamlessly](/audio).'
-    },
-    {
-      id: 'unihub',
-      title: 'Universal Hubs ',
-      description: 'Universal Hubs - Peer Nearby Connectivity - Dynamic Hub Registration',
-      href: '/universalhubs/',
-      cta: 'YES PLEASE!',
-    }       
+    }      
   ],
 };
 
